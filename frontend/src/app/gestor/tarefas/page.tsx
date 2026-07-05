@@ -301,7 +301,9 @@ export default function AdminTarefasPage() {
             ) : (
               <Download className="h-4 w-4" />
             )}
-            <span className="hidden sm:inline">Sincronizar Smoobu</span>
+            <span className="hidden sm:inline">
+              {sincronizando ? "A sincronizar…" : "Sincronizar Reservas"}
+            </span>
           </Button>
           <Button onClick={() => setMostrarForm((v) => !v)}>
             <Plus className="h-4 w-4" />
