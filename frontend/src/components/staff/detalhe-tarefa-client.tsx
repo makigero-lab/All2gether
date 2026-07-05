@@ -138,7 +138,7 @@ export function DetalheTarefaClient({
     setAtrasoResultado(null);
     try {
       const res = await adminPost<{ carga_total: number; cascata_desatribuida: boolean }>(
-        `/api/admin/tarefas/${tarefa.id}/atraso`,
+        `/api/gestor/tarefas/${tarefa.id}/atraso`,
         { minutos_atraso: minutosAtraso }
       );
       if (res.cascata_desatribuida) {

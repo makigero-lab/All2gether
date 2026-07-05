@@ -2,9 +2,9 @@
  * Configuração e helpers para chamadas à API backend (Autocell).
  *
  * v1.14.0 — Arquitetura com cookie httpOnly + proxy:
- *   As chamadas à API admin vão para SAME-ORIGIN (/api/admin/...), não
+ *   As chamadas à API admin vão para SAME-ORIGIN (/api/gestor/...), não
  *   diretamente para o backend. O catch-all proxy em
- *   app/api/admin/[...path]/route.ts lê o token do cookie httpOnly e
+ *   app/api/gestor/[...path]/route.ts lê o token do cookie httpOnly e
  *   injeta o header Authorization ao encaminhar para o backend.
  *
  *   Isto significa que o browser NUNCA tem acesso ao token JWT — ele

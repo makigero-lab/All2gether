@@ -30,7 +30,7 @@ const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 
 const webhookRoutes = require('./routes/webhookRoutes');
-const adminRoutes = require('./routes/adminRoutes');
+const gestorRoutes = require('./routes/gestorRoutes');
 const authRoutes = require('./routes/authRoutes');
 const ausenciaRoutes = require('./routes/ausenciaRoutes');
 const relatorioRoutes = require('./routes/relatorioRoutes');
@@ -96,17 +96,16 @@ app.use('/webhooks', webhookRoutes);
 // Autenticação (login público + /me protegido).
 app.use('/api/auth', authRoutes);
 
-// Painel de Administração.
-// NOTA: a proteção por auth é aplicada dentro de adminRoutes.js, apenas às
-// rotas que precisam (propriedades). O /setup fica PÚBLICO porque é o
-// endpoint de bootstrap (cria o primeiro utilizador — ainda não há token).
-app.use('/api/admin', adminRoutes);
+// Painel do Gestor de Operações (admin e gestor).
+// NOTA: a proteção por auth + isGestor é aplicada dentro de gestorRoutes.js.
+// O /setup fica PÚBLICO porque é o endpoint de bootstrap.
+app.use('/api/gestor', gestorRoutes);
 
-// Gestão de Ausências (Folgas e Férias) — protegido por auth.
-app.use('/api/admin/ausencias', ausenciaRoutes);
+// Gestão de Ausências (Folgas e Férias) — protegido por auth + isGestor.
+app.use('/api/gestor/ausencias', ausenciaRoutes);
 
-// Relatórios / Analytics — protegido por auth.
-app.use('/api/admin/relatorios', relatorioRoutes);
+// Relatórios / Analytics — protegido por auth + isGestor.
+app.use('/api/gestor/relatorios', relatorioRoutes);
 
 // Staff — gestão das próprias ausências (pedidos de férias/doença).
 app.use('/api/staff', staffRoutes);

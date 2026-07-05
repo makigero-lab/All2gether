@@ -43,7 +43,7 @@ import { PaginationBar } from "@/components/admin/pagination-bar";
 /**
  * Página de Tarefas — Painel do Gestor (/manager/tarefas).
  *
- * Consome a mesma API do admin (GET/POST/PATCH /api/admin/tarefas).
+ * Consome a mesma API do admin (GET/POST/PATCH /api/gestor/tarefas).
  */
 interface TarefaAdmin {
   _id: string;
@@ -132,10 +132,10 @@ export default function ManagerTarefasPage() {
 
       const [tarefasRes, propRes, equipaRes] = await Promise.all([
         adminGet<{ tarefas: TarefaAdmin[] }>(
-          `/api/admin/tarefas?inicio=${inicioStr}&fim=${fimStr}`
+          `/api/gestor/tarefas?inicio=${inicioStr}&fim=${fimStr}`
         ),
-        adminGet<{ propriedades: PropriedadeDTO[] }>("/api/admin/propriedades"),
-        adminGet<{ utilizadores: UtilizadorDTO[] }>("/api/admin/equipa"),
+        adminGet<{ propriedades: PropriedadeDTO[] }>("/api/gestor/propriedades"),
+        adminGet<{ utilizadores: UtilizadorDTO[] }>("/api/gestor/equipa"),
       ]);
 
       setTarefas(tarefasRes.tarefas ?? []);
@@ -167,7 +167,7 @@ export default function ManagerTarefasPage() {
 
     setSubmitting(true);
     try {
-      await adminPost("/api/admin/tarefas", {
+      await adminPost("/api/gestor/tarefas", {
         propriedade_id: form.propriedade_id,
         utilizador_id: form.utilizador_id || null,
         data: form.data,
@@ -188,7 +188,7 @@ export default function ManagerTarefasPage() {
     if (!atribuindo || !atribuirUserId) return;
     setAtribuirSubmitting(true);
     try {
-      await adminPatch(`/api/admin/tarefas/${atribuindo._id}/atribuir`, {
+      await adminPatch(`/api/gestor/tarefas/${atribuindo._id}/atribuir`, {
         utilizador_id: atribuirUserId,
       });
       setAtribuindo(null);
@@ -203,7 +203,7 @@ export default function ManagerTarefasPage() {
 
   async function handleCancelar(t: TarefaAdmin) {
     try {
-      await adminPatch(`/api/admin/tarefas/${t._id}/estado`, { estado: "cancelada" });
+      await adminPatch(`/api/gestor/tarefas/${t._id}/estado`, { estado: "cancelada" });
       await carregar();
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Erro ao cancelar tarefa.");
@@ -227,7 +227,7 @@ export default function ManagerTarefasPage() {
         existentes: number;
         erros: number;
         detalheErros: { reservaId: string | null; erro: string }[];
-      }>("/api/admin/smoobu/sincronizar", {});
+      }>("/api/gestor/smoobu/sincronizar", {});
 
       let msg = `Sincronização concluída! ${res.criadas} tarefa(s) gerada(s)`;
       if (res.existentes > 0) msg += `, ${res.existentes} já existiam`;

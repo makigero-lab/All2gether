@@ -8,8 +8,8 @@
  *   - Auth /me com token
  *   - CRUD Propriedades (criar, listar, toggle estado, duplicado 409)
  *   - Webhook Smoobu (cria tarefa + atribui ao staff disponível)
- *   - Dashboard (GET /api/admin/dashboard)
- *   - Relatórios (GET /api/admin/relatorios/produtividade)
+ *   - Dashboard (GET /api/gestor/dashboard)
+ *   - Relatórios (GET /api/gestor/relatorios/produtividade)
  *
  * Estratégia:
  *   - Usa mongodb-memory-server (BD efémera em memória, sem dependências externas).
@@ -109,11 +109,11 @@ describe('GET /api/health', () => {
 
 describe('Auth — rotas protegidas sem token devolvem 401', () => {
   const rotasProtegidas = [
-    '/api/admin/dashboard',
-    '/api/admin/propriedades',
-    '/api/admin/equipa',
-    '/api/admin/tarefas',
-    '/api/admin/relatorios/produtividade',
+    '/api/gestor/dashboard',
+    '/api/gestor/propriedades',
+    '/api/gestor/equipa',
+    '/api/gestor/tarefas',
+    '/api/gestor/relatorios/produtividade',
     '/api/auth/me',
   ];
 
@@ -127,7 +127,7 @@ describe('Auth — rotas protegidas sem token devolvem 401', () => {
 
   it('token inválido → 401', async () => {
     const res = await request(app)
-      .get('/api/admin/dashboard')
+      .get('/api/gestor/dashboard')
       .set('Authorization', 'Bearer token-invalido');
     expect(res.status).toBe(401);
   });
@@ -205,8 +205,8 @@ describe('GET /api/auth/me', () => {
 describe('Propriedades (CRUD)', () => {
   let propId;
 
-  it('POST /api/admin/propriedades → 201 (cria propriedade)', async () => {
-    const res = await authPost('/api/admin/propriedades', {
+  it('POST /api/gestor/propriedades → 201 (cria propriedade)', async () => {
+    const res = await authPost('/api/gestor/propriedades', {
       smoobu_id: 'prop-100',
       nome: 'Casa da Praia',
       morada: 'Rua do Mar 1, Lisboa',
@@ -220,12 +220,12 @@ describe('Propriedades (CRUD)', () => {
   });
 
   it('POST sem campos obrigatórios → 400', async () => {
-    const res = await authPost('/api/admin/propriedades', { smoobu_id: 'x' });
+    const res = await authPost('/api/gestor/propriedades', { smoobu_id: 'x' });
     expect(res.status).toBe(400);
   });
 
   it('POST com smoobu_id duplicado → 409', async () => {
-    const res = await authPost('/api/admin/propriedades', {
+    const res = await authPost('/api/gestor/propriedades', {
       smoobu_id: 'prop-100',
       nome: 'Repetida',
       morada: 'Rua X',
@@ -233,28 +233,28 @@ describe('Propriedades (CRUD)', () => {
     expect(res.status).toBe(409);
   });
 
-  it('GET /api/admin/propriedades → 200 + lista com a propriedade', async () => {
-    const res = await authGet('/api/admin/propriedades');
+  it('GET /api/gestor/propriedades → 200 + lista com a propriedade', async () => {
+    const res = await authGet('/api/gestor/propriedades');
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.propriedades)).toBe(true);
     expect(res.body.propriedades.some((p) => p.smoobu_id === 'prop-100')).toBe(true);
   });
 
-  it('PATCH /api/admin/propriedades/:id/estado → alterna ativo', async () => {
-    const res = await authPatch(`/api/admin/propriedades/${propId}/estado`, { ativo: false });
+  it('PATCH /api/gestor/propriedades/:id/estado → alterna ativo', async () => {
+    const res = await authPatch(`/api/gestor/propriedades/${propId}/estado`, { ativo: false });
     expect(res.status).toBe(200);
     expect(res.body.ativo).toBe(false);
   });
 
   it('PATCH com id inexistente → 404', async () => {
     const idInexistente = new mongoose.Types.ObjectId();
-    const res = await authPatch(`/api/admin/propriedades/${idInexistente}/estado`, {});
+    const res = await authPatch(`/api/gestor/propriedades/${idInexistente}/estado`, {});
     expect(res.status).toBe(404);
   });
 
-  it('PUT /api/admin/propriedades/:id → 200 (atualiza nome e tempo)', async () => {
+  it('PUT /api/gestor/propriedades/:id → 200 (atualiza nome e tempo)', async () => {
     // Cria uma propriedade para editar.
-    const criada = await authPost('/api/admin/propriedades', {
+    const criada = await authPost('/api/gestor/propriedades', {
       smoobu_id: 'prop-edit-1',
       nome: 'Nome Inicial',
       morada: 'Rua Inicial 1, Lisboa',
@@ -263,7 +263,7 @@ describe('Propriedades (CRUD)', () => {
     expect(criada.status).toBe(201);
 
     const res = await request(app)
-      .put(`/api/admin/propriedades/${criada.body.propriedade._id}`)
+      .put(`/api/gestor/propriedades/${criada.body.propriedade._id}`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ nome: 'Nome Editado', tempo_limpeza_minutos: 90 });
     expect(res.status).toBe(200);
@@ -275,12 +275,12 @@ describe('Propriedades (CRUD)', () => {
 
   it('PUT com smoobu_id duplicado (de outra propriedade) → 409', async () => {
     // Cria duas propriedades.
-    await authPost('/api/admin/propriedades', {
+    await authPost('/api/gestor/propriedades', {
       smoobu_id: 'prop-edit-2',
       nome: 'A',
       morada: 'Rua A',
     });
-    const criadaB = await authPost('/api/admin/propriedades', {
+    const criadaB = await authPost('/api/gestor/propriedades', {
       smoobu_id: 'prop-edit-3',
       nome: 'B',
       morada: 'Rua B',
@@ -288,7 +288,7 @@ describe('Propriedades (CRUD)', () => {
 
     // Tenta mudar B para o smoobu_id de A → 409.
     const res = await request(app)
-      .put(`/api/admin/propriedades/${criadaB.body.propriedade._id}`)
+      .put(`/api/gestor/propriedades/${criadaB.body.propriedade._id}`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ smoobu_id: 'prop-edit-2' });
     expect(res.status).toBe(409);
@@ -297,20 +297,20 @@ describe('Propriedades (CRUD)', () => {
   it('PUT com id inexistente → 404', async () => {
     const idInexistente = new mongoose.Types.ObjectId();
     const res = await request(app)
-      .put(`/api/admin/propriedades/${idInexistente}`)
+      .put(`/api/gestor/propriedades/${idInexistente}`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ nome: 'X' });
     expect(res.status).toBe(404);
   });
 
   it('PUT sem campos no body → 400', async () => {
-    const criada = await authPost('/api/admin/propriedades', {
+    const criada = await authPost('/api/gestor/propriedades', {
       smoobu_id: 'prop-edit-4',
       nome: 'C',
       morada: 'Rua C',
     });
     const res = await request(app)
-      .put(`/api/admin/propriedades/${criada.body.propriedade._id}`)
+      .put(`/api/gestor/propriedades/${criada.body.propriedade._id}`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({});
     expect(res.status).toBe(400);
@@ -335,7 +335,7 @@ describe('Propriedades (CRUD)', () => {
     // O toggle (PATCH .../estado) deve funcionar SEM 500, mesmo com a
     // morada em falta. Isto era o bug de produção ( findOne+save re-valida ).
     const res = await authPatch(
-      `/api/admin/propriedades/${doc.insertedId}/estado`,
+      `/api/gestor/propriedades/${doc.insertedId}/estado`,
       {}
     );
     expect(res.status).toBe(200);
@@ -347,7 +347,7 @@ describe('Propriedades (CRUD)', () => {
 /* 5b. Calendário Visual — getDadosCalendario                          */
 /* ------------------------------------------------------------------ */
 
-describe('GET /api/admin/calendario/dados', () => {
+describe('GET /api/gestor/calendario/dados', () => {
   let prop1, prop2, staff1, staff2;
   const hoje = new Date();
   const dataStr = new Date(
@@ -430,13 +430,13 @@ describe('GET /api/admin/calendario/dados', () => {
   });
 
   it('sem token → 401', async () => {
-    const res = await request(app).get('/api/admin/calendario/dados');
+    const res = await request(app).get('/api/gestor/calendario/dados');
     expect(res.status).toBe(401);
   });
 
   it('com token + sem filtros → 200 + todas as tarefas (incluindo canceladas)', async () => {
     const res = await authGet(
-      `/api/admin/calendario/dados?inicio=${dataStr}&fim=${dataStr}`
+      `/api/gestor/calendario/dados?inicio=${dataStr}&fim=${dataStr}`
     );
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.tarefas)).toBe(true);
@@ -449,7 +449,7 @@ describe('GET /api/admin/calendario/dados', () => {
 
   it('populate inclui nome + morada da propriedade e nome do utilizador', async () => {
     const res = await authGet(
-      `/api/admin/calendario/dados?inicio=${dataStr}&fim=${dataStr}&propriedadeId=${prop1._id}`
+      `/api/gestor/calendario/dados?inicio=${dataStr}&fim=${dataStr}&propriedadeId=${prop1._id}`
     );
     expect(res.status).toBe(200);
     const t = res.body.tarefas[0];
@@ -464,7 +464,7 @@ describe('GET /api/admin/calendario/dados', () => {
 
   it('filtro por propriedade → só devolve tarefas dessa propriedade', async () => {
     const res = await authGet(
-      `/api/admin/calendario/dados?inicio=${dataStr}&fim=${dataStr}&propriedadeId=${prop2._id}`
+      `/api/gestor/calendario/dados?inicio=${dataStr}&fim=${dataStr}&propriedadeId=${prop2._id}`
     );
     expect(res.status).toBe(200);
     expect(res.body.tarefas.length).toBeGreaterThanOrEqual(1);
@@ -475,7 +475,7 @@ describe('GET /api/admin/calendario/dados', () => {
 
   it('filtro por utilizador → só devolve tarefas desse funcionário', async () => {
     const res = await authGet(
-      `/api/admin/calendario/dados?inicio=${dataStr}&fim=${dataStr}&utilizadorId=${staff1._id}`
+      `/api/gestor/calendario/dados?inicio=${dataStr}&fim=${dataStr}&utilizadorId=${staff1._id}`
     );
     expect(res.status).toBe(200);
     expect(res.body.tarefas.length).toBeGreaterThanOrEqual(1);
@@ -486,7 +486,7 @@ describe('GET /api/admin/calendario/dados', () => {
 
   it('filtro utilizadorId=null → só devolve tarefas por atribuir', async () => {
     const res = await authGet(
-      `/api/admin/calendario/dados?inicio=${dataStr}&fim=${dataStr}&utilizadorId=null`
+      `/api/gestor/calendario/dados?inicio=${dataStr}&fim=${dataStr}&utilizadorId=null`
     );
     expect(res.status).toBe(200);
     expect(res.body.tarefas.length).toBeGreaterThanOrEqual(1);
@@ -495,7 +495,7 @@ describe('GET /api/admin/calendario/dados', () => {
 
   it('filtro por estado=concluida → só devolve concluídas', async () => {
     const res = await authGet(
-      `/api/admin/calendario/dados?inicio=${dataStr}&fim=${dataStr}&estado=concluida`
+      `/api/gestor/calendario/dados?inicio=${dataStr}&fim=${dataStr}&estado=concluida`
     );
     expect(res.status).toBe(200);
     expect(res.body.tarefas.length).toBeGreaterThanOrEqual(1);
@@ -504,7 +504,7 @@ describe('GET /api/admin/calendario/dados', () => {
 
   it('combina filtros (propriedade + utilizador)', async () => {
     const res = await authGet(
-      `/api/admin/calendario/dados?inicio=${dataStr}&fim=${dataStr}&propriedadeId=${prop1._id}&utilizadorId=${staff1._id}`
+      `/api/gestor/calendario/dados?inicio=${dataStr}&fim=${dataStr}&propriedadeId=${prop1._id}&utilizadorId=${staff1._id}`
     );
     expect(res.status).toBe(200);
     expect(res.body.tarefas.length).toBeGreaterThanOrEqual(1);
@@ -781,14 +781,14 @@ describe('POST /webhooks/smoobu (load balancer)', () => {
 /* 6b. Admin — Webhooks (logs)                                        */
 /* ------------------------------------------------------------------ */
 
-describe('GET /api/admin/webhooks', () => {
+describe('GET /api/gestor/webhooks', () => {
   it('sem token → 401', async () => {
-    const res = await request(app).get('/api/admin/webhooks');
+    const res = await request(app).get('/api/gestor/webhooks');
     expect(res.status).toBe(401);
   });
 
   it('com token → 200 + lista de logs + total', async () => {
-    const res = await authGet('/api/admin/webhooks');
+    const res = await authGet('/api/gestor/webhooks');
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.webhooks)).toBe(true);
     expect(typeof res.body.total).toBe('number');
@@ -804,14 +804,14 @@ describe('GET /api/admin/webhooks', () => {
     });
     await esperar(400);
 
-    const res = await authGet('/api/admin/webhooks?status=erro');
+    const res = await authGet('/api/gestor/webhooks?status=erro');
     expect(res.status).toBe(200);
     expect(res.body.webhooks.length).toBeGreaterThan(0);
     expect(res.body.webhooks.every((w) => w.status === 'erro')).toBe(true);
   });
 });
 
-describe('POST /api/admin/webhooks/:id/reprocessar', () => {
+describe('POST /api/gestor/webhooks/:id/reprocessar', () => {
   it('webhook com erro (propriedade inexistente) → reprocessar mantém erro', async () => {
     // Cria um webhook que falhou (propriedade não existe).
     await request(app).post('/webhooks/smoobu').send({
@@ -825,7 +825,7 @@ describe('POST /api/admin/webhooks/:id/reprocessar', () => {
     expect(logErro.status).toBe('erro');
 
     // Reproccessa → continua a falhar (propriedade ainda não existe).
-    const res = await authPost(`/api/admin/webhooks/${logErro._id}/reprocessar`, {});
+    const res = await authPost(`/api/gestor/webhooks/${logErro._id}/reprocessar`, {});
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('erro');
   });
@@ -835,9 +835,9 @@ describe('POST /api/admin/webhooks/:id/reprocessar', () => {
 /* 7. Dashboard                                                        */
 /* ------------------------------------------------------------------ */
 
-describe('GET /api/admin/dashboard', () => {
+describe('GET /api/gestor/dashboard', () => {
   it('com token → 200 + shape esperado', async () => {
-    const res = await authGet('/api/admin/dashboard');
+    const res = await authGet('/api/gestor/dashboard');
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('totalPropriedades');
     expect(res.body).toHaveProperty('propriedadesAtivas');
@@ -853,9 +853,9 @@ describe('GET /api/admin/dashboard', () => {
 /* 8. Relatórios                                                       */
 /* ------------------------------------------------------------------ */
 
-describe('GET /api/admin/relatorios/produtividade', () => {
+describe('GET /api/gestor/relatorios/produtividade', () => {
   it('com token → 200 + shape completo', async () => {
-    const res = await authGet('/api/admin/relatorios/produtividade');
+    const res = await authGet('/api/gestor/relatorios/produtividade');
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('periodo');
     expect(res.body).toHaveProperty('resumo');
@@ -871,7 +871,7 @@ describe('GET /api/admin/relatorios/produtividade', () => {
   it('com filtro de datas custom → 200', async () => {
     const inicio = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
     const fim = new Date().toISOString().slice(0, 10);
-    const res = await authGet(`/api/admin/relatorios/produtividade?inicio=${inicio}&fim=${fim}`);
+    const res = await authGet(`/api/gestor/relatorios/produtividade?inicio=${inicio}&fim=${fim}`);
     expect(res.status).toBe(200);
     expect(res.body.periodo.inicio).toBeDefined();
     expect(res.body.periodo.fim).toBeDefined();
@@ -882,7 +882,7 @@ describe('GET /api/admin/relatorios/produtividade', () => {
 /* 9. Smoobu — sincronização em massa                                  */
 /* ------------------------------------------------------------------ */
 
-describe('POST /api/admin/smoobu/sincronizar', () => {
+describe('POST /api/gestor/smoobu/sincronizar', () => {
   let apiKeyOriginal;
 
   beforeEach(() => {
@@ -906,13 +906,13 @@ describe('POST /api/admin/smoobu/sincronizar', () => {
   });
 
   it('sem token → 401', async () => {
-    const res = await request(app).post('/api/admin/smoobu/sincronizar');
+    const res = await request(app).post('/api/gestor/smoobu/sincronizar');
     expect(res.status).toBe(401);
   });
 
   it('sem SMOOBU_API_KEY configurada → 400', async () => {
     delete process.env.SMOOBU_API_KEY;
-    const res = await authPost('/api/admin/smoobu/sincronizar', {});
+    const res = await authPost('/api/gestor/smoobu/sincronizar', {});
     expect(res.status).toBe(400);
     expect(res.body.erro).toMatch(/SMOOBU_API_KEY/);
   });
@@ -945,7 +945,7 @@ describe('POST /api/admin/smoobu/sincronizar', () => {
     mockFetch.__isMock = true;
     global.fetch = mockFetch;
 
-    const res = await authPost('/api/admin/smoobu/sincronizar', {});
+    const res = await authPost('/api/gestor/smoobu/sincronizar', {});
     expect(res.status).toBe(200);
     expect(res.body.totalRecebidas).toBe(2);
     expect(res.body.criadas).toBe(2);
@@ -982,13 +982,13 @@ describe('POST /api/admin/smoobu/sincronizar', () => {
     global.fetch = mockFetch;
 
     // 1ª sincronização → cria.
-    const res1 = await authPost('/api/admin/smoobu/sincronizar', {});
+    const res1 = await authPost('/api/gestor/smoobu/sincronizar', {});
     expect(res1.status).toBe(200);
     expect(res1.body.criadas).toBe(1);
     expect(res1.body.existentes).toBe(0);
 
     // 2ª sincronização → já existe.
-    const res2 = await authPost('/api/admin/smoobu/sincronizar', {});
+    const res2 = await authPost('/api/gestor/smoobu/sincronizar', {});
     expect(res2.status).toBe(200);
     expect(res2.body.criadas).toBe(0);
     expect(res2.body.existentes).toBe(1);
@@ -1010,7 +1010,7 @@ describe('POST /api/admin/smoobu/sincronizar', () => {
     mockFetch.__isMock = true;
     global.fetch = mockFetch;
 
-    const res = await authPost('/api/admin/smoobu/sincronizar', {});
+    const res = await authPost('/api/gestor/smoobu/sincronizar', {});
     expect(res.status).toBe(502);
     expect(res.body.erro).toMatch(/500/);
   });
@@ -1041,7 +1041,7 @@ describe('POST /api/admin/smoobu/sincronizar', () => {
     mockFetch.__isMock = true;
     global.fetch = mockFetch;
 
-    const res = await authPost('/api/admin/smoobu/sincronizar', {});
+    const res = await authPost('/api/gestor/smoobu/sincronizar', {});
     expect(res.status).toBe(200);
     expect(res.body.totalRecebidas).toBe(2);
     expect(res.body.criadas).toBe(1);
@@ -1055,7 +1055,7 @@ describe('POST /api/admin/smoobu/sincronizar', () => {
 /* 10. Smoobu — listar propriedades (apartamentos)                     */
 /* ------------------------------------------------------------------ */
 
-describe('GET /api/admin/smoobu/propriedades', () => {
+describe('GET /api/gestor/smoobu/propriedades', () => {
   let apiKeyOriginal;
 
   beforeEach(() => {
@@ -1075,13 +1075,13 @@ describe('GET /api/admin/smoobu/propriedades', () => {
   });
 
   it('sem token → 401', async () => {
-    const res = await request(app).get('/api/admin/smoobu/propriedades');
+    const res = await request(app).get('/api/gestor/smoobu/propriedades');
     expect(res.status).toBe(401);
   });
 
   it('sem SMOOBU_API_KEY configurada → 400', async () => {
     delete process.env.SMOOBU_API_KEY;
-    const res = await authGet('/api/admin/smoobu/propriedades');
+    const res = await authGet('/api/gestor/smoobu/propriedades');
     expect(res.status).toBe(400);
     expect(res.body.erro).toMatch(/SMOOBU_API_KEY/);
   });
@@ -1103,7 +1103,7 @@ describe('GET /api/admin/smoobu/propriedades', () => {
     mockFetch.__isMock = true;
     global.fetch = mockFetch;
 
-    const res = await authGet('/api/admin/smoobu/propriedades');
+    const res = await authGet('/api/gestor/smoobu/propriedades');
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.propriedadesSmoobu)).toBe(true);
     expect(res.body.propriedadesSmoobu.length).toBe(2);
@@ -1130,7 +1130,7 @@ describe('GET /api/admin/smoobu/propriedades', () => {
     mockFetch.__isMock = true;
     global.fetch = mockFetch;
 
-    const res = await authGet('/api/admin/smoobu/propriedades');
+    const res = await authGet('/api/gestor/smoobu/propriedades');
     expect(res.status).toBe(502);
     expect(res.body.erro).toMatch(/401/);
   });
@@ -1140,7 +1140,7 @@ describe('GET /api/admin/smoobu/propriedades', () => {
 /* 11. Smoobu — sincronizar propriedades (upsert em massa)             */
 /* ------------------------------------------------------------------ */
 
-describe('POST /api/admin/smoobu/sincronizar-propriedades', () => {
+describe('POST /api/gestor/smoobu/sincronizar-propriedades', () => {
   const Propriedade = require('../models/Propriedade');
   let apiKeyOriginal;
 
@@ -1163,13 +1163,13 @@ describe('POST /api/admin/smoobu/sincronizar-propriedades', () => {
   });
 
   it('sem token → 401', async () => {
-    const res = await request(app).post('/api/admin/smoobu/sincronizar-propriedades');
+    const res = await request(app).post('/api/gestor/smoobu/sincronizar-propriedades');
     expect(res.status).toBe(401);
   });
 
   it('sem SMOOBU_API_KEY configurada → 400', async () => {
     delete process.env.SMOOBU_API_KEY;
-    const res = await authPost('/api/admin/smoobu/sincronizar-propriedades', {});
+    const res = await authPost('/api/gestor/smoobu/sincronizar-propriedades', {});
     expect(res.status).toBe(400);
     expect(res.body.erro).toMatch(/SMOOBU_API_KEY/);
   });
@@ -1191,7 +1191,7 @@ describe('POST /api/admin/smoobu/sincronizar-propriedades', () => {
     mockFetch.__isMock = true;
     global.fetch = mockFetch;
 
-    const res = await authPost('/api/admin/smoobu/sincronizar-propriedades', {});
+    const res = await authPost('/api/gestor/smoobu/sincronizar-propriedades', {});
     expect(res.status).toBe(200);
     expect(res.body.totalRecebidas).toBe(2);
     expect(res.body.criadas).toBe(2);
@@ -1222,12 +1222,12 @@ describe('POST /api/admin/smoobu/sincronizar-propriedades', () => {
     global.fetch = mockFetch;
 
     // 1ª sincronização → cria.
-    const res1 = await authPost('/api/admin/smoobu/sincronizar-propriedades', {});
+    const res1 = await authPost('/api/gestor/smoobu/sincronizar-propriedades', {});
     expect(res1.body.criadas).toBe(1);
     expect(res1.body.existentes).toBe(0);
 
     // 2ª sincronização → já existe (não duplica).
-    const res2 = await authPost('/api/admin/smoobu/sincronizar-propriedades', {});
+    const res2 = await authPost('/api/gestor/smoobu/sincronizar-propriedades', {});
     expect(res2.body.criadas).toBe(0);
     expect(res2.body.existentes).toBe(1);
 
@@ -1260,7 +1260,7 @@ describe('POST /api/admin/smoobu/sincronizar-propriedades', () => {
     mockFetch.__isMock = true;
     global.fetch = mockFetch;
 
-    const res = await authPost('/api/admin/smoobu/sincronizar-propriedades', {});
+    const res = await authPost('/api/gestor/smoobu/sincronizar-propriedades', {});
     expect(res.status).toBe(200);
     expect(res.body.existentes).toBe(1);
     expect(res.body.criadas).toBe(0);
@@ -1350,17 +1350,17 @@ describe('Fluxo de aprovação de ausências', () => {
     expect(res.status).toBe(401);
   });
 
-  it('staff não pode aceder a endpoints de gestão (/api/admin/ausencias) → 403', async () => {
+  it('staff não pode aceder a endpoints de gestão (/api/gestor/ausencias) → 403', async () => {
     // O staff tem token válido, mas role 'staff' não tem permissão de gestor/admin.
     const res = await request(app)
-      .get('/api/admin/ausencias')
+      .get('/api/gestor/ausencias')
       .set('Authorization', `Bearer ${staffToken}`);
     expect(res.status).toBe(403);
   });
 
-  it('staff não pode aprovar ausências (PATCH /api/admin/ausencias/:id/estado) → 403', async () => {
+  it('staff não pode aprovar ausências (PATCH /api/gestor/ausencias/:id/estado) → 403', async () => {
     const res = await request(app)
-      .patch('/api/admin/ausencias/000000000000000000000000/estado')
+      .patch('/api/gestor/ausencias/000000000000000000000000/estado')
       .set('Authorization', `Bearer ${staffToken}`)
       .send({ estado: 'aprovada' });
     expect(res.status).toBe(403);
@@ -1380,7 +1380,7 @@ describe('Fluxo de aprovação de ausências', () => {
     expect(String(antes.utilizador_id)).toBe(staffId);
 
     // Admin aprova.
-    const res = await authPatch(`/api/admin/ausencias/${pendente._id}/estado`, {
+    const res = await authPatch(`/api/gestor/ausencias/${pendente._id}/estado`, {
       estado: 'aprovada',
     });
     expect(res.status).toBe(200);
@@ -1411,7 +1411,7 @@ describe('Fluxo de aprovação de ausências', () => {
     });
     expect(pendente).not.toBeNull();
 
-    const res = await authPatch(`/api/admin/ausencias/${pendente._id}/estado`, {
+    const res = await authPatch(`/api/gestor/ausencias/${pendente._id}/estado`, {
       estado: 'rejeitada',
     });
     expect(res.status).toBe(200);
@@ -1427,7 +1427,7 @@ describe('Fluxo de aprovação de ausências', () => {
       estado: 'pendente',
     });
     if (!pendente) return; // se não há pendente, skip
-    const res = await authPatch(`/api/admin/ausencias/${pendente._id}/estado`, {
+    const res = await authPatch(`/api/gestor/ausencias/${pendente._id}/estado`, {
       estado: 'invalido',
     });
     expect(res.status).toBe(400);
@@ -1435,7 +1435,7 @@ describe('Fluxo de aprovação de ausências', () => {
 
   it('admin aprovar ausência inexistente → 404', async () => {
     const idInexistente = new mongoose.Types.ObjectId();
-    const res = await authPatch(`/api/admin/ausencias/${idInexistente}/estado`, {
+    const res = await authPatch(`/api/gestor/ausencias/${idInexistente}/estado`, {
       estado: 'aprovada',
     });
     expect(res.status).toBe(404);
@@ -1479,7 +1479,7 @@ describe('Fluxo de aprovação de ausências', () => {
     const id = r.body.ausencia._id;
 
     // Admin aprova.
-    await authPatch(`/api/admin/ausencias/${id}/estado`, { estado: 'aprovada' });
+    await authPatch(`/api/gestor/ausencias/${id}/estado`, { estado: 'aprovada' });
 
     // Staff tenta cancelar → 403.
     const res = await request(app)

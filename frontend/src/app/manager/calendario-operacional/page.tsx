@@ -45,8 +45,8 @@ import { adminGet, adminPatch, type PropriedadeDTO, type UtilizadorDTO } from "@
  * Calendário Operacional — Painel do Gestor (/manager/calendario-operacional).
  *
  * Consome a mesma API do admin:
- *   - GET /api/admin/calendario/dados?inicio=&fim=&propriedadeId=&utilizadorId=&estado=
- *   - PATCH /api/admin/tarefas/:id/atribuir (reatribuição rápida)
+ *   - GET /api/gestor/calendario/dados?inicio=&fim=&propriedadeId=&utilizadorId=&estado=
+ *   - PATCH /api/gestor/tarefas/:id/atribuir (reatribuição rápida)
  */
 
 interface TarefaCalendario {
@@ -126,8 +126,8 @@ export default function ManagerCalendarioOperacionalPage() {
   const carregarFiltros = useCallback(async () => {
     try {
       const [propRes, equipaRes] = await Promise.all([
-        adminGet<{ propriedades: PropriedadeDTO[] }>("/api/admin/propriedades"),
-        adminGet<{ utilizadores: UtilizadorDTO[] }>("/api/admin/equipa"),
+        adminGet<{ propriedades: PropriedadeDTO[] }>("/api/gestor/propriedades"),
+        adminGet<{ utilizadores: UtilizadorDTO[] }>("/api/gestor/equipa"),
       ]);
       setPropriedades((propRes.propriedades ?? []).filter((p) => p.ativo));
       setEquipa(
@@ -157,7 +157,7 @@ export default function ManagerCalendarioOperacionalPage() {
       if (filtros.estado) params.set("estado", filtros.estado);
 
       const res = await adminGet<{ tarefas: TarefaCalendario[] }>(
-        `/api/admin/calendario/dados?${params.toString()}`
+        `/api/gestor/calendario/dados?${params.toString()}`
       );
       setTarefas(res.tarefas ?? []);
     } catch (e) {
@@ -194,7 +194,7 @@ export default function ManagerCalendarioOperacionalPage() {
     if (!tarefaSelecionada || !reatribuindoPara) return;
     setReatribuindo(true);
     try {
-      await adminPatch(`/api/admin/tarefas/${tarefaSelecionada._id}/atribuir`, {
+      await adminPatch(`/api/gestor/tarefas/${tarefaSelecionada._id}/atribuir`, {
         utilizador_id: reatribuindoPara,
       });
       const novoStaff = equipa.find((u) => u._id === reatribuindoPara);

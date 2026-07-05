@@ -25,7 +25,7 @@ const express = require('express');
 const router = express.Router();
 
 const { auth } = require('../middleware/auth');
-const { requireManager } = require('../middleware/requireRole');
+const { isGestor } = require('../middleware/requireRole');
 const {
   getDashboard,
   getPropriedades,
@@ -46,7 +46,7 @@ const {
   getWebhooks,
   reprocessarWebhook,
   setupClienteZero,
-} = require('../controllers/adminController');
+} = require('../controllers/gestorController');
 const { reportarAtrasoTarefa, criarTarefa, atribuirTarefa, atualizarEstadoTarefa } = require('../controllers/tarefaController');
 const { sincronizarReservas, getPropriedadesSmoobu, sincronizarPropriedades } = require('../controllers/smoobuController');
 
@@ -54,58 +54,58 @@ const { sincronizarReservas, getPropriedadesSmoobu, sincronizarPropriedades } = 
 router.get('/setup', setupClienteZero);
 
 // Dashboard com dados reais.
-router.get('/dashboard', auth, requireManager, getDashboard);
+router.get('/dashboard', auth, isGestor, getDashboard);
 
 // Gestão de propriedades da empresa. PROTEGIDO por JWT.
-router.get('/propriedades', auth, requireManager, getPropriedades);
-router.post('/propriedades', auth, requireManager, criarPropriedade);
-router.put('/propriedades/:id', auth, requireManager, atualizarPropriedade);
-router.patch('/propriedades/:id/estado', auth, requireManager, alternarEstadoPropriedade);
+router.get('/propriedades', auth, isGestor, getPropriedades);
+router.post('/propriedades', auth, isGestor, criarPropriedade);
+router.put('/propriedades/:id', auth, isGestor, atualizarPropriedade);
+router.patch('/propriedades/:id/estado', auth, isGestor, alternarEstadoPropriedade);
 
 // Calendário Geral de Operações — lista tarefas com filtro de datas.
-router.get('/tarefas', auth, requireManager, getTarefas);
+router.get('/tarefas', auth, isGestor, getTarefas);
 
 // Calendário Visual Avançado — endpoint unificado com filtros + populate.
-router.get('/calendario/dados', auth, requireManager, getDadosCalendario);
+router.get('/calendario/dados', auth, isGestor, getDadosCalendario);
 
 // Exportação CSV de tarefas.
-router.get('/tarefas/export', auth, requireManager, exportarTarefasCSV);
+router.get('/tarefas/export', auth, isGestor, exportarTarefasCSV);
 
 // Reportar atraso numa tarefa.
-router.post('/tarefas/:id/atraso', auth, requireManager, reportarAtrasoTarefa);
+router.post('/tarefas/:id/atraso', auth, isGestor, reportarAtrasoTarefa);
 
 // Gestão manual de tarefas.
-router.post('/tarefas', auth, requireManager, criarTarefa);
-router.patch('/tarefas/:id/atribuir', auth, requireManager, atribuirTarefa);
-router.patch('/tarefas/:id/estado', auth, requireManager, atualizarEstadoTarefa);
+router.post('/tarefas', auth, isGestor, criarTarefa);
+router.patch('/tarefas/:id/atribuir', auth, isGestor, atribuirTarefa);
+router.patch('/tarefas/:id/estado', auth, isGestor, atualizarEstadoTarefa);
 
 // Gestão de equipa (utilizadores) da empresa. PROTEGIDO por JWT.
-router.get('/equipa', auth, requireManager, getEquipa);
-router.post('/equipa', auth, requireManager, criarMembroEquipa);
-router.put('/equipa/:id', auth, requireManager, atualizarMembroEquipa);
-router.patch('/equipa/:id/estado', auth, requireManager, alternarEstadoMembro);
-router.delete('/equipa/:id', auth, requireManager, eliminarMembroEquipa);
+router.get('/equipa', auth, isGestor, getEquipa);
+router.post('/equipa', auth, isGestor, criarMembroEquipa);
+router.put('/equipa/:id', auth, isGestor, atualizarMembroEquipa);
+router.patch('/equipa/:id/estado', auth, isGestor, alternarEstadoMembro);
+router.delete('/equipa/:id', auth, isGestor, eliminarMembroEquipa);
 
 // Falta súbita — reatribuição de emergência.
-router.post('/equipa/:id/falta-subita', auth, requireManager, reportarFaltaSubita);
+router.post('/equipa/:id/falta-subita', auth, isGestor, reportarFaltaSubita);
 
 // Baixa prolongada / férias — redistribuição de tarefas futuras.
-router.post('/equipa/:id/baixa', auth, requireManager, registarBaixaProlongada);
+router.post('/equipa/:id/baixa', auth, isGestor, registarBaixaProlongada);
 
 // Auditoria.
-router.get('/auditoria', auth, requireManager, getAuditoria);
+router.get('/auditoria', auth, isGestor, getAuditoria);
 
 // Webhooks — logs do Smoobu (lista + reproccessamento manual).
-router.get('/webhooks', auth, requireManager, getWebhooks);
-router.post('/webhooks/:id/reprocessar', auth, requireManager, reprocessarWebhook);
+router.get('/webhooks', auth, isGestor, getWebhooks);
+router.post('/webhooks/:id/reprocessar', auth, isGestor, reprocessarWebhook);
 
 // Smoobu — sincronização em massa de reservas (REST API pull).
-router.post('/smoobu/sincronizar', auth, requireManager, sincronizarReservas);
+router.post('/smoobu/sincronizar', auth, isGestor, sincronizarReservas);
 
 // Smoobu — listar propriedades (apartamentos) para mapeamento no fluxo de criação.
-router.get('/smoobu/propriedades', auth, requireManager, getPropriedadesSmoobu);
+router.get('/smoobu/propriedades', auth, isGestor, getPropriedadesSmoobu);
 
 // Smoobu — sincronizar propriedades (upsert em massa do /api/apartments).
-router.post('/smoobu/sincronizar-propriedades', auth, requireManager, sincronizarPropriedades);
+router.post('/smoobu/sincronizar-propriedades', auth, isGestor, sincronizarPropriedades);
 
 module.exports = router;

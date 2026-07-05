@@ -16,7 +16,7 @@
  *
  * NOTA: o middleware NÃO verifica a assinatura do JWT (seria arriscado no
  * Edge). Valida apenas formato + expiração. A verificação real é feita pelo
- * backend (ou pelo proxy /api/admin/[...path]) em cada pedido à API.
+ * backend (ou pelo proxy /api/gestor/[...path]) em cada pedido à API.
  */
 
 import { NextResponse } from "next/server";

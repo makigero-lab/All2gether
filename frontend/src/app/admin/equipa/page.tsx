@@ -47,7 +47,7 @@ import { PaginationBar } from "@/components/admin/pagination-bar";
 /**
  * Página de Equipa — Painel de Administração (CRUD completo).
  *
- * Consome a API real (GET/POST/PUT/PATCH/DELETE /api/admin/equipa) com JWT
+ * Consome a API real (GET/POST/PUT/PATCH/DELETE /api/gestor/equipa) com JWT
  * no header Authorization (via helpers adminGet/adminPost/adminPut/...).
  *
  * Lista os membros numa tabela (Nome, Email, Role, Estado, Ações) e permite:
@@ -205,7 +205,7 @@ export default function EquipaPage() {
       const hoje = new Date();
 
       const [data, ausenciasRes] = await Promise.all([
-        adminGet<{ utilizadores: UtilizadorDTO[] }>("/api/admin/equipa"),
+        adminGet<{ utilizadores: UtilizadorDTO[] }>("/api/gestor/equipa"),
         adminGet<{
           ausencias: {
             utilizador_id: string;
@@ -213,7 +213,7 @@ export default function EquipaPage() {
             data_fim: string;
             estado: string;
           }[];
-        }>("/api/admin/ausencias?estado=aprovada"),
+        }>("/api/gestor/ausencias?estado=aprovada"),
       ]);
       setUtilizadores(data.utilizadores ?? []);
 
@@ -257,7 +257,7 @@ export default function EquipaPage() {
 
     setSubmitting(true);
     try {
-      await adminPost("/api/admin/equipa", {
+      await adminPost("/api/gestor/equipa", {
         nome: form.nome.trim(),
         email: form.email.trim(),
         password: form.password,
@@ -318,7 +318,7 @@ export default function EquipaPage() {
       };
       if (editForm.password) body.password = editForm.password;
 
-      await adminPut(`/api/admin/equipa/${editando._id}`, body);
+      await adminPut(`/api/gestor/equipa/${editando._id}`, body);
       setEditando(null);
       await carregar();
     } catch (e) {
@@ -335,7 +335,7 @@ export default function EquipaPage() {
       prev.map((x) => (x._id === u._id ? { ...x, ativo: !x.ativo } : x))
     );
     try {
-      await adminPatch(`/api/admin/equipa/${u._id}/estado`);
+      await adminPatch(`/api/gestor/equipa/${u._id}/estado`);
     } catch (e) {
       // Reverte em caso de erro.
       setUtilizadores((prev) =>
@@ -350,7 +350,7 @@ export default function EquipaPage() {
     if (!eliminando) return;
     setElimSubmitting(true);
     try {
-      await adminDelete(`/api/admin/equipa/${eliminando._id}`);
+      await adminDelete(`/api/gestor/equipa/${eliminando._id}`);
       setEliminando(null);
       await carregar();
     } catch (e) {
@@ -367,7 +367,7 @@ export default function EquipaPage() {
     setFaltaResultado(null);
     try {
       const res = await adminPost<{ reatribuidas: number; orfas: number; total: number }>(
-        `/api/admin/equipa/${faltaSubita._id}/falta-subita`,
+        `/api/gestor/equipa/${faltaSubita._id}/falta-subita`,
         {}
       );
       setFaltaResultado(
@@ -1127,7 +1127,7 @@ export default function EquipaPage() {
                     reatribuidas: number;
                     orfas: number;
                     total: number;
-                  }>(`/api/admin/equipa/${baixaModal._id}/baixa`, {
+                  }>(`/api/gestor/equipa/${baixaModal._id}/baixa`, {
                     data_inicio: baixaForm.data_inicio,
                     data_fim: baixaForm.data_fim,
                     tipo: "ferias",

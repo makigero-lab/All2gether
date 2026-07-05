@@ -130,8 +130,8 @@ export default function CalendarioOperacionalPage() {
   const carregarFiltros = useCallback(async () => {
     try {
       const [propRes, equipaRes] = await Promise.all([
-        adminGet<{ propriedades: PropriedadeDTO[] }>("/api/admin/propriedades"),
-        adminGet<{ utilizadores: UtilizadorDTO[] }>("/api/admin/equipa"),
+        adminGet<{ propriedades: PropriedadeDTO[] }>("/api/gestor/propriedades"),
+        adminGet<{ utilizadores: UtilizadorDTO[] }>("/api/gestor/equipa"),
       ]);
       setPropriedades((propRes.propriedades ?? []).filter((p) => p.ativo));
       setEquipa(
@@ -162,7 +162,7 @@ export default function CalendarioOperacionalPage() {
       if (filtros.estado) params.set("estado", filtros.estado);
 
       const res = await adminGet<{ tarefas: TarefaCalendario[] }>(
-        `/api/admin/calendario/dados?${params.toString()}`
+        `/api/gestor/calendario/dados?${params.toString()}`
       );
       setTarefas(res.tarefas ?? []);
     } catch (e) {
@@ -200,7 +200,7 @@ export default function CalendarioOperacionalPage() {
     if (!tarefaSelecionada || !reatribuindoPara) return;
     setReatribuindo(true);
     try {
-      await adminPatch(`/api/admin/tarefas/${tarefaSelecionada._id}/atribuir`, {
+      await adminPatch(`/api/gestor/tarefas/${tarefaSelecionada._id}/atribuir`, {
         utilizador_id: reatribuindoPara,
       });
       // Atualiza localmente a tarefa no estado.

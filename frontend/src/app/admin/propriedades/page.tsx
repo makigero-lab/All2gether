@@ -32,7 +32,7 @@ import {
 /**
  * Página de Propriedades — Painel de Administração.
  *
- * Consome a API real (GET/POST /api/admin/propriedades) em vez do mock-data.
+ * Consome a API real (GET/POST /api/gestor/propriedades) em vez do mock-data.
  *
  * O JWT é enviado automaticamente pelo helper `adminGet`/`adminPost`
  * (header `Authorization: Bearer <token>`, ver `src/lib/api.ts`).
@@ -54,7 +54,7 @@ export default function PropriedadesPage() {
   const [formErro, setFormErro] = useState<string | null>(null);
 
   // Lista de apartamentos do Smoobu (para o dropdown no formulário de criação).
-  // Carregada via GET /api/admin/smoobu/propriedades quando o formulário abre.
+  // Carregada via GET /api/gestor/smoobu/propriedades quando o formulário abre.
   const [propriedadesSmoobu, setPropriedadesSmoobu] = useState<
     { id: string | number; name: string }[]
   >([]);
@@ -67,7 +67,7 @@ export default function PropriedadesPage() {
     setErro(null);
     try {
       const data = await adminGet<{ propriedades: PropriedadeDTO[] }>(
-        "/api/admin/propriedades"
+        "/api/gestor/propriedades"
       );
       setPropriedades(data.propriedades ?? []);
     } catch (e) {
@@ -89,7 +89,7 @@ export default function PropriedadesPage() {
     setSmoobuErro(null);
     try {
       const data = await adminGet<{ propriedadesSmoobu: { id: string | number; name: string }[] }>(
-        "/api/admin/smoobu/propriedades"
+        "/api/gestor/smoobu/propriedades"
       );
       setPropriedadesSmoobu(data.propriedadesSmoobu ?? []);
     } catch (e) {
@@ -128,7 +128,7 @@ export default function PropriedadesPage() {
 
     setSubmitting(true);
     try {
-      await adminPost("/api/admin/propriedades", {
+      await adminPost("/api/gestor/propriedades", {
         nome: form.nome.trim(),
         smoobu_id: form.smoobu_id.trim(),
         morada: form.morada.trim(),
@@ -152,7 +152,7 @@ export default function PropriedadesPage() {
       prev.map((x) => (x._id === p._id ? { ...x, ativo: !x.ativo } : x))
     );
     try {
-      await adminPatch(`/api/admin/propriedades/${p._id}/estado`);
+      await adminPatch(`/api/gestor/propriedades/${p._id}/estado`);
     } catch (e) {
       // Reverte em caso de erro.
       setPropriedades((prev) =>
@@ -177,7 +177,7 @@ export default function PropriedadesPage() {
         criadas: number;
         existentes: number;
         erros: number;
-      }>("/api/admin/smoobu/sincronizar-propriedades", {});
+      }>("/api/gestor/smoobu/sincronizar-propriedades", {});
 
       let msg = `Sincronização concluída! ${res.criadas} propriedade(s) importada(s)`;
       if (res.existentes > 0) msg += `, ${res.existentes} já existiam`;
@@ -241,7 +241,7 @@ export default function PropriedadesPage() {
     setEditSubmitting(true);
     try {
       const res = await adminPut<{ propriedade: PropriedadeDTO }>(
-        `/api/admin/propriedades/${editando._id}`,
+        `/api/gestor/propriedades/${editando._id}`,
         {
           nome: editForm.nome.trim(),
           morada: editForm.morada.trim(),

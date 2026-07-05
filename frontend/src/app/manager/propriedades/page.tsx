@@ -32,7 +32,7 @@ import {
 /**
  * Página de Propriedades — Painel do Gestor (/manager/propriedades).
  *
- * Consome a mesma API do admin (GET/POST/PUT/PATCH /api/admin/propriedades)
+ * Consome a mesma API do admin (GET/POST/PUT/PATCH /api/gestor/propriedades)
  * via proxy same-origin (cookie httpOnly).
  */
 export default function ManagerPropriedadesPage() {
@@ -64,7 +64,7 @@ export default function ManagerPropriedadesPage() {
     setErro(null);
     try {
       const data = await adminGet<{ propriedades: PropriedadeDTO[] }>(
-        "/api/admin/propriedades"
+        "/api/gestor/propriedades"
       );
       setPropriedades(data.propriedades ?? []);
     } catch (e) {
@@ -85,7 +85,7 @@ export default function ManagerPropriedadesPage() {
     setSmoobuErro(null);
     try {
       const data = await adminGet<{ propriedadesSmoobu: { id: string | number; name: string }[] }>(
-        "/api/admin/smoobu/propriedades"
+        "/api/gestor/smoobu/propriedades"
       );
       setPropriedadesSmoobu(data.propriedadesSmoobu ?? []);
     } catch (e) {
@@ -123,7 +123,7 @@ export default function ManagerPropriedadesPage() {
 
     setSubmitting(true);
     try {
-      await adminPost("/api/admin/propriedades", {
+      await adminPost("/api/gestor/propriedades", {
         nome: form.nome.trim(),
         smoobu_id: form.smoobu_id.trim(),
         morada: form.morada.trim(),
@@ -145,7 +145,7 @@ export default function ManagerPropriedadesPage() {
       prev.map((x) => (x._id === p._id ? { ...x, ativo: !x.ativo } : x))
     );
     try {
-      await adminPatch(`/api/admin/propriedades/${p._id}/estado`);
+      await adminPatch(`/api/gestor/propriedades/${p._id}/estado`);
     } catch (e) {
       setPropriedades((prev) =>
         prev.map((x) => (x._id === p._id ? { ...x, ativo: p.ativo } : x))
@@ -169,7 +169,7 @@ export default function ManagerPropriedadesPage() {
         criadas: number;
         existentes: number;
         erros: number;
-      }>("/api/admin/smoobu/sincronizar-propriedades", {});
+      }>("/api/gestor/smoobu/sincronizar-propriedades", {});
 
       let msg = `Sincronização concluída! ${res.criadas} propriedade(s) importada(s)`;
       if (res.existentes > 0) msg += `, ${res.existentes} já existiam`;
@@ -230,7 +230,7 @@ export default function ManagerPropriedadesPage() {
     setEditSubmitting(true);
     try {
       const res = await adminPut<{ propriedade: PropriedadeDTO }>(
-        `/api/admin/propriedades/${editando._id}`,
+        `/api/gestor/propriedades/${editando._id}`,
         {
           nome: editForm.nome.trim(),
           morada: editForm.morada.trim(),

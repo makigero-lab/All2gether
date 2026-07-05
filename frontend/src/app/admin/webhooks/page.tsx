@@ -118,7 +118,7 @@ export default function WebhooksPage() {
     setErro(null);
     try {
       const query = filtro !== "todos" ? `?status=${filtro}` : "";
-      const res = await adminGet<WebhooksResponse>(`/api/admin/webhooks${query}`);
+      const res = await adminGet<WebhooksResponse>(`/api/gestor/webhooks${query}`);
       setWebhooks(res.webhooks ?? []);
       setTotal(res.total ?? 0);
     } catch (e) {
@@ -135,7 +135,7 @@ export default function WebhooksPage() {
   const handleReprocessar = async (id: string) => {
     setReprocessando(id);
     try {
-      await adminPost(`/api/admin/webhooks/${id}/reprocessar`, {});
+      await adminPost(`/api/gestor/webhooks/${id}/reprocessar`, {});
       // Recarrega para mostrar o novo estado.
       await carregar();
     } catch (e) {

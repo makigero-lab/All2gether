@@ -78,40 +78,40 @@ A API arranca na porta definida em `PORT` (por defeito **5000**).
 | `GET`  | `/api/auth/me/push-vapid-public-key` | Devolve a chave pública VAPID para subscrição push. **Auth:** JWT. |
 | `POST` | `/api/auth/me/push-subscribe` | Guarda a subscrição push do browser no utilizador. Body: `{ subscription }`. **Auth:** JWT. |
 | `POST` | `/api/auth/me/push-unsubscribe` | Remove a subscrição push do utilizador. **Auth:** JWT. |
-| `GET`  | `/api/admin/dashboard` | Estatísticas em tempo real (propriedades, equipa, tarefas hoje, carga por staff). **Auth:** JWT. |
-| `GET`  | `/api/admin/propriedades` | Lista as propriedades da empresa. **Auth:** JWT. |
-| `POST` | `/api/admin/propriedades` | Cria propriedade (com geocoding da morada). **Auth:** JWT; **Body:** `smoobu_id`, `nome`, `morada`, `tempo_limpeza_minutos?` |
-| `PATCH`| `/api/admin/propriedades/:id/estado` | Ativa/desativa propriedade (webhook ignora inativas). **Auth:** JWT. |
-| `PUT` | `/api/admin/propriedades/:id` | Atualiza propriedade (nome, smoobu_id, morada, tempo). Re-faz geocoding se morada mudar. **Auth:** JWT. |
-| `GET`  | `/api/admin/tarefas` | Lista tarefas (calendário de operações). Query: `?inicio=&fim=`. **Auth:** JWT. |
-| `GET`  | `/api/admin/calendario/dados` | Endpoint unificado para Calendário Visual Avançado. Filtros: `?inicio=&fim=&propriedadeId=&utilizadorId=&estado=`. Populate propriedade (nome+morada) + utilizador (nome). **Auth:** JWT. |
-| `GET`  | `/api/admin/tarefas/export` | Exportação CSV de tarefas. Query: `?inicio=&fim=`. **Auth:** JWT. |
-| `POST` | `/api/admin/tarefas` | Cria tarefa manualmente. **Auth:** JWT. |
-| `PATCH`| `/api/admin/tarefas/:id/atribuir` | Atribui tarefa a um funcionário. **Auth:** JWT. |
-| `PATCH`| `/api/admin/tarefas/:id/estado` | Atualiza estado da tarefa. **Auth:** JWT. |
-| `POST` | `/api/admin/tarefas/:id/atraso` | Reporta atraso (soma minutos). **Auth:** JWT. |
-| `GET`  | `/api/admin/equipa` | Lista os utilizadores da empresa (sem `password_hash`). **Auth:** JWT. |
-| `POST` | `/api/admin/equipa` | Cria membro de equipa (bcrypt hash). **Auth:** JWT; **Body:** `nome`, `email`, `password`, `role?`, `dias_folga?`, `telefone?` |
-| `PUT`  | `/api/admin/equipa/:id` | Atualiza utilizador. **Auth:** JWT. |
-| `PATCH`| `/api/admin/equipa/:id/estado` | Alterna ativo/desativado. **Auth:** JWT. |
-| `DELETE`| `/api/admin/equipa/:id` | Elimina utilizador (soft delete). **Auth:** JWT. |
-| `POST` | `/api/admin/equipa/:id/falta-subita` | Reatribuição de emergência (tarefas do dia). **Auth:** JWT. |
-| `POST` | `/api/admin/equipa/:id/baixa` | Baixa prolongada/férias (redistribui tarefas futuras). **Auth:** JWT. |
-| `GET`  | `/api/admin/ausencias` | Lista ausências (incl. pendentes para aprovação). Query: `?futuras=true`. **Auth:** JWT. |
-| `POST` | `/api/admin/ausencias` | Regista ausência (admin → estado 'aprovada'). **Auth:** JWT. |
-| `DELETE`| `/api/admin/ausencias/:id` | Elimina ausência. **Auth:** JWT. |
-| `PATCH`| `/api/admin/ausencias/:id/estado` | Aprovar/rejeitar pedido do staff. Body: `{ estado: 'aprovada'\|'rejeitada' }`. Aprovar → redistribui tarefas. **Auth:** JWT. |
+| `GET`  | `/api/gestor/dashboard` | Estatísticas em tempo real (propriedades, equipa, tarefas hoje, carga por staff). **Auth:** JWT. |
+| `GET`  | `/api/gestor/propriedades` | Lista as propriedades da empresa. **Auth:** JWT. |
+| `POST` | `/api/gestor/propriedades` | Cria propriedade (com geocoding da morada). **Auth:** JWT; **Body:** `smoobu_id`, `nome`, `morada`, `tempo_limpeza_minutos?` |
+| `PATCH`| `/api/gestor/propriedades/:id/estado` | Ativa/desativa propriedade (webhook ignora inativas). **Auth:** JWT. |
+| `PUT` | `/api/gestor/propriedades/:id` | Atualiza propriedade (nome, smoobu_id, morada, tempo). Re-faz geocoding se morada mudar. **Auth:** JWT. |
+| `GET`  | `/api/gestor/tarefas` | Lista tarefas (calendário de operações). Query: `?inicio=&fim=`. **Auth:** JWT. |
+| `GET`  | `/api/gestor/calendario/dados` | Endpoint unificado para Calendário Visual Avançado. Filtros: `?inicio=&fim=&propriedadeId=&utilizadorId=&estado=`. Populate propriedade (nome+morada) + utilizador (nome). **Auth:** JWT. |
+| `GET`  | `/api/gestor/tarefas/export` | Exportação CSV de tarefas. Query: `?inicio=&fim=`. **Auth:** JWT. |
+| `POST` | `/api/gestor/tarefas` | Cria tarefa manualmente. **Auth:** JWT. |
+| `PATCH`| `/api/gestor/tarefas/:id/atribuir` | Atribui tarefa a um funcionário. **Auth:** JWT. |
+| `PATCH`| `/api/gestor/tarefas/:id/estado` | Atualiza estado da tarefa. **Auth:** JWT. |
+| `POST` | `/api/gestor/tarefas/:id/atraso` | Reporta atraso (soma minutos). **Auth:** JWT. |
+| `GET`  | `/api/gestor/equipa` | Lista os utilizadores da empresa (sem `password_hash`). **Auth:** JWT. |
+| `POST` | `/api/gestor/equipa` | Cria membro de equipa (bcrypt hash). **Auth:** JWT; **Body:** `nome`, `email`, `password`, `role?`, `dias_folga?`, `telefone?` |
+| `PUT`  | `/api/gestor/equipa/:id` | Atualiza utilizador. **Auth:** JWT. |
+| `PATCH`| `/api/gestor/equipa/:id/estado` | Alterna ativo/desativado. **Auth:** JWT. |
+| `DELETE`| `/api/gestor/equipa/:id` | Elimina utilizador (soft delete). **Auth:** JWT. |
+| `POST` | `/api/gestor/equipa/:id/falta-subita` | Reatribuição de emergência (tarefas do dia). **Auth:** JWT. |
+| `POST` | `/api/gestor/equipa/:id/baixa` | Baixa prolongada/férias (redistribui tarefas futuras). **Auth:** JWT. |
+| `GET`  | `/api/gestor/ausencias` | Lista ausências (incl. pendentes para aprovação). Query: `?futuras=true`. **Auth:** JWT. |
+| `POST` | `/api/gestor/ausencias` | Regista ausência (admin → estado 'aprovada'). **Auth:** JWT. |
+| `DELETE`| `/api/gestor/ausencias/:id` | Elimina ausência. **Auth:** JWT. |
+| `PATCH`| `/api/gestor/ausencias/:id/estado` | Aprovar/rejeitar pedido do staff. Body: `{ estado: 'aprovada'\|'rejeitada' }`. Aprovar → redistribui tarefas. **Auth:** JWT. |
 | `GET`  | `/api/staff/ausencias` | Staff vê as SUAS ausências (histórico). **Auth:** JWT. |
 | `POST` | `/api/staff/ausencias` | Staff cria pedido de ausência (sempre 'pendente'). Body: `{ data_inicio, data_fim, tipo, notas? }`. **Auth:** JWT. |
 | `POST` | `/api/staff/falta-hoje` | Staff reporta falta de emergência para o dia atual (estado 'pendente_emergencia'). Body: `{ justificacao? }`. **Auth:** JWT. |
-| `GET`  | `/api/admin/auditoria` | Histórico de ações administrativas. Query: `?limit=`. **Auth:** JWT. |
-| `GET`  | `/api/admin/relatorios/produtividade` | Relatório de produtividade (resumo + por staff/dia/estado/propriedade). Query: `?inicio=&fim=`. **Auth:** JWT. |
-| `GET`  | `/api/admin/webhooks` | Lista logs de webhooks do Smoobu (status + payload + erro). Query: `?status=&limit=`. **Auth:** JWT. |
-| `POST` | `/api/admin/webhooks/:id/reprocessar` | Reproccessa webhook que falhou (reutiliza payload guardado, idempotente). **Auth:** JWT. |
-| `POST` | `/api/admin/smoobu/sincronizar` | Sincroniza reservas futuras do Smoobu via REST API (pull). Idempotente. Requer `SMOOBU_API_KEY`. **Auth:** JWT. |
-| `GET`  | `/api/admin/smoobu/propriedades` | Lista apartamentos do Smoobu (para dropdown no fluxo de criação). Requer `SMOOBU_API_KEY`. **Auth:** JWT. |
-| `POST` | `/api/admin/smoobu/sincronizar-propriedades` | Importa apartamentos do Smoobu em massa (upsert `$setOnInsert` — não altera existentes). Requer `SMOOBU_API_KEY`. **Auth:** JWT. |
-| `GET`  | `/api/admin/setup` | Bootstrap do "Cliente Zero" (Empresa + Admin + Manager + Staff + Propriedade de teste). Idempotente. **PÚBLICO.** |
+| `GET`  | `/api/gestor/auditoria` | Histórico de ações administrativas. Query: `?limit=`. **Auth:** JWT. |
+| `GET`  | `/api/gestor/relatorios/produtividade` | Relatório de produtividade (resumo + por staff/dia/estado/propriedade). Query: `?inicio=&fim=`. **Auth:** JWT. |
+| `GET`  | `/api/gestor/webhooks` | Lista logs de webhooks do Smoobu (status + payload + erro). Query: `?status=&limit=`. **Auth:** JWT. |
+| `POST` | `/api/gestor/webhooks/:id/reprocessar` | Reproccessa webhook que falhou (reutiliza payload guardado, idempotente). **Auth:** JWT. |
+| `POST` | `/api/gestor/smoobu/sincronizar` | Sincroniza reservas futuras do Smoobu via REST API (pull). Idempotente. Requer `SMOOBU_API_KEY`. **Auth:** JWT. |
+| `GET`  | `/api/gestor/smoobu/propriedades` | Lista apartamentos do Smoobu (para dropdown no fluxo de criação). Requer `SMOOBU_API_KEY`. **Auth:** JWT. |
+| `POST` | `/api/gestor/smoobu/sincronizar-propriedades` | Importa apartamentos do Smoobu em massa (upsert `$setOnInsert` — não altera existentes). Requer `SMOOBU_API_KEY`. **Auth:** JWT. |
+| `GET`  | `/api/gestor/setup` | Bootstrap do "Cliente Zero" (Empresa + Admin + Manager + Staff + Propriedade de teste). Idempotente. **PÚBLICO.** |
 
 > Detalhes completos da lógica de atribuição (regras de negócio) em [`docs/BACKEND.md`](docs/BACKEND.md#32-lógica-central--atribuição-de-tarefas-webhook-smoobu).
 

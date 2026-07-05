@@ -47,7 +47,7 @@ import { PaginationBar } from "@/components/admin/pagination-bar";
 /**
  * Página de Equipa — Painel do Gestor (/manager/equipa).
  *
- * Consome a mesma API do admin (GET/POST/PUT/PATCH/DELETE /api/admin/equipa).
+ * Consome a mesma API do admin (GET/POST/PUT/PATCH/DELETE /api/gestor/equipa).
  *
  * Lista os membros numa tabela (Nome, Email, Role, Estado, Ações) e permite:
  *   - Adicionar (formulário inline)
@@ -203,7 +203,7 @@ export default function ManagerEquipaPage() {
       const hoje = new Date();
 
       const [data, ausenciasRes] = await Promise.all([
-        adminGet<{ utilizadores: UtilizadorDTO[] }>("/api/admin/equipa"),
+        adminGet<{ utilizadores: UtilizadorDTO[] }>("/api/gestor/equipa"),
         adminGet<{
           ausencias: {
             utilizador_id: string;
@@ -211,7 +211,7 @@ export default function ManagerEquipaPage() {
             data_fim: string;
             estado: string;
           }[];
-        }>("/api/admin/ausencias?estado=aprovada"),
+        }>("/api/gestor/ausencias?estado=aprovada"),
       ]);
       setUtilizadores(data.utilizadores ?? []);
 
@@ -254,7 +254,7 @@ export default function ManagerEquipaPage() {
 
     setSubmitting(true);
     try {
-      await adminPost("/api/admin/equipa", {
+      await adminPost("/api/gestor/equipa", {
         nome: form.nome.trim(),
         email: form.email.trim(),
         password: form.password,
@@ -315,7 +315,7 @@ export default function ManagerEquipaPage() {
       };
       if (editForm.password) body.password = editForm.password;
 
-      await adminPut(`/api/admin/equipa/${editando._id}`, body);
+      await adminPut(`/api/gestor/equipa/${editando._id}`, body);
       setEditando(null);
       await carregar();
     } catch (e) {
@@ -331,7 +331,7 @@ export default function ManagerEquipaPage() {
       prev.map((x) => (x._id === u._id ? { ...x, ativo: !x.ativo } : x))
     );
     try {
-      await adminPatch(`/api/admin/equipa/${u._id}/estado`);
+      await adminPatch(`/api/gestor/equipa/${u._id}/estado`);
     } catch (e) {
       setUtilizadores((prev) =>
         prev.map((x) => (x._id === u._id ? { ...x, ativo: u.ativo } : x))
@@ -345,7 +345,7 @@ export default function ManagerEquipaPage() {
     if (!eliminando) return;
     setElimSubmitting(true);
     try {
-      await adminDelete(`/api/admin/equipa/${eliminando._id}`);
+      await adminDelete(`/api/gestor/equipa/${eliminando._id}`);
       setEliminando(null);
       await carregar();
     } catch (e) {
@@ -362,7 +362,7 @@ export default function ManagerEquipaPage() {
     setFaltaResultado(null);
     try {
       const res = await adminPost<{ reatribuidas: number; orfas: number; total: number }>(
-        `/api/admin/equipa/${faltaSubita._id}/falta-subita`,
+        `/api/gestor/equipa/${faltaSubita._id}/falta-subita`,
         {}
       );
       setFaltaResultado(
@@ -1122,7 +1122,7 @@ export default function ManagerEquipaPage() {
                     reatribuidas: number;
                     orfas: number;
                     total: number;
-                  }>(`/api/admin/equipa/${baixaModal._id}/baixa`, {
+                  }>(`/api/gestor/equipa/${baixaModal._id}/baixa`, {
                     data_inicio: baixaForm.data_inicio,
                     data_fim: baixaForm.data_fim,
                     tipo: "ferias",

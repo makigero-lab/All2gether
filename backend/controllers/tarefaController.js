@@ -8,7 +8,7 @@ const mongoose = require('mongoose');
 const Tarefa = require('../models/Tarefa');
 const Propriedade = require('../models/Propriedade');
 const Utilizador = require('../models/Utilizador');
-const { obterEmpresaId } = require('./adminController');
+const { obterEmpresaId } = require('./gestorController');
 
 const CAPACIDADE_MAXIMA_MINUTOS = 420;
 

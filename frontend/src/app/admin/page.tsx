@@ -43,7 +43,7 @@ interface EmergenciaDTO {
 
 /**
  * Dashboard do Admin (/admin) — dados reais.
- * Consome GET /api/admin/dashboard (via proxy same-origin).
+ * Consome GET /api/gestor/dashboard (via proxy same-origin).
  */
 export default function AdminDashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
@@ -60,9 +60,9 @@ export default function AdminDashboardPage() {
     setErro(null);
     try {
       const [dashRes, emergRes] = await Promise.all([
-        adminGet<DashboardData>("/api/admin/dashboard"),
+        adminGet<DashboardData>("/api/gestor/dashboard"),
         adminGet<{ ausencias: EmergenciaDTO[] }>(
-          "/api/admin/ausencias?estado=pendente_emergencia"
+          "/api/gestor/ausencias?estado=pendente_emergencia"
         ),
       ]);
       setData(dashRes);
@@ -91,7 +91,7 @@ export default function AdminDashboardPage() {
     try {
       const res = await adminPatch<{
         redistribuicao: { total: number; reatribuidas: number; orfas: number } | null;
-      }>(`/api/admin/ausencias/${em._id}/estado`, { estado: "aprovada" });
+      }>(`/api/gestor/ausencias/${em._id}/estado`, { estado: "aprovada" });
 
       const r = res.redistribuicao;
       const msg =

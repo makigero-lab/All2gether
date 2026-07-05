@@ -34,7 +34,7 @@ interface DashboardData {
 
 /**
  * Dashboard do Gestor (/manager) — dados reais.
- * Consome GET /api/admin/dashboard (via proxy same-origin).
+ * Consome GET /api/gestor/dashboard (via proxy same-origin).
  *
  * Diferença para o /admin: SEM o banner de emergência (esse é exclusivo do admin).
  */
@@ -47,7 +47,7 @@ export default function ManagerDashboardPage() {
     setLoading(true);
     setErro(null);
     try {
-      const dashRes = await adminGet<DashboardData>("/api/admin/dashboard");
+      const dashRes = await adminGet<DashboardData>("/api/gestor/dashboard");
       setData(dashRes);
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Erro ao carregar dashboard.");

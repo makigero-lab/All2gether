@@ -29,8 +29,8 @@ import { adminGet, adminPatch, type Role } from "@/lib/api";
  * Página de Pedidos de Férias — Painel do Gestor (/manager/aprovacoes).
  *
  * Consome a mesma API do admin:
- *   - GET /api/admin/ausencias?estado=pendente,pendente_emergencia
- *   - PATCH /api/admin/ausencias/:id/estado
+ *   - GET /api/gestor/ausencias?estado=pendente,pendente_emergencia
+ *   - PATCH /api/gestor/ausencias/:id/estado
  */
 
 interface AusenciaDTO {
@@ -87,7 +87,7 @@ export default function ManagerAprovacoesPage() {
     setErro(null);
     try {
       const res = await adminGet<{ ausencias: AusenciaDTO[] }>(
-        "/api/admin/ausencias?estado=pendente,pendente_emergencia"
+        "/api/gestor/ausencias?estado=pendente,pendente_emergencia"
       );
       setPendentes(res.ausencias ?? []);
     } catch (e) {
@@ -109,7 +109,7 @@ export default function ManagerAprovacoesPage() {
       const res = await adminPatch<{
         mensagem: string;
         redistribuicao: { total: number; reatribuidas: number; orfas: number } | null;
-      }>(`/api/admin/ausencias/${a._id}/estado`, { estado: "aprovada" });
+      }>(`/api/gestor/ausencias/${a._id}/estado`, { estado: "aprovada" });
 
       const r = res.redistribuicao;
       const msg =
@@ -134,7 +134,7 @@ export default function ManagerAprovacoesPage() {
     setProcessando(`rejeitar-${a._id}`);
     setErro(null);
     try {
-      await adminPatch(`/api/admin/ausencias/${a._id}/estado`, {
+      await adminPatch(`/api/gestor/ausencias/${a._id}/estado`, {
         estado: "rejeitada",
       });
       setToast({ tipo: "sucesso", msg: "Pedido rejeitado." });
