@@ -31,15 +31,15 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { label: "Dashboard", href: "/admin", icon: LayoutDashboard },
-  { label: "Propriedades", href: "/admin/propriedades", icon: Building2 },
-  { label: "Tarefas", href: "/admin/tarefas", icon: ClipboardList },
-  { label: "Equipa", href: "/admin/equipa", icon: Users },
-  { label: "Pedidos de Férias", href: "/admin/aprovacoes", icon: CalendarCheck },
-  { label: "Calendário Operacional", href: "/admin/calendario-operacional", icon: CalendarRange },
-  { label: "Calendário de Folgas", href: "/admin/calendario", icon: CalendarDays },
-  { label: "Relatórios", href: "/admin/relatorios", icon: BarChart3 },
-  { label: "Webhooks", href: "/admin/webhooks", icon: Webhook },
+  { label: "Dashboard", href: "/gestor", icon: LayoutDashboard },
+  { label: "Propriedades", href: "/gestor/propriedades", icon: Building2 },
+  { label: "Tarefas", href: "/gestor/tarefas", icon: ClipboardList },
+  { label: "Equipa", href: "/gestor/equipa", icon: Users },
+  { label: "Pedidos de Férias", href: "/gestor/aprovacoes", icon: CalendarCheck },
+  { label: "Calendário Operacional", href: "/gestor/calendario-operacional", icon: CalendarRange },
+  { label: "Calendário de Folgas", href: "/gestor/calendario", icon: CalendarDays },
+  { label: "Relatórios", href: "/gestor/relatorios", icon: BarChart3 },
+  { label: "Webhooks", href: "/gestor/webhooks", icon: Webhook },
 ];
 
 /**
@@ -53,7 +53,7 @@ export function AdminSidebar() {
   const [open, setOpen] = useState(false);
 
   const isActive = (href: string) =>
-    href === "/admin" ? pathname === "/admin" : pathname.startsWith(href);
+    href === "/gestor" ? pathname === "/gestor" : pathname.startsWith(href);
 
   const NavLinks = () => (
     <nav className="flex flex-col gap-1 px-3 py-4">
