@@ -27,8 +27,14 @@ let configured = false;
 function configurarWebPush() {
   const publicKey = process.env.VAPID_PUBLIC_KEY;
   const privateKey = process.env.VAPID_PRIVATE_KEY;
-  const subject =
+  let subject =
     process.env.VAPID_SUBJECT || 'mailto:admin@autocell.com';
+
+  // Garante que o subject tem o prefixo mailto: (exige o web-push).
+  // Se vier só o email (ex: "makigerorr@gmail.com"), adiciona o prefixo.
+  if (subject && !subject.startsWith('mailto:') && !subject.startsWith('http')) {
+    subject = `mailto:${subject}`;
+  }
 
   if (!publicKey || !privateKey) {
     console.warn(
@@ -39,7 +45,13 @@ function configurarWebPush() {
     return;
   }
 
-  webpush.setVapidDetails(subject, publicKey, privateKey);
+  try {
+    webpush.setVapidDetails(subject, publicKey, privateKey);
+  } catch (err) {
+    console.error('❌ Erro ao configurar VAPID:', err.message);
+    configured = false;
+    return;
+  }
   configured = true;
   console.log('✅ Web Push configurado (VAPID).');
 }
