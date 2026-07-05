@@ -150,6 +150,18 @@ function horaTarefa(dataISO: string): string {
   }
 }
 
+/** Calcula a hora de fim estimada (início + tempo_limpeza_minutos). */
+function horaFimTarefa(dataISO: string, minutos: number): string {
+  if (!dataISO || !dataISO.includes("T")) return "—";
+  try {
+    const inicio = parseISO(dataISO);
+    const fim = new Date(inicio.getTime() + (minutos || 0) * 60000);
+    return format(fim, "HH:mm");
+  } catch {
+    return "—";
+  }
+}
+
 /** "Segunda 15" — nome curto do dia (sem "-feira") + dia do mês. */
 function headerDia(dia: Date): string {
   return `${DIAS_SEMANA_FULL[dia.getDay()]} ${format(dia, "d")}`;
@@ -640,14 +652,15 @@ export default function CalendarioOperacionalPage() {
                                 t.utilizador_id ? " · " + t.utilizador_id.nome : ""
                               }`}
                             >
-                              <div className="text-[10px] font-mono opacity-70">
-                                {horaTarefa(t.data)}
+                              <div className="flex items-center gap-1 text-[10px] font-mono opacity-80">
+                                <Clock className="h-2.5 w-2.5" />
+                                {horaTarefa(t.data)} - {horaFimTarefa(t.data, t.tempo_limpeza_minutos)}
                               </div>
                               <div className="truncate font-medium">
                                 {nomeCurto(t.propriedade_id?.nome, 18)}
                               </div>
                               <div className="truncate opacity-80">
-                                {primeiroNome(t.utilizador_id?.nome) || "—"}
+                                {primeiroNome(t.utilizador_id?.nome) || "Sem atribuição"}
                               </div>
                             </button>
                           );
@@ -902,15 +915,16 @@ function DiariaList({ dia, tarefasPorDia, abrirTarefa }: DiariaListProps) {
               <div className="min-w-0 flex-1">
                 <div className="font-medium">{t.propriedade_id?.nome ?? "—"}</div>
                 <div className="text-sm text-muted-foreground">
-                  {t.utilizador_id?.nome ?? "Por atribuir"}
+                  {t.utilizador_id?.nome ?? "Sem atribuição"}
                 </div>
                 <div className="mt-1.5 flex flex-wrap items-center gap-2">
                   <Badge variant="outline" className="text-xs">
                     {tipoLabel}
                   </Badge>
-                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <span className="flex items-center gap-1 text-xs font-mono text-muted-foreground">
                     <Clock className="h-3 w-3" />
-                    {t.tempo_limpeza_minutos} min
+                    {horaTarefa(t.data)} - {horaFimTarefa(t.data, t.tempo_limpeza_minutos)}
+                    <span className="opacity-60">({t.tempo_limpeza_minutos} min)</span>
                   </span>
                 </div>
               </div>
