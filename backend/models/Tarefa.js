@@ -70,10 +70,15 @@ const tarefaSchema = new mongoose.Schema(
       default: null,
     },
     // v1.34.0 — Hora exata de conclusão (timestamp preciso, para auditoria).
-    // Diferente de concluida_em que pode ser normalizado para meia-noite.
     hora_conclusao: {
       type: Date,
       default: null,
+    },
+    // v1.38.0 — Avarias reportadas pelo staff durante a limpeza.
+    // Array de strings (descrição do problema). Cada item é uma avaria.
+    avarias: {
+      type: [String],
+      default: [],
     },
   },
   { timestamps: true }

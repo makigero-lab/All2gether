@@ -332,3 +332,69 @@ exports.concluirTarefa = async (req, res) => {
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
   }
 };
+
+/* ------------------------------------------------------------------ */
+/* POST /api/staff/tarefas/:id/avaria — reportar avaria (v1.38.0)     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Permite ao staff reportar uma avaria durante a limpeza.
+ * Adiciona a descrição ao array `avarias` da tarefa.
+ *
+ * Body: { descricao: string }
+ *
+ * Validações:
+ *   - A tarefa tem de pertencer ao req.user.id.
+ *   - descricao obrigatória (não vazia).
+ *   - Não pode reportar avaria em tarefa cancelada.
+ *
+ * Resposta 200: { tarefa, mensagem }
+ */
+exports.reportarAvaria = async (req, res) => {
+  try {
+    const utilizadorId = req.user && req.user.id;
+    if (!utilizadorId) {
+      return res.status(401).json({ erro: 'Não autenticado.' });
+    }
+
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ erro: 'ID de tarefa inválido.' });
+    }
+
+    const { descricao } = req.body || {};
+    if (!descricao || !String(descricao).trim()) {
+      return res.status(400).json({ erro: 'Descrição da avaria é obrigatória.' });
+    }
+
+    const tarefa = await Tarefa.findOne({
+      _id: id,
+      utilizador_id: utilizadorId,
+    });
+
+    if (!tarefa) {
+      return res.status(404).json({
+        erro: 'Tarefa não encontrada (ou não te está atribuída).',
+      });
+    }
+
+    if (tarefa.estado === 'cancelada') {
+      return res.status(400).json({ erro: 'Não podes reportar avaria numa tarefa cancelada.' });
+    }
+
+    // Adiciona a avaria ao array.
+    if (!Array.isArray(tarefa.avarias)) {
+      tarefa.avarias = [];
+    }
+    tarefa.avarias.push(String(descricao).trim());
+    await tarefa.save();
+
+    return res.status(200).json({
+      tarefa,
+      mensagem: 'Avaria reportada com sucesso.',
+    });
+  } catch (err) {
+    console.error('❌ reportarAvaria:', err.message);
+    return res.status(500).json({ erro: 'Erro interno do servidor.' });
+  }
+};
