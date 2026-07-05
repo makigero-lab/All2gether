@@ -35,9 +35,7 @@ const navItems: NavItem[] = [
   { label: "Propriedades", href: "/gestor/propriedades", icon: Building2 },
   { label: "Tarefas", href: "/gestor/tarefas", icon: ClipboardList },
   { label: "Equipa", href: "/gestor/equipa", icon: Users },
-  { label: "Pedidos de Férias", href: "/gestor/aprovacoes", icon: CalendarCheck },
-  { label: "Calendário Operacional", href: "/gestor/calendario-operacional", icon: CalendarRange },
-  { label: "Calendário de Folgas", href: "/gestor/calendario", icon: CalendarDays },
+  { label: "Calendário", href: "/gestor/calendario", icon: CalendarRange },
   { label: "Relatórios", href: "/gestor/relatorios", icon: BarChart3 },
   { label: "Webhooks", href: "/gestor/webhooks", icon: Webhook },
 ];

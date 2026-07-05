@@ -2,38 +2,34 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  CalendarDays,
   ChevronLeft,
   ChevronRight,
+  CalendarRange,
   Loader2,
   AlertCircle,
+  RefreshCw,
+  MapPin,
+  Clock,
+  User,
   X,
-  SprayCan,
-  Plane,
-  Sun,
 } from "lucide-react";
 import {
   format,
+  parseISO,
   startOfMonth,
   endOfMonth,
   startOfWeek,
   endOfWeek,
   eachDayOfInterval,
   isSameMonth,
-  isSameDay,
+  isToday,
   addMonths,
-  parseISO,
 } from "date-fns";
-import { ptBR } from "date-fns/locale";
+import { pt } from "date-fns/locale";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import {
   Dialog,
   DialogHeader,
@@ -41,429 +37,572 @@ import {
   DialogDescription,
   DialogClose,
   DialogContent,
+  DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  adminGet,
-  type AusenciaDTO,
-  type UtilizadorDTO,
-} from "@/lib/api";
+import { adminGet, adminPatch, type PropriedadeDTO, type UtilizadorDTO } from "@/lib/api";
 
-/**
- * Página de Calendário Geral de Operações — Painel de Administração.
- *
- * Mostra uma grelha visual estilo Google Calendar com:
- *   - Badges de Limpeza (azul/verde) — sigla da casa
- *   - Badges de Folga/Férias (amarelo/laranja) — nome do funcionário
- *   - Click num dia → modal com detalhe
- *
- * Consome /api/gestor/tarefas + /api/gestor/ausencias (via proxy same-origin).
- */
-
-// --- Tipos locais ---
+/* ------------------------------------------------------------------ */
+/* Tipos                                                               */
+/* ------------------------------------------------------------------ */
 
 interface TarefaCalendario {
   _id: string;
-  propriedade_id?: { nome: string } | null;
-  utilizador_id?: { nome: string } | null;
+  propriedade_id: { _id: string; nome: string; morada?: string } | null;
+  utilizador_id: { _id: string; nome: string } | null;
   data: string;
+  tempo_limpeza_minutos: number;
   tipo: string;
   estado: string;
-  tempo_limpeza_minutos: number;
+  observacoes?: string;
 }
 
-interface DiaData {
-  tarefas: TarefaCalendario[];
-  ausencias: AusenciaDTO[];
+interface FiltrosState {
+  propriedadeId: string;
+  utilizadorId: string;
+  estado: string;
 }
 
-// --- Helpers ---
+const ESTADO_OPTS = [
+  { value: "", label: "Todos os estados" },
+  { value: "por_atribuir", label: "Por atribuir" },
+  { value: "atribuida", label: "Atribuída" },
+  { value: "em_curso", label: "Em curso" },
+  { value: "concluida", label: "Concluída" },
+  { value: "cancelada", label: "Cancelada" },
+];
 
 const DIAS_SEMANA = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
 
-function siglaCasa(nome: string): string {
-  const palavras = nome.trim().split(/\s+/);
-  if (palavras.length === 1) return palavras[0].slice(0, 3).toUpperCase();
-  return (palavras[0][0] + palavras[1][0] + (palavras[2]?.[0] ?? "")).toUpperCase();
+/* ------------------------------------------------------------------ */
+/* Helpers de estilo por estado                                        */
+/* ------------------------------------------------------------------ */
+
+function estiloPorEstado(estado: string): string {
+  switch (estado) {
+    case "por_atribuir":
+      return "bg-destructive/10 text-destructive border-destructive/20 hover:bg-destructive/15";
+    case "atribuida":
+    case "em_curso":
+      return "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20 hover:bg-amber-500/15";
+    case "concluida":
+      return "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/15";
+    case "cancelada":
+      return "bg-muted/40 text-muted-foreground border-muted line-through opacity-60";
+    default:
+      return "bg-muted/40 text-muted-foreground border-muted";
+  }
 }
 
-function corBadgeTarefa(estado: string): string {
-  if (estado === "concluida") return "bg-emerald-100 text-emerald-800 border-emerald-300";
-  if (estado === "por_atribuir") return "bg-amber-100 text-amber-800 border-amber-300";
-  return "bg-blue-100 text-blue-800 border-blue-300";
+function nomeCurto(nome: string | undefined, max = 14): string {
+  if (!nome) return "—";
+  return nome.length > max ? nome.slice(0, max) + "…" : nome;
 }
 
-// --- Componente ---
+function primeiroNome(nome: string | undefined): string {
+  if (!nome) return "";
+  return nome.split(" ")[0];
+}
 
-export default function CalendarioPage() {
+/* ------------------------------------------------------------------ */
+/* Página                                                              */
+/* ------------------------------------------------------------------ */
+
+export default function CalendarioOperacionalPage() {
   const [mesAtual, setMesAtual] = useState(new Date());
+  const [filtros, setFiltros] = useState<FiltrosState>({
+    propriedadeId: "",
+    utilizadorId: "",
+    estado: "",
+  });
+
+  const [tarefas, setTarefas] = useState<TarefaCalendario[]>([]);
+  const [propriedades, setPropriedades] = useState<PropriedadeDTO[]>([]);
+  const [equipa, setEquipa] = useState<UtilizadorDTO[]>([]);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
-  const [tarefas, setTarefas] = useState<TarefaCalendario[]>([]);
-  const [ausencias, setAusencias] = useState<AusenciaDTO[]>([]);
-  const [diaSelecionado, setDiaSelecionado] = useState<Date | null>(null);
 
-  // Gera os dias do calendário (inclui dias do mês anterior/posterior para preencher a grelha).
+  // Modal de detalhe.
+  const [tarefaSelecionada, setTarefaSelecionada] = useState<TarefaCalendario | null>(null);
+  const [reatribuindoPara, setReatribuindoPara] = useState<string>("");
+  const [reatribuindo, setReatribuindo] = useState(false);
+
+  /* --- Carregar propriedades + equipa (uma vez) --- */
+  const carregarFiltros = useCallback(async () => {
+    try {
+      const [propRes, equipaRes] = await Promise.all([
+        adminGet<{ propriedades: PropriedadeDTO[] }>("/api/gestor/propriedades"),
+        adminGet<{ utilizadores: UtilizadorDTO[] }>("/api/gestor/equipa"),
+      ]);
+      setPropriedades((propRes.propriedades ?? []).filter((p) => p.ativo));
+      setEquipa(
+        (equipaRes.utilizadores ?? []).filter(
+          (u) => u.role === "staff" || u.role === "gestor"
+        )
+      );
+    } catch (e) {
+      // Não bloqueia o calendário se os filtros falharem.
+      console.error("Erro ao carregar filtros:", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    carregarFiltros();
+  }, [carregarFiltros]);
+
+  /* --- Carregar tarefas do mês + filtros --- */
+  const carregarTarefas = useCallback(async () => {
+    setLoading(true);
+    setErro(null);
+    try {
+      const inicio = format(startOfMonth(mesAtual), "yyyy-MM-dd");
+      const fim = format(endOfMonth(mesAtual), "yyyy-MM-dd");
+      const params = new URLSearchParams({ inicio, fim });
+      if (filtros.propriedadeId) params.set("propriedadeId", filtros.propriedadeId);
+      if (filtros.utilizadorId) params.set("utilizadorId", filtros.utilizadorId);
+      if (filtros.estado) params.set("estado", filtros.estado);
+
+      const res = await adminGet<{ tarefas: TarefaCalendario[] }>(
+        `/api/gestor/calendario/dados?${params.toString()}`
+      );
+      setTarefas(res.tarefas ?? []);
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Erro ao carregar calendário.");
+    } finally {
+      setLoading(false);
+    }
+  }, [mesAtual, filtros]);
+
+  // Recarrega quando o mês ou os filtros mudam.
+  useEffect(() => {
+    carregarTarefas();
+  }, [carregarTarefas]);
+
+  /* --- Grelha de dias --- */
   const dias = useMemo(() => {
     const inicio = startOfWeek(startOfMonth(mesAtual), { weekStartsOn: 1 });
     const fim = endOfWeek(endOfMonth(mesAtual), { weekStartsOn: 1 });
     return eachDayOfInterval({ start: inicio, end: fim });
   }, [mesAtual]);
 
-  // Agrupa dados por dia (chave: YYYY-MM-DD).
-  const dadosPorDia = useMemo(() => {
-    const mapa = new Map<string, DiaData>();
-
+  /* --- Agrupar tarefas por dia --- */
+  const tarefasPorDia = useMemo(() => {
+    const mapa = new Map<string, TarefaCalendario[]>();
     for (const t of tarefas) {
       const key = format(parseISO(t.data), "yyyy-MM-dd");
-      if (!mapa.has(key)) mapa.set(key, { tarefas: [], ausencias: [] });
-      mapa.get(key)!.tarefas.push(t);
+      if (!mapa.has(key)) mapa.set(key, []);
+      mapa.get(key)!.push(t);
     }
-
-    for (const a of ausencias) {
-      const inicio = parseISO(a.data_inicio);
-      const fim = parseISO(a.data_fim);
-      const intervalo = eachDayOfInterval({ start: inicio, end: fim });
-      for (const d of intervalo) {
-        const key = format(d, "yyyy-MM-dd");
-        if (!mapa.has(key)) mapa.set(key, { tarefas: [], ausencias: [] });
-        mapa.get(key)!.ausencias.push(a);
-      }
-    }
-
     return mapa;
-  }, [tarefas, ausencias]);
+  }, [tarefas]);
 
-  // Carrega dados do mês atual.
-  const carregar = useCallback(async () => {
-    setLoading(true);
-    setErro(null);
+  /* --- Reatribuição rápida --- */
+  async function handleReatribuir() {
+    if (!tarefaSelecionada || !reatribuindoPara) return;
+    setReatribuindo(true);
     try {
-      const inicio = format(startOfMonth(mesAtual), "yyyy-MM-dd");
-      const fim = format(endOfMonth(mesAtual), "yyyy-MM-dd");
-
-      const [tarefasRes, ausenciasRes] = await Promise.all([
-        adminGet<{ tarefas: TarefaCalendario[] }>(
-          `/api/gestor/tarefas?inicio=${inicio}&fim=${fim}`
-        ),
-        adminGet<{ ausencias: AusenciaDTO[] }>(
-          `/api/gestor/ausencias?futuras=false`
-        ),
-      ]);
-
-      setTarefas(tarefasRes.tarefas ?? []);
-      // Filtra ausências que se sobrepõem ao mês atual.
-      const mesInicio = startOfMonth(mesAtual);
-      const mesFim = endOfMonth(mesAtual);
-      setAusencias(
-        (ausenciasRes.ausencias ?? []).filter((a) => {
-          const ai = parseISO(a.data_inicio);
-          const af = parseISO(a.data_fim);
-          return af >= mesInicio && ai <= mesFim;
-        })
+      await adminPatch(`/api/gestor/tarefas/${tarefaSelecionada._id}/atribuir`, {
+        utilizador_id: reatribuindoPara,
+      });
+      // Atualiza localmente a tarefa no estado.
+      const novoStaff = equipa.find((u) => u._id === reatribuindoPara);
+      setTarefas((prev) =>
+        prev.map((t) =>
+          t._id === tarefaSelecionada._id
+            ? {
+                ...t,
+                utilizador_id: novoStaff
+                  ? { _id: novoStaff._id, nome: novoStaff.nome }
+                  : null,
+                estado: "atribuida",
+              }
+            : t
+        )
       );
+      setTarefaSelecionada(null);
+      setReatribuindoPara("");
     } catch (e) {
-      setErro(e instanceof Error ? e.message : "Erro ao carregar calendário.");
+      setErro(e instanceof Error ? e.message : "Erro ao reatribuir tarefa.");
     } finally {
-      setLoading(false);
+      setReatribuindo(false);
     }
-  }, [mesAtual]);
+  }
 
-  useEffect(() => {
-    carregar();
-  }, [carregar]);
-
-  // Dados do dia selecionado (para o modal).
-  const diaSelecionadoData = diaSelecionado
-    ? dadosPorDia.get(format(diaSelecionado, "yyyy-MM-dd"))
-    : null;
+  const mesAnoLabel = format(mesAtual, "MMMM yyyy", { locale: pt });
 
   return (
-    <div className="flex flex-col gap-4 p-4 sm:p-6 lg:p-8">
-      {/* Cabeçalho com navegação de mês */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="hidden flex-col gap-1 lg:flex">
-          <h1 className="text-2xl font-bold tracking-tight">
-            Calendário de Operações
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Tarefas de limpeza e folgas da equipa.
-          </p>
+    <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
+      {/* Cabeçalho */}
+      <div className="hidden flex-col gap-1 lg:flex">
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold tracking-tight">Calendário Operacional</h1>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={carregarTarefas}
+            disabled={loading}
+            aria-label="Atualizar"
+          >
+            <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
+          </Button>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Vista mensal de todas as tarefas de limpeza. Filtra por propriedade, staff ou estado.
+        </p>
+      </div>
+
+      {/* Zona de Filtros */}
+      <div className="flex flex-col gap-4 rounded-lg border bg-card p-4 lg:flex-row lg:items-end lg:justify-between">
+        {/* Filtros */}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 lg:flex lg:gap-3">
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-medium text-muted-foreground">Propriedade</label>
+            <select
+              value={filtros.propriedadeId}
+              onChange={(e) => setFiltros((f) => ({ ...f, propriedadeId: e.target.value }))}
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring lg:w-44"
+            >
+              <option value="">Todas</option>
+              {propriedades.map((p) => (
+                <option key={p._id} value={p._id}>
+                  {p.nome}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-medium text-muted-foreground">Staff</label>
+            <select
+              value={filtros.utilizadorId}
+              onChange={(e) => setFiltros((f) => ({ ...f, utilizadorId: e.target.value }))}
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring lg:w-44"
+            >
+              <option value="">Todos</option>
+              <option value="null">Por atribuir</option>
+              {equipa.map((u) => (
+                <option key={u._id} value={u._id}>
+                  {u.nome}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-medium text-muted-foreground">Estado</label>
+            <select
+              value={filtros.estado}
+              onChange={(e) => setFiltros((f) => ({ ...f, estado: e.target.value }))}
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring lg:w-44"
+            >
+              {ESTADO_OPTS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {(filtros.propriedadeId || filtros.utilizadorId || filtros.estado) && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-9 self-end"
+              onClick={() =>
+                setFiltros({ propriedadeId: "", utilizadorId: "", estado: "" })
+              }
+            >
+              <X className="h-3.5 w-3.5" />
+              Limpar
+            </Button>
+          )}
         </div>
 
+        {/* Navegação de meses */}
         <div className="flex items-center gap-2">
           <Button
             variant="outline"
             size="icon"
-            onClick={() => setMesAtual(addMonths(mesAtual, -1))}
+            onClick={() => setMesAtual((m) => addMonths(m, -1))}
             aria-label="Mês anterior"
           >
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <span className="min-w-[140px] text-center text-sm font-semibold capitalize">
-            {format(mesAtual, "MMMM yyyy", { locale: ptBR })}
-          </span>
+          <Button variant="outline" size="sm" onClick={() => setMesAtual(new Date())}>
+            Hoje
+          </Button>
           <Button
             variant="outline"
             size="icon"
-            onClick={() => setMesAtual(addMonths(mesAtual, 1))}
-            aria-label="Próximo mês"
+            onClick={() => setMesAtual((m) => addMonths(m, 1))}
+            aria-label="Mês seguinte"
           >
             <ChevronRight className="h-4 w-4" />
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setMesAtual(new Date())}
-          >
-            Hoje
-          </Button>
+          <Badge variant="default" className="ml-2 px-3 py-1.5 text-sm capitalize">
+            <CalendarRange className="mr-1.5 h-3.5 w-3.5" />
+            {mesAnoLabel}
+          </Badge>
         </div>
       </div>
 
       {/* Erro */}
       {erro && (
-        <Card className="border-destructive/50">
-          <CardContent className="flex items-center gap-3 p-4 text-sm text-destructive">
-            <AlertCircle className="h-5 w-5 shrink-0" />
-            <span>{erro}</span>
-            <Button variant="outline" size="sm" onClick={carregar} className="ml-auto">
-              Tentar novamente
-            </Button>
-          </CardContent>
-        </Card>
+        <div className="flex items-center gap-3 rounded-lg border border-destructive/50 bg-destructive/5 p-4 text-sm text-destructive">
+          <AlertCircle className="h-5 w-5 shrink-0" />
+          <span>{erro}</span>
+          <Button variant="outline" size="sm" onClick={carregarTarefas} className="ml-auto">
+            Tentar novamente
+          </Button>
+        </div>
       )}
 
-      {/* Calendário (CSS Grid) */}
-      <Card>
-        <CardContent className="p-3 sm:p-4">
-          {loading ? (
-            <div className="flex items-center justify-center gap-2 py-20 text-sm text-muted-foreground">
-              <Loader2 className="h-5 w-5 animate-spin" />
-              A carregar calendário…
-            </div>
-          ) : (
-            <>
-              {/* Header dias da semana */}
-              <div className="grid grid-cols-7 gap-1 mb-1">
-                {DIAS_SEMANA.map((d) => (
-                  <div
-                    key={d}
-                    className="text-center text-xs font-semibold uppercase text-muted-foreground py-2"
-                  >
-                    {d}
-                  </div>
-                ))}
+      {/* Loading inicial */}
+      {loading && tarefas.length === 0 ? (
+        <div className="flex items-center justify-center gap-2 py-20 text-sm text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin" />
+          A carregar calendário…
+        </div>
+      ) : (
+        <>
+          {/* Cabeçalho dos dias da semana */}
+          <div className="grid grid-cols-7 gap-2">
+            {DIAS_SEMANA.map((d) => (
+              <div
+                key={d}
+                className="py-2 text-center text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+              >
+                {d}
               </div>
+            ))}
+          </div>
 
-              {/* Grelha de dias */}
-              <div className="grid grid-cols-7 gap-1">
-                {dias.map((dia) => {
-                  const key = format(dia, "yyyy-MM-dd");
-                  const dados = dadosPorDia.get(key);
-                  const noMes = isSameMonth(dia, mesAtual);
-                  const ehHoje = isSameDay(dia, new Date());
-                  const temTarefas = (dados?.tarefas.length ?? 0) > 0;
-                  const temAusencias = (dados?.ausencias.length ?? 0) > 0;
+          {/* Grelha do calendário */}
+          <div className="grid grid-cols-7 gap-2">
+            {dias.map((dia) => {
+              const key = format(dia, "yyyy-MM-dd");
+              const tarefasDoDia = tarefasPorDia.get(key) ?? [];
+              const noMes = isSameMonth(dia, mesAtual);
+              const hoje = isToday(dia);
 
-                  return (
-                    <button
-                      key={key}
-                      onClick={() => setDiaSelecionado(dia)}
-                      className={`
-                        relative min-h-[80px] sm:min-h-[110px] rounded-md border p-1.5 text-left
-                        transition-colors hover:bg-accent/50
-                        ${noMes ? "bg-background" : "bg-muted/30 opacity-50"}
-                        ${ehHoje ? "border-primary ring-1 ring-primary/30" : "border-border/60"}
-                        ${(temTarefas || temAusencias) ? "cursor-pointer" : ""}
-                      `}
-                    >
-                      {/* Número do dia */}
-                      <span
-                        className={`text-xs font-medium ${
-                          ehHoje
-                            ? "inline-flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground"
-                            : "text-muted-foreground"
-                        }`}
-                      >
-                        {format(dia, "d")}
-                      </span>
-
-                      {/* Badges de tarefas (máx 3 visíveis) */}
-                      <div className="mt-1 space-y-0.5">
-                        {dados?.tarefas.slice(0, 3).map((t) => (
+              return (
+                <div
+                  key={key}
+                  className={cn(
+                    "min-h-[110px] rounded-lg border p-1.5 transition-colors",
+                    noMes ? "bg-card" : "bg-muted/30",
+                    hoje && "border-primary ring-1 ring-primary/30"
+                  )}
+                >
+                  <div
+                    className={cn(
+                      "mb-1 text-right text-xs font-medium",
+                      noMes ? "text-muted-foreground" : "text-muted-foreground/50",
+                      hoje && "text-primary"
+                    )}
+                  >
+                    {format(dia, "d")}
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    {tarefasDoDia.slice(0, 4).map((t) => {
+                      // Folga fixa semanal — bloco cinzento suave.
+                      if (t.tipo === "folga_fixa") {
+                        return (
                           <div
                             key={t._id}
-                            className={`truncate rounded border px-1 py-0.5 text-[10px] font-medium ${corBadgeTarefa(t.estado)}`}
+                            className="rounded-md border border-slate-200 bg-slate-100 px-1.5 py-1 text-left text-[11px] leading-tight text-slate-500 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-400"
+                            title={`Folga semanal — ${t.utilizador_id?.nome ?? "Staff"}`}
                           >
-                            <span className="inline-flex items-center gap-0.5">
-                              <SprayCan className="h-2.5 w-2.5" />
-                              {siglaCasa(t.propriedade_id?.nome ?? "?")}
-                            </span>
+                            <div className="truncate font-medium">
+                              Folga — {primeiroNome(t.utilizador_id?.nome)}
+                            </div>
                           </div>
-                        ))}
-                        {dados && dados.tarefas.length > 3 && (
-                          <div className="text-[10px] text-muted-foreground">
-                            +{dados.tarefas.length - 3} mais
+                        );
+                      }
+                      return (
+                      <button
+                        key={t._id}
+                        onClick={() => {
+                          setTarefaSelecionada(t);
+                          setReatribuindoPara(
+                            t.utilizador_id?._id ?? ""
+                          );
+                        }}
+                        className={cn(
+                          "rounded-md border px-1.5 py-1 text-left text-[11px] leading-tight transition-all",
+                          "hover:shadow-md hover:-translate-y-0.5 hover:z-10",
+                          estiloPorEstado(t.estado)
+                        )}
+                        title={`${t.propriedade_id?.nome ?? "—"}${
+                          t.utilizador_id ? " · " + t.utilizador_id.nome : ""
+                        }`}
+                      >
+                        <div className="truncate font-medium">
+                          {nomeCurto(t.propriedade_id?.nome)}
+                        </div>
+                        {t.utilizador_id && (
+                          <div className="truncate opacity-80">
+                            {primeiroNome(t.utilizador_id.nome)}
                           </div>
                         )}
-
-                        {/* Badges de ausências (máx 2) */}
-                        {dados?.ausencias.slice(0, 2).map((a) => (
-                          <div
-                            key={a._id}
-                            className={`truncate rounded border px-1 py-0.5 text-[10px] font-medium ${
-                              a.tipo === "ferias"
-                                ? "bg-orange-100 text-orange-800 border-orange-300"
-                                : "bg-yellow-100 text-yellow-800 border-yellow-300"
-                            }`}
-                          >
-                            <span className="inline-flex items-center gap-0.5">
-                              {a.tipo === "ferias" ? (
-                                <Plane className="h-2.5 w-2.5" />
-                              ) : (
-                                <Sun className="h-2.5 w-2.5" />
-                              )}
-                              {a.utilizador?.nome?.split(" ")[0] ?? "?"}
-                            </span>
-                          </div>
-                        ))}
-                        {dados && dados.ausencias.length > 2 && (
-                          <div className="text-[10px] text-muted-foreground">
-                            +{dados.ausencias.length - 2} folgas
-                          </div>
-                        )}
+                      </button>
+                      );
+                    })}
+                    {tarefasDoDia.length > 4 && (
+                      <div className="px-1 text-[10px] text-muted-foreground">
+                        +{tarefasDoDia.length - 4} mais
                       </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
 
-      {/* Legenda */}
-      <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
-        <span className="inline-flex items-center gap-1.5">
-          <span className="h-3 w-3 rounded border bg-blue-100 border-blue-300" />
-          Limpeza atribuída
-        </span>
-        <span className="inline-flex items-center gap-1.5">
-          <span className="h-3 w-3 rounded border bg-amber-100 border-amber-300" />
-          Por atribuir
-        </span>
-        <span className="inline-flex items-center gap-1.5">
-          <span className="h-3 w-3 rounded border bg-emerald-100 border-emerald-300" />
-          Concluída
-        </span>
-        <span className="inline-flex items-center gap-1.5">
-          <span className="h-3 w-3 rounded border bg-yellow-100 border-yellow-300" />
-          Folga
-        </span>
-        <span className="inline-flex items-center gap-1.5">
-          <span className="h-3 w-3 rounded border bg-orange-100 border-orange-300" />
-          Férias
-        </span>
-      </div>
+          {/* Legenda */}
+          <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+            <span className="font-medium">Legenda:</span>
+            <span className="flex items-center gap-1.5">
+              <span className="h-3 w-3 rounded border bg-destructive/10 border-destructive/20" />
+              Por atribuir
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="h-3 w-3 rounded border bg-amber-500/10 border-amber-500/20" />
+              Atribuída
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="h-3 w-3 rounded border bg-emerald-500/10 border-emerald-500/20" />
+              Concluída
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="h-3 w-3 rounded border bg-muted/40 border-muted" />
+              Cancelada
+            </span>
+          </div>
+        </>
+      )}
 
-      {/* Modal de detalhe do dia */}
+      {/* Modal de detalhe + reatribuição */}
       <Dialog
-        open={diaSelecionado !== null}
-        onOpenChange={(o) => !o && setDiaSelecionado(null)}
+        open={tarefaSelecionada !== null}
+        onOpenChange={(o) => !o && setTarefaSelecionada(null)}
       >
         <DialogHeader>
-          <div>
-            <DialogTitle>
-              {diaSelecionado
-                ? format(diaSelecionado, "EEEE, d 'de' MMMM", { locale: ptBR })
-                : ""}
-            </DialogTitle>
-            <DialogDescription>
-              Detalhe das operações do dia.
-            </DialogDescription>
-          </div>
-          <DialogClose onClick={() => setDiaSelecionado(null)} />
+          <DialogTitle>Detalhe da Tarefa</DialogTitle>
+          <DialogDescription>
+            Informação da tarefa e reatribuição rápida.
+          </DialogDescription>
+          <DialogClose onClick={() => setTarefaSelecionada(null)} />
         </DialogHeader>
-        <DialogContent className="space-y-4">
-          {!diaSelecionadoData ||
-          (diaSelecionadoData.tarefas.length === 0 &&
-            diaSelecionadoData.ausencias.length === 0) ? (
-            <p className="text-sm text-muted-foreground">
-              Sem operações agendadas para este dia.
-            </p>
-          ) : (
-            <>
-              {/* Tarefas do dia */}
-              {diaSelecionadoData.tarefas.length > 0 && (
-                <div className="space-y-2">
-                  <h4 className="text-sm font-semibold flex items-center gap-1.5">
-                    <SprayCan className="h-4 w-4 text-blue-600" />
-                    Limpezas ({diaSelecionadoData.tarefas.length})
-                  </h4>
-                  <ul className="space-y-1.5">
-                    {diaSelecionadoData.tarefas.map((t) => (
-                      <li
-                        key={t._id}
-                        className="flex items-center justify-between rounded-md border border-border/60 px-3 py-2 text-sm"
-                      >
-                        <div className="min-w-0">
-                          <span className="font-medium">
-                            {t.propriedade_id?.nome ?? "Propriedade desconhecida"}
-                          </span>
-                          <span className="ml-2 text-muted-foreground">
-                            {t.utilizador_id?.nome ?? "Por atribuir"}
-                          </span>
-                        </div>
-                        <Badge
-                          variant={
-                            t.estado === "concluida"
-                              ? "success"
-                              : t.estado === "por_atribuir"
-                              ? "warning"
-                              : "secondary"
-                          }
-                        >
-                          {t.estado === "concluida"
-                            ? "Concluída"
-                            : t.estado === "por_atribuir"
-                            ? "Por atribuir"
-                            : "Atribuída"}
-                        </Badge>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+        {tarefaSelecionada && (
+          <DialogContent className="space-y-4">
+            {/* Estado + propriedade */}
+            <div className="flex items-center gap-2">
+              <Badge
+                variant={
+                  tarefaSelecionada.estado === "concluida"
+                    ? "default"
+                    : tarefaSelecionada.estado === "cancelada"
+                    ? "secondary"
+                    : tarefaSelecionada.estado === "por_atribuir"
+                    ? "destructive"
+                    : "outline"
+                }
+              >
+                {ESTADO_OPTS.find((o) => o.value === tarefaSelecionada.estado)?.label ??
+                  tarefaSelecionada.estado}
+              </Badge>
+              <span className="font-medium">
+                {tarefaSelecionada.propriedade_id?.nome ?? "—"}
+              </span>
+            </div>
 
-              {/* Ausências do dia */}
-              {diaSelecionadoData.ausencias.length > 0 && (
-                <div className="space-y-2">
-                  <h4 className="text-sm font-semibold flex items-center gap-1.5">
-                    <Sun className="h-4 w-4 text-yellow-600" />
-                    Folgas/Férias ({diaSelecionadoData.ausencias.length})
-                  </h4>
-                  <ul className="space-y-1.5">
-                    {diaSelecionadoData.ausencias.map((a) => (
-                      <li
-                        key={a._id}
-                        className="flex items-center justify-between rounded-md border border-border/60 px-3 py-2 text-sm"
-                      >
-                        <span className="font-medium">
-                          {a.utilizador?.nome ?? "?"}
-                        </span>
-                        <Badge
-                          variant={a.tipo === "ferias" ? "default" : "secondary"}
-                        >
-                          {a.tipo === "ferias" ? "Férias" : "Folga"}
-                        </Badge>
-                      </li>
-                    ))}
-                  </ul>
+            {/* Data + tempo */}
+            <div className="space-y-2 rounded-md bg-muted/40 p-3 text-sm">
+              <div className="flex items-center gap-2">
+                <CalendarRange className="h-4 w-4 text-muted-foreground" />
+                <span>
+                  {format(parseISO(tarefaSelecionada.data), "EEEE, d 'de' MMMM yyyy", {
+                    locale: pt,
+                  })}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Clock className="h-4 w-4 text-muted-foreground" />
+                <span>Tempo estimado: {tarefaSelecionada.tempo_limpeza_minutos} min</span>
+              </div>
+              {tarefaSelecionada.propriedade_id?.morada && (
+                <div className="flex items-start gap-2">
+                  <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                  <span className="text-muted-foreground">
+                    {tarefaSelecionada.propriedade_id.morada}
+                  </span>
                 </div>
               )}
-            </>
-          )}
-        </DialogContent>
+              <div className="flex items-center gap-2">
+                <User className="h-4 w-4 text-muted-foreground" />
+                <span>
+                  Staff atual:{" "}
+                  {tarefaSelecionada.utilizador_id?.nome ?? (
+                    <span className="text-destructive">Por atribuir</span>
+                  )}
+                </span>
+              </div>
+            </div>
+
+            {/* Reatribuição rápida */}
+            <div className="space-y-1.5">
+              <label htmlFor="reatribuir" className="text-sm font-medium">
+                Reatribuir a (rápido)
+              </label>
+              <select
+                id="reatribuir"
+                value={reatribuindoPara}
+                onChange={(e) => setReatribuindoPara(e.target.value)}
+                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="">— Selecionar staff —</option>
+                {equipa.map((u) => (
+                  <option key={u._id} value={u._id}>
+                    {u.nome}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {tarefaSelecionada.observacoes && (
+              <div className="rounded-md bg-muted/30 p-3 text-sm">
+                <p className="mb-1 text-xs font-medium text-muted-foreground">
+                  Observações:
+                </p>
+                <p>{tarefaSelecionada.observacoes}</p>
+              </div>
+            )}
+          </DialogContent>
+        )}
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setTarefaSelecionada(null)}
+            disabled={reatribuindo}
+          >
+            Fechar
+          </Button>
+          <Button
+            type="button"
+            onClick={handleReatribuir}
+            disabled={!reatribuindoPara || reatribuindo}
+          >
+            {reatribuindo ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                A reatribuir…
+              </>
+            ) : (
+              "Reatribuir"
+            )}
+          </Button>
+        </DialogFooter>
       </Dialog>
     </div>
   );

@@ -439,6 +439,60 @@ exports.getDadosCalendario = async (req, res) => {
       .sort({ data: 1 })
       .lean();
 
+    // v1.42.0 — Injeta folgas fixas semanais (dias_folga) como objetos virtuais
+    // no array de tarefas, para o calendário as mostrar dinamicamente.
+    // Só injeta se houver um intervalo de datas definido.
+    if (filtro.data && (filtro.data.$gte || filtro.data.$lt)) {
+      const dataInicio = filtro.data.$gte || new Date(Date.now() - 365 * 86400000);
+      const dataFim = filtro.data.$lt || new Date(Date.now() + 365 * 86400000);
+
+      // Busca todos os staff/gestor da empresa com dias_folga configurados.
+      const staffComFolgas = await Utilizador.find({
+        empresa_id: empresaId,
+        role: { $in: ['staff', 'gestor'] },
+        eliminado_em: null,
+        dias_folga: { $exists: true, $ne: [] },
+      })
+        .select('nome dias_folga')
+        .lean();
+
+      // Se o filtro utilizadorId for específico, filtra só esse staff.
+      const staffFiltrados = (filtro.utilizador_id && filtro.utilizador_id !== null)
+        ? staffComFolgas.filter((s) => String(s._id) === String(filtro.utilizador_id))
+        : staffComFolgas;
+
+      // Gera objetos virtuais de folga para cada dia do intervalo.
+      const diasFolga = [];
+      const diaAtual = new Date(dataInicio);
+
+      while (diaAtual < dataFim) {
+        const diaSemana = diaAtual.getDay(); // 0=Dom, 1=Seg, ..., 6=Sáb
+
+        for (const staff of staffFiltrados) {
+          if (Array.isArray(staff.dias_folga) && staff.dias_folga.includes(diaSemana)) {
+            diasFolga.push({
+              _id: `folga_${staff._id}_${diaAtual.toISOString().slice(0, 10)}`,
+              tipo: 'folga_fixa',
+              data: new Date(diaAtual),
+              utilizador_id: { _id: String(staff._id), nome: staff.nome },
+              estado: 'concluida', // folga fixa não é uma tarefa ativa
+              tempo_limpeza_minutos: 0,
+              propriedade_id: null,
+            });
+          }
+        }
+
+        diaAtual.setDate(diaAtual.getDate() + 1);
+      }
+
+      // Junta as folgas fixas com as tarefas e ordena por data.
+      const resultado = [...tarefas, ...diasFolga].sort(
+        (a, b) => new Date(a.data).getTime() - new Date(b.data).getTime()
+      );
+
+      return res.status(200).json({ tarefas: resultado });
+    }
+
     return res.status(200).json({ tarefas });
   } catch (err) {
     console.error('❌ getDadosCalendario:', err.message);
