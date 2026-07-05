@@ -41,9 +41,13 @@ import {
 } from "@/components/ui/dialog";
 import { adminGet, adminPatch, type PropriedadeDTO, type UtilizadorDTO } from "@/lib/api";
 
-/* ------------------------------------------------------------------ */
-/* Tipos                                                               */
-/* ------------------------------------------------------------------ */
+/**
+ * Calendário Operacional — Painel do Gestor (/manager/calendario-operacional).
+ *
+ * Consome a mesma API do admin:
+ *   - GET /api/admin/calendario/dados?inicio=&fim=&propriedadeId=&utilizadorId=&estado=
+ *   - PATCH /api/admin/tarefas/:id/atribuir (reatribuição rápida)
+ */
 
 interface TarefaCalendario {
   _id: string;
@@ -73,10 +77,6 @@ const ESTADO_OPTS = [
 
 const DIAS_SEMANA = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
 
-/* ------------------------------------------------------------------ */
-/* Helpers de estilo por estado                                        */
-/* ------------------------------------------------------------------ */
-
 function estiloPorEstado(estado: string): string {
   switch (estado) {
     case "por_atribuir":
@@ -103,11 +103,7 @@ function primeiroNome(nome: string | undefined): string {
   return nome.split(" ")[0];
 }
 
-/* ------------------------------------------------------------------ */
-/* Página                                                              */
-/* ------------------------------------------------------------------ */
-
-export default function CalendarioOperacionalPage() {
+export default function ManagerCalendarioOperacionalPage() {
   const [mesAtual, setMesAtual] = useState(new Date());
   const [filtros, setFiltros] = useState<FiltrosState>({
     propriedadeId: "",
@@ -140,7 +136,6 @@ export default function CalendarioOperacionalPage() {
         )
       );
     } catch (e) {
-      // Não bloqueia o calendário se os filtros falharem.
       console.error("Erro ao carregar filtros:", e);
     }
   }, []);
@@ -172,7 +167,6 @@ export default function CalendarioOperacionalPage() {
     }
   }, [mesAtual, filtros]);
 
-  // Recarrega quando o mês ou os filtros mudam.
   useEffect(() => {
     carregarTarefas();
   }, [carregarTarefas]);
@@ -203,7 +197,6 @@ export default function CalendarioOperacionalPage() {
       await adminPatch(`/api/admin/tarefas/${tarefaSelecionada._id}/atribuir`, {
         utilizador_id: reatribuindoPara,
       });
-      // Atualiza localmente a tarefa no estado.
       const novoStaff = equipa.find((u) => u._id === reatribuindoPara);
       setTarefas((prev) =>
         prev.map((t) =>
@@ -252,7 +245,6 @@ export default function CalendarioOperacionalPage() {
 
       {/* Zona de Filtros */}
       <div className="flex flex-col gap-4 rounded-lg border bg-card p-4 lg:flex-row lg:items-end lg:justify-between">
-        {/* Filtros */}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 lg:flex lg:gap-3">
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-medium text-muted-foreground">Propriedade</label>

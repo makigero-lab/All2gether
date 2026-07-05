@@ -7,7 +7,7 @@ import { Loader2 } from "lucide-react";
 import { lerUtilizador, type Role } from "@/lib/auth";
 
 interface RouteGuardProps {
-  /** Role exigida para esta área ("admin" | "manager" | "staff"). */
+  /** Role exigida para esta área ("admin" | "gestor" | "staff"). */
   role: Role;
   children: React.ReactNode;
 }

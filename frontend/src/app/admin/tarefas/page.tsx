@@ -138,7 +138,7 @@ export default function AdminTarefasPage() {
       setPropriedades(propRes.propriedades ?? []);
       setStaff(
         (equipaRes.utilizadores ?? []).filter(
-          (u) => u.role === "staff" || u.role === "manager"
+          (u) => u.role === "staff" || u.role === "gestor"
         )
       );
     } catch (e) {

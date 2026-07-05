@@ -24,7 +24,7 @@ import type { NextRequest } from "next/server";
 
 const TOKEN_COOKIE = "autocell_token";
 
-type Role = "admin" | "manager" | "staff";
+type Role = "admin" | "gestor" | "staff";
 
 interface JwtPayload {
   id?: string;
@@ -55,7 +55,7 @@ function descodificarToken(token: string): JwtPayload | null {
 
 function rotaPorRole(role: Role): string {
   if (role === "admin") return "/admin";
-  if (role === "manager") return "/manager";
+  if (role === "gestor") return "/manager";
   return "/staff";
 }
 
@@ -87,7 +87,7 @@ export function middleware(req: NextRequest) {
     const rotaEsperada = rotaPorRole(role);
     const rotaErrada =
       (isAdmin && role !== "admin") ||
-      (isManager && role !== "manager") ||
+      (isManager && role !== "gestor") ||
       (isStaff && role !== "staff");
     if (rotaErrada) {
       const url = req.nextUrl.clone();

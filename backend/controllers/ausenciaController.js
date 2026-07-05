@@ -110,7 +110,7 @@ exports.listarAusencias = async (req, res) => {
  * Body: { utilizador_id, data_inicio, data_fim, tipo, notas? }
  *
  * Validações:
- *   - utilizador_id tem de pertencer à empresa e ter role staff/manager (não admin).
+ *   - utilizador_id tem de pertencer à empresa e ter role staff/gestor (não admin).
  *   - data_inicio e data_fim obrigatórias e data_fim >= data_inicio.
  *   - tipo em ['ferias','folga'].
  *   - Não pode haver sobreposição com outra ausência do mesmo utilizador.
@@ -139,12 +139,12 @@ exports.registarAusencia = async (req, res) => {
     const utilizador = await Utilizador.findOne({
       _id: utilizador_id,
       empresa_id: empresaId,
-      role: { $in: ['staff', 'manager'] },
+      role: { $in: ['staff', 'gestor'] },
     });
     if (!utilizador) {
       return res.status(400).json({
         erro:
-          'Utilizador não encontrado (ou não é staff/manager da empresa).',
+          'Utilizador não encontrado (ou não é staff/gestor da empresa).',
       });
     }
 

@@ -1351,7 +1351,7 @@ describe('Fluxo de aprovação de ausências', () => {
   });
 
   it('staff não pode aceder a endpoints de gestão (/api/admin/ausencias) → 403', async () => {
-    // O staff tem token válido, mas role 'staff' não tem permissão de manager/admin.
+    // O staff tem token válido, mas role 'staff' não tem permissão de gestor/admin.
     const res = await request(app)
       .get('/api/admin/ausencias')
       .set('Authorization', `Bearer ${staffToken}`);

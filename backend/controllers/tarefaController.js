@@ -168,13 +168,13 @@ exports.criarTarefa = async (req, res) => {
       const user = await Utilizador.findOne({
         _id: utilizador_id,
         empresa_id: empresaId,
-        role: { $in: ['staff', 'manager'] },
+        role: { $in: ['staff', 'gestor'] },
         ativo: true,
         eliminado_em: null,
       });
       if (!user) {
         return res.status(400).json({
-          erro: 'Utilizador não encontrado (ou não é staff/manager ativo da empresa).',
+          erro: 'Utilizador não encontrado (ou não é staff/gestor ativo da empresa).',
         });
       }
       utilizadorValidado = user._id;
@@ -245,13 +245,13 @@ exports.atribuirTarefa = async (req, res) => {
       const user = await Utilizador.findOne({
         _id: utilizador_id,
         empresa_id: empresaId,
-        role: { $in: ['staff', 'manager'] },
+        role: { $in: ['staff', 'gestor'] },
         ativo: true,
         eliminado_em: null,
       });
       if (!user) {
         return res.status(400).json({
-          erro: 'Utilizador não encontrado (ou não é staff/manager ativo).',
+          erro: 'Utilizador não encontrado (ou não é staff/gestor ativo).',
         });
       }
       tarefa.utilizador_id = user._id;

@@ -59,13 +59,13 @@ import { PaginationBar } from "@/components/admin/pagination-bar";
 
 const ROLE_LABEL: Record<Role, string> = {
   admin: "Admin",
-  manager: "Responsável",
+  gestor: "Gestor",
   staff: "Staff",
 };
 
 const ROLE_VARIANT: Record<Role, "default" | "secondary" | "outline"> = {
   admin: "default",
-  manager: "secondary",
+  gestor: "secondary",
   staff: "outline",
 };
 
@@ -191,7 +191,7 @@ export default function EquipaPage() {
   // Utilizadores que podem ser responsáveis (admin + manager).
   // Usado para popular o select de Responsável nos formulários.
   const responsaveisPossiveis = utilizadores.filter(
-    (u) => u.role === "admin" || u.role === "manager"
+    (u) => u.role === "admin" || u.role === "gestor"
   );
 
   // IDs dos utilizadores com ausência aprovada para hoje (para mostrar badge).
@@ -494,7 +494,7 @@ export default function EquipaPage() {
                     className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                   >
                     <option value="staff">Staff</option>
-                    <option value="manager">Responsável</option>
+                    <option value="gestor">Responsável</option>
                   </select>
                 </div>
                 <div className="space-y-1.5">
@@ -820,7 +820,7 @@ export default function EquipaPage() {
                 className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
               >
                 <option value="staff">Staff</option>
-                <option value="manager">Responsável</option>
+                <option value="gestor">Responsável</option>
               </select>
             </div>
             <div className="space-y-1.5">

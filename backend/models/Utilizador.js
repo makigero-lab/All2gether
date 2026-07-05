@@ -53,12 +53,12 @@ const utilizadorSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ['admin', 'manager', 'staff'],
+      enum: ['admin', 'gestor', 'staff'],
       default: 'staff',
       required: true,
     },
     // Superior hierárquico (responsável) do utilizador.
-    // Referência a outro Utilizador (normalmente role 'admin' ou 'manager').
+    // Referência a outro Utilizador (normalmente role 'admin' ou 'gestor').
     // O admin não tem responsavel_id (topo da hierarquia).
     responsavel_id: {
       type: mongoose.Schema.Types.ObjectId,

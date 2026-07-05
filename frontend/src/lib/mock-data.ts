@@ -48,7 +48,7 @@ export interface MembroEquipaMock {
   id: string;
   nome: string;
   email: string;
-  role: "admin" | "manager" | "staff";
+  role: "admin" | "gestor" | "staff";
   ativo: boolean;
   /** Tarefas atribuídas hoje (para o dashboard). */
   tarefas_hoje: number;
@@ -176,7 +176,7 @@ export const equipa: MembroEquipaMock[] = [
     id: "u-005",
     nome: "Responsável Limpezas",
     email: "manager@autocell.pt",
-    role: "manager",
+    role: "gestor",
     ativo: true,
     tarefas_hoje: 1,
     carga_minutos: 60,
@@ -232,7 +232,7 @@ export const propriedades: PropriedadeMock[] = [
 export const resumoDashboard = {
   totalPropriedades: propriedades.length,
   membrosEquipaAtivos: equipa.filter(
-    (m) => m.ativo && (m.role === "staff" || m.role === "manager")
+    (m) => m.ativo && (m.role === "staff" || m.role === "gestor")
   ).length,
   tarefasHoje: tarefasHoje.length,
   tarefasPorAtribuir: tarefasHoje.filter((t) => t.estado === "por_atribuir")

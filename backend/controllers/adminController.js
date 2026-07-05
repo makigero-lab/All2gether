@@ -90,7 +90,7 @@ exports.getDashboard = async (req, res) => {
       Propriedade.countDocuments({ empresa_id: empresaId, ativo: true }),
       Utilizador.countDocuments({
         empresa_id: empresaId,
-        role: { $in: ['staff', 'manager'] },
+        role: { $in: ['staff', 'gestor'] },
         ativo: true,
         eliminado_em: null,
       }),
@@ -690,7 +690,7 @@ exports.getEquipa = async (req, res) => {
  *   - nome      (obrigatório)
  *   - email     (obrigatório, único global)
  *   - password  (obrigatória, em claro — é guardada como hash bcrypt)
- *   - role      (opcional, default 'staff'; enum ['admin','manager','staff'])
+ *   - role      (opcional, default 'staff'; enum ['admin','gestor','staff'])
  *
  * Resposta 201: { utilizador: { ... } } (sem password_hash).
  * Erros: 400 campos em falta / role inválido; 409 email duplicado; 500 erro.
@@ -718,9 +718,9 @@ exports.criarMembroEquipa = async (req, res) => {
 
     // Validação do role (se vier, tem de ser um dos permitidos).
     const roleFinal = role || 'staff';
-    if (!['admin', 'manager', 'staff'].includes(roleFinal)) {
+    if (!['admin', 'gestor', 'staff'].includes(roleFinal)) {
       return res.status(400).json({
-        erro: 'Role inválido. Valores permitidos: admin, manager, staff.',
+        erro: 'Role inválido. Valores permitidos: admin, gestor, staff.',
       });
     }
 
@@ -741,7 +741,7 @@ exports.criarMembroEquipa = async (req, res) => {
       });
     }
 
-    // SEGURANÇA: Valida responsavel_id se vier — tem de ser admin/manager
+    // SEGURANÇA: Valida responsavel_id se vier — tem de ser admin/gestor
     // da mesma empresa.
     let responsavelValidado = null;
     if (responsavel_id) {
@@ -751,11 +751,11 @@ exports.criarMembroEquipa = async (req, res) => {
       const resp = await Utilizador.findOne({
         _id: responsavel_id,
         empresa_id: empresaId,
-        role: { $in: ['admin', 'manager'] },
+        role: { $in: ['admin', 'gestor'] },
       });
       if (!resp) {
         return res.status(400).json({
-          erro: 'Responsável não encontrado (ou não é admin/manager da empresa).',
+          erro: 'Responsável não encontrado (ou não é admin/gestor da empresa).',
         });
       }
       responsavelValidado = resp._id;
@@ -909,9 +909,9 @@ exports.atualizarMembroEquipa = async (req, res) => {
 
     // --- Role ---
     if (role !== undefined) {
-      if (!['manager', 'staff'].includes(role)) {
+      if (!['gestor', 'staff'].includes(role)) {
         return res.status(400).json({
-          erro: 'Role inválido. Valores permitidos via edição: manager, staff.',
+          erro: 'Role inválido. Valores permitidos via edição: gestor, staff.',
         });
       }
       utilizador.role = role;
@@ -928,11 +928,11 @@ exports.atualizarMembroEquipa = async (req, res) => {
         const resp = await Utilizador.findOne({
           _id: responsavel_id,
           empresa_id: empresaId,
-          role: { $in: ['admin', 'manager'] },
+          role: { $in: ['admin', 'gestor'] },
         });
         if (!resp) {
           return res.status(400).json({
-            erro: 'Responsável não encontrado (ou não é admin/manager da empresa).',
+            erro: 'Responsável não encontrado (ou não é admin/gestor da empresa).',
           });
         }
         // Não permitir atribuir o utilizador como responsável de si próprio.
@@ -1579,7 +1579,7 @@ exports.setupClienteZero = async (req, res) => {
     // deve alterar a sua password após o primeiro login).
     const PASSWORD_TESTE = 'autocell123';
 
-    // Utilizadores a garantir (admin + manager + staff).
+    // Utilizadores a garantir (admin + gestor + staff).
     const UTILIZADORES_TESTE = [
       {
         nome: 'Gestor Autocell', // admin — para ti (dono da conta)
@@ -1587,9 +1587,9 @@ exports.setupClienteZero = async (req, res) => {
         role: 'admin',
       },
       {
-        nome: 'Responsável Limpezas', // manager — gere a equipa de staff
-        email: 'manager@autocell.pt',
-        role: 'manager',
+        nome: 'Responsável Limpezas', // gestor — gere a equipa de staff
+        email: 'gestor@autocell.pt',
+        role: 'gestor',
       },
       {
         nome: 'João Limpezas', // staff — executante de limpezas
@@ -1609,7 +1609,7 @@ exports.setupClienteZero = async (req, res) => {
       empresaCriada = true;
     }
 
-    // 2) Utilizadores (admin + manager + staff) — não duplicar (email único).
+    // 2) Utilizadores (admin + gestor + staff) — não duplicar (email único).
     //    Para cada um: cria se não existir, ou define password se existir sem.
     const utilizadores = [];
     for (const u of UTILIZADORES_TESTE) {
@@ -1683,7 +1683,7 @@ exports.setupClienteZero = async (req, res) => {
         plano_ativo: empresa.plano_ativo,
         criada: empresaCriada,
       },
-      // 3 utilizadores: admin (dono), manager (responsável limpezas), staff (executante).
+      // 3 utilizadores: admin (dono), gestor (responsável limpezas), staff (executante).
       utilizadores,
       propriedade: {
         id: propriedade._id,

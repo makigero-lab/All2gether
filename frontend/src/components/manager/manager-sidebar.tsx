@@ -5,8 +5,11 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import {
   LayoutDashboard,
+  Building2,
   ClipboardList,
   Users,
+  CalendarCheck,
+  CalendarRange,
   Menu,
   X,
   Sparkles,
@@ -26,12 +29,15 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { label: "Dashboard", href: "/manager", icon: LayoutDashboard },
+  { label: "Propriedades", href: "/manager/propriedades", icon: Building2 },
   { label: "Tarefas", href: "/manager/tarefas", icon: ClipboardList },
   { label: "Equipa", href: "/manager/equipa", icon: Users },
+  { label: "Pedidos de Férias", href: "/manager/aprovacoes", icon: CalendarCheck },
+  { label: "Calendário Operacional", href: "/manager/calendario-operacional", icon: CalendarRange },
 ];
 
 /**
- * Barra lateral de navegação do Responsável de Limpezas (manager).
+ * Barra lateral de navegação do Gestor de Limpezas (manager).
  *
  * - Desktop (lg+): sidebar fixa à esquerda, sempre visível.
  * - Mobile: colapsada por defeito; abre como overlay ao tocar no botão de menu.
@@ -76,7 +82,7 @@ export function ManagerSidebar() {
       </div>
       <div className="flex flex-col leading-none">
         <span className="text-sm font-bold">Autocell</span>
-        <span className="text-[11px] text-muted-foreground">Responsável</span>
+        <span className="text-[11px] text-muted-foreground">Gestor</span>
       </div>
     </div>
   );
@@ -93,7 +99,7 @@ export function ManagerSidebar() {
         >
           <Menu className="h-5 w-5" />
         </Button>
-        <span className="text-sm font-semibold">Autocell — Responsável</span>
+        <span className="text-sm font-semibold">Autocell — Gestor</span>
       </header>
 
       {/* Sidebar — desktop */}

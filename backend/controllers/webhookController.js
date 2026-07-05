@@ -200,11 +200,11 @@ function calcularTempoViagem(coordA, coordB) {
  */
 async function determinarUtilizadorAtribuido(empresaId, range, coordenadasNovaPropriedade, tempoNovaTarefa) {
   // Passo 3 — Procurar todos os Staff e Managers ativos da empresa.
-  // (O manager — responsável de limpezas — também pode executar limpezas,
+  // (O gestor — responsável de limpezas — também pode executar limpezas,
   //  pelo que entra no load balancing como qualquer staff.)
   const staff = await Utilizador.find({
     empresa_id: empresaId,
-    role: { $in: ['staff', 'manager'] },
+    role: { $in: ['staff', 'gestor'] },
     ativo: true,
   }).lean();
 

@@ -1,14 +1,18 @@
 /**
- * Middleware de Controlo de Acesso por Role — Autocell
+ * Middleware de Controlo de Acesso por Role (RBAC) — Autocell
  *
- * Hierarquia:
- *   admin   → dono da conta (gestão total)
- *   manager → gestor responsável (gere equipa, aprova faltas, vê dashboard)
- *   staff   → executante de limpezas (vê só as suas tarefas)
+ * Hierarquia (v1.29.0):
+ *   admin  → Super Admin (dono da conta, gestão total)
+ *   gestor → Gestor de Operações (gere equipa, aprova faltas, vê dashboard)
+ *   staff  → Executante de limpezas (vê só as suas tarefas)
+ *
+ * Middlewares:
+ *   isGestor — admin OU gestor (gestão operacional: propriedades, equipa, ausências)
+ *   isAdmin  — só admin (ações sensíveis: criar admins, setup, etc.)
  *
  * Uso:
- *   const { requireRole } = require('../middleware/requireRole');
- *   router.patch('/ausencias/:id/estado', auth, requireRole('admin', 'manager'), aprovar);
+ *   const { isGestor, isAdmin } = require('../middleware/requireRole');
+ *   router.patch('/ausencias/:id/estado', auth, isGestor, aprovar);
  *
  * Nota: o `auth` deve ser sempre chamado antes (injeta req.user com o role).
  */
@@ -17,7 +21,7 @@
  * Cria um middleware que só deixa passar se o role do utilizador (req.user.role)
  * estiver na lista de roles permitidas.
  *
- * @param  {...string} rolesPermitidas — ex: 'admin', 'manager'
+ * @param  {...string} rolesPermitidas — ex: 'admin', 'gestor'
  * @returns {Function} middleware Express
  */
 function requireRole(...rolesPermitidas) {
@@ -38,9 +42,30 @@ function requireRole(...rolesPermitidas) {
   };
 }
 
-// Atalhos pré-configurados para uso comum.
-const requireAdmin = requireRole('admin');
-const requireManager = requireRole('admin', 'manager'); // admin pode tudo; manager gere
-const requireStaff = requireRole('staff', 'manager'); // staff e manager (manager também executa limpezas)
+/**
+ * isGestor — permite admin e gestor.
+ * O admin tem todas as permissões do gestor (para testes e supervisão).
+ * Usado para: dashboard, propriedades, equipa, ausências, tarefas, webhooks, etc.
+ */
+const isGestor = requireRole('admin', 'gestor');
 
-module.exports = { requireRole, requireAdmin, requireManager, requireStaff };
+/**
+ * isAdmin — ESTRITO. Só admin.
+ * Usado para: criar outros admins, setup, configurações sensíveis.
+ */
+const isAdmin = requireRole('admin');
+
+// Atalhos legacy (compatibilidade — requireManager = isGestor).
+const requireManager = isGestor;
+const requireAdmin = isAdmin;
+const requireStaff = requireRole('staff', 'gestor');
+
+module.exports = {
+  requireRole,
+  isGestor,
+  isAdmin,
+  // Legacy (não quebrar código existente)
+  requireManager,
+  requireAdmin,
+  requireStaff,
+};

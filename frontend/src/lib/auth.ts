@@ -17,7 +17,7 @@
  *   não precisa de fetch assíncrono.
  */
 
-export type Role = "admin" | "manager" | "staff";
+export type Role = "admin" | "gestor" | "staff";
 
 export interface UtilizadorAuth {
   id: string;
@@ -85,7 +85,7 @@ export async function fazerLogout(): Promise<void> {
  */
 export function rotaPorRole(role: Role): string {
   if (role === "admin") return "/admin";
-  if (role === "manager") return "/manager";
+  if (role === "gestor") return "/manager";
   return "/staff";
 }
 
