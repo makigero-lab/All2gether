@@ -16,7 +16,7 @@
  *
  * NOTA: o middleware NÃO verifica a assinatura do JWT (seria arriscado no
  * Edge). Valida apenas formato + expiração. A verificação real é feita pelo
- * backend (ou pelo proxy /api/admin/[...path]) em cada pedido à API.
+ * backend (ou pelo proxy /api/gestor/[...path]) em cada pedido à API.
  */
 
 import { NextResponse } from "next/server";
@@ -24,7 +24,7 @@ import type { NextRequest } from "next/server";
 
 const TOKEN_COOKIE = "autocell_token";
 
-type Role = "admin" | "manager" | "staff";
+type Role = "admin" | "gestor" | "staff";
 
 interface JwtPayload {
   id?: string;
@@ -55,7 +55,7 @@ function descodificarToken(token: string): JwtPayload | null {
 
 function rotaPorRole(role: Role): string {
   if (role === "admin") return "/admin";
-  if (role === "manager") return "/manager";
+  if (role === "gestor") return "/gestor";
   return "/staff";
 }
 
@@ -67,7 +67,7 @@ export function middleware(req: NextRequest) {
 
   // --- Rotas privadas ---
   const isAdmin = pathname === "/admin" || pathname.startsWith("/admin/");
-  const isManager = pathname === "/manager" || pathname.startsWith("/manager/");
+  const isGestor = pathname === "/gestor" || pathname.startsWith("/gestor/");
   const isStaff = pathname === "/staff" || pathname.startsWith("/staff/");
 
   // Não aplicar proteção às rotas /api/* (são proxy routes, têm a sua própria lógica).
@@ -75,7 +75,7 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  if (isAdmin || isManager || isStaff) {
+  if (isAdmin || isGestor || isStaff) {
     if (!autenticado) {
       const loginUrl = req.nextUrl.clone();
       loginUrl.pathname = "/login";
@@ -87,7 +87,7 @@ export function middleware(req: NextRequest) {
     const rotaEsperada = rotaPorRole(role);
     const rotaErrada =
       (isAdmin && role !== "admin") ||
-      (isManager && role !== "manager") ||
+      (isGestor && role !== "gestor") ||
       (isStaff && role !== "staff");
     if (rotaErrada) {
       const url = req.nextUrl.clone();
@@ -111,5 +111,5 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/", "/login", "/admin/:path*", "/manager/:path*", "/staff/:path*"],
+  matcher: ["/", "/login", "/admin/:path*", "/gestor/:path*", "/manager/:path*", "/staff/:path*"],
 };

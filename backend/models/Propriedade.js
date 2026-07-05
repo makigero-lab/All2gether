@@ -41,12 +41,20 @@ const propriedadeSchema = new mongoose.Schema(
     // do Smoobu não traz esta informação.
     tempo_limpeza_minutos: {
       type: Number,
-      default: 60,
+      default: 45,
       min: 0,
     },
     ativo: {
       type: Boolean,
       default: true,
+    },
+    // v1.34.0 — Checklist de limpeza da propriedade (lista de itens a verificar).
+    // O staff vê esta lista ao concluir a tarefa e pode marcar cada item.
+    // Definida pelo gestor no painel de propriedades.
+    // Ex: ['Verificar toalhas', 'Esvaziar lixo', 'Trocar roupa de cama']
+    checklist: {
+      type: [String],
+      default: [],
     },
   },
   { timestamps: true }

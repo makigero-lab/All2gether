@@ -90,7 +90,7 @@ exports.getDashboard = async (req, res) => {
       Propriedade.countDocuments({ empresa_id: empresaId, ativo: true }),
       Utilizador.countDocuments({
         empresa_id: empresaId,
-        role: { $in: ['staff', 'manager'] },
+        role: { $in: ['staff', 'gestor'] },
         ativo: true,
         eliminado_em: null,
       }),
@@ -183,7 +183,7 @@ exports.getPropriedades = async (req, res) => {
  * POST /api/admin/propriedades
  * Cria uma propriedade para essa empresa.
  * Valida: smoobu_id (obrigatório + único), nome (obrigatório),
- * tempo_limpeza_minutos (opcional, default 60).
+ * tempo_limpeza_minutos (opcional, default 45).
  *
  * Body esperado:
  *   { smoobu_id, nome, tempo_limpeza_minutos? }
@@ -212,7 +212,7 @@ exports.criarPropriedade = async (req, res) => {
     }
 
     // Validação de tempo_limpeza_minutos (se vier, tem de ser número >= 0).
-    let tempo = 60;
+    let tempo = 45;
     if (tempo_limpeza_minutos !== undefined && tempo_limpeza_minutos !== null) {
       const n = Number(tempo_limpeza_minutos);
       if (Number.isNaN(n) || n < 0) {
@@ -243,6 +243,9 @@ exports.criarPropriedade = async (req, res) => {
       coordenadas,
       empresa_id: empresaId,
       tempo_limpeza_minutos: tempo,
+      checklist: Array.isArray(req.body?.checklist)
+        ? req.body.checklist.filter((s) => typeof s === 'string' && s.trim())
+        : [],
     });
 
     // Auditoria.
@@ -338,6 +341,107 @@ exports.getTarefas = async (req, res) => {
     return res.status(200).json({ tarefas });
   } catch (err) {
     console.error('❌ getTarefas:', err.message);
+    return res.status(500).json({ erro: 'Erro interno do servidor.' });
+  }
+};
+
+/**
+ * GET /api/admin/calendario/dados
+ *
+ * Endpoint unificado para alimentar a página de Calendário Visual Avançado.
+ * Devolve as tarefas da empresa num intervalo de datas, com filtros
+ * opcionais e populate de propriedade (nome + morada) e utilizador (nome).
+ *
+ * Query params:
+ *   - inicio        (yyyy-mm-dd | ISO) — início do período (obrigatório na prática)
+ *   - fim           (yyyy-mm-dd | ISO) — fim do período (inclusive)
+ *   - propriedadeId (ObjectId)         — filtra por propriedade (opcional)
+ *   - utilizadorId  (ObjectId)         — filtra por funcionário (opcional)
+ *   - estado        (string)           — filtra por estado (opcional):
+ *                                        por_atribuir | atribuida | em_curso |
+ *                                        concluida | cancelada
+ *
+ * Notas:
+ *   - Diferente do getTarefas, NÃO exclui canceladas por defeito (o calendário
+ *     pode querer mostrá-las a tracejado). O utilizador pode excluí-las com
+ *     ?estado=atribuida (ou outro).
+ *   - Populate inclui `morada` (para tooltip/info no calendário) e `coordenadas`
+ *     (para futuro mapa de rotas).
+ *
+ * Resposta 200: { tarefas: [...] }
+ */
+exports.getDadosCalendario = async (req, res) => {
+  try {
+    const { ok, empresaId } = obterEmpresaId(req, res);
+    if (!ok) return;
+
+    const { inicio, fim, propriedadeId, utilizadorId, estado } = req.query;
+
+    // Filtro base: empresa do utilizador autenticado.
+    const filtro = { empresa_id: empresaId };
+
+    // Filtro por intervalo de datas [inicio, fim] (fim inclusive).
+    if (inicio || fim) {
+      const dataFiltro = {};
+      if (inicio) {
+        const d = new Date(inicio);
+        if (!isNaN(d.getTime())) {
+          dataFiltro.$gte = new Date(
+            Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
+          );
+        }
+      }
+      if (fim) {
+        const d = new Date(fim);
+        if (!isNaN(d.getTime())) {
+          // Inclui o dia inteiro (até meia-noite do dia seguinte).
+          dataFiltro.$lt = new Date(
+            Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) +
+              24 * 60 * 60 * 1000
+          );
+        }
+      }
+      if (Object.keys(dataFiltro).length > 0) {
+        filtro.data = dataFiltro;
+      }
+    }
+
+    // Filtro opcional por propriedade.
+    if (propriedadeId && mongoose.isValidObjectId(propriedadeId)) {
+      filtro.propriedade_id = propriedadeId;
+    }
+
+    // Filtro opcional por utilizador (funcionário).
+    // Nota: utilizadorId pode ser 'null' (string) para filtrar tarefas por atribuir.
+    if (utilizadorId !== undefined && utilizadorId !== null && utilizadorId !== '') {
+      if (utilizadorId === 'null' || utilizadorId === 'sem_atribuicao') {
+        filtro.utilizador_id = null;
+      } else if (mongoose.isValidObjectId(utilizadorId)) {
+        filtro.utilizador_id = utilizadorId;
+      }
+    }
+
+    // Filtro opcional por estado.
+    const ESTADOS_VALIDOS = [
+      'por_atribuir',
+      'atribuida',
+      'em_curso',
+      'concluida',
+      'cancelada',
+    ];
+    if (estado && ESTADOS_VALIDOS.includes(estado)) {
+      filtro.estado = estado;
+    }
+
+    const tarefas = await Tarefa.find(filtro)
+      .populate({ path: 'propriedade_id', select: 'nome morada coordenadas' })
+      .populate({ path: 'utilizador_id', select: 'nome' })
+      .sort({ data: 1 })
+      .lean();
+
+    return res.status(200).json({ tarefas });
+  } catch (err) {
+    console.error('❌ getDadosCalendario:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
   }
 };
@@ -511,6 +615,13 @@ exports.atualizarPropriedade = async (req, res) => {
       }
     }
 
+    // v1.34.0: atualiza checklist (array de strings).
+    if (req.body?.checklist !== undefined) {
+      propriedade.checklist = Array.isArray(req.body.checklist)
+        ? req.body.checklist.filter((s) => typeof s === 'string' && s.trim())
+        : [];
+    }
+
     await propriedade.save();
 
     // Auditoria.
@@ -589,7 +700,7 @@ exports.getEquipa = async (req, res) => {
  *   - nome      (obrigatório)
  *   - email     (obrigatório, único global)
  *   - password  (obrigatória, em claro — é guardada como hash bcrypt)
- *   - role      (opcional, default 'staff'; enum ['admin','manager','staff'])
+ *   - role      (opcional, default 'staff'; enum ['admin','gestor','staff'])
  *
  * Resposta 201: { utilizador: { ... } } (sem password_hash).
  * Erros: 400 campos em falta / role inválido; 409 email duplicado; 500 erro.
@@ -617,9 +728,9 @@ exports.criarMembroEquipa = async (req, res) => {
 
     // Validação do role (se vier, tem de ser um dos permitidos).
     const roleFinal = role || 'staff';
-    if (!['admin', 'manager', 'staff'].includes(roleFinal)) {
+    if (!['admin', 'gestor', 'staff'].includes(roleFinal)) {
       return res.status(400).json({
-        erro: 'Role inválido. Valores permitidos: admin, manager, staff.',
+        erro: 'Role inválido. Valores permitidos: admin, gestor, staff.',
       });
     }
 
@@ -640,7 +751,7 @@ exports.criarMembroEquipa = async (req, res) => {
       });
     }
 
-    // SEGURANÇA: Valida responsavel_id se vier — tem de ser admin/manager
+    // SEGURANÇA: Valida responsavel_id se vier — tem de ser admin/gestor
     // da mesma empresa.
     let responsavelValidado = null;
     if (responsavel_id) {
@@ -650,11 +761,11 @@ exports.criarMembroEquipa = async (req, res) => {
       const resp = await Utilizador.findOne({
         _id: responsavel_id,
         empresa_id: empresaId,
-        role: { $in: ['admin', 'manager'] },
+        role: { $in: ['admin', 'gestor'] },
       });
       if (!resp) {
         return res.status(400).json({
-          erro: 'Responsável não encontrado (ou não é admin/manager da empresa).',
+          erro: 'Responsável não encontrado (ou não é admin/gestor da empresa).',
         });
       }
       responsavelValidado = resp._id;
@@ -808,9 +919,9 @@ exports.atualizarMembroEquipa = async (req, res) => {
 
     // --- Role ---
     if (role !== undefined) {
-      if (!['manager', 'staff'].includes(role)) {
+      if (!['gestor', 'staff'].includes(role)) {
         return res.status(400).json({
-          erro: 'Role inválido. Valores permitidos via edição: manager, staff.',
+          erro: 'Role inválido. Valores permitidos via edição: gestor, staff.',
         });
       }
       utilizador.role = role;
@@ -827,11 +938,11 @@ exports.atualizarMembroEquipa = async (req, res) => {
         const resp = await Utilizador.findOne({
           _id: responsavel_id,
           empresa_id: empresaId,
-          role: { $in: ['admin', 'manager'] },
+          role: { $in: ['admin', 'gestor'] },
         });
         if (!resp) {
           return res.status(400).json({
-            erro: 'Responsável não encontrado (ou não é admin/manager da empresa).',
+            erro: 'Responsável não encontrado (ou não é admin/gestor da empresa).',
           });
         }
         // Não permitir atribuir o utilizador como responsável de si próprio.
@@ -1065,13 +1176,15 @@ exports.reportarFaltaSubita = async (req, res) => {
     const amanhaInicio = new Date(hojeInicio.getTime() + 24 * 60 * 60 * 1000);
 
     // 2) Regista Ausencia para hoje (ignora erro de duplicado).
+    // v1.24.0: falta súbita é uma ação do admin → estado 'aprovada'.
     try {
       await Ausencia.create({
         utilizador_id: id,
         empresa_id: empresaId,
         data_inicio: hojeInicio,
         data_fim: hojeInicio,
-        tipo: 'folga',
+        tipo: 'outro',
+        estado: 'aprovada',
         notas: 'Falta súbita reportada pelo admin',
       });
     } catch (err) {
@@ -1247,6 +1360,7 @@ exports.registarBaixaProlongada = async (req, res) => {
     }
 
     // 1) Cria a Ausencia (ignora duplicado).
+    // v1.24.0: baixa prolongada é uma ação do admin → estado 'aprovada'.
     try {
       await Ausencia.create({
         utilizador_id: id,
@@ -1254,6 +1368,7 @@ exports.registarBaixaProlongada = async (req, res) => {
         data_inicio: inicio,
         data_fim: fim,
         tipo: tipo || 'ferias',
+        estado: 'aprovada',
         notas: notas ? String(notas).trim() : '',
       });
     } catch (err) {
@@ -1297,7 +1412,7 @@ exports.registarBaixaProlongada = async (req, res) => {
       const range = { start: tInicio, end: tFim };
 
       const coordNovaProp = tarefa.propriedade_id?.coordenadas ?? null;
-      const tempoNovaTarefa = tarefa.tempo_limpeza_minutos || 60;
+      const tempoNovaTarefa = tarefa.tempo_limpeza_minutos || 45;
 
       let novoUtilizador = null;
       try {
@@ -1474,7 +1589,7 @@ exports.setupClienteZero = async (req, res) => {
     // deve alterar a sua password após o primeiro login).
     const PASSWORD_TESTE = 'autocell123';
 
-    // Utilizadores a garantir (admin + manager + staff).
+    // Utilizadores a garantir (admin + gestor + staff).
     const UTILIZADORES_TESTE = [
       {
         nome: 'Gestor Autocell', // admin — para ti (dono da conta)
@@ -1482,9 +1597,9 @@ exports.setupClienteZero = async (req, res) => {
         role: 'admin',
       },
       {
-        nome: 'Responsável Limpezas', // manager — gere a equipa de staff
-        email: 'manager@autocell.pt',
-        role: 'manager',
+        nome: 'Responsável Limpezas', // gestor — gere a equipa de staff
+        email: 'gestor@autocell.pt',
+        role: 'gestor',
       },
       {
         nome: 'João Limpezas', // staff — executante de limpezas
@@ -1504,7 +1619,7 @@ exports.setupClienteZero = async (req, res) => {
       empresaCriada = true;
     }
 
-    // 2) Utilizadores (admin + manager + staff) — não duplicar (email único).
+    // 2) Utilizadores (admin + gestor + staff) — não duplicar (email único).
     //    Para cada um: cria se não existir, ou define password se existir sem.
     const utilizadores = [];
     for (const u of UTILIZADORES_TESTE) {
@@ -1557,7 +1672,7 @@ exports.setupClienteZero = async (req, res) => {
         smoobu_id: SMOOBU_ID_TESTE,
         nome: NOME_PROPRIEDADE,
         empresa_id: empresa._id,
-        tempo_limpeza_minutos: 60,
+        tempo_limpeza_minutos: 45,
       });
       propriedadeCriada = true;
     }
@@ -1578,7 +1693,7 @@ exports.setupClienteZero = async (req, res) => {
         plano_ativo: empresa.plano_ativo,
         criada: empresaCriada,
       },
-      // 3 utilizadores: admin (dono), manager (responsável limpezas), staff (executante).
+      // 3 utilizadores: admin (dono), gestor (responsável limpezas), staff (executante).
       utilizadores,
       propriedade: {
         id: propriedade._id,

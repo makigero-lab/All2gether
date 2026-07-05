@@ -47,7 +47,7 @@ import { PaginationBar } from "@/components/admin/pagination-bar";
 /**
  * Página de Equipa — Painel de Administração (CRUD completo).
  *
- * Consome a API real (GET/POST/PUT/PATCH/DELETE /api/admin/equipa) com JWT
+ * Consome a API real (GET/POST/PUT/PATCH/DELETE /api/gestor/equipa) com JWT
  * no header Authorization (via helpers adminGet/adminPost/adminPut/...).
  *
  * Lista os membros numa tabela (Nome, Email, Role, Estado, Ações) e permite:
@@ -59,13 +59,13 @@ import { PaginationBar } from "@/components/admin/pagination-bar";
 
 const ROLE_LABEL: Record<Role, string> = {
   admin: "Admin",
-  manager: "Responsável",
+  gestor: "Gestor",
   staff: "Staff",
 };
 
 const ROLE_VARIANT: Record<Role, "default" | "secondary" | "outline"> = {
   admin: "default",
-  manager: "secondary",
+  gestor: "secondary",
   staff: "outline",
 };
 
@@ -191,18 +191,45 @@ export default function EquipaPage() {
   // Utilizadores que podem ser responsáveis (admin + manager).
   // Usado para popular o select de Responsável nos formulários.
   const responsaveisPossiveis = utilizadores.filter(
-    (u) => u.role === "admin" || u.role === "manager"
+    (u) => u.role === "admin" || u.role === "gestor"
   );
 
-  /** Carrega os utilizadores da API. */
+  // IDs dos utilizadores com ausência aprovada para hoje (para mostrar badge).
+  const [ausentesHoje, setAusentesHoje] = useState<Set<string>>(new Set());
+
+  /** Carrega os utilizadores da API + ausências aprovadas para hoje. */
   const carregar = useCallback(async () => {
     setLoading(true);
     setErro(null);
     try {
-      const data = await adminGet<{ utilizadores: UtilizadorDTO[] }>(
-        "/api/admin/equipa"
-      );
+      const hoje = new Date();
+
+      const [data, ausenciasRes] = await Promise.all([
+        adminGet<{ utilizadores: UtilizadorDTO[] }>("/api/gestor/equipa"),
+        adminGet<{
+          ausencias: {
+            utilizador_id: string;
+            data_inicio: string;
+            data_fim: string;
+            estado: string;
+          }[];
+        }>("/api/gestor/ausencias?estado=aprovada"),
+      ]);
       setUtilizadores(data.utilizadores ?? []);
+
+      // Filtra as ausências aprovadas que cobrem hoje.
+      const hojeUTC = new Date(
+        Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth(), hoje.getUTCDate())
+      );
+      const setAusentes = new Set<string>();
+      for (const a of ausenciasRes.ausencias ?? []) {
+        const ini = new Date(a.data_inicio);
+        const fim = new Date(a.data_fim);
+        if (hojeUTC >= ini && hojeUTC <= fim && a.utilizador_id) {
+          setAusentes.add(a.utilizador_id);
+        }
+      }
+      setAusentesHoje(setAusentes);
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Erro ao carregar equipa.");
     } finally {
@@ -230,7 +257,7 @@ export default function EquipaPage() {
 
     setSubmitting(true);
     try {
-      await adminPost("/api/admin/equipa", {
+      await adminPost("/api/gestor/equipa", {
         nome: form.nome.trim(),
         email: form.email.trim(),
         password: form.password,
@@ -291,7 +318,7 @@ export default function EquipaPage() {
       };
       if (editForm.password) body.password = editForm.password;
 
-      await adminPut(`/api/admin/equipa/${editando._id}`, body);
+      await adminPut(`/api/gestor/equipa/${editando._id}`, body);
       setEditando(null);
       await carregar();
     } catch (e) {
@@ -308,7 +335,7 @@ export default function EquipaPage() {
       prev.map((x) => (x._id === u._id ? { ...x, ativo: !x.ativo } : x))
     );
     try {
-      await adminPatch(`/api/admin/equipa/${u._id}/estado`);
+      await adminPatch(`/api/gestor/equipa/${u._id}/estado`);
     } catch (e) {
       // Reverte em caso de erro.
       setUtilizadores((prev) =>
@@ -323,7 +350,7 @@ export default function EquipaPage() {
     if (!eliminando) return;
     setElimSubmitting(true);
     try {
-      await adminDelete(`/api/admin/equipa/${eliminando._id}`);
+      await adminDelete(`/api/gestor/equipa/${eliminando._id}`);
       setEliminando(null);
       await carregar();
     } catch (e) {
@@ -340,7 +367,7 @@ export default function EquipaPage() {
     setFaltaResultado(null);
     try {
       const res = await adminPost<{ reatribuidas: number; orfas: number; total: number }>(
-        `/api/admin/equipa/${faltaSubita._id}/falta-subita`,
+        `/api/gestor/equipa/${faltaSubita._id}/falta-subita`,
         {}
       );
       setFaltaResultado(
@@ -467,7 +494,7 @@ export default function EquipaPage() {
                     className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                   >
                     <option value="staff">Staff</option>
-                    <option value="manager">Responsável</option>
+                    <option value="gestor">Responsável</option>
                   </select>
                 </div>
                 <div className="space-y-1.5">
@@ -584,9 +611,20 @@ export default function EquipaPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {utilizadoresPagina.map((u) => (
-                    <tr key={u._id} className="hover:bg-muted/30">
-                      <td className="px-4 py-3 font-medium">{u.nome}</td>
+                  {utilizadoresPagina.map((u) => {
+                    const ausenteHoje = ausentesHoje.has(u._id);
+                    return (
+                    <tr key={u._id} className={`hover:bg-muted/30 ${ausenteHoje ? "opacity-65" : ""}`}>
+                      <td className="px-4 py-3 font-medium">
+                        <div className="flex items-center gap-2">
+                          {u.nome}
+                          {ausenteHoje && (
+                            <Badge variant="destructive" className="text-[10px]">
+                              Ausente Hoje
+                            </Badge>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-4 py-3 text-muted-foreground">
                         {u.email}
                       </td>
@@ -687,7 +725,8 @@ export default function EquipaPage() {
                         )}
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -781,7 +820,7 @@ export default function EquipaPage() {
                 className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
               >
                 <option value="staff">Staff</option>
-                <option value="manager">Responsável</option>
+                <option value="gestor">Responsável</option>
               </select>
             </div>
             <div className="space-y-1.5">
@@ -1088,7 +1127,7 @@ export default function EquipaPage() {
                     reatribuidas: number;
                     orfas: number;
                     total: number;
-                  }>(`/api/admin/equipa/${baixaModal._id}/baixa`, {
+                  }>(`/api/gestor/equipa/${baixaModal._id}/baixa`, {
                     data_inicio: baixaForm.data_inicio,
                     data_fim: baixaForm.data_fim,
                     tipo: "ferias",

@@ -56,7 +56,7 @@ import {
  *   - Badges de Folga/Férias (amarelo/laranja) — nome do funcionário
  *   - Click num dia → modal com detalhe
  *
- * Consome /api/admin/tarefas + /api/admin/ausencias (via proxy same-origin).
+ * Consome /api/gestor/tarefas + /api/gestor/ausencias (via proxy same-origin).
  */
 
 // --- Tipos locais ---
@@ -143,10 +143,10 @@ export default function CalendarioPage() {
 
       const [tarefasRes, ausenciasRes] = await Promise.all([
         adminGet<{ tarefas: TarefaCalendario[] }>(
-          `/api/admin/tarefas?inicio=${inicio}&fim=${fim}`
+          `/api/gestor/tarefas?inicio=${inicio}&fim=${fim}`
         ),
         adminGet<{ ausencias: AusenciaDTO[] }>(
-          `/api/admin/ausencias?futuras=false`
+          `/api/gestor/ausencias?futuras=false`
         ),
       ]);
 

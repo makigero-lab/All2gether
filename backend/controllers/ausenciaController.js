@@ -16,6 +16,8 @@
 const mongoose = require('mongoose');
 const Ausencia = require('../models/Ausencia');
 const Utilizador = require('../models/Utilizador');
+const Tarefa = require('../models/Tarefa');
+const { registarAuditoria } = require('../utils/auditoria');
 
 /**
  * Lê o `empresa_id` do JWT (req.user.empresa_id).
@@ -60,6 +62,21 @@ exports.listarAusencias = async (req, res) => {
       const hoje = normalizarDia(new Date());
       filtro.data_fim = { $gte: hoje };
     }
+    // v1.25.0: filtro por estado (pendente/aprovada/rejeitada) — usado pelo
+    // Centro de Aprovações de RH para mostrar só pendentes.
+    // v1.26.0: suporta comma-separated (ex: ?estado=pendente,pendente_emergencia)
+    const ESTADOS_VALIDOS = ['pendente', 'pendente_emergencia', 'aprovada', 'rejeitada'];
+    if (req.query.estado) {
+      const estados = String(req.query.estado)
+        .split(',')
+        .map((s) => s.trim())
+        .filter((s) => ESTADOS_VALIDOS.includes(s));
+      if (estados.length === 1) {
+        filtro.estado = estados[0];
+      } else if (estados.length > 1) {
+        filtro.estado = { $in: estados };
+      }
+    }
 
     const ausencias = await Ausencia.find(filtro)
       .populate({ path: 'utilizador_id', select: 'nome email role' })
@@ -93,7 +110,7 @@ exports.listarAusencias = async (req, res) => {
  * Body: { utilizador_id, data_inicio, data_fim, tipo, notas? }
  *
  * Validações:
- *   - utilizador_id tem de pertencer à empresa e ter role staff/manager (não admin).
+ *   - utilizador_id tem de pertencer à empresa e ter role staff/gestor (não admin).
  *   - data_inicio e data_fim obrigatórias e data_fim >= data_inicio.
  *   - tipo em ['ferias','folga'].
  *   - Não pode haver sobreposição com outra ausência do mesmo utilizador.
@@ -122,12 +139,12 @@ exports.registarAusencia = async (req, res) => {
     const utilizador = await Utilizador.findOne({
       _id: utilizador_id,
       empresa_id: empresaId,
-      role: { $in: ['staff', 'manager'] },
+      role: { $in: ['staff', 'gestor'] },
     });
     if (!utilizador) {
       return res.status(400).json({
         erro:
-          'Utilizador não encontrado (ou não é staff/manager da empresa).',
+          'Utilizador não encontrado (ou não é staff/gestor da empresa).',
       });
     }
 
@@ -143,11 +160,11 @@ exports.registarAusencia = async (req, res) => {
       });
     }
 
-    // Valida tipo.
-    const tipoFinal = tipo || 'folga';
-    if (!['ferias', 'folga'].includes(tipoFinal)) {
+    // Valida tipo (v1.24.0: enum alargado para ferias/doenca/outro).
+    const tipoFinal = tipo || 'ferias';
+    if (!['ferias', 'doenca', 'outro'].includes(tipoFinal)) {
       return res.status(400).json({
-        erro: 'tipo inválido. Valores permitidos: ferias, folga.',
+        erro: 'tipo inválido. Valores permitidos: ferias, doenca, outro.',
       });
     }
 
@@ -165,12 +182,15 @@ exports.registarAusencia = async (req, res) => {
       });
     }
 
+    // v1.24.0: admin a criar ausência diretamente → estado 'aprovada'
+    // (o fluxo de aprovação só se aplica aos pedidos do staff via /api/auth/me/ausencias).
     const nova = await Ausencia.create({
       utilizador_id,
       empresa_id: empresaId,
       data_inicio: inicio,
       data_fim: fim,
       tipo: tipoFinal,
+      estado: 'aprovada',
       notas: notas ? String(notas).trim() : '',
     });
 
@@ -239,3 +259,203 @@ exports.eliminarAusencia = async (req, res) => {
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
   }
 };
+
+/* ------------------------------------------------------------------ */
+/* Aprovar / Rejeitar ausência (v1.24.0)                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * PATCH /api/admin/ausencias/:id/estado
+ *
+ * Aprova ou rejeita um pedido de ausência (criado pelo staff como 'pendente').
+ *
+ * Body: { estado: 'aprovada' | 'rejeitada' }
+ *
+ * Lógica crítica:
+ *   - Se 'aprovada': redistribui automaticamente as tarefas futuras do
+ *     utilizador no período [data_inicio, data_fim] usando o load balancer
+ *     (mesma lógica do registarBaixaProlongada). As tarefas reatribuídas
+ *     ficam com outro staff; as que não têm staff disponível ficam
+ *     'por_atribuir'.
+ *   - Se 'rejeitada': apenas atualiza o estado (não mexe nas tarefas).
+ *
+ * Resposta 200:
+ *   {
+ *     mensagem, ausencia,
+ *     redistribuicao: { total, reatribuidas, orfas } | null
+ *   }
+ */
+exports.aprovarRejeitarAusencia = async (req, res) => {
+  try {
+    const { ok, empresaId } = obterEmpresaId(req, res);
+    if (!ok) return;
+
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ erro: 'ID de ausência inválido.' });
+    }
+
+    const novoEstado = req.body?.estado;
+    if (!['aprovada', 'rejeitada'].includes(novoEstado)) {
+      return res.status(400).json({
+        erro: "estado inválido. Valores permitidos: 'aprovada' ou 'rejeitada'.",
+      });
+    }
+
+    const ausencia = await Ausencia.findOne({ _id: id, empresa_id: empresaId });
+    if (!ausencia) {
+      return res.status(404).json({
+        erro: 'Ausência não encontrada (ou não pertence a esta empresa).',
+      });
+    }
+
+    // Se já está no estado pedido, não faz nada (idempotente).
+    if (ausencia.estado === novoEstado) {
+      return res.status(200).json({
+        mensagem: `Ausência já estava ${novoEstado}.`,
+        ausencia,
+        redistribuicao: null,
+      });
+    }
+
+    // Atualiza o estado.
+    ausencia.estado = novoEstado;
+    await ausencia.save();
+
+    let redistribuicao = null;
+
+    // Se aprovada → redistribui tarefas do período.
+    if (novoEstado === 'aprovada') {
+      redistribuicao = await redistribuirTarefasPeriodo(
+        ausencia.utilizador_id,
+        empresaId,
+        ausencia.data_inicio,
+        ausencia.data_fim
+      );
+    }
+
+    // Auditoria.
+    const utilizador = await Utilizador.findById(ausencia.utilizador_id).select('nome').lean();
+    registarAuditoria({
+      utilizador_id: req.user.id,
+      utilizador_nome: req.user.nome || 'Admin',
+      empresa_id: empresaId,
+      acao: novoEstado === 'aprovada' ? 'aprovar_ausencia' : 'rejeitar_ausencia',
+      recurso: 'ausencia',
+      recurso_id: ausencia._id,
+      descricao: `Ausência de "${utilizador?.nome ?? '?'}" ${novoEstado}${
+        redistribuicao
+          ? `: ${redistribuicao.reatribuidas} reatribuídas, ${redistribuicao.orfas} órfãs`
+          : ''
+      }`,
+      detalhes: {
+        utilizador_id: String(ausencia.utilizador_id),
+        data_inicio: ausencia.data_inicio,
+        data_fim: ausencia.data_fim,
+        tipo: ausencia.tipo,
+        redistribuicao,
+      },
+    });
+
+    return res.status(200).json({
+      mensagem:
+        novoEstado === 'aprovada'
+          ? `Ausência aprovada. ${redistribuicao.reatribuidas} tarefa(s) reatribuída(s), ${redistribuicao.orfas} órfã(s).`
+          : 'Ausência rejeitada.',
+      ausencia,
+      redistribuicao,
+    });
+  } catch (err) {
+    console.error('❌ aprovarRejeitarAusencia:', err.message);
+    return res.status(500).json({ erro: 'Erro interno do servidor.' });
+  }
+};
+
+/* ------------------------------------------------------------------ */
+/* Helper: redistribuir tarefas de um utilizador num período          */
+/* (partilhado com registarBaixaProlongada — mesma lógica)            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Redistribui as tarefas futuras de um utilizador num período [inicio, fim]
+ * usando o load balancer (determinarUtilizadorAtribuido do webhookController).
+ *
+ * @param {ObjectId} utilizadorId
+ * @param {ObjectId} empresaId
+ * @param {Date} inicio
+ * @param {Date} fim
+ * @returns {Promise<{ total, reatribuidas, orfas, detalhes }>}
+ */
+async function redistribuirTarefasPeriodo(utilizadorId, empresaId, inicio, fim) {
+  // fim do dia = meia-noite do dia seguinte (para query <).
+  const fimDia = new Date(fim.getTime() + 24 * 60 * 60 * 1000);
+
+  // Procura tarefas atribuídas no período.
+  const tarefas = await Tarefa.find({
+    utilizador_id: utilizadorId,
+    data: { $gte: inicio, $lt: fimDia },
+    estado: 'atribuida',
+  }).populate({ path: 'propriedade_id', select: 'coordenadas nome' });
+
+  if (tarefas.length === 0) {
+    return { total: 0, reatribuidas: 0, orfas: 0, detalhes: [] };
+  }
+
+  const { determinarUtilizadorAtribuido } = require('../controllers/webhookController');
+
+  let reatribuidas = 0;
+  let orfas = 0;
+  const detalhes = [];
+
+  for (const tarefa of tarefas) {
+    const td = new Date(tarefa.data);
+    const tInicio = new Date(
+      Date.UTC(td.getUTCFullYear(), td.getUTCMonth(), td.getUTCDate())
+    );
+    const tFim = new Date(tInicio.getTime() + 24 * 60 * 60 * 1000);
+    const range = { start: tInicio, end: tFim };
+
+    const coordNovaProp = tarefa.propriedade_id?.coordenadas ?? null;
+    const tempoNovaTarefa = tarefa.tempo_limpeza_minutos || 45;
+
+    let novoUtilizador = null;
+    try {
+      novoUtilizador = await determinarUtilizadorAtribuido(
+        empresaId,
+        range,
+        coordNovaProp,
+        tempoNovaTarefa
+      );
+    } catch (err) {
+      console.error('⚠️  Erro ao reatribuir tarefa', tarefa._id, ':', err.message);
+    }
+
+    if (novoUtilizador) {
+      tarefa.utilizador_id = novoUtilizador;
+      await tarefa.save();
+      reatribuidas++;
+      detalhes.push({
+        tarefa_id: String(tarefa._id),
+        propriedade: tarefa.propriedade_id?.nome ?? '?',
+        novo_utilizador_id: String(novoUtilizador),
+        reatribuida: true,
+      });
+    } else {
+      tarefa.utilizador_id = null;
+      tarefa.estado = 'por_atribuir';
+      await tarefa.save();
+      orfas++;
+      detalhes.push({
+        tarefa_id: String(tarefa._id),
+        propriedade: tarefa.propriedade_id?.nome ?? '?',
+        novo_utilizador_id: null,
+        reatribuida: false,
+      });
+    }
+  }
+
+  return { total: tarefas.length, reatribuidas, orfas, detalhes };
+}
+
+// Exporta o helper para reutilização (ex: registarBaixaProlongada poderia usá-lo).
+exports.redistribuirTarefasPeriodo = redistribuirTarefasPeriodo;

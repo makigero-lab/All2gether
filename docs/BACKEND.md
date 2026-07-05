@@ -588,6 +588,132 @@ Vai buscar todas as reservas **futuras** (a partir de hoje) ao Smoobu via REST A
 
 ---
 
+### 6.8. Listar propriedades do Smoobu — v1.21.0
+
+*Protegido por JWT (middleware `auth`).*
+
+#### `GET /api/admin/smoobu/propriedades`
+
+Vai buscar a lista de apartamentos ao Smoobu (endpoint oficial `/api/apartments`) e devolve-a de forma limpa (só `id` + `name` por apartamento). Isto facilita o mapeamento no fluxo de criação de propriedades: o frontend pode mostrar um dropdown com os apartamentos do Smoobu em vez de o Admin ter de digitar o `smoobu_id` manualmente.
+
+**Requer:** `SMOOBU_API_KEY`.
+
+**Resposta 200:** `{ propriedadesSmoobu: [{ id, name }, ...] }`
+
+**Erros:** `400` (API key em falta), `502` (erro no fetch ao Smoobu).
+
+---
+
+### 6.9. Sincronizar propriedades do Smoobu (upsert em massa) — v1.22.0
+
+*Protegido por JWT (middleware `auth`).*
+
+#### `POST /api/admin/smoobu/sincronizar-propriedades`
+
+Importa em massa os apartamentos do Smoobu para a coleção `Propriedade`. Usa upsert com `$setOnInsert`: **insere apenas as propriedades que ainda não existem** (por `smoobu_id`). As propriedades já existentes **não são alteradas** — preserva edições manuais do Admin (nome, morada, tempo de limpeza, coordenadas, ativo).
+
+Caso de uso: configuração inicial — em vez de criar cada propriedade à mão, o Admin sincroniza todas de uma vez e depois edita só as que precisam de ajustes (morada, tempo de limpeza).
+
+**Requer:** `SMOOBU_API_KEY`. O `empresa_id` vem do JWT.
+
+**Resposta 200:**
+```json
+{
+  "totalRecebidas": 20,
+  "criadas": 15,
+  "existentes": 5,
+  "erros": 0,
+  "detalheErros": []
+}
+```
+
+**Erros:** `400` (API key em falta), `502` (erro no fetch ao Smoobu).
+
+> **Nota sobre o `atualizarPropriedade`:** o endpoint `PUT /api/admin/propriedades/:id` já existe desde a v1.19.1 — permite editar `nome`, `smoobu_id`, `morada`, `tempo_limpeza_minutos` (com re-geocoding automático se a morada mudar). Não foi duplicado nesta versão.
+
+---
+
+### 6.10. Calendário Visual Avançado — v1.23.0
+
+*Protegido por JWT (middleware `auth`).*
+
+#### `GET /api/admin/calendario/dados`
+
+Endpoint unificado para alimentar a página de Calendário Visual Avançado. Devolve as tarefas da empresa num intervalo de datas, com filtros opcionais e populate de propriedade (nome + morada + coordenadas) e utilizador (nome).
+
+**Query params:**
+| Parâmetro | Tipo | Descrição |
+|-----------|------|-----------|
+| `inicio` | yyyy-mm-dd \| ISO | Início do período |
+| `fim` | yyyy-mm-dd \| ISO | Fim do período (inclusive) |
+| `propriedadeId` | ObjectId | Filtra por propriedade (opcional) |
+| `utilizadorId` | ObjectId \| `null` | Filtra por funcionário; `null` = tarefas por atribuir (opcional) |
+| `estado` | string | `por_atribuir` \| `atribuida` \| `em_curso` \| `concluida` \| `cancelada` (opcional) |
+
+**Diferença para o `GET /api/admin/tarefas`:**
+- Não exclui canceladas por defeito (o calendário pode mostrá-las a tracejado). Use `?estado=atribuida` para excluir.
+- Aceita filtros opcionais por `propriedadeId`, `utilizadorId` e `estado`.
+- Populate inclui `morada` e `coordenadas` da propriedade (para tooltip e futuro mapa de rotas).
+
+**Resposta 200:** `{ tarefas: [...] }` (cada tarefa tem `propriedade_id: { nome, morada, coordenadas }` e `utilizador_id: { nome } | null`)
+
+**Erros:** `401` (sem token), `500` (erro interno).
+
+---
+
+### 6.11. Fluxo de aprovação de ausências — v1.24.0
+
+#### Modelo `Ausencia` (campos novos)
+
+| Campo | Tipo | Valores | Default |
+|-------|------|---------|---------|
+| `estado` | String | `pendente` \| `aprovada` \| `rejeitada` | `pendente` |
+| `tipo` | String | `ferias` \| `doenca` \| `outro` | `ferias` |
+
+> O enum do `tipo` mudou de `['ferias','folga']` para `['ferias','doenca','outro']`. As "folgas" fixas semanais continuam no campo `dias_folga` do Utilizador.
+
+#### Endpoints do Staff (`/api/staff/ausencias`)
+
+*Protegido por JWT. O staff só gere as SUAS ausências.*
+
+| Método | Rota | Descrição |
+|--------|------|-----------|
+| `GET`  | `/api/staff/ausencias` | Histórico de ausências do próprio utilizador |
+| `POST` | `/api/staff/ausencias` | Criar pedido de ausência (sempre `estado: 'pendente'`) |
+
+**POST Body:** `{ data_inicio, data_fim, tipo?, notas? }`
+
+O staff **não pode aprovar** os próprios pedidos — só o admin.
+
+#### Endpoint de Aprovação (Admin)
+
+`PATCH /api/admin/ausencias/:id/estado` — aprovar ou rejeitar um pedido do staff.
+
+**Body:** `{ estado: 'aprovada' | 'rejeitada' }`
+
+**Lógica crítica:**
+- **Aprovar** → redistribui automaticamente as tarefas futuras do utilizador no período `[data_inicio, data_fim]` usando o load balancer (`determinarUtilizadorAtribuido`). Tarefas com staff disponível são reatribuídas; as sem staff disponível ficam `por_atribuir`.
+- **Rejeitar** → apenas atualiza o estado (não mexe nas tarefas).
+
+**Resposta 200:**
+```json
+{
+  "mensagem": "Ausência aprovada. 2 tarefa(s) reatribuída(s), 0 órfã(s).",
+  "ausencia": { ... },
+  "redistribuicao": { "total": 2, "reatribuidas": 2, "orfas": 0, "detalhes": [...] }
+}
+```
+
+#### Impacto no webhook (load balancer)
+
+O webhook do Smoobu (e o `atualizarTarefaPorReserva`) agora só consideram ausências com `estado: 'aprovada'` para excluir staff da atribuição. Pedidos pendentes ou rejeitados **não bloqueiam** a atribuição (o staff pode ainda trabalhar).
+
+#### Ações do admin que criam ausências
+
+As ações diretas do admin (falta súbita, baixa prolongada, registo manual) criam ausências com `estado: 'aprovada'` (não precisam de aprovação — o admin já decidiu).
+
+---
+
 ## 7. Deploy no Render
 
 | Definição        | Valor                        |
@@ -639,3 +765,8 @@ Vai buscar todas as reservas **futuras** (a partir de hoje) ao Smoobu via REST A
 | v1.19.0    | 1.19.0 | **Reação a cancelamentos e edições do Smoobu:** o webhook deixa de ignorar `cancellation` e `updateReservation` — agora **reage**. `processarReservaSmoobu` refactorizada num **dispatcher** que chama 3 handlers: `criarTarefaPorReserva` (newReservation, com re-activação se a tarefa estava cancelada), `cancelarTarefaPorReserva` (cancellation → `estado='cancelada'`, respeita concluídas, idempotente) e `atualizarTarefaPorReserva` (updateReservation → atualiza `data`/`propriedade_id`/`tempo_limpeza_minutos`; se a data mudou, **reavalia a atribuição** verificando folgas fixas + ausências + ativo — mantém o funcionário se ainda for disponível, senão passa a `por_atribuir`; se a tarefa estava cancelada, re-activa; se não existir tarefa, cai para o fluxo de criação por fallback). Update sem tarefa existente agora cria (em vez de ignorar). 6 novos testes (41 no total): cancellation, cancellation idempotente, cancellation sem tarefa, update de data, update sem tarefa (fallback), re-activação após cancelamento. |
 | v1.19.1    | 1.19.1 | **Edição de propriedades:** novo endpoint `PUT /api/admin/propriedades/:id` (`atualizarPropriedade`) que permite editar `nome`, `smoobu_id`, `morada` e `tempo_limpeza_minutos`. Valida pertença à empresa (404); valida unicidade global do `smoobu_id` (409 se outra propriedade já o tiver); se a `morada` mudar, **re-faz geocoding** (best-effort — se falhar, mantém coordenadas antigas, não bloqueia). Auditoria registada. No frontend, página `/admin/propriedades` tem agora botão "Editar" (ícone Pencil) que abre modal com os 4 campos. 4 novos testes (45 no total): atualizar nome+tempo, smoobu_id duplicado 409, id inexistente 404, body vazio 400. |
 | v1.20.0    | 1.20.0 | **Sincronização em massa do Smoobu (REST API pull):** novo endpoint `POST /api/admin/smoobu/sincronizar` (`controllers/smoobuController.js` → `sincronizarReservas`) que vai buscar todas as reservas **futuras** (a partir de hoje) ao Smoobu via REST API (`fetch https://login.smoobu.com/api/reservations?from=YYYY-MM-DD` com header `Api-Key`) e cria as tarefas correspondentes reutilizando `_processarReservaSmoobu` (idempotente — não cria duplicados). Cada reserva é mapeada do formato REST API para o formato do webhook e processada individualmente com try/catch (se uma falhar, ex: propriedade inexistente, as outras continuam). Devolve contadores: `totalRecebidas`, `importadas` (criadas + existentes), `criadas`, `existentes`, `erros`, `detalheErros`. Requer variável de ambiente `SMOOBU_API_KEY` (documentada em `.env.example` + topo do `server.js`); sem ela → `400`. Erros de fetch/timeout/JSON → `502`. Reutiliza a função já exportada `_processarReservaSmoobu` (sem duplicar lógica). 6 novos testes (51 no total) com mock de `global.fetch`: sem token 401, sem API key 400, contadores corretos, idempotência (2x não duplica), erro 500 do Smoobu → 502, reserva com propriedade inexistente → erro isolado. |
+| v1.20.1    | 1.20.1 | **Fix 500 no toggle de propriedades + PWA:** (1) Bug crítico — `PATCH /api/admin/propriedades/:id/estado` dava 500 em propriedades legacy sem `morada` porque `findOne` + `save()` re-valida o documento inteiro. Corrigido com `findOneAndUpdate` + `$set` (não re-valida). Teste de regressão: propriedade inserida sem morada → toggle 200. (2) PWA — meta `mobile-web-app-capable` adicionada (apple-* deprecated). (3) Ícones 1x1 placeholder substituídos por ícones reais 192/512/180 (gerados com image-generation + sharp, fundo dourado #B8860B). |
+| v1.21.0    | 1.21.0 | **Listar propriedades do Smoobu:** novo endpoint `GET /api/admin/smoobu/propriedades` (`smoobuController` → `getPropriedadesSmoobu`) que faz `fetch https://login.smoobu.com/api/apartments` com header `Api-Key` e devolve `{ propriedadesSmoobu: [{ id, name }, ...] }` de forma limpa (só os campos úteis, não vaza dados sensíveis/volumosos do Smoobu). Facilita o mapeamento no fluxo de criação de propriedades — o frontend pode mostrar um dropdown com os apartamentos do Smoobu em vez de o Admin ter de digitar o `smoobu_id` manualmente. Mesmo padrão de robustez do `sincronizarReservas`: valida `SMOOBU_API_KEY` (400), trata erros de fetch/HTTP/JSON (502), aceita variantes da resposta (`body.apartments` ou `body.data.apartments`). 4 novos testes (56 no total): sem token 401, sem API key 400, fetch mockado devolve lista limpa (verifica que só id+name, não vaza other fields, e que o fetch foi chamado com URL+header corretos), erro 401 do Smoobu → 502. |
+| v1.22.0    | 1.22.0 | **Sincronizar propriedades do Smoobu (upsert em massa):** novo endpoint `POST /api/admin/smoobu/sincronizar-propriedades` (`smoobuController` → `sincronizarPropriedades`) que faz `fetch https://login.smoobu.com/api/apartments` e faz upsert de cada apartamento com `$setOnInsert` — **insere só as que não existem**, não altera as existentes (preserva edições manuais do Admin: nome, morada, tempo, coordenadas, ativo). `empresa_id` vem do JWT. Devolve contadores: `totalRecebidas`, `criadas`, `existentes`, `erros`, `detalheErros`. Caso de uso: configuração inicial (importar todas as propriedades de uma vez). O endpoint `PUT /api/admin/propriedades/:id` (`atualizarPropriedade`) **já existia** desde a v1.19.1 (nome, smoobu_id, morada, tempo + re-geocoding) — não foi duplicado. 5 novos testes (61 no total): sem token 401, sem API key 400, cria propriedades novas, idempotente (2x não duplica), preserva edições manuais (propriedade com nome/tempo/ativo editados não é sobreposta). |
+| v1.23.0    | 1.23.0 | **Calendário Visual Avançado — endpoint unificado:** novo endpoint `GET /api/admin/calendario/dados` (`adminController` → `getDadosCalendario`) que devolve tarefas da empresa num intervalo de datas com filtros opcionais (`propriedadeId`, `utilizadorId`, `estado`) + populate de propriedade (`nome`, `morada`, `coordenadas`) e utilizador (`nome`). Diferença para `getTarefas`: não exclui canceladas por defeito (calendário pode mostrá-las a tracejado), aceita `utilizadorId=null` para filtrar tarefas por atribuir, e o populate inclui `morada`+`coordenadas` (para tooltips e futuro mapa de rotas). 8 novos testes (69 no total): sem token 401, sem filtros (inclui canceladas), populate (nome+morada+utilizador), filtro por propriedade, filtro por utilizador, filtro utilizadorId=null (por atribuir), filtro por estado=concluida, combina filtros. Fix de teste existente: o teste do webhook assumia que só havia 1 staff (quebrado pelo `beforeAll` do calendário que cria 2 staff extra) — corrigido para verificar apenas que a tarefa foi atribuída a algum staff ativo (não null), que é o comportamento correto do load balancer. |
+| v1.24.0    | 1.24.0 | **Fluxo de aprovação de ausências:** (1) Modelo `Ausencia` — novo campo `estado` (`pendente`\|`aprovada`\|`rejeitada`, default `pendente`); enum do `tipo` alargado para `ferias`\|`doenca`\|`outro` (as "folgas" fixas semanais continuam em `dias_folga` do Utilizador). (2) **Staff routes** — novo `controllers/staffController.js` + `routes/staffRoutes.js` montado em `/api/staff`: `GET /ausencias` (histórico próprio) + `POST /ausencias` (cria pedido sempre `pendente`; staff não pode auto-aprovar). (3) **Aprovação** — `PATCH /api/admin/ausencias/:id/estado` (`ausenciaController` → `aprovarRejeitarAusencia`): aprovar → redistribui tarefas do período via load balancer (helper `redistribuirTarefasPeriodo` extraído e reutilizável); rejeitar → só atualiza estado. (4) **Webhook** — `determinarUtilizadorAtribuido` e `atualizarTarefaPorReserva` agora só consideram ausências `aprovada` (pendentes/rejeitadas não bloqueiam atribuição). (5) Ações diretas do admin (falta súbita, baixa prolongada, registo manual) criam ausências com `estado: 'aprovada'`. 7 novos testes (76 no total): staff cria pedido (pendente), staff vê suas ausências, staff sem token 401, admin aprova (redistribui — verifica utilizador_id mudou), admin rejeita (não mexe em tarefas), estado inválido 400, ausência inexistente 404. |

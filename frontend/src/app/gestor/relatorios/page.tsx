@@ -172,7 +172,7 @@ export default function RelatoriosPage() {
       if (inicio) params.set("inicio", inicio);
       if (fim) params.set("fim", fim);
       const res = await adminGet<RelatorioData>(
-        `/api/admin/relatorios/produtividade?${params.toString()}`
+        `/api/gestor/relatorios/produtividade?${params.toString()}`
       );
       setData(res);
     } catch (e) {

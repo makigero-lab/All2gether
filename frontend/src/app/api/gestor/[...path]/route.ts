@@ -1,7 +1,7 @@
 /**
- * Catch-all proxy route: /api/admin/[...path]
+ * Catch-all proxy route: /api/gestor/[...path]
  *
- * Encaminha TODOS os pedidos para /api/admin/* do frontend para o backend,
+ * Encaminha TODOS os pedidos para /api/gestor/* do frontend para o backend,
  * injetando o token JWT do cookie httpOnly no header Authorization.
  *
  * Isto significa que o browser NUNCA tem acesso ao token — o token vive
@@ -52,7 +52,7 @@ async function proxyHandler(
     // Encaminha para o backend (incluindo query params).
     const url = new URL(req.url);
     const queryString = url.search; // preserva ?futuras=true etc.
-    const backendUrl = `${BACKEND_URL}/api/admin/${pathString}${queryString}`;
+    const backendUrl = `${BACKEND_URL}/api/gestor/${pathString}${queryString}`;
 
     const res = await fetch(backendUrl, {
       method,

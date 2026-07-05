@@ -41,7 +41,7 @@ const tarefaSchema = new mongoose.Schema(
     tempo_limpeza_minutos: {
       type: Number,
       required: true,
-      default: 60,
+      default: 45,
       min: 0,
     },
     tipo: {
@@ -54,13 +54,24 @@ const tarefaSchema = new mongoose.Schema(
       enum: ['por_atribuir', 'atribuida', 'em_curso', 'concluida', 'cancelada'],
       default: 'por_atribuir',
     },
-    // Observações preenchidas pelo staff ao concluir a tarefa.
+    // Observações gerais (gestor/admin).
     observacoes: {
+      type: String,
+      default: '',
+    },
+    // v1.34.0 — Observações do staff ao concluir a tarefa (separadas das gerais).
+    observacoes_staff: {
       type: String,
       default: '',
     },
     // Data em que a tarefa foi concluída (para relatórios).
     concluida_em: {
+      type: Date,
+      default: null,
+    },
+    // v1.34.0 — Hora exata de conclusão (timestamp preciso, para auditoria).
+    // Diferente de concluida_em que pode ser normalizado para meia-noite.
+    hora_conclusao: {
       type: Date,
       default: null,
     },

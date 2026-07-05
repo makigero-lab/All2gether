@@ -53,12 +53,12 @@ const utilizadorSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ['admin', 'manager', 'staff'],
+      enum: ['admin', 'gestor', 'staff'],
       default: 'staff',
       required: true,
     },
     // Superior hierárquico (responsável) do utilizador.
-    // Referência a outro Utilizador (normalmente role 'admin' ou 'manager').
+    // Referência a outro Utilizador (normalmente role 'admin' ou 'gestor').
     // O admin não tem responsavel_id (topo da hierarquia).
     responsavel_id: {
       type: mongoose.Schema.Types.ObjectId,
@@ -90,6 +90,14 @@ const utilizadorSchema = new mongoose.Schema(
       type: Date,
       default: null,
       index: true,
+    },
+    // v1.27.0 — Notificações Push (Web Push API).
+    // Subscrição gerada pelo browser (Service Worker) via PushManager.subscribe().
+    // Guarda o objeto PushSubscription completo (endpoint + keys.p256dh + keys.auth).
+    // Null = ainda não subscreveu. Se expirar (410 Gone), volta a null.
+    pushSubscription: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
     },
   },
   { timestamps: true }

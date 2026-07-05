@@ -11,6 +11,10 @@
  *   - SMOOBU_API_KEY     — API Key do Smoobu para sincronização em massa
  *                          (POST /api/admin/smoobu/sincronizar). Opcional:
  *                          sem ela, a sincronização devolve 400.
+ *   - VAPID_PUBLIC_KEY   — Chave pública VAPID para Web Push (notificações push)
+ *   - VAPID_PRIVATE_KEY  — Chave privada VAPID (assina as notificações)
+ *   - VAPID_SUBJECT      — Identificador do emissor (mailto:admin@autocell.com)
+ *                          Gerar com: npx web-push generate-vapid-keys
  *
  * NOTA: a instância `app` é exportada (module.exports) para poder ser
  * usada nos testes com supertest SEM iniciar o servidor HTTP nem ligar
@@ -26,14 +30,20 @@ const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 
 const webhookRoutes = require('./routes/webhookRoutes');
+const gestorRoutes = require('./routes/gestorRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const authRoutes = require('./routes/authRoutes');
 const ausenciaRoutes = require('./routes/ausenciaRoutes');
 const relatorioRoutes = require('./routes/relatorioRoutes');
+const staffRoutes = require('./routes/staffRoutes');
 const { iniciarDailyBriefing } = require('./jobs/dailyBriefing');
+const { configurarWebPush } = require('./utils/push');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+
+// Configura Web Push (VAPID) — silencioso se as chaves não estiverem definidas.
+configurarWebPush();
 
 /* ------------------------------------------------------------------ */
 /* Middlewares                                                         */
@@ -87,17 +97,23 @@ app.use('/webhooks', webhookRoutes);
 // Autenticação (login público + /me protegido).
 app.use('/api/auth', authRoutes);
 
-// Painel de Administração.
-// NOTA: a proteção por auth é aplicada dentro de adminRoutes.js, apenas às
-// rotas que precisam (propriedades). O /setup fica PÚBLICO porque é o
-// endpoint de bootstrap (cria o primeiro utilizador — ainda não há token).
+// Painel do Gestor de Operações (admin e gestor).
+// NOTA: a proteção por auth + isGestor é aplicada dentro de gestorRoutes.js.
+// O /setup fica PÚBLICO porque é o endpoint de bootstrap.
+app.use('/api/gestor', gestorRoutes);
+
+// Gestão de Ausências (Folgas e Férias) — protegido por auth + isGestor.
+app.use('/api/gestor/ausencias', ausenciaRoutes);
+
+// Relatórios / Analytics — protegido por auth + isGestor.
+app.use('/api/gestor/relatorios', relatorioRoutes);
+
+// Super Admin — rotas exclusivas do admin (auth + isAdmin estrito).
+// Impersonation, gestão de empresas, etc.
 app.use('/api/admin', adminRoutes);
 
-// Gestão de Ausências (Folgas e Férias) — protegido por auth.
-app.use('/api/admin/ausencias', ausenciaRoutes);
-
-// Relatórios / Analytics — protegido por auth.
-app.use('/api/admin/relatorios', relatorioRoutes);
+// Staff — gestão das próprias ausências (pedidos de férias/doença).
+app.use('/api/staff', staffRoutes);
 
 /* ------------------------------------------------------------------ */
 /* Middleware global de tratamento de erros                            */

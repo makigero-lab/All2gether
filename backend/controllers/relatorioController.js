@@ -11,7 +11,7 @@ const mongoose = require('mongoose');
 const Tarefa = require('../models/Tarefa');
 const Utilizador = require('../models/Utilizador');
 const Propriedade = require('../models/Propriedade');
-const { obterEmpresaId } = require('./adminController');
+const { obterEmpresaId } = require('./gestorController');
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */

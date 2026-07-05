@@ -8,7 +8,7 @@ const mongoose = require('mongoose');
 const Tarefa = require('../models/Tarefa');
 const Propriedade = require('../models/Propriedade');
 const Utilizador = require('../models/Utilizador');
-const { obterEmpresaId } = require('./adminController');
+const { obterEmpresaId } = require('./gestorController');
 
 const CAPACIDADE_MAXIMA_MINUTOS = 420;
 
@@ -168,13 +168,13 @@ exports.criarTarefa = async (req, res) => {
       const user = await Utilizador.findOne({
         _id: utilizador_id,
         empresa_id: empresaId,
-        role: { $in: ['staff', 'manager'] },
+        role: { $in: ['staff', 'gestor'] },
         ativo: true,
         eliminado_em: null,
       });
       if (!user) {
         return res.status(400).json({
-          erro: 'Utilizador não encontrado (ou não é staff/manager ativo da empresa).',
+          erro: 'Utilizador não encontrado (ou não é staff/gestor ativo da empresa).',
         });
       }
       utilizadorValidado = user._id;
@@ -194,7 +194,7 @@ exports.criarTarefa = async (req, res) => {
       propriedade_id,
       utilizador_id: utilizadorValidado,
       data: dataNormalizada,
-      tempo_limpeza_minutos: Number(tempo_limpeza_minutos) || propriedade.tempo_limpeza_minutos || 60,
+      tempo_limpeza_minutos: Number(tempo_limpeza_minutos) || propriedade.tempo_limpeza_minutos || 45,
       tipo: tipo || 'limpeza',
       estado: utilizadorValidado ? 'atribuida' : 'por_atribuir',
     });
@@ -245,13 +245,13 @@ exports.atribuirTarefa = async (req, res) => {
       const user = await Utilizador.findOne({
         _id: utilizador_id,
         empresa_id: empresaId,
-        role: { $in: ['staff', 'manager'] },
+        role: { $in: ['staff', 'gestor'] },
         ativo: true,
         eliminado_em: null,
       });
       if (!user) {
         return res.status(400).json({
-          erro: 'Utilizador não encontrado (ou não é staff/manager ativo).',
+          erro: 'Utilizador não encontrado (ou não é staff/gestor ativo).',
         });
       }
       tarefa.utilizador_id = user._id;

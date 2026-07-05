@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Plus, Building2, Loader2, AlertCircle, RefreshCw, Power, Pencil } from "lucide-react";
+import { Plus, Building2, Loader2, AlertCircle, RefreshCw, Power, Pencil, Download, CheckCircle2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,7 +32,7 @@ import {
 /**
  * Página de Propriedades — Painel de Administração.
  *
- * Consome a API real (GET/POST /api/admin/propriedades) em vez do mock-data.
+ * Consome a API real (GET/POST /api/gestor/propriedades) em vez do mock-data.
  *
  * O JWT é enviado automaticamente pelo helper `adminGet`/`adminPost`
  * (header `Authorization: Bearer <token>`, ver `src/lib/api.ts`).
@@ -48,10 +48,19 @@ export default function PropriedadesPage() {
     nome: "",
     smoobu_id: "",
     morada: "",
-    tempo_limpeza_minutos: "60",
+    tempo_limpeza_minutos: "45",
+    checklist: "",
   });
   const [submitting, setSubmitting] = useState(false);
   const [formErro, setFormErro] = useState<string | null>(null);
+
+  // Lista de apartamentos do Smoobu (para o dropdown no formulário de criação).
+  // Carregada via GET /api/gestor/smoobu/propriedades quando o formulário abre.
+  const [propriedadesSmoobu, setPropriedadesSmoobu] = useState<
+    { id: string | number; name: string }[]
+  >([]);
+  const [smoobuLoading, setSmoobuLoading] = useState(false);
+  const [smoobuErro, setSmoobuErro] = useState<string | null>(null);
 
   /** Carrega as propriedades da API. */
   const carregar = useCallback(async () => {
@@ -59,7 +68,7 @@ export default function PropriedadesPage() {
     setErro(null);
     try {
       const data = await adminGet<{ propriedades: PropriedadeDTO[] }>(
-        "/api/admin/propriedades"
+        "/api/gestor/propriedades"
       );
       setPropriedades(data.propriedades ?? []);
     } catch (e) {
@@ -72,6 +81,35 @@ export default function PropriedadesPage() {
   useEffect(() => {
     carregar();
   }, [carregar]);
+
+  /** Carrega a lista de apartamentos do Smoobu (para o dropdown). */
+  const carregarSmoobu = useCallback(async () => {
+    // Só carrega se ainda não foi carregado (evita pedidos repetidos).
+    if (propriedadesSmoobu.length > 0) return;
+    setSmoobuLoading(true);
+    setSmoobuErro(null);
+    try {
+      const data = await adminGet<{ propriedadesSmoobu: { id: string | number; name: string }[] }>(
+        "/api/gestor/smoobu/propriedades"
+      );
+      setPropriedadesSmoobu(data.propriedadesSmoobu ?? []);
+    } catch (e) {
+      setSmoobuErro(
+        e instanceof Error
+          ? `Não foi possível carregar os apartamentos do Smoobu: ${e.message}`
+          : "Erro ao carregar apartamentos do Smoobu."
+      );
+    } finally {
+      setSmoobuLoading(false);
+    }
+  }, [propriedadesSmoobu.length]);
+
+  // Quando o formulário abre, carrega a lista do Smoobu (se ainda não foi).
+  useEffect(() => {
+    if (mostrarForm) {
+      carregarSmoobu();
+    }
+  }, [mostrarForm, carregarSmoobu]);
 
   /** Submete o formulário de nova propriedade. */
   async function handleSubmeter(e: React.FormEvent) {
@@ -91,14 +129,18 @@ export default function PropriedadesPage() {
 
     setSubmitting(true);
     try {
-      await adminPost("/api/admin/propriedades", {
+      await adminPost("/api/gestor/propriedades", {
         nome: form.nome.trim(),
         smoobu_id: form.smoobu_id.trim(),
         morada: form.morada.trim(),
         tempo_limpeza_minutos: tempo,
+        checklist: form.checklist
+          .split("\n")
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0),
       });
       // Limpa o formulário e atualiza a tabela automaticamente.
-      setForm({ nome: "", smoobu_id: "", morada: "", tempo_limpeza_minutos: "60" });
+      setForm({ nome: "", smoobu_id: "", morada: "", tempo_limpeza_minutos: "45", checklist: "" });
       setMostrarForm(false);
       await carregar();
     } catch (e) {
@@ -115,7 +157,7 @@ export default function PropriedadesPage() {
       prev.map((x) => (x._id === p._id ? { ...x, ativo: !x.ativo } : x))
     );
     try {
-      await adminPatch(`/api/admin/propriedades/${p._id}/estado`);
+      await adminPatch(`/api/gestor/propriedades/${p._id}/estado`);
     } catch (e) {
       // Reverte em caso de erro.
       setPropriedades((prev) =>
@@ -125,13 +167,50 @@ export default function PropriedadesPage() {
     }
   }
 
+  // Estado da sincronização de propriedades do Smoobu (importação em massa).
+  const [sincronizando, setSincronizando] = useState(false);
+  const [sincronizacaoOk, setSincronizacaoOk] = useState<string | null>(null);
+
+  /** Importa em massa os apartamentos do Smoobu (upsert — não altera existentes). */
+  async function handleSincronizarPropriedades() {
+    setSincronizando(true);
+    setSincronizacaoOk(null);
+    setErro(null);
+    try {
+      const res = await adminPost<{
+        totalRecebidas: number;
+        criadas: number;
+        existentes: number;
+        erros: number;
+      }>("/api/gestor/smoobu/sincronizar-propriedades", {});
+
+      let msg = `Sincronização concluída! ${res.criadas} propriedade(s) importada(s)`;
+      if (res.existentes > 0) msg += `, ${res.existentes} já existiam`;
+      if (res.erros > 0) msg += `, ${res.erros} com erro`;
+      msg += `.`;
+      setSincronizacaoOk(msg);
+
+      // Atualiza a tabela para mostrar as novas propriedades.
+      await carregar();
+    } catch (e) {
+      setErro(
+        e instanceof Error
+          ? `Sincronização falhou: ${e.message}`
+          : "Erro ao sincronizar propriedades com o Smoobu."
+      );
+    } finally {
+      setSincronizando(false);
+    }
+  }
+
   // Estado do modal de edição
   const [editando, setEditando] = useState<PropriedadeDTO | null>(null);
   const [editForm, setEditForm] = useState({
     nome: "",
     smoobu_id: "",
     morada: "",
-    tempo_limpeza_minutos: "60",
+    tempo_limpeza_minutos: "45",
+    checklist: "",
   });
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editErro, setEditErro] = useState<string | null>(null);
@@ -143,7 +222,8 @@ export default function PropriedadesPage() {
       nome: p.nome,
       smoobu_id: p.smoobu_id,
       morada: p.morada ?? "",
-      tempo_limpeza_minutos: String(p.tempo_limpeza_minutos ?? 60),
+      tempo_limpeza_minutos: String(p.tempo_limpeza_minutos ?? 45),
+      checklist: (p.checklist ?? []).join("\n"),
     });
     setEditErro(null);
   }
@@ -154,8 +234,8 @@ export default function PropriedadesPage() {
     if (!editando) return;
     setEditErro(null);
 
-    if (!editForm.nome.trim() || !editForm.smoobu_id.trim() || !editForm.morada.trim()) {
-      setEditErro("Nome, Smoobu ID e Morada são obrigatórios.");
+    if (!editForm.nome.trim() || !editForm.morada.trim()) {
+      setEditErro("Nome e Morada são obrigatórios.");
       return;
     }
 
@@ -168,12 +248,15 @@ export default function PropriedadesPage() {
     setEditSubmitting(true);
     try {
       const res = await adminPut<{ propriedade: PropriedadeDTO }>(
-        `/api/admin/propriedades/${editando._id}`,
+        `/api/gestor/propriedades/${editando._id}`,
         {
           nome: editForm.nome.trim(),
-          smoobu_id: editForm.smoobu_id.trim(),
           morada: editForm.morada.trim(),
           tempo_limpeza_minutos: tempo,
+          checklist: editForm.checklist
+            .split("\n")
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0),
         }
       );
       // Atualiza a linha na tabela.
@@ -208,6 +291,19 @@ export default function PropriedadesPage() {
             aria-label="Atualizar"
           >
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+          </Button>
+          <Button
+            variant="outline"
+            onClick={handleSincronizarPropriedades}
+            disabled={sincronizando}
+            title="Importa todos os apartamentos do Smoobu de uma vez. Não altera as propriedades já existentes (preserva as tuas edições)."
+          >
+            {sincronizando ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4" />
+            )}
+            <span className="hidden sm:inline">Sincronizar Smoobu</span>
           </Button>
           <Button onClick={() => setMostrarForm((v) => !v)}>
             <Plus className="h-4 w-4" />
@@ -244,17 +340,62 @@ export default function PropriedadesPage() {
                 </div>
                 <div className="space-y-1.5">
                   <label htmlFor="smoobu_id" className="text-sm font-medium">
-                    Smoobu ID
+                    Apartamento do Smoobu
                   </label>
-                  <Input
-                    id="smoobu_id"
-                    value={form.smoobu_id}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, smoobu_id: e.target.value }))
-                    }
-                    placeholder="Ex.: 67890"
-                    required
-                  />
+                  {smoobuLoading ? (
+                    <div className="flex h-9 items-center gap-2 rounded-md border border-input px-3 text-xs text-muted-foreground">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      A carregar do Smoobu…
+                    </div>
+                  ) : smoobuErro ? (
+                    <>
+                      <Input
+                        id="smoobu_id"
+                        value={form.smoobu_id}
+                        onChange={(e) =>
+                          setForm((f) => ({ ...f, smoobu_id: e.target.value }))
+                        }
+                        placeholder="Ex.: 67890 (fallback manual)"
+                        required
+                      />
+                      <p className="text-xs text-amber-600 dark:text-amber-500">
+                        {smoobuErro} Podes inserir o ID manualmente.
+                      </p>
+                    </>
+                  ) : (
+                    <select
+                      id="smoobu_id"
+                      value={form.smoobu_id}
+                      onChange={(e) => {
+                        const idEscolhido = e.target.value;
+                        // Encontra o apartamento escolhido para preencher o nome.
+                        const apto = propriedadesSmoobu.find(
+                          (p) => String(p.id) === idEscolhido
+                        );
+                        setForm((f) => ({
+                          ...f,
+                          smoobu_id: idEscolhido,
+                          // Preenche o nome automaticamente se o utilizador ainda
+                          // não o tiver editado (poupa tempo). Se já escreveu algo
+                          // custom, respeita — mas o comportamento padrão é usar o
+                          // nome do Smoobu.
+                          nome: apto?.name ?? f.nome,
+                        }));
+                      }}
+                      required
+                      className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <option value="">Seleciona um apartamento…</option>
+                      {propriedadesSmoobu.map((p) => (
+                        <option key={p.id} value={String(p.id)}>
+                          {p.name} (ID: {p.id})
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    Lista carregada do Smoobu. Ao escolher, o nome é preenchido automaticamente.
+                  </p>
                 </div>
                 <div className="space-y-1.5 sm:col-span-2">
                   <label htmlFor="morada" className="text-sm font-medium">
@@ -288,9 +429,29 @@ export default function PropriedadesPage() {
                         tempo_limpeza_minutos: e.target.value,
                       }))
                     }
-                    placeholder="60"
+                    placeholder="45"
                   />
                 </div>
+              </div>
+
+              {/* Checklist de Limpeza */}
+              <div className="space-y-1.5">
+                <label htmlFor="checklist" className="text-sm font-medium">
+                  Checklist de Limpeza (um item por linha)
+                </label>
+                <textarea
+                  id="checklist"
+                  value={form.checklist}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, checklist: e.target.value }))
+                  }
+                  rows={4}
+                  placeholder={"Verificar toalhas\nEsvaziar lixo\nTrocar roupa de cama"}
+                  className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+                <p className="text-xs text-muted-foreground">
+                  O staff verá estes itens ao concluir a tarefa de limpeza desta propriedade.
+                </p>
               </div>
 
               {formErro && (
@@ -317,7 +478,7 @@ export default function PropriedadesPage() {
                   onClick={() => {
                     setMostrarForm(false);
                     setFormErro(null);
-                    setForm({ nome: "", smoobu_id: "", morada: "", tempo_limpeza_minutos: "60" });
+                    setForm({ nome: "", smoobu_id: "", morada: "", tempo_limpeza_minutos: "45", checklist: "" });
                   }}
                   disabled={submitting}
                 >
@@ -340,6 +501,24 @@ export default function PropriedadesPage() {
             </div>
             <Button variant="outline" size="sm" onClick={carregar}>
               Tentar novamente
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Sucesso da sincronização Smoobu */}
+      {sincronizacaoOk && (
+        <Card className="border-emerald-500/50">
+          <CardContent className="flex items-center gap-3 p-4 text-sm text-emerald-600 dark:text-emerald-400">
+            <CheckCircle2 className="h-5 w-5 shrink-0" />
+            <span>{sincronizacaoOk}</span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setSincronizacaoOk(null)}
+              className="ml-auto"
+            >
+              Fechar
             </Button>
           </CardContent>
         </Card>
@@ -464,15 +643,12 @@ export default function PropriedadesPage() {
               <Input
                 id="edit-smoobu"
                 value={editForm.smoobu_id}
-                onChange={(e) =>
-                  setEditForm((f) => ({ ...f, smoobu_id: e.target.value }))
-                }
-                required
-                className="font-mono text-xs"
+                readOnly
+                tabIndex={-1}
+                className="font-mono text-xs bg-muted/50 text-muted-foreground cursor-not-allowed"
               />
               <p className="text-xs text-muted-foreground">
-                Tem de corresponder ao <code>apartment.id</code> do Smoobu
-                (é assim que o webhook cruza a reserva com a propriedade).
+                O Smoobu ID não é editável (é o identificador do apartamento no Smoobu).
               </p>
             </div>
             <div className="space-y-1.5">
@@ -509,6 +685,27 @@ export default function PropriedadesPage() {
                 required
               />
             </div>
+
+            {/* Checklist de Limpeza (edição) */}
+            <div className="space-y-1.5">
+              <label htmlFor="edit-checklist" className="text-sm font-medium">
+                Checklist de Limpeza (um item por linha)
+              </label>
+              <textarea
+                id="edit-checklist"
+                value={editForm.checklist}
+                onChange={(e) =>
+                  setEditForm((f) => ({ ...f, checklist: e.target.value }))
+                }
+                rows={4}
+                placeholder={"Verificar toalhas\nEsvaziar lixo\nTrocar roupa de cama"}
+                className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+              <p className="text-xs text-muted-foreground">
+                O staff verá estes itens ao concluir a tarefa de limpeza desta propriedade.
+              </p>
+            </div>
+
             {editErro && (
               <p className="text-sm text-destructive">{editErro}</p>
             )}

@@ -209,7 +209,7 @@ exports.minhasTarefas = async (req, res) => {
       data: { $gte: hoje, $lt: amanha },
       estado: { $ne: 'cancelada' },
     })
-      .populate({ path: 'propriedade_id', select: 'nome morada coordenadas' })
+      .populate({ path: 'propriedade_id', select: 'nome morada coordenadas checklist' })
       .sort({ createdAt: 1 })
       .lean();
 
@@ -244,7 +244,7 @@ exports.minhaTarefaDetalhe = async (req, res) => {
       _id: id,
       utilizador_id: req.user.id,
     })
-      .populate({ path: 'propriedade_id', select: 'nome morada coordenadas' })
+      .populate({ path: 'propriedade_id', select: 'nome morada coordenadas checklist' })
       .lean();
 
     if (!tarefa) {
@@ -308,6 +308,109 @@ exports.concluirMinhaTarefa = async (req, res) => {
     return res.status(200).json({ tarefa: resp });
   } catch (err) {
     console.error('❌ concluirMinhaTarefa:', err.message);
+    return res.status(500).json({ erro: 'Erro interno do servidor.' });
+  }
+};
+
+/* ------------------------------------------------------------------ */
+/* Notificações Push (Web Push API) — v1.27.0                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * GET /api/auth/me/push-vapid-public-key
+ *
+ * Devolve a chave pública VAPID para o frontend pedir a subscrição
+ * do browser (PushManager.subscribe({ applicationServerKey })).
+ *
+ * Resposta 200: { publicKey: string }
+ * Resposta 503: Web Push não configurado (chaves VAPID em falta).
+ */
+exports.pushVapidPublicKey = async (req, res) => {
+  try {
+    const { isConfigured, getPublicKey } = require('../utils/push');
+    if (!isConfigured()) {
+      return res.status(503).json({
+        erro: 'Notificações push não configuradas no servidor.',
+      });
+    }
+    return res.status(200).json({ publicKey: getPublicKey() });
+  } catch (err) {
+    console.error('❌ pushVapidPublicKey:', err.message);
+    return res.status(500).json({ erro: 'Erro interno do servidor.' });
+  }
+};
+
+/**
+ * POST /api/auth/me/push-subscribe
+ *
+ * Guarda a subscrição push gerada pelo browser no utilizador logado.
+ * O frontend chama isto depois de obter a subscrição via:
+ *   const sub = await registration.pushManager.subscribe({...});
+ *   fetch('/api/auth/me/push-subscribe', { method: 'POST', body: sub })
+ *
+ * Body: { subscription: PushSubscription }
+ *   - objeto com { endpoint, keys: { p256dh, auth }, expirationTime? }
+ *
+ * Resposta 200: { mensagem: 'Subscrição guardada com sucesso.' }
+ * Resposta 400: subscription em falta ou inválida
+ * Resposta 503: Web Push não configurado
+ */
+exports.pushSubscribe = async (req, res) => {
+  try {
+    const { isConfigured } = require('../utils/push');
+    if (!isConfigured()) {
+      return res.status(503).json({
+        erro: 'Notificações push não configuradas no servidor.',
+      });
+    }
+
+    const { subscription } = req.body || {};
+
+    if (!subscription || !subscription.endpoint) {
+      return res.status(400).json({
+        erro: 'Subscrição inválida: falta o objeto subscription com endpoint.',
+      });
+    }
+
+    // Guarda a subscrição no utilizador logado.
+    const utilizador = await Utilizador.findById(req.user.id);
+    if (!utilizador) {
+      return res.status(404).json({ erro: 'Utilizador não encontrado.' });
+    }
+
+    utilizador.pushSubscription = subscription;
+    await utilizador.save();
+
+    return res.status(200).json({
+      mensagem: 'Subscrição guardada com sucesso.',
+    });
+  } catch (err) {
+    console.error('❌ pushSubscribe:', err.message);
+    return res.status(500).json({ erro: 'Erro interno do servidor.' });
+  }
+};
+
+/**
+ * POST /api/auth/me/push-unsubscribe
+ *
+ * Remove a subscrição push do utilizador (ex: user fez logout, ou o
+ * browser reportou que a subscrição expirou).
+ *
+ * Resposta 200: { mensagem: 'Subscrição removida.' }
+ */
+exports.pushUnsubscribe = async (req, res) => {
+  try {
+    const utilizador = await Utilizador.findById(req.user.id);
+    if (!utilizador) {
+      return res.status(404).json({ erro: 'Utilizador não encontrado.' });
+    }
+
+    utilizador.pushSubscription = null;
+    await utilizador.save();
+
+    return res.status(200).json({ mensagem: 'Subscrição removida.' });
+  } catch (err) {
+    console.error('❌ pushUnsubscribe:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
   }
 };

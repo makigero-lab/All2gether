@@ -17,7 +17,7 @@
  *   não precisa de fetch assíncrono.
  */
 
-export type Role = "admin" | "manager" | "staff";
+export type Role = "admin" | "gestor" | "staff";
 
 export interface UtilizadorAuth {
   id: string;
@@ -79,13 +79,13 @@ export async function fazerLogout(): Promise<void> {
 
 /**
  * Determina para onde redirecionar o utilizador após login, com base no role.
- * - admin   -> /admin   (dono da conta)
- * - manager -> /manager  (responsável de limpezas)
+ * - admin   -> /admin   (Super Admin — painel de administração)
+ * - gestor  -> /gestor  (Gestor de Operações — painel operacional)
  * - staff   -> /staff    (executante de limpezas)
  */
 export function rotaPorRole(role: Role): string {
   if (role === "admin") return "/admin";
-  if (role === "manager") return "/manager";
+  if (role === "gestor") return "/gestor";
   return "/staff";
 }
 

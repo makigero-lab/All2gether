@@ -200,11 +200,11 @@ function calcularTempoViagem(coordA, coordB) {
  */
 async function determinarUtilizadorAtribuido(empresaId, range, coordenadasNovaPropriedade, tempoNovaTarefa) {
   // Passo 3 — Procurar todos os Staff e Managers ativos da empresa.
-  // (O manager — responsável de limpezas — também pode executar limpezas,
+  // (O gestor — responsável de limpezas — também pode executar limpezas,
   //  pelo que entra no load balancing como qualquer staff.)
   const staff = await Utilizador.find({
     empresa_id: empresaId,
-    role: { $in: ['staff', 'manager'] },
+    role: { $in: ['staff', 'gestor'] },
     ativo: true,
   }).lean();
 
@@ -214,8 +214,11 @@ async function determinarUtilizadorAtribuido(empresaId, range, coordenadasNovaPr
   // v1.16.0: o campo legacy `data` foi removido. Query agora usa apenas
   // data_inicio/data_fim (sobreposição de intervalos).
   // Condição: ausencia.data_inicio <= dia AND ausencia.data_fim >= dia.
+  // v1.24.0: só ausências APROVADAS bloqueiam a atribuição. Pedidos
+  // pendentes ou rejeitados não contam (o staff pode ainda trabalhar).
   const ausentes = await Ausencia.find({
     utilizador_id: { $in: staff.map((s) => s._id) },
+    estado: 'aprovada',
     data_inicio: { $lte: range.start },
     data_fim: { $gte: range.start },
   }).distinct('utilizador_id');
@@ -469,7 +472,7 @@ async function criarTarefaPorReserva(reservaId, smoobuPropId, dataCheckInRaw, co
     content.tempo_limpeza_minutos ??
     content.cleaning_minutes ??
     propriedade.tempo_limpeza_minutos ??
-    60;
+    45;
 
   // Load balancer (best-effort: se falhar, cria sem atribuição).
   let utilizadorAtribuido = null;
@@ -494,7 +497,7 @@ async function criarTarefaPorReserva(reservaId, smoobuPropId, dataCheckInRaw, co
     smoobu_reserva_id: reservaId || undefined,
     utilizador_id: utilizadorAtribuido,
     data: range.start,
-    tempo_limpeza_minutos: Number(tempoLimpeza) || 60,
+    tempo_limpeza_minutos: Number(tempoLimpeza) || 45,
     tipo: 'limpeza',
     estado: utilizadorAtribuido ? 'atribuida' : 'por_atribuir',
   });
@@ -620,8 +623,8 @@ async function atualizarTarefaPorReserva(reservaId, smoobuPropId, dataCheckInRaw
         content.tempo_limpeza_minutos ??
         content.cleaning_minutes ??
         propriedade.tempo_limpeza_minutos ??
-        60;
-      const novoTempo = Number(tempoLimpeza) || 60;
+        45;
+      const novoTempo = Number(tempoLimpeza) || 45;
       if (tarefa.tempo_limpeza_minutos !== novoTempo) {
         tarefa.tempo_limpeza_minutos = novoTempo;
         mudou = true;
@@ -653,6 +656,7 @@ async function atualizarTarefaPorReserva(reservaId, smoobuPropId, dataCheckInRaw
     if (disponivel) {
       const ausente = await Ausencia.exists({
         utilizador_id: tarefa.utilizador_id,
+        estado: 'aprovada',
         data_inicio: { $lte: novoRange.start },
         data_fim: { $gte: novoRange.start },
       });

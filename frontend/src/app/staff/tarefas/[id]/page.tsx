@@ -5,13 +5,14 @@ import { notFound } from "next/navigation";
 import { Loader2 } from "lucide-react";
 
 import { DetalheTarefaClient } from "@/components/staff/detalhe-tarefa-client";
-import { checklistPorDefeito } from "@/lib/mock-data";
 
 /**
  * Ecrã de Detalhe da Tarefa — /staff/tarefas/[id]
  *
  * Client Component: busca a tarefa real da API (/api/auth/me/tarefas/:id)
  * e passa ao DetalheTarefaClient que gere o estado interativo.
+ *
+ * A checklist vem do propriedade_id.checklist (populado pelo backend).
  */
 export default function DetalheTarefaPage({
   params,
@@ -63,10 +64,15 @@ export default function DetalheTarefaPage({
     endereco: tarefa.propriedade_id?.morada,
   };
 
+  // Usa a checklist real da propriedade (vinda do populate do backend).
+  // Se a propriedade não tiver checklist definida, usa uma vazia (o botão
+  // de concluir fica sempre ativo quando não há itens).
+  const checklist: string[] = tarefa.propriedade_id?.checklist ?? [];
+
   return (
     <DetalheTarefaClient
       tarefa={tarefaAdaptada}
-      checklist={checklistPorDefeito}
+      checklist={checklist}
     />
   );
 }

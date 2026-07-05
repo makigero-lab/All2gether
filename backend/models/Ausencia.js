@@ -1,18 +1,25 @@
 /**
  * Modelo: Ausencia
- * Regista férias ou folgas de um utilizador (Staff/Manager) num intervalo de datas.
+ * Regista férias ou ausências de um utilizador (Staff/Manager) num intervalo de datas.
+ *
+ * v1.24.0 — Fluxo de aprovação:
+ *   - `estado`: 'pendente' | 'aprovada' | 'rejeitada' (default 'pendente').
+ *     O staff cria pedidos (sempre 'pendente'); o admin aprova/rejeita.
+ *     Aprovar → redistribui tarefas do período (load balancer).
+ *   - `tipo`: 'ferias' | 'doenca' | 'outro' (default 'ferias'). Substitui o
+ *     enum antigo ['ferias', 'folga'] — as "folgas" passam a ser geridas
+ *     pelo campo `dias_folga` do Utilizador (folgas fixas semanais).
  *
  * v1.16.0 — Limpeza de retrocompatibilidade:
  *   O campo legacy `data` (v1.1.0, dia único) foi REMOVIDO. O modelo
  *   passa a usar exclusivamente `data_inicio` / `data_fim` (intervalos).
- *   O pre('save') que preenchia `data` foi também removido.
  *
  * v1.8.0 — Sistema de Folgas e Férias:
  *   - `data_inicio` / `data_fim` definem o intervalo (inclusive).
- *   - `tipo`: 'ferias' | 'folga'.
- *   - `notas`: observações livres.
  *
  * O webhook consulta Ausencia para excluir staff indisponível no dia da limpeza.
+ * Nota: o webhook só considera ausências com estado 'aprovada' (pendentes e
+ * rejeitadas não bloqueiam a atribuição).
  */
 const mongoose = require('mongoose');
 
@@ -41,11 +48,30 @@ const ausenciaSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    // v1.24.0: enum alargado. As "folgas" fixas semanais passaram para o
+    // campo `dias_folga` do Utilizador (v1.14.0).
     tipo: {
       type: String,
-      enum: ['ferias', 'folga'],
-      default: 'folga',
+      enum: ['ferias', 'doenca', 'outro'],
+      default: 'ferias',
       required: true,
+    },
+    // v1.24.0: fluxo de aprovação.
+    // v1.26.0: adicionado 'pendente_emergencia' — falta criada pelo próprio
+    // funcionário para o dia atual (doença súbita). O admin aprova e dispara
+    // a redistribuição imediata das tarefas do dia.
+    estado: {
+      type: String,
+      enum: ['pendente', 'pendente_emergencia', 'aprovada', 'rejeitada'],
+      default: 'pendente',
+      required: true,
+      index: true,
+    },
+    // v1.26.0: justificação enviada pelo staff ao reportar falta de emergência.
+    justificacao: {
+      type: String,
+      trim: true,
+      default: '',
     },
     notas: {
       type: String,
