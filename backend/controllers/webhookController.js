@@ -491,12 +491,57 @@ async function criarTarefaPorReserva(reservaId, smoobuPropId, dataCheckInRaw, co
     utilizadorAtribuido = null;
   }
 
+  // v1.49.0 — Scheduler Sequencial: calcula a hora exata de início da
+  // tarefa em vez de usar meia-noite (range.start). As limpezas começam
+  // às 11:00 por defeito; se o staff já tiver tarefas nesse dia, a nova
+  // tarefa é agendada após a última (fim + tempo de viagem).
+  let dataAgendada = new Date(range.start);
+  dataAgendada.setUTCHours(10, 0, 0, 0); // 11:00 local (UTC+1) = 10:00 UTC
+
+  if (utilizadorAtribuido) {
+    try {
+      // Procura a última tarefa do utilizador nesse dia (com coordenadas).
+      const ultimaTarefa = await Tarefa.findOne({
+        utilizador_id: utilizadorAtribuido,
+        data: { $gte: range.start, $lt: range.end },
+        estado: { $nin: ['cancelada'] },
+      })
+        .populate({ path: 'propriedade_id', select: 'coordenadas nome' })
+        .sort({ data: -1 })
+        .lean();
+
+      if (ultimaTarefa && ultimaTarefa.propriedade_id) {
+        // Calcula hora de fim da tarefa anterior.
+        const fimAnterior = new Date(ultimaTarefa.data);
+        fimAnterior.setMinutes(
+          fimAnterior.getMinutes() + (ultimaTarefa.tempo_limpeza_minutos || 45)
+        );
+
+        // Calcula tempo de viagem entre a propriedade anterior e a nova.
+        const coordAnterior = ultimaTarefa.propriedade_id.coordenadas;
+        const coordNova = propriedade.coordenadas;
+        const tempoViagem = calcularTempoViagem(coordAnterior, coordNova);
+
+        // Nova hora de início = fim anterior + tempo de viagem.
+        dataAgendada = new Date(fimAnterior.getTime() + tempoViagem * 60000);
+
+        console.log(
+          `📅 Scheduler: tarefa agendada para ${dataAgendada.toISOString()} ` +
+            `(fim anterior: ${fimAnterior.toISOString()}, viagem: ${tempoViagem}min)`
+        );
+      }
+    } catch (err) {
+      console.error('⚠️  Scheduler sequencial falhou (usa 11:00 padrão):', err.message);
+      // Mantém dataAgendada = 11:00 (já definido acima).
+    }
+  }
+
   const novaTarefa = await Tarefa.create({
     empresa_id: empresaId,
     propriedade_id: propriedade._id,
     smoobu_reserva_id: reservaId || undefined,
     utilizador_id: utilizadorAtribuido,
-    data: range.start,
+    data: dataAgendada,
     tempo_limpeza_minutos: Number(tempoLimpeza) || 45,
     tipo: 'limpeza',
     estado: utilizadorAtribuido ? 'atribuida' : 'por_atribuir',
