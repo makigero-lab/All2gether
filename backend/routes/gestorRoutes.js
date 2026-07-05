@@ -47,7 +47,7 @@ const {
   reprocessarWebhook,
   setupClienteZero,
 } = require('../controllers/gestorController');
-const { reportarAtrasoTarefa, criarTarefa, atribuirTarefa, atualizarEstadoTarefa } = require('../controllers/tarefaController');
+const { reportarAtrasoTarefa, criarTarefa, atribuirTarefa, atualizarEstadoTarefa, apagarTarefasFuturas } = require('../controllers/tarefaController');
 const { sincronizarReservas, getPropriedadesSmoobu, sincronizarPropriedades, importarPropriedades } = require('../controllers/smoobuController');
 
 // Bootstrap do ambiente de testes — Cliente Zero. PÚBLICO (sem auth).
@@ -78,6 +78,9 @@ router.post('/tarefas/:id/atraso', auth, isGestor, reportarAtrasoTarefa);
 router.post('/tarefas', auth, isGestor, criarTarefa);
 router.patch('/tarefas/:id/atribuir', auth, isGestor, atribuirTarefa);
 router.patch('/tarefas/:id/estado', auth, isGestor, atualizarEstadoTarefa);
+
+// Apagar tarefas futuras não concluídas (reset do calendário).
+router.delete('/tarefas/futuras', auth, isGestor, apagarTarefasFuturas);
 
 // Gestão de equipa (utilizadores) da empresa. PROTEGIDO por JWT.
 router.get('/equipa', auth, isGestor, getEquipa);

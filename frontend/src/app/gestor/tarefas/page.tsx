@@ -13,6 +13,7 @@ import {
   CheckCircle2,
   Wrench,
   Filter,
+  Trash2,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -37,6 +38,7 @@ import {
   adminGet,
   adminPost,
   adminPatch,
+  adminDelete,
   type PropriedadeDTO,
   type UtilizadorDTO,
   type Role,
@@ -264,6 +266,26 @@ export default function AdminTarefasPage() {
     }
   }
 
+  // v1.50.0 — Limpar tarefas futuras (reset do calendário).
+  const [limpando, setLimpando] = useState(false);
+  const [confirmarLimpar, setConfirmarLimpar] = useState(false);
+
+  async function handleLimparFuturas() {
+    setLimpando(true);
+    setConfirmarLimpar(false);
+    try {
+      const res = await adminDelete<{ mensagem: string; apagadas: number }>(
+        "/api/gestor/tarefas/futuras"
+      );
+      setSincronizacaoOk(res.mensagem || `${res.apagadas} tarefa(s) apagada(s).`);
+      await carregar();
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Erro ao apagar tarefas.");
+    } finally {
+      setLimpando(false);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
       {/* Cabeçalho */}
@@ -313,6 +335,20 @@ export default function AdminTarefasPage() {
             <span className="hidden sm:inline">
               {sincronizando ? "A sincronizar…" : "Sincronizar Reservas"}
             </span>
+          </Button>
+          <Button
+            variant="outline"
+            className="border-destructive/40 text-destructive hover:bg-destructive/10"
+            onClick={() => setConfirmarLimpar(true)}
+            disabled={limpando}
+            title="Apaga todas as tarefas não concluídas de hoje para a frente. Depois podes sincronizar novamente."
+          >
+            {limpando ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Trash2 className="h-4 w-4" />
+            )}
+            <span className="hidden sm:inline">Limpar Futuras</span>
           </Button>
           <Button onClick={() => setMostrarForm((v) => !v)}>
             <Plus className="h-4 w-4" />
@@ -568,6 +604,55 @@ export default function AdminTarefasPage() {
           <Button variant="outline" onClick={() => setAtribuindo(null)} disabled={atribuirSubmitting}>Cancelar</Button>
           <Button onClick={handleAtribuir} disabled={!atribuirUserId || atribuirSubmitting}>
             {atribuirSubmitting ? <><Loader2 className="h-4 w-4 animate-spin" />A atribuir…</> : "Atribuir"}
+          </Button>
+        </DialogFooter>
+      </Dialog>
+
+      {/* Dialog de confirmação: Limpar Futuras */}
+      <Dialog open={confirmarLimpar} onOpenChange={setConfirmarLimpar}>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Trash2 className="h-5 w-5 text-destructive" />
+            Limpar Tarefas Futuras
+          </DialogTitle>
+          <DialogDescription>
+            Isto vai apagar todas as tarefas não concluídas de hoje para a frente.
+            As concluídas e canceladas serão preservadas. Queres continuar?
+          </DialogDescription>
+          <DialogClose onClick={() => setConfirmarLimpar(false)} />
+        </DialogHeader>
+        <DialogContent className="space-y-2">
+          <p className="text-sm text-muted-foreground">
+            Depois de apagar, podes clicar em &ldquo;Sincronizar Reservas&rdquo; para recriar
+            as tarefas com o scheduler sequencial (horas reais).
+          </p>
+        </DialogContent>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setConfirmarLimpar(false)}
+            disabled={limpando}
+          >
+            Cancelar
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            onClick={handleLimparFuturas}
+            disabled={limpando}
+          >
+            {limpando ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                A apagar…
+              </>
+            ) : (
+              <>
+                <Trash2 className="mr-2 h-4 w-4" />
+                Sim, apagar
+              </>
+            )}
           </Button>
         </DialogFooter>
       </Dialog>

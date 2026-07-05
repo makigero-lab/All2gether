@@ -334,3 +334,52 @@ exports.atualizarEstadoTarefa = async (req, res) => {
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
   }
 };
+
+/* ------------------------------------------------------------------ */
+/* DELETE /api/gestor/tarefas/futuras — apagar tarefas futuras (v1.50) */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Apaga todas as tarefas NÃO concluídas de hoje para a frente.
+ * Útil para forçar o reprocessamento do load balancer — o gestor apaga
+ * as tarefas futuras e depois clica em "Sincronizar Reservas" para
+ * recriá-las com o scheduler sequencial (horas reais).
+ *
+ * Regras:
+ *   - Só apaga tarefas da empresa do gestor (empresa_id do JWT).
+ *   - Só apaga tarefas com data >= início de hoje (UTC).
+ *   - NÃO apaga tarefas concluídas (preserva histórico).
+ *   - NÃO apaga tarefas canceladas (já não contam para carga).
+ *
+ * Resposta 200: { mensagem, apagadas }
+ */
+exports.apagarTarefasFuturas = async (req, res) => {
+  try {
+    const { ok, empresaId } = obterEmpresaId(req, res);
+    if (!ok) return;
+
+    const agora = new Date();
+    const hojeInicio = new Date(
+      Date.UTC(agora.getUTCFullYear(), agora.getUTCMonth(), agora.getUTCDate())
+    );
+
+    const resultado = await Tarefa.deleteMany({
+      empresa_id: empresaId,
+      data: { $gte: hojeInicio },
+      estado: { $nin: ['concluida', 'cancelada'] },
+    });
+
+    console.log(
+      `🧹 apagarTarefasFuturas: ${resultado.deletedCount} tarefa(s) apagada(s) ` +
+        `(empresa ${empresaId}, desde ${hojeInicio.toISOString()}).`
+    );
+
+    return res.status(200).json({
+      mensagem: `${resultado.deletedCount} tarefa(s) futura(s) apagada(s) com sucesso.`,
+      apagadas: resultado.deletedCount,
+    });
+  } catch (err) {
+    console.error('❌ apagarTarefasFuturas:', err.message);
+    return res.status(500).json({ erro: 'Erro interno do servidor.' });
+  }
+};
