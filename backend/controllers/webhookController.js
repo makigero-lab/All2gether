@@ -495,6 +495,10 @@ async function criarTarefaPorReserva(reservaId, smoobuPropId, dataCheckInRaw, co
   // tarefa em vez de usar meia-noite (range.start). As limpezas começam
   // às 11:00 por defeito; se o staff já tiver tarefas nesse dia, a nova
   // tarefa é agendada após a última (fim + tempo de viagem).
+  // v1.51.0 — Proteção de hora de almoço (13:00-14:00 local):
+  //   Regra A: se o início cair no almoço, empurra para 14:00.
+  //   Regra B: se o início for antes do almoço mas o fim ultrapassar 13:15,
+  //     empurra para 14:00 (não partir a limpeza a meio).
   let dataAgendada = new Date(range.start);
   dataAgendada.setUTCHours(10, 0, 0, 0); // 11:00 local (UTC+1) = 10:00 UTC
 
@@ -534,6 +538,30 @@ async function criarTarefaPorReserva(reservaId, smoobuPropId, dataCheckInRaw, co
       console.error('⚠️  Scheduler sequencial falhou (usa 11:00 padrão):', err.message);
       // Mantém dataAgendada = 11:00 (já definido acima).
     }
+  }
+
+  // v1.51.0 — Proteção de hora de almoço (13:00-14:00, hora local PT = UTC+1).
+  // Em UTC: almoço = 12:00-13:00 UTC.
+  try {
+    const inicioUTC = dataAgendada.getUTCHours() * 60 + dataAgendada.getUTCMinutes();
+    const ALMOCO_INICIO = 12 * 60;       // 13:00 local = 12:00 UTC
+    const ALMOCO_FIM = 13 * 60;          // 14:00 local = 13:00 UTC
+    const ALMOCO_TOLERANCIA = 12 * 60 + 15; // 13:15 local = 12:15 UTC
+    const duracaoMin = Number(tempoLimpeza) || 45;
+    const fimPrevistoMin = inicioUTC + duracaoMin;
+
+    // Regra A: início dentro do almoço → empurra para 14:00 (13:00 UTC).
+    if (inicioUTC >= ALMOCO_INICIO && inicioUTC < ALMOCO_FIM) {
+      dataAgendada.setUTCHours(13, 0, 0, 0);
+      console.log(`🍽️ Scheduler: início no almoço → empurrado para 14:00 local`);
+    }
+    // Regra B: início antes do almoço mas fim ultrapassa 13:15 → empurra para 14:00.
+    else if (inicioUTC < ALMOCO_INICIO && fimPrevistoMin > ALMOCO_TOLERANCIA) {
+      dataAgendada.setUTCHours(13, 0, 0, 0);
+      console.log(`🍽️ Scheduler: fim ultrapassa 13:15 → empurrado para 14:00 local`);
+    }
+  } catch (err) {
+    console.error('⚠️  Proteção de almoço falhou:', err.message);
   }
 
   const novaTarefa = await Tarefa.create({
