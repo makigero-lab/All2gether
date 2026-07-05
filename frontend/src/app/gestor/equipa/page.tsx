@@ -13,7 +13,15 @@ import {
   Phone,
   Siren,
   CalendarOff,
+  // Ícones usados pela aba de Aprovações
+  CalendarCheck,
+  Check,
+  X,
+  CheckCircle2,
+  User,
 } from "lucide-react";
+import { format, parseISO } from "date-fns";
+import { pt } from "date-fns/locale";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +29,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
+  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -34,6 +43,12 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
+import {
   adminGet,
   adminPost,
   adminPut,
@@ -45,17 +60,25 @@ import {
 import { PaginationBar } from "@/components/admin/pagination-bar";
 
 /**
- * Página de Equipa — Painel de Administração (CRUD completo).
+ * Página de Equipa — Painel de Administração.
  *
- * Consome a API real (GET/POST/PUT/PATCH/DELETE /api/gestor/equipa) com JWT
- * no header Authorization (via helpers adminGet/adminPost/adminPut/...).
+ * Esta página agrega duas secções em Tabs do shadcn/ui:
+ *  - "Lista de Staff": CRUD completo de membros (Admin, Responsável e Staff).
+ *  - "Aprovações de Férias": pedidos de ausência pendentes (aprovar / rejeitar).
  *
- * Lista os membros numa tabela (Nome, Email, Role, Estado, Ações) e permite:
- *   - Adicionar (formulário inline)
- *   - Editar (modal: nome, email, role, password opcional)
- *   - Ativar/Desativar (toggle instantâneo)
- *   - Eliminar (com confirmação)
+ * A aba de Staff consome a API real (GET/POST/PUT/PATCH/DELETE /api/gestor/equipa)
+ * com JWT no header Authorization (via helpers adminGet/adminPost/...).
+ * A aba de Aprovações consome GET /api/gestor/ausencias?estado=pendente,...
+ * e PATCH /api/gestor/ausencias/:id/estado.
+ *
+ * Como ambas as secções partilham o mesmo componente, todos os estados, funções
+ * e handlers da aba de Aprovações estão prefixados com `apr_` para evitar
+ * colisões com os da aba de Staff (ex.: `loading`, `erro`, `carregar`).
  */
+
+/* ------------------------------------------------------------------ */
+/* Constantes — Equipa                                                 */
+/* ------------------------------------------------------------------ */
 
 const ROLE_LABEL: Record<Role, string> = {
   admin: "Admin",
@@ -78,6 +101,53 @@ const DIAS_SEMANA = [
   { valor: 5, label: "Sex" },
   { valor: 6, label: "Sáb" },
 ];
+
+/* ------------------------------------------------------------------ */
+/* Constantes & tipos — Aprovações                                     */
+/* ------------------------------------------------------------------ */
+
+interface AusenciaDTO {
+  _id: string;
+  utilizador_id: string;
+  utilizador: {
+    _id: string;
+    nome: string;
+    email: string;
+    role: Role;
+  } | null;
+  data_inicio: string;
+  data_fim: string;
+  tipo: string;
+  estado: string;
+  justificacao?: string;
+  notas?: string;
+  createdAt: string;
+}
+
+const TIPO_LABEL: Record<string, string> = {
+  ferias: "Férias",
+  doenca: "Doença",
+  outro: "Outro",
+};
+
+const TIPO_VARIANT: Record<string, "default" | "secondary" | "outline"> = {
+  ferias: "default",
+  doenca: "secondary",
+  outro: "outline",
+};
+
+/** Formata uma data ISO (yyyy-MM-dd) para "d MMM yyyy" em PT. */
+function formatarData(iso: string): string {
+  try {
+    return format(parseISO(iso), "d MMM yyyy", { locale: pt });
+  } catch {
+    return iso;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Sub-componente — Folgas Semanais                                    */
+/* ------------------------------------------------------------------ */
 
 /** Componente de checkboxes para Folgas Semanais Fixas (0=Dom a 6=Sáb). */
 function FolgasSemanaisCheckboxes({
@@ -126,7 +196,12 @@ function FolgasSemanaisCheckboxes({
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* Página                                                              */
+/* ------------------------------------------------------------------ */
+
 export default function EquipaPage() {
+  // ===== Estado — Equipa (Staff) =====
   const [utilizadores, setUtilizadores] = useState<UtilizadorDTO[]>([]);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
@@ -189,7 +264,6 @@ export default function EquipaPage() {
   const [baixaResultado, setBaixaResultado] = useState<string | null>(null);
 
   // Utilizadores que podem ser responsáveis (admin + gestor).
-  // Usado para popular o select de Responsável nos formulários.
   const responsaveisPossiveis = utilizadores.filter(
     (u) => u.role === "admin" || u.role === "gestor"
   );
@@ -383,113 +457,548 @@ export default function EquipaPage() {
     }
   }
 
+  // ===== Estado — Aprovações (prefix apr_) =====
+  const [aprPendentes, setAprPendentes] = useState<AusenciaDTO[]>([]);
+  const [aprLoading, setAprLoading] = useState(true);
+  const [aprErro, setAprErro] = useState<string | null>(null);
+  const [aprToast, setAprToast] = useState<{
+    tipo: "sucesso" | "erro";
+    msg: string;
+  } | null>(null);
+  const [aprProcessando, setAprProcessando] = useState<string | null>(null);
+
+  /** Carrega as ausências pendentes da empresa. */
+  const aprCarregar = useCallback(async () => {
+    setAprLoading(true);
+    setAprErro(null);
+    try {
+      const res = await adminGet<{ ausencias: AusenciaDTO[] }>(
+        "/api/gestor/ausencias?estado=pendente,pendente_emergencia"
+      );
+      setAprPendentes(res.ausencias ?? []);
+    } catch (e) {
+      setAprErro(e instanceof Error ? e.message : "Erro ao carregar pedidos.");
+    } finally {
+      setAprLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    aprCarregar();
+  }, [aprCarregar]);
+
+  /** Aprova um pedido e mostra toast com o resultado da redistribuição. */
+  async function aprAprovar(a: AusenciaDTO) {
+    setAprProcessando(`aprovar-${a._id}`);
+    setAprErro(null);
+    try {
+      const res = await adminPatch<{
+        mensagem: string;
+        redistribuicao: { total: number; reatribuidas: number; orfas: number } | null;
+      }>(`/api/gestor/ausencias/${a._id}/estado`, { estado: "aprovada" });
+
+      const r = res.redistribuicao;
+      const msg =
+        r && r.total > 0
+          ? `Férias aprovadas. As tarefas deste funcionário foram redistribuídas com sucesso! (${r.reatribuidas} reatribuída(s)${r.orfas > 0 ? `, ${r.orfas} órfã(s)` : ""})`
+          : "Férias aprovadas. Sem tarefas para redistribuir no período.";
+      setAprToast({ tipo: "sucesso", msg });
+
+      // Remove da lista de pendentes (já foi decidido).
+      setAprPendentes((prev) => prev.filter((p) => p._id !== a._id));
+    } catch (e) {
+      setAprToast({
+        tipo: "erro",
+        msg: e instanceof Error ? `Erro ao aprovar: ${e.message}` : "Erro ao aprovar pedido.",
+      });
+    } finally {
+      setAprProcessando(null);
+    }
+  }
+
+  /** Rejeita um pedido. */
+  async function aprRejeitar(a: AusenciaDTO) {
+    setAprProcessando(`rejeitar-${a._id}`);
+    setAprErro(null);
+    try {
+      await adminPatch(`/api/gestor/ausencias/${a._id}/estado`, {
+        estado: "rejeitada",
+      });
+      setAprToast({ tipo: "sucesso", msg: "Pedido rejeitado." });
+      setAprPendentes((prev) => prev.filter((p) => p._id !== a._id));
+    } catch (e) {
+      setAprToast({
+        tipo: "erro",
+        msg: e instanceof Error ? `Erro ao rejeitar: ${e.message}` : "Erro ao rejeitar pedido.",
+      });
+    } finally {
+      setAprProcessando(null);
+    }
+  }
+
+  // Auto-esconde o toast após 6s.
+  useEffect(() => {
+    if (!aprToast) return;
+    const t = setTimeout(() => setAprToast(null), 6000);
+    return () => clearTimeout(t);
+  }, [aprToast]);
+
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
-      {/* Cabeçalho */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="hidden flex-col gap-1 lg:flex">
-          <h1 className="text-2xl font-bold tracking-tight">Equipa</h1>
-          <p className="text-sm text-muted-foreground">
-            Membros da equipa (Admin, Responsável e Staff).
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={carregar}
-            disabled={loading}
-            aria-label="Atualizar"
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-          </Button>
-          <Button onClick={() => setMostrarForm((v) => !v)}>
-            <Plus className="h-4 w-4" />
-            Adicionar Funcionário
-          </Button>
-        </div>
+      {/* Cabeçalho da página */}
+      <div className="hidden flex-col gap-1 lg:flex">
+        <h1 className="text-2xl font-bold tracking-tight">Equipa</h1>
+        <p className="text-sm text-muted-foreground">
+          Gere os membros da equipa e aprova os pedidos de férias e ausências.
+        </p>
       </div>
 
-      {/* Formulário inline de criação */}
-      {mostrarForm && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Users className="h-5 w-5 text-primary" />
-              Novo Funcionário
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmeter} className="space-y-4">
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <Tabs defaultValue="staff" className="w-full">
+        <TabsList>
+          <TabsTrigger value="staff" className="gap-1.5">
+            <Users className="h-4 w-4" />
+            Lista de Staff
+          </TabsTrigger>
+          <TabsTrigger value="aprovacoes" className="gap-1.5">
+            <CalendarCheck className="h-4 w-4" />
+            Aprovações de Férias
+            {aprPendentes.length > 0 && (
+              <Badge
+                variant="destructive"
+                className="ml-1 h-5 min-w-[1.25rem] justify-center px-1.5 text-[10px]"
+              >
+                {aprPendentes.length}
+              </Badge>
+            )}
+          </TabsTrigger>
+        </TabsList>
+
+        {/* ============================================================ */}
+        {/* ABA 1 — Lista de Staff                                       */}
+        {/* ============================================================ */}
+        <TabsContent value="staff" className="mt-4 flex flex-col gap-6">
+          {/* Ações */}
+          <div className="flex items-center justify-end gap-2">
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={carregar}
+              disabled={loading}
+              aria-label="Atualizar"
+            >
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            </Button>
+            <Button onClick={() => setMostrarForm((v) => !v)}>
+              <Plus className="h-4 w-4" />
+              Adicionar Funcionário
+            </Button>
+          </div>
+
+          {/* Formulário inline de criação */}
+          {mostrarForm && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Users className="h-5 w-5 text-primary" />
+                  Novo Funcionário
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={handleSubmeter} className="space-y-4">
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    <div className="space-y-1.5">
+                      <label htmlFor="nome" className="text-sm font-medium">
+                        Nome
+                      </label>
+                      <Input
+                        id="nome"
+                        value={form.nome}
+                        onChange={(e) =>
+                          setForm((f) => ({ ...f, nome: e.target.value }))
+                        }
+                        placeholder="Ex.: Maria Ferreira"
+                        required
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label htmlFor="email" className="text-sm font-medium">
+                        Email
+                      </label>
+                      <Input
+                        id="email"
+                        type="email"
+                        value={form.email}
+                        onChange={(e) =>
+                          setForm((f) => ({ ...f, email: e.target.value }))
+                        }
+                        placeholder="exemplo@autocell.pt"
+                        required
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label htmlFor="password" className="text-sm font-medium">
+                        Password
+                      </label>
+                      <Input
+                        id="password"
+                        type="password"
+                        value={form.password}
+                        onChange={(e) =>
+                          setForm((f) => ({ ...f, password: e.target.value }))
+                        }
+                        placeholder="Mín. 6 caracteres"
+                        required
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label htmlFor="telefone" className="text-sm font-medium">
+                        Telemóvel (WhatsApp)
+                      </label>
+                      <Input
+                        id="telefone"
+                        type="tel"
+                        value={form.telefone}
+                        onChange={(e) =>
+                          setForm((f) => ({ ...f, telefone: e.target.value }))
+                        }
+                        placeholder="+351 912 345 678"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label htmlFor="role" className="text-sm font-medium">
+                        Role
+                      </label>
+                      <select
+                        id="role"
+                        value={form.role}
+                        onChange={(e) =>
+                          setForm((f) => ({ ...f, role: e.target.value as Role }))
+                        }
+                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      >
+                        <option value="staff">Staff</option>
+                        <option value="gestor">Responsável</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label htmlFor="responsavel" className="text-sm font-medium">
+                        Responsável{" "}
+                        <span className="font-normal text-muted-foreground">
+                          (opcional)
+                        </span>
+                      </label>
+                      <select
+                        id="responsavel"
+                        value={form.responsavel_id}
+                        onChange={(e) =>
+                          setForm((f) => ({ ...f, responsavel_id: e.target.value }))
+                        }
+                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      >
+                        <option value="">— Sem responsável —</option>
+                        {responsaveisPossiveis.map((r) => (
+                          <option key={r._id} value={r._id}>
+                            {r.nome} ({ROLE_LABEL[r.role]})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Folgas Semanais Fixas */}
+                  <FolgasSemanaisCheckboxes
+                    diasFolga={form.dias_folga}
+                    onChange={(dias) => setForm((f) => ({ ...f, dias_folga: dias }))}
+                  />
+
+                  {formErro && (
+                    <p className="flex items-center gap-2 text-sm text-destructive">
+                      <AlertCircle className="h-4 w-4" />
+                      {formErro}
+                    </p>
+                  )}
+
+                  <div className="flex items-center gap-2">
+                    <Button type="submit" disabled={submitting}>
+                      {submitting ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          A guardar…
+                        </>
+                      ) : (
+                        "Guardar Funcionário"
+                      )}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        setMostrarForm(false);
+                        setFormErro(null);
+                        setForm({ nome: "", email: "", password: "", role: "staff", responsavel_id: "", dias_folga: [], telefone: "" });
+                      }}
+                      disabled={submitting}
+                    >
+                      Cancelar
+                    </Button>
+                  </div>
+                </form>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Erro de carregamento */}
+          {erro && !loading && (
+            <Card className="border-destructive/50">
+              <CardContent className="flex items-center gap-3 p-4 text-sm text-destructive">
+                <AlertCircle className="h-5 w-5 shrink-0" />
+                <div className="flex-1">
+                  <p className="font-medium">Não foi possível carregar a equipa.</p>
+                  <p className="text-xs opacity-80">{erro}</p>
+                </div>
+                <Button variant="outline" size="sm" onClick={carregar}>
+                  Tentar novamente
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Tabela de utilizadores */}
+          <Card>
+            <CardContent className="p-0">
+              {loading ? (
+                <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                  A carregar equipa…
+                </div>
+              ) : utilizadores.length === 0 ? (
+                <div className="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">
+                  <Users className="h-10 w-10 opacity-40" />
+                  <p className="text-sm">Ainda não há membros na equipa.</p>
+                  <p className="text-xs">
+                    Clica em “Adicionar Funcionário” para adicionar o primeiro.
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/40 text-left">
+                        <th className="px-4 py-3 font-medium">Nome</th>
+                        <th className="px-4 py-3 font-medium">Email</th>
+                        <th className="px-4 py-3 font-medium">Telemóvel</th>
+                        <th className="px-4 py-3 font-medium">Role</th>
+                        <th className="px-4 py-3 font-medium">Responsável</th>
+                        <th className="px-4 py-3 font-medium">Estado</th>
+                        <th className="px-4 py-3 text-right font-medium">Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {utilizadoresPagina.map((u) => {
+                        const ausenteHoje = ausentesHoje.has(u._id);
+                        return (
+                        <tr key={u._id} className={`hover:bg-muted/30 ${ausenteHoje ? "opacity-65" : ""}`}>
+                          <td className="px-4 py-3 font-medium">
+                            <div className="flex items-center gap-2">
+                              {u.nome}
+                              {ausenteHoje && (
+                                <Badge variant="destructive" className="text-[10px]">
+                                  Ausente Hoje
+                                </Badge>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground">
+                            {u.email}
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground">
+                            {u.telefone ? (
+                              <span className="inline-flex items-center gap-1.5">
+                                <Phone className="h-3.5 w-3.5" />
+                                {u.telefone}
+                              </span>
+                            ) : (
+                              "—"
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            <Badge variant={ROLE_VARIANT[u.role]}>
+                              {ROLE_LABEL[u.role]}
+                            </Badge>
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground">
+                            {u.responsavel ? u.responsavel.nome : "—"}
+                          </td>
+                          <td className="px-4 py-3">
+                            <Badge variant={u.ativo ? "success" : "secondary"}>
+                              {u.ativo ? "Ativo" : "Inativo"}
+                            </Badge>
+                          </td>
+                          <td className="px-4 py-3">
+                            {/* Admin: linha só de leitura (sem ações) */}
+                            {u.role === "admin" ? (
+                              <span className="text-xs text-muted-foreground">
+                                —
+                              </span>
+                            ) : (
+                              <div className="flex items-center justify-end gap-1">
+                                {/* Editar */}
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8"
+                                  onClick={() => abrirEdicao(u)}
+                                  aria-label={`Editar ${u.nome}`}
+                                  title="Editar"
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                {/* Ativar/Desativar */}
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8"
+                                  onClick={() => handleToggleAtivo(u)}
+                                  aria-label={u.ativo ? "Desativar" : "Ativar"}
+                                  title={u.ativo ? "Desativar" : "Ativar"}
+                                >
+                                  <Power className="h-4 w-4" />
+                                </Button>
+                                {/* Eliminar */}
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-destructive hover:text-destructive"
+                                  onClick={() => setEliminando(u)}
+                                  aria-label={`Eliminar ${u.nome}`}
+                                  title="Eliminar"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                                {/* Falta súbita */}
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-amber-500 hover:text-amber-600"
+                                  onClick={() => {
+                                    setFaltaSubita(u);
+                                    setFaltaResultado(null);
+                                  }}
+                                  aria-label={`Reportar falta súbita de ${u.nome}`}
+                                  title="Reportar Falta Hoje"
+                                >
+                                  <Siren className="h-4 w-4" />
+                                </Button>
+                                {/* Baixa prolongada / férias */}
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-blue-500 hover:text-blue-600"
+                                  onClick={() => {
+                                    setBaixaModal(u);
+                                    setBaixaForm({ data_inicio: "", data_fim: "" });
+                                    setBaixaResultado(null);
+                                  }}
+                                  aria-label={`Registar baixa ou férias de ${u.nome}`}
+                                  title="Registar Baixa / Férias"
+                                >
+                                  <CalendarOff className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {/* Paginação */}
+              {!loading && utilizadores.length > 0 && (
+                <PaginationBar
+                  page={paginaSegura}
+                  totalPages={totalPaginas}
+                  total={utilizadores.length}
+                  pageSize={tamPagina}
+                  onPageChange={setPagina}
+                  onPageSizeChange={(n) => {
+                    setTamPagina(n);
+                    setPagina(1);
+                  }}
+                  label="membros"
+                />
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Modal de Edição */}
+          <Dialog
+            open={editando !== null}
+            onOpenChange={(o) => !o && setEditando(null)}
+          >
+            <DialogHeader>
+              <div>
+                <DialogTitle>Editar Utilizador</DialogTitle>
+                <DialogDescription>
+                  Atualiza os dados do funcionário. Deixa a password vazia para
+                  manter a atual.
+                </DialogDescription>
+              </div>
+              <DialogClose onClick={() => setEditando(null)} />
+            </DialogHeader>
+            <form onSubmit={handleEditar}>
+              <DialogContent className="space-y-4">
                 <div className="space-y-1.5">
-                  <label htmlFor="nome" className="text-sm font-medium">
+                  <label htmlFor="edit-nome" className="text-sm font-medium">
                     Nome
                   </label>
                   <Input
-                    id="nome"
-                    value={form.nome}
+                    id="edit-nome"
+                    value={editForm.nome}
                     onChange={(e) =>
-                      setForm((f) => ({ ...f, nome: e.target.value }))
+                      setEditForm((f) => ({ ...f, nome: e.target.value }))
                     }
-                    placeholder="Ex.: Maria Ferreira"
                     required
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <label htmlFor="email" className="text-sm font-medium">
+                  <label htmlFor="edit-email" className="text-sm font-medium">
                     Email
                   </label>
                   <Input
-                    id="email"
+                    id="edit-email"
                     type="email"
-                    value={form.email}
+                    value={editForm.email}
                     onChange={(e) =>
-                      setForm((f) => ({ ...f, email: e.target.value }))
+                      setEditForm((f) => ({ ...f, email: e.target.value }))
                     }
-                    placeholder="exemplo@autocell.pt"
                     required
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <label htmlFor="password" className="text-sm font-medium">
-                    Password
-                  </label>
-                  <Input
-                    id="password"
-                    type="password"
-                    value={form.password}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, password: e.target.value }))
-                    }
-                    placeholder="Mín. 6 caracteres"
-                    required
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label htmlFor="telefone" className="text-sm font-medium">
+                  <label htmlFor="edit-telefone" className="text-sm font-medium">
                     Telemóvel (WhatsApp)
                   </label>
                   <Input
-                    id="telefone"
+                    id="edit-telefone"
                     type="tel"
-                    value={form.telefone}
+                    value={editForm.telefone}
                     onChange={(e) =>
-                      setForm((f) => ({ ...f, telefone: e.target.value }))
+                      setEditForm((f) => ({ ...f, telefone: e.target.value }))
                     }
                     placeholder="+351 912 345 678"
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <label htmlFor="role" className="text-sm font-medium">
+                  <label htmlFor="edit-role" className="text-sm font-medium">
                     Role
                   </label>
                   <select
-                    id="role"
-                    value={form.role}
+                    id="edit-role"
+                    value={editForm.role}
                     onChange={(e) =>
-                      setForm((f) => ({ ...f, role: e.target.value as Role }))
+                      setEditForm((f) => ({ ...f, role: e.target.value as Role }))
                     }
                     className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                   >
@@ -498,668 +1007,620 @@ export default function EquipaPage() {
                   </select>
                 </div>
                 <div className="space-y-1.5">
-                  <label htmlFor="responsavel" className="text-sm font-medium">
+                  <label htmlFor="edit-responsavel" className="text-sm font-medium">
                     Responsável{" "}
                     <span className="font-normal text-muted-foreground">
                       (opcional)
                     </span>
                   </label>
                   <select
-                    id="responsavel"
-                    value={form.responsavel_id}
+                    id="edit-responsavel"
+                    value={editForm.responsavel_id}
                     onChange={(e) =>
-                      setForm((f) => ({ ...f, responsavel_id: e.target.value }))
+                      setEditForm((f) => ({
+                        ...f,
+                        responsavel_id: e.target.value,
+                      }))
                     }
                     className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                   >
                     <option value="">— Sem responsável —</option>
-                    {responsaveisPossiveis.map((r) => (
-                      <option key={r._id} value={r._id}>
-                        {r.nome} ({ROLE_LABEL[r.role]})
-                      </option>
-                    ))}
+                    {responsaveisPossiveis
+                      .filter((r) => r._id !== editando?._id)
+                      .map((r) => (
+                        <option key={r._id} value={r._id}>
+                          {r.nome} ({ROLE_LABEL[r.role]})
+                        </option>
+                      ))}
                   </select>
                 </div>
-              </div>
+                <div className="space-y-1.5">
+                  <label htmlFor="edit-password" className="text-sm font-medium">
+                    Nova Password{" "}
+                    <span className="font-normal text-muted-foreground">
+                      (opcional)
+                    </span>
+                  </label>
+                  <Input
+                    id="edit-password"
+                    type="password"
+                    value={editForm.password}
+                    onChange={(e) =>
+                      setEditForm((f) => ({ ...f, password: e.target.value }))
+                    }
+                    placeholder="Deixa vazio para manter"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Útil para redefinir a password se o funcionário se esquecer.
+                  </p>
+                </div>
 
-              {/* Folgas Semanais Fixas */}
-              <FolgasSemanaisCheckboxes
-                diasFolga={form.dias_folga}
-                onChange={(dias) => setForm((f) => ({ ...f, dias_folga: dias }))}
-              />
+                {/* Folgas Semanais Fixas */}
+                <FolgasSemanaisCheckboxes
+                  diasFolga={editForm.dias_folga}
+                  onChange={(dias) =>
+                    setEditForm((f) => ({ ...f, dias_folga: dias }))
+                  }
+                />
 
-              {formErro && (
-                <p className="flex items-center gap-2 text-sm text-destructive">
-                  <AlertCircle className="h-4 w-4" />
-                  {formErro}
-                </p>
-              )}
-
-              <div className="flex items-center gap-2">
-                <Button type="submit" disabled={submitting}>
-                  {submitting ? (
+                {editErro && (
+                  <p className="flex items-center gap-2 text-sm text-destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    {editErro}
+                  </p>
+                )}
+              </DialogContent>
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setEditando(null)}
+                  disabled={editSubmitting}
+                >
+                  Cancelar
+                </Button>
+                <Button type="submit" disabled={editSubmitting}>
+                  {editSubmitting ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
                       A guardar…
                     </>
                   ) : (
-                    "Guardar Funcionário"
+                    "Guardar Alterações"
                   )}
                 </Button>
+              </DialogFooter>
+            </form>
+          </Dialog>
+
+          {/* Modal de Confirmação de Eliminação */}
+          <Dialog
+            open={eliminando !== null}
+            onOpenChange={(o) => !o && setEliminando(null)}
+          >
+            <DialogHeader>
+              <div>
+                <DialogTitle>Eliminar Utilizador</DialogTitle>
+                <DialogDescription>
+                  Esta ação é permanente e não pode ser desfeita.
+                </DialogDescription>
+              </div>
+              <DialogClose onClick={() => setEliminando(null)} />
+            </DialogHeader>
+            <DialogContent className="space-y-3">
+              <p className="text-sm">
+                Tens a certeza que queres eliminar{" "}
+                <span className="font-semibold">{eliminando?.nome}</span> (
+                {eliminando?.email})?
+              </p>
+              <p className="text-xs text-muted-foreground">
+                O utilizador perderá imediatamente o acesso à plataforma. Se só
+                quiseres suspender o acesso temporariamente, usa o botão de
+                Desativar.
+              </p>
+              {editErro && (
+                <p className="flex items-center gap-2 text-sm text-destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  {editErro}
+                </p>
+              )}
+            </DialogContent>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setEliminando(null)}
+                disabled={elimSubmitting}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={handleEliminar}
+                disabled={elimSubmitting}
+              >
+                {elimSubmitting ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    A eliminar…
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="h-4 w-4" />
+                    Eliminar Definitivamente
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </Dialog>
+
+          {/* Modal de Falta Súbita */}
+          <Dialog
+            open={faltaSubita !== null}
+            onOpenChange={(o) => !o && setFaltaSubita(null)}
+          >
+            <DialogHeader>
+              <div>
+                <DialogTitle className="flex items-center gap-2">
+                  <Siren className="h-5 w-5 text-amber-500" />
+                  Reportar Falta Súbita
+                </DialogTitle>
+                <DialogDescription>
+                  As tarefas de hoje serão redistribuídas pelos colegas disponíveis.
+                </DialogDescription>
+              </div>
+              <DialogClose onClick={() => setFaltaSubita(null)} />
+            </DialogHeader>
+            <DialogContent className="space-y-3">
+              <p className="text-sm">
+                Reportar falta hoje para{" "}
+                <span className="font-semibold">{faltaSubita?.nome}</span>?
+              </p>
+              <p className="text-xs text-muted-foreground">
+                As tarefas de hoje deste funcionário serão redistribuídas pelos
+                colegas disponíveis, usando o sistema de load balancing com
+                tempo de viagem. Tarefas sem ninguém disponível ficarão por atribuir.
+              </p>
+              {faltaResultado && (
+                <div className="rounded-md bg-amber-50 dark:bg-amber-950/20 p-3 text-sm text-amber-800 dark:text-amber-200">
+                  {faltaResultado}
+                </div>
+              )}
+            </DialogContent>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setFaltaSubita(null)}
+                disabled={faltaSubmitting}
+              >
+                {faltaResultado ? "Fechar" : "Cancelar"}
+              </Button>
+              {!faltaResultado && (
                 <Button
                   type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setMostrarForm(false);
-                    setFormErro(null);
-                    setForm({ nome: "", email: "", password: "", role: "staff", responsavel_id: "", dias_folga: [], telefone: "" });
-                  }}
-                  disabled={submitting}
+                  className="bg-amber-500 text-white hover:bg-amber-600"
+                  onClick={handleFaltaSubita}
+                  disabled={faltaSubmitting}
                 >
-                  Cancelar
+                  {faltaSubmitting ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      A processar…
+                    </>
+                  ) : (
+                    <>
+                      <Siren className="h-4 w-4" />
+                      Confirmar Falta
+                    </>
+                  )}
                 </Button>
+              )}
+            </DialogFooter>
+          </Dialog>
+
+          {/* Modal de Baixa Prolongada / Férias */}
+          <Dialog
+            open={baixaModal !== null}
+            onOpenChange={(o) => !o && setBaixaModal(null)}
+          >
+            <DialogHeader>
+              <div>
+                <DialogTitle className="flex items-center gap-2">
+                  <CalendarOff className="h-5 w-5 text-blue-500" />
+                  Registar Baixa ou Férias
+                </DialogTitle>
+                <DialogDescription>
+                  As tarefas futuras serão redistribuídas pelos colegas disponíveis.
+                </DialogDescription>
               </div>
-            </form>
-          </CardContent>
-        </Card>
-      )}
+              <DialogClose onClick={() => setBaixaModal(null)} />
+            </DialogHeader>
+            <DialogContent className="space-y-4">
+              {!baixaResultado ? (
+                <>
+                  <p className="text-sm">
+                    Registar baixa para{" "}
+                    <span className="font-semibold">{baixaModal?.nome}</span>?
+                  </p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label htmlFor="baixa-inicio" className="text-sm font-medium">
+                        Data de Início
+                      </label>
+                      <Input
+                        id="baixa-inicio"
+                        type="date"
+                        value={baixaForm.data_inicio}
+                        onChange={(e) =>
+                          setBaixaForm((f) => ({ ...f, data_inicio: e.target.value }))
+                        }
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label htmlFor="baixa-fim" className="text-sm font-medium">
+                        Data de Fim
+                      </label>
+                      <Input
+                        id="baixa-fim"
+                        type="date"
+                        value={baixaForm.data_fim}
+                        onChange={(e) =>
+                          setBaixaForm((f) => ({ ...f, data_fim: e.target.value }))
+                        }
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Todas as tarefas atribuídas a este funcionário no período serão
+                    reatribuídas usando o sistema de load balancing. As que não
+                    tiverem ninguém disponível ficarão por atribuir.
+                  </p>
+                </>
+              ) : (
+                <div className="rounded-md bg-blue-50 dark:bg-blue-950/20 p-3 text-sm text-blue-800 dark:text-blue-200">
+                  {baixaResultado}
+                </div>
+              )}
+            </DialogContent>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setBaixaModal(null)}
+                disabled={baixaSubmitting}
+              >
+                {baixaResultado ? "Fechar" : "Cancelar"}
+              </Button>
+              {!baixaResultado && (
+                <Button
+                  type="button"
+                  className="bg-blue-500 text-white hover:bg-blue-600"
+                  disabled={
+                    !baixaForm.data_inicio ||
+                    !baixaForm.data_fim ||
+                    baixaSubmitting
+                  }
+                  onClick={async () => {
+                    if (!baixaModal) return;
+                    setBaixaSubmitting(true);
+                    try {
+                      const res = await adminPost<{
+                        reatribuidas: number;
+                        orfas: number;
+                        total: number;
+                      }>(`/api/gestor/equipa/${baixaModal._id}/baixa`, {
+                        data_inicio: baixaForm.data_inicio,
+                        data_fim: baixaForm.data_fim,
+                        tipo: "ferias",
+                      });
+                      setBaixaResultado(
+                        `Baixa registada. ${res.reatribuidas} tarefa(s) reatribuída(s) aos colegas, ${res.orfas} ficou(aram) por atribuir.`
+                      );
+                      await carregar();
+                    } catch (e) {
+                      setBaixaResultado(
+                        e instanceof Error ? e.message : "Erro ao registar baixa."
+                      );
+                    } finally {
+                      setBaixaSubmitting(false);
+                    }
+                  }}
+                >
+                  {baixaSubmitting ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      A processar…
+                    </>
+                  ) : (
+                    <>
+                      <CalendarOff className="h-4 w-4" />
+                      Confirmar Ausência
+                    </>
+                  )}
+                </Button>
+              )}
+            </DialogFooter>
+          </Dialog>
+        </TabsContent>
 
-      {/* Erro de carregamento */}
-      {erro && !loading && (
-        <Card className="border-destructive/50">
-          <CardContent className="flex items-center gap-3 p-4 text-sm text-destructive">
-            <AlertCircle className="h-5 w-5 shrink-0" />
-            <div className="flex-1">
-              <p className="font-medium">Não foi possível carregar a equipa.</p>
-              <p className="text-xs opacity-80">{erro}</p>
-            </div>
-            <Button variant="outline" size="sm" onClick={carregar}>
-              Tentar novamente
+        {/* ============================================================ */}
+        {/* ABA 2 — Aprovações de Férias                                 */}
+        {/* ============================================================ */}
+        <TabsContent value="aprovacoes" className="mt-4 flex flex-col gap-6">
+          {/* Cabeçalho da aba */}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-muted-foreground">
+              Aprova ou rejeita os pedidos de ausência da equipa. Aprovar
+              redistribui automaticamente as tarefas do período.
+            </p>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={aprCarregar}
+              disabled={aprLoading}
+              aria-label="Atualizar"
+            >
+              <RefreshCw className={`h-4 w-4 ${aprLoading ? "animate-spin" : ""}`} />
             </Button>
-          </CardContent>
-        </Card>
-      )}
+          </div>
 
-      {/* Tabela de utilizadores */}
-      <Card>
-        <CardContent className="p-0">
-          {loading ? (
-            <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
+          {/* Toast (inline, não usa biblioteca externa) */}
+          {aprToast && (
+            <Card
+              className={
+                aprToast.tipo === "sucesso"
+                  ? "border-emerald-500/50"
+                  : "border-destructive/50"
+              }
+            >
+              <CardContent
+                className={`flex items-center gap-3 p-4 text-sm ${
+                  aprToast.tipo === "sucesso"
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : "text-destructive"
+                }`}
+              >
+                {aprToast.tipo === "sucesso" ? (
+                  <CheckCircle2 className="h-5 w-5 shrink-0" />
+                ) : (
+                  <AlertCircle className="h-5 w-5 shrink-0" />
+                )}
+                <span className="flex-1">{aprToast.msg}</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2"
+                  onClick={() => setAprToast(null)}
+                >
+                  ×
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Erro de carregamento */}
+          {aprErro && !aprLoading && (
+            <Card className="border-destructive/50">
+              <CardContent className="flex items-center gap-3 p-4 text-sm text-destructive">
+                <AlertCircle className="h-5 w-5 shrink-0" />
+                <span>{aprErro}</span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={aprCarregar}
+                  className="ml-auto"
+                >
+                  Tentar novamente
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Conteúdo */}
+          {aprLoading ? (
+            <div className="flex items-center justify-center gap-2 py-20 text-sm text-muted-foreground">
               <Loader2 className="h-5 w-5 animate-spin" />
-              A carregar equipa…
+              A carregar pedidos…
             </div>
-          ) : utilizadores.length === 0 ? (
-            <div className="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">
-              <Users className="h-10 w-10 opacity-40" />
-              <p className="text-sm">Ainda não há membros na equipa.</p>
-              <p className="text-xs">
-                Clica em “Adicionar Funcionário” para adicionar o primeiro.
-              </p>
-            </div>
+          ) : aprPendentes.length === 0 ? (
+            <Card>
+              <CardContent className="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">
+                <CalendarCheck className="h-12 w-12 opacity-40" />
+                <p className="text-sm font-medium">Sem pedidos pendentes</p>
+                <p className="text-xs">
+                  Quando um funcionário pedir férias ou ausência, aparece aqui para aprovação.
+                </p>
+              </CardContent>
+            </Card>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b bg-muted/40 text-left">
-                    <th className="px-4 py-3 font-medium">Nome</th>
-                    <th className="px-4 py-3 font-medium">Email</th>
-                    <th className="px-4 py-3 font-medium">Telemóvel</th>
-                    <th className="px-4 py-3 font-medium">Role</th>
-                    <th className="px-4 py-3 font-medium">Responsável</th>
-                    <th className="px-4 py-3 font-medium">Estado</th>
-                    <th className="px-4 py-3 text-right font-medium">Ações</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {utilizadoresPagina.map((u) => {
-                    const ausenteHoje = ausentesHoje.has(u._id);
-                    return (
-                    <tr key={u._id} className={`hover:bg-muted/30 ${ausenteHoje ? "opacity-65" : ""}`}>
-                      <td className="px-4 py-3 font-medium">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <CalendarCheck className="h-5 w-5 text-primary" />
+                  Pedidos pendentes
+                  <Badge variant="secondary" className="ml-1">
+                    {aprPendentes.length}
+                  </Badge>
+                </CardTitle>
+                <CardDescription>
+                  Aprovar redistribui as tarefas do período; rejeitar mantém as tarefas.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="p-0">
+                {/* Tabela (desktop) */}
+                <div className="hidden overflow-x-auto md:block">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/40 text-left">
+                        <th className="px-4 py-3 font-medium">Funcionário</th>
+                        <th className="px-4 py-3 font-medium">Tipo</th>
+                        <th className="px-4 py-3 font-medium">Datas</th>
+                        <th className="px-4 py-3 font-medium">Notas</th>
+                        <th className="px-4 py-3 text-right font-medium">Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {aprPendentes.map((a) => (
+                        <tr key={a._id} className="hover:bg-muted/30">
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <User className="h-4 w-4 text-muted-foreground" />
+                              <div>
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-medium">
+                                    {a.utilizador?.nome ?? "—"}
+                                  </span>
+                                  {a.estado === "pendente_emergencia" && (
+                                    <Badge variant="destructive" className="text-[10px]">
+                                      🚨 Emergência
+                                    </Badge>
+                                  )}
+                                </div>
+                                {a.utilizador?.email && (
+                                  <div className="text-xs text-muted-foreground">
+                                    {a.utilizador.email}
+                                  </div>
+                                )}
+                                {a.justificacao && (
+                                  <div className="mt-0.5 text-xs text-amber-600 dark:text-amber-500">
+                                    {a.justificacao}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <Badge variant={TIPO_VARIANT[a.tipo] ?? "outline"}>
+                              {TIPO_LABEL[a.tipo] ?? a.tipo}
+                            </Badge>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="text-muted-foreground">
+                              {formatarData(a.data_inicio)}
+                              {a.data_inicio !== a.data_fim && (
+                                <> → {formatarData(a.data_fim)}</>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground">
+                            {a.notas ? (
+                              <span className="line-clamp-2 max-w-xs">{a.notas}</span>
+                            ) : (
+                              "—"
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center justify-end gap-2">
+                              <Button
+                                size="sm"
+                                className="bg-emerald-600 text-white hover:bg-emerald-700"
+                                onClick={() => aprAprovar(a)}
+                                disabled={aprProcessando !== null}
+                              >
+                                {aprProcessando === `aprovar-${a._id}` ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Check className="h-3.5 w-3.5" />
+                                )}
+                                Aprovar
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                onClick={() => aprRejeitar(a)}
+                                disabled={aprProcessando !== null}
+                              >
+                                {aprProcessando === `rejeitar-${a._id}` ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <X className="h-3.5 w-3.5" />
+                                )}
+                                Rejeitar
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Cards (mobile) */}
+                <div className="space-y-3 p-4 md:hidden">
+                  {aprPendentes.map((a) => (
+                    <div
+                      key={a._id}
+                      className="rounded-lg border p-4 space-y-2"
+                    >
+                      <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          {u.nome}
-                          {ausenteHoje && (
+                          <User className="h-4 w-4 text-muted-foreground" />
+                          <span className="font-medium">
+                            {a.utilizador?.nome ?? "—"}
+                          </span>
+                          {a.estado === "pendente_emergencia" && (
                             <Badge variant="destructive" className="text-[10px]">
-                              Ausente Hoje
+                              🚨
                             </Badge>
                           )}
                         </div>
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">
-                        {u.email}
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">
-                        {u.telefone ? (
-                          <span className="inline-flex items-center gap-1.5">
-                            <Phone className="h-3.5 w-3.5" />
-                            {u.telefone}
-                          </span>
-                        ) : (
-                          "—"
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <Badge variant={ROLE_VARIANT[u.role]}>
-                          {ROLE_LABEL[u.role]}
+                        <Badge variant={TIPO_VARIANT[a.tipo] ?? "outline"}>
+                          {TIPO_LABEL[a.tipo] ?? a.tipo}
                         </Badge>
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">
-                        {u.responsavel ? u.responsavel.nome : "—"}
-                      </td>
-                      <td className="px-4 py-3">
-                        <Badge variant={u.ativo ? "success" : "secondary"}>
-                          {u.ativo ? "Ativo" : "Inativo"}
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-3">
-                        {/* Admin: linha só de leitura (sem ações) */}
-                        {u.role === "admin" ? (
-                          <span className="text-xs text-muted-foreground">
-                            —
-                          </span>
-                        ) : (
-                          <div className="flex items-center justify-end gap-1">
-                            {/* Editar */}
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                              onClick={() => abrirEdicao(u)}
-                              aria-label={`Editar ${u.nome}`}
-                              title="Editar"
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            {/* Ativar/Desativar */}
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                              onClick={() => handleToggleAtivo(u)}
-                              aria-label={u.ativo ? "Desativar" : "Ativar"}
-                              title={u.ativo ? "Desativar" : "Ativar"}
-                            >
-                              <Power className="h-4 w-4" />
-                            </Button>
-                            {/* Eliminar */}
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-destructive hover:text-destructive"
-                              onClick={() => setEliminando(u)}
-                              aria-label={`Eliminar ${u.nome}`}
-                              title="Eliminar"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                            {/* Falta súbita */}
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-amber-500 hover:text-amber-600"
-                              onClick={() => {
-                                setFaltaSubita(u);
-                                setFaltaResultado(null);
-                              }}
-                              aria-label={`Reportar falta súbita de ${u.nome}`}
-                              title="Reportar Falta Hoje"
-                            >
-                              <Siren className="h-4 w-4" />
-                            </Button>
-                            {/* Baixa prolongada / férias */}
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-blue-500 hover:text-blue-600"
-                              onClick={() => {
-                                setBaixaModal(u);
-                                setBaixaForm({ data_inicio: "", data_fim: "" });
-                                setBaixaResultado(null);
-                              }}
-                              aria-label={`Registar baixa ou férias de ${u.nome}`}
-                              title="Registar Baixa / Férias"
-                            >
-                              <CalendarOff className="h-4 w-4" />
-                            </Button>
-                          </div>
+                      </div>
+                      {a.justificacao && (
+                        <p className="text-xs text-amber-600 dark:text-amber-500">
+                          {a.justificacao}
+                        </p>
+                      )}
+                      <div className="text-sm text-muted-foreground">
+                        {formatarData(a.data_inicio)}
+                        {a.data_inicio !== a.data_fim && (
+                          <> → {formatarData(a.data_fim)}</>
                         )}
-                      </td>
-                    </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-          {/* Paginação */}
-          {!loading && utilizadores.length > 0 && (
-            <PaginationBar
-              page={paginaSegura}
-              totalPages={totalPaginas}
-              total={utilizadores.length}
-              pageSize={tamPagina}
-              onPageChange={setPagina}
-              onPageSizeChange={(n) => {
-                setTamPagina(n);
-                setPagina(1);
-              }}
-              label="membros"
-            />
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Modal de Edição */}
-      <Dialog
-        open={editando !== null}
-        onOpenChange={(o) => !o && setEditando(null)}
-      >
-        <DialogHeader>
-          <div>
-            <DialogTitle>Editar Utilizador</DialogTitle>
-            <DialogDescription>
-              Atualiza os dados do funcionário. Deixa a password vazia para
-              manter a atual.
-            </DialogDescription>
-          </div>
-          <DialogClose onClick={() => setEditando(null)} />
-        </DialogHeader>
-        <form onSubmit={handleEditar}>
-          <DialogContent className="space-y-4">
-            <div className="space-y-1.5">
-              <label htmlFor="edit-nome" className="text-sm font-medium">
-                Nome
-              </label>
-              <Input
-                id="edit-nome"
-                value={editForm.nome}
-                onChange={(e) =>
-                  setEditForm((f) => ({ ...f, nome: e.target.value }))
-                }
-                required
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label htmlFor="edit-email" className="text-sm font-medium">
-                Email
-              </label>
-              <Input
-                id="edit-email"
-                type="email"
-                value={editForm.email}
-                onChange={(e) =>
-                  setEditForm((f) => ({ ...f, email: e.target.value }))
-                }
-                required
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label htmlFor="edit-telefone" className="text-sm font-medium">
-                Telemóvel (WhatsApp)
-              </label>
-              <Input
-                id="edit-telefone"
-                type="tel"
-                value={editForm.telefone}
-                onChange={(e) =>
-                  setEditForm((f) => ({ ...f, telefone: e.target.value }))
-                }
-                placeholder="+351 912 345 678"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label htmlFor="edit-role" className="text-sm font-medium">
-                Role
-              </label>
-              <select
-                id="edit-role"
-                value={editForm.role}
-                onChange={(e) =>
-                  setEditForm((f) => ({ ...f, role: e.target.value as Role }))
-                }
-                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-              >
-                <option value="staff">Staff</option>
-                <option value="gestor">Responsável</option>
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <label htmlFor="edit-responsavel" className="text-sm font-medium">
-                Responsável{" "}
-                <span className="font-normal text-muted-foreground">
-                  (opcional)
-                </span>
-              </label>
-              <select
-                id="edit-responsavel"
-                value={editForm.responsavel_id}
-                onChange={(e) =>
-                  setEditForm((f) => ({
-                    ...f,
-                    responsavel_id: e.target.value,
-                  }))
-                }
-                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-              >
-                <option value="">— Sem responsável —</option>
-                {responsaveisPossiveis
-                  .filter((r) => r._id !== editando?._id)
-                  .map((r) => (
-                    <option key={r._id} value={r._id}>
-                      {r.nome} ({ROLE_LABEL[r.role]})
-                    </option>
+                      </div>
+                      {a.notas && (
+                        <p className="text-xs text-muted-foreground">{a.notas}</p>
+                      )}
+                      <div className="flex gap-2 pt-1">
+                        <Button
+                          size="sm"
+                          className="flex-1 bg-emerald-600 text-white hover:bg-emerald-700"
+                          onClick={() => aprAprovar(a)}
+                          disabled={aprProcessando !== null}
+                        >
+                          {aprProcessando === `aprovar-${a._id}` ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Check className="h-3.5 w-3.5" />
+                          )}
+                          Aprovar
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          className="flex-1"
+                          onClick={() => aprRejeitar(a)}
+                          disabled={aprProcessando !== null}
+                        >
+                          {aprProcessando === `rejeitar-${a._id}` ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <X className="h-3.5 w-3.5" />
+                          )}
+                          Rejeitar
+                        </Button>
+                      </div>
+                    </div>
                   ))}
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <label htmlFor="edit-password" className="text-sm font-medium">
-                Nova Password{" "}
-                <span className="font-normal text-muted-foreground">
-                  (opcional)
-                </span>
-              </label>
-              <Input
-                id="edit-password"
-                type="password"
-                value={editForm.password}
-                onChange={(e) =>
-                  setEditForm((f) => ({ ...f, password: e.target.value }))
-                }
-                placeholder="Deixa vazio para manter"
-              />
-              <p className="text-xs text-muted-foreground">
-                Útil para redefinir a password se o funcionário se esquecer.
-              </p>
-            </div>
-
-            {/* Folgas Semanais Fixas */}
-            <FolgasSemanaisCheckboxes
-              diasFolga={editForm.dias_folga}
-              onChange={(dias) =>
-                setEditForm((f) => ({ ...f, dias_folga: dias }))
-              }
-            />
-
-            {editErro && (
-              <p className="flex items-center gap-2 text-sm text-destructive">
-                <AlertCircle className="h-4 w-4" />
-                {editErro}
-              </p>
-            )}
-          </DialogContent>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setEditando(null)}
-              disabled={editSubmitting}
-            >
-              Cancelar
-            </Button>
-            <Button type="submit" disabled={editSubmitting}>
-              {editSubmitting ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  A guardar…
-                </>
-              ) : (
-                "Guardar Alterações"
-              )}
-            </Button>
-          </DialogFooter>
-        </form>
-      </Dialog>
-
-      {/* Modal de Confirmação de Eliminação */}
-      <Dialog
-        open={eliminando !== null}
-        onOpenChange={(o) => !o && setEliminando(null)}
-      >
-        <DialogHeader>
-          <div>
-            <DialogTitle>Eliminar Utilizador</DialogTitle>
-            <DialogDescription>
-              Esta ação é permanente e não pode ser desfeita.
-            </DialogDescription>
-          </div>
-          <DialogClose onClick={() => setEliminando(null)} />
-        </DialogHeader>
-        <DialogContent className="space-y-3">
-          <p className="text-sm">
-            Tens a certeza que queres eliminar{" "}
-            <span className="font-semibold">{eliminando?.nome}</span> (
-            {eliminando?.email})?
-          </p>
-          <p className="text-xs text-muted-foreground">
-            O utilizador perderá imediatamente o acesso à plataforma. Se só
-            quiseres suspender o acesso temporariamente, usa o botão de
-            Desativar.
-          </p>
-          {editErro && (
-            <p className="flex items-center gap-2 text-sm text-destructive">
-              <AlertCircle className="h-4 w-4" />
-              {editErro}
-            </p>
-          )}
-        </DialogContent>
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setEliminando(null)}
-            disabled={elimSubmitting}
-          >
-            Cancelar
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            onClick={handleEliminar}
-            disabled={elimSubmitting}
-          >
-            {elimSubmitting ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                A eliminar…
-              </>
-            ) : (
-              <>
-                <Trash2 className="h-4 w-4" />
-                Eliminar Definitivamente
-              </>
-            )}
-          </Button>
-        </DialogFooter>
-      </Dialog>
-
-      {/* Modal de Falta Súbita */}
-      <Dialog
-        open={faltaSubita !== null}
-        onOpenChange={(o) => !o && setFaltaSubita(null)}
-      >
-        <DialogHeader>
-          <div>
-            <DialogTitle className="flex items-center gap-2">
-              <Siren className="h-5 w-5 text-amber-500" />
-              Reportar Falta Súbita
-            </DialogTitle>
-            <DialogDescription>
-              As tarefas de hoje serão redistribuídas pelos colegas disponíveis.
-            </DialogDescription>
-          </div>
-          <DialogClose onClick={() => setFaltaSubita(null)} />
-        </DialogHeader>
-        <DialogContent className="space-y-3">
-          <p className="text-sm">
-            Reportar falta hoje para{" "}
-            <span className="font-semibold">{faltaSubita?.nome}</span>?
-          </p>
-          <p className="text-xs text-muted-foreground">
-            As tarefas de hoje deste funcionário serão redistribuídas pelos
-            colegas disponíveis, usando o sistema de load balancing com
-            tempo de viagem. Tarefas sem ninguém disponível ficarão por atribuir.
-          </p>
-          {faltaResultado && (
-            <div className="rounded-md bg-amber-50 dark:bg-amber-950/20 p-3 text-sm text-amber-800 dark:text-amber-200">
-              {faltaResultado}
-            </div>
-          )}
-        </DialogContent>
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setFaltaSubita(null)}
-            disabled={faltaSubmitting}
-          >
-            {faltaResultado ? "Fechar" : "Cancelar"}
-          </Button>
-          {!faltaResultado && (
-            <Button
-              type="button"
-              className="bg-amber-500 text-white hover:bg-amber-600"
-              onClick={handleFaltaSubita}
-              disabled={faltaSubmitting}
-            >
-              {faltaSubmitting ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  A processar…
-                </>
-              ) : (
-                <>
-                  <Siren className="h-4 w-4" />
-                  Confirmar Falta
-                </>
-              )}
-            </Button>
-          )}
-        </DialogFooter>
-      </Dialog>
-
-      {/* Modal de Baixa Prolongada / Férias */}
-      <Dialog
-        open={baixaModal !== null}
-        onOpenChange={(o) => !o && setBaixaModal(null)}
-      >
-        <DialogHeader>
-          <div>
-            <DialogTitle className="flex items-center gap-2">
-              <CalendarOff className="h-5 w-5 text-blue-500" />
-              Registar Baixa ou Férias
-            </DialogTitle>
-            <DialogDescription>
-              As tarefas futuras serão redistribuídas pelos colegas disponíveis.
-            </DialogDescription>
-          </div>
-          <DialogClose onClick={() => setBaixaModal(null)} />
-        </DialogHeader>
-        <DialogContent className="space-y-4">
-          {!baixaResultado ? (
-            <>
-              <p className="text-sm">
-                Registar baixa para{" "}
-                <span className="font-semibold">{baixaModal?.nome}</span>?
-              </p>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label htmlFor="baixa-inicio" className="text-sm font-medium">
-                    Data de Início
-                  </label>
-                  <Input
-                    id="baixa-inicio"
-                    type="date"
-                    value={baixaForm.data_inicio}
-                    onChange={(e) =>
-                      setBaixaForm((f) => ({ ...f, data_inicio: e.target.value }))
-                    }
-                  />
                 </div>
-                <div className="space-y-1.5">
-                  <label htmlFor="baixa-fim" className="text-sm font-medium">
-                    Data de Fim
-                  </label>
-                  <Input
-                    id="baixa-fim"
-                    type="date"
-                    value={baixaForm.data_fim}
-                    onChange={(e) =>
-                      setBaixaForm((f) => ({ ...f, data_fim: e.target.value }))
-                    }
-                  />
-                </div>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Todas as tarefas atribuídas a este funcionário no período serão
-                reatribuídas usando o sistema de load balancing. As que não
-                tiverem ninguém disponível ficarão por atribuir.
-              </p>
-            </>
-          ) : (
-            <div className="rounded-md bg-blue-50 dark:bg-blue-950/20 p-3 text-sm text-blue-800 dark:text-blue-200">
-              {baixaResultado}
-            </div>
+              </CardContent>
+            </Card>
           )}
-        </DialogContent>
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setBaixaModal(null)}
-            disabled={baixaSubmitting}
-          >
-            {baixaResultado ? "Fechar" : "Cancelar"}
-          </Button>
-          {!baixaResultado && (
-            <Button
-              type="button"
-              className="bg-blue-500 text-white hover:bg-blue-600"
-              disabled={
-                !baixaForm.data_inicio ||
-                !baixaForm.data_fim ||
-                baixaSubmitting
-              }
-              onClick={async () => {
-                if (!baixaModal) return;
-                setBaixaSubmitting(true);
-                try {
-                  const res = await adminPost<{
-                    reatribuidas: number;
-                    orfas: number;
-                    total: number;
-                  }>(`/api/gestor/equipa/${baixaModal._id}/baixa`, {
-                    data_inicio: baixaForm.data_inicio,
-                    data_fim: baixaForm.data_fim,
-                    tipo: "ferias",
-                  });
-                  setBaixaResultado(
-                    `Baixa registada. ${res.reatribuidas} tarefa(s) reatribuída(s) aos colegas, ${res.orfas} ficou(aram) por atribuir.`
-                  );
-                  await carregar();
-                } catch (e) {
-                  setBaixaResultado(
-                    e instanceof Error ? e.message : "Erro ao registar baixa."
-                  );
-                } finally {
-                  setBaixaSubmitting(false);
-                }
-              }}
-            >
-              {baixaSubmitting ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  A processar…
-                </>
-              ) : (
-                <>
-                  <CalendarOff className="h-4 w-4" />
-                  Confirmar Ausência
-                </>
-              )}
-            </Button>
-          )}
-        </DialogFooter>
-      </Dialog>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
