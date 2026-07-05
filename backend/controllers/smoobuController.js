@@ -30,7 +30,7 @@ const Propriedade = require('../models/Propriedade');
  * Fluxo:
  *   1. Valida que SMOOBU_API_KEY está configurada.
  *   2. Calcula a data de hoje (YYYY-MM-DD) para não importar o passado.
- *   3. Faz fetch a https://login.smoobu.com/api/reservations?from=YYYY-MM-DD
+ *   3. Faz fetch a https://login.smoobu.com/api/reservations?arrivalFrom=YYYY-MM-DD
  *      com o header Api-Key.
  *   4. Itera sobre o array `reservations` do JSON de resposta.
  *   5. Para cada reserva, mapeia para o formato do webhook e chama
@@ -76,7 +76,7 @@ exports.sincronizarReservas = async (req, res) => {
   let respostaSmoobu;
   try {
     respostaSmoobu = await fetch(
-      `https://login.smoobu.com/api/reservations?arrivalfrom=${from}`,
+      `https://login.smoobu.com/api/reservations?arrivalFrom=${from}`,
       {
         method: 'GET',
         headers: {
