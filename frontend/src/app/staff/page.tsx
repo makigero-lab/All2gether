@@ -16,6 +16,7 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { TaskCard } from "@/components/staff/task-card";
+import { PushNotificationSetup } from "@/components/staff/push-notification-setup";
 import {
   Dialog,
   DialogHeader,
@@ -220,6 +221,9 @@ export default function StaffPage() {
 
       {/* Lista de tarefas */}
       <main className="flex-1 space-y-4 p-5">
+        {/* Banner de ativar notificações push */}
+        <PushNotificationSetup />
+
         {/* Reportar Falta Hoje — botão ou aviso de já reportado */}
         {faltaPendente ? (
           <div className="flex items-start gap-2 rounded-lg border border-amber-500/50 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400">
