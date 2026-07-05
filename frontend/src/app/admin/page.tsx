@@ -14,6 +14,7 @@ import {
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -38,6 +39,7 @@ interface EmpresaDTO {
 /* ------------------------------------------------------------------ */
 
 export default function SuperAdminPage() {
+  const router = useRouter();
   const [user, setUser] = useState<UtilizadorAuth | null>(null);
   const [empresas, setEmpresas] = useState<EmpresaDTO[]>([]);
   const [loading, setLoading] = useState(true);
@@ -70,11 +72,30 @@ export default function SuperAdminPage() {
   }, []);
 
   useEffect(() => {
+    // Flag para evitar chamar carregar() depois de um redirect já disparado.
+    let redirecionado = false;
+
     lerUtilizador()
-      .then((u) => setUser(u))
-      .catch(() => {});
-    carregar();
-  }, [carregar]);
+      .then((u) => {
+        // Sem sessão (token inexistente/expirado) → redirect para /login.
+        // Mantém loading=true até que o redirect aconteça, para evitar
+        // flimmer do conteúdo e pedidos 401 em loop (carregar() seria
+        // rejeitado pelo backend e faria o efeito voltar a correr).
+        if (u === null) {
+          redirecionado = true;
+          router.replace("/login");
+          return;
+        }
+        setUser(u);
+        // Só carrega as empresas depois de confirmar que o user é válido.
+        return carregar();
+      })
+      .catch(() => {
+        if (!redirecionado) {
+          router.replace("/login");
+        }
+      });
+  }, [carregar, router]);
 
   // Auto-esconde o toast.
   useEffect(() => {

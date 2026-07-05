@@ -506,6 +506,16 @@ async function criarTarefaPorReserva(reservaId, smoobuPropId, dataCheckInRaw, co
     console.log(
       `✅ Tarefa ${novaTarefa._id} atribuída ao utilizador ${utilizadorAtribuido} (carga do dia calculada).`
     );
+
+    // v1.37.0 — Notificação push ao staff (se tiver subscrição ativa).
+    const { notificarUtilizador } = require('../utils/notificar');
+    const propNome = propriedade?.nome ?? 'Propriedade';
+    notificarUtilizador(
+      String(utilizadorAtribuido),
+      '🧹 Nova tarefa atribuída',
+      `${propNome} — ${new Date(range.start).toLocaleDateString('pt-PT')}`,
+      '/staff'
+    );
   } else {
     console.log(
       `✅ Tarefa ${novaTarefa._id} criada SEM atribuição (sem Staff disponível ou erro).`

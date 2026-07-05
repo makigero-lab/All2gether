@@ -357,6 +357,26 @@ exports.aprovarRejeitarAusencia = async (req, res) => {
       },
     });
 
+    // v1.37.0 — Notificação push ao staff (se tiver subscrição ativa).
+    const { notificarUtilizador } = require('../utils/notificar');
+    const dataInicioFmt = new Date(ausencia.data_inicio).toLocaleDateString('pt-PT');
+    const dataFimFmt = new Date(ausencia.data_fim).toLocaleDateString('pt-PT');
+    if (novoEstado === 'aprovada') {
+      notificarUtilizador(
+        String(ausencia.utilizador_id),
+        '✅ Ausência aprovada',
+        `O teu pedido de ${ausencia.tipo} (${dataInicioFmt} a ${dataFimFmt}) foi aprovado.`,
+        '/staff/ausencias'
+      );
+    } else {
+      notificarUtilizador(
+        String(ausencia.utilizador_id),
+        '❌ Ausência rejeitada',
+        `O teu pedido de ${ausencia.tipo} (${dataInicioFmt} a ${dataFimFmt}) foi rejeitado.`,
+        '/staff/ausencias'
+      );
+    }
+
     return res.status(200).json({
       mensagem:
         novoEstado === 'aprovada'
