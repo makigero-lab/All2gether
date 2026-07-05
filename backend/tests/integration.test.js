@@ -1640,3 +1640,98 @@ describe('Super Admin (rotas exclusivas /api/admin)', () => {
     expect(res.status).toBe(404);
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* 15. Staff — concluir tarefa (v1.34.0)                              */
+/* ------------------------------------------------------------------ */
+
+describe('PATCH /api/staff/tarefas/:id/concluir', () => {
+  let tarefaStaff, propTeste, staffConcluirToken, staffConcluirId;
+
+  beforeAll(async () => {
+    // Cria um staff próprio para este bloco.
+    const hash = await bcrypt.hash(PASSWORD, 10);
+    const staffConcluir = await Utilizador.create({
+      nome: 'Staff Concluir',
+      email: 'staff.concluir@teste.pt',
+      password_hash: hash,
+      empresa_id: new mongoose.Types.ObjectId(empresaId),
+      role: 'staff',
+      ativo: true,
+    });
+    staffConcluirId = String(staffConcluir._id);
+    const loginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'staff.concluir@teste.pt', password: PASSWORD });
+    staffConcluirToken = loginRes.body.token;
+
+    // Cria uma propriedade para os testes.
+    const Propriedade = require('../models/Propriedade');
+    propTeste = await Propriedade.create({
+      smoobu_id: 'concluir-test-prop',
+      nome: 'Casa Teste Concluir',
+      morada: 'Rua Teste',
+      empresa_id: new mongoose.Types.ObjectId(empresaId),
+      tempo_limpeza_minutos: 45,
+    });
+
+    // Cria uma tarefa atribuída ao staff de teste.
+    const amanha = new Date(Date.now() + 86400000);
+    tarefaStaff = await Tarefa.create({
+      empresa_id: new mongoose.Types.ObjectId(empresaId),
+      propriedade_id: propTeste._id,
+      utilizador_id: staffConcluirId,
+      data: amanha,
+      tempo_limpeza_minutos: 45,
+      tipo: 'limpeza',
+      estado: 'atribuida',
+    });
+  });
+
+  it('sem token → 401', async () => {
+    const res = await request(app).patch(`/api/staff/tarefas/${tarefaStaff._id}/concluir`);
+    expect(res.status).toBe(401);
+  });
+
+  it('staff conclui a sua tarefa → 200 + estado concluída + hora_conclusao', async () => {
+    const res = await request(app)
+      .patch(`/api/staff/tarefas/${tarefaStaff._id}/concluir`)
+      .set('Authorization', `Bearer ${staffConcluirToken}`)
+      .send({ observacoes_staff: 'Tudo limpo, sem problemas.' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.tarefa.estado).toBe('concluida');
+    expect(res.body.tarefa.hora_conclusao).toBeTruthy();
+    expect(res.body.tarefa.concluida_em).toBeTruthy();
+    expect(res.body.tarefa.observacoes_staff).toBe('Tudo limpo, sem problemas.');
+  });
+
+  it('tentar concluir tarefa já concluída → 400', async () => {
+    const res = await request(app)
+      .patch(`/api/staff/tarefas/${tarefaStaff._id}/concluir`)
+      .set('Authorization', `Bearer ${staffConcluirToken}`)
+      .send({});
+
+    expect(res.status).toBe(400);
+  });
+
+  it('staff tenta concluir tarefa de outro utilizador → 404', async () => {
+    // Cria tarefa atribuída ao admin (não ao staff).
+    const tarefaAdmin = await Tarefa.create({
+      empresa_id: new mongoose.Types.ObjectId(empresaId),
+      propriedade_id: propTeste._id,
+      utilizador_id: new mongoose.Types.ObjectId(adminId),
+      data: new Date(Date.now() + 86400000),
+      tempo_limpeza_minutos: 45,
+      tipo: 'limpeza',
+      estado: 'atribuida',
+    });
+
+    const res = await request(app)
+      .patch(`/api/staff/tarefas/${tarefaAdmin._id}/concluir`)
+      .set('Authorization', `Bearer ${staffConcluirToken}`)
+      .send({});
+
+    expect(res.status).toBe(404);
+  });
+});

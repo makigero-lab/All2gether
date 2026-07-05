@@ -12,6 +12,7 @@
 const mongoose = require('mongoose');
 const Ausencia = require('../models/Ausencia');
 const Utilizador = require('../models/Utilizador');
+const Tarefa = require('../models/Tarefa');
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -250,6 +251,84 @@ exports.faltaHoje = async (req, res) => {
     if (err.name === 'ValidationError') {
       return res.status(400).json({ erro: err.message });
     }
+    return res.status(500).json({ erro: 'Erro interno do servidor.' });
+  }
+};
+
+/* ------------------------------------------------------------------ */
+/* PATCH /api/staff/tarefas/:id/concluir — concluir tarefa (v1.34.0)  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Marca uma tarefa como concluída pelo staff.
+ *
+ * Validações:
+ *   - A tarefa tem de pertencer ao req.user.id (staff só conclui as suas).
+ *   - Não pode concluir uma tarefa já concluída ou cancelada.
+ *
+ * Atualiza:
+ *   - estado → 'concluida'
+ *   - concluida_em → new Date() (para relatórios)
+ *   - hora_conclusao → new Date() (timestamp exato, para auditoria)
+ *   - observacoes_staff → texto do body (opcional)
+ *
+ * Body: { observacoes_staff?: string }
+ *
+ * Resposta 200: { tarefa: { ... } }
+ *   400 — já concluída/cancelada
+ *   404 — não encontrada (ou não pertence ao utilizador)
+ */
+exports.concluirTarefa = async (req, res) => {
+  try {
+    const utilizadorId = req.user && req.user.id;
+    if (!utilizadorId) {
+      return res.status(401).json({ erro: 'Não autenticado.' });
+    }
+
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ erro: 'ID de tarefa inválido.' });
+    }
+
+    // Verifica se a tarefa pertence ao utilizador logado.
+    const tarefa = await Tarefa.findOne({
+      _id: id,
+      utilizador_id: utilizadorId,
+    });
+
+    if (!tarefa) {
+      return res.status(404).json({
+        erro: 'Tarefa não encontrada (ou não te está atribuída).',
+      });
+    }
+
+    if (tarefa.estado === 'concluida') {
+      return res.status(400).json({ erro: 'Tarefa já concluída.' });
+    }
+
+    if (tarefa.estado === 'cancelada') {
+      return res.status(400).json({ erro: 'Não podes concluir uma tarefa cancelada.' });
+    }
+
+    // Atualiza estado + timestamps + observações do staff.
+    const agora = new Date();
+    tarefa.estado = 'concluida';
+    tarefa.concluida_em = agora;
+    tarefa.hora_conclusao = agora;
+
+    if (req.body?.observacoes_staff !== undefined) {
+      tarefa.observacoes_staff = String(req.body.observacoes_staff || '');
+    }
+    // Retrocompatibilidade: também aceita "observacoes" (campo legacy).
+    if (req.body?.observacoes !== undefined) {
+      tarefa.observacoes = String(req.body.observacoes || '');
+    }
+
+    await tarefa.save();
+
+    return res.status(200).json({ tarefa });
+  } catch (err) {
+    console.error('❌ concluirTarefa:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
   }
 };
