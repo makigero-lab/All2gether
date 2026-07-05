@@ -31,6 +31,7 @@ const rateLimit = require('express-rate-limit');
 
 const webhookRoutes = require('./routes/webhookRoutes');
 const gestorRoutes = require('./routes/gestorRoutes');
+const adminRoutes = require('./routes/adminRoutes');
 const authRoutes = require('./routes/authRoutes');
 const ausenciaRoutes = require('./routes/ausenciaRoutes');
 const relatorioRoutes = require('./routes/relatorioRoutes');
@@ -106,6 +107,10 @@ app.use('/api/gestor/ausencias', ausenciaRoutes);
 
 // Relatórios / Analytics — protegido por auth + isGestor.
 app.use('/api/gestor/relatorios', relatorioRoutes);
+
+// Super Admin — rotas exclusivas do admin (auth + isAdmin estrito).
+// Impersonation, gestão de empresas, etc.
+app.use('/api/admin', adminRoutes);
 
 // Staff — gestão das próprias ausências (pedidos de férias/doença).
 app.use('/api/staff', staffRoutes);

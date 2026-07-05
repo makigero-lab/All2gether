@@ -1534,3 +1534,109 @@ describe('Notificações Push (Web Push API)', () => {
     expect(res.status).toBe(401);
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* 14. Super Admin — listarEmpresas + impersonarGestor (v1.32.0)      */
+/* ------------------------------------------------------------------ */
+
+describe('Super Admin (rotas exclusivas /api/admin)', () => {
+  it('GET /api/admin/empresas sem token → 401', async () => {
+    const res = await request(app).get('/api/admin/empresas');
+    expect(res.status).toBe(401);
+  });
+
+  it('GET /api/admin/empresas com token de gestor → 403', async () => {
+    // O adminToken é role 'admin', mas vamos testar com um gestor.
+    const hash = await bcrypt.hash(PASSWORD, 10);
+    const gestorUser = await Utilizador.create({
+      nome: 'Gestor Teste RBAC',
+      email: 'gestor.rbac@teste.pt',
+      password_hash: hash,
+      empresa_id: new mongoose.Types.ObjectId(empresaId),
+      role: 'gestor',
+      ativo: true,
+    });
+    const gestorLogin = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'gestor.rbac@teste.pt', password: PASSWORD });
+    const gestorToken = gestorLogin.body.token;
+
+    const res = await request(app)
+      .get('/api/admin/empresas')
+      .set('Authorization', `Bearer ${gestorToken}`);
+    expect(res.status).toBe(403);
+  });
+
+  it('GET /api/admin/empresas com admin → 200 + lista com gestor', async () => {
+    const res = await authGet('/api/admin/empresas');
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.empresas)).toBe(true);
+    expect(res.body.empresas.length).toBeGreaterThanOrEqual(1);
+
+    // Verifica que a empresa de teste tem gestor populado.
+    const empTeste = res.body.empresas.find(
+      (e) => String(e._id) === empresaId
+    );
+    expect(empTeste).toBeTruthy();
+    // O setup cria um gestor (gestor@autocell.pt), mas pode não estar na
+    // mesma empresa se o setup foi chamado antes do beforeAll. Verifica
+    // que o campo gestor existe (pode ser null se não houver gestor).
+    expect(empTeste).toHaveProperty('gestor');
+  });
+
+  it('POST /api/admin/empresas/:id/impersonar com admin → 200 + token do gestor', async () => {
+    // Cria um gestor na empresa de teste.
+    const hash = await bcrypt.hash(PASSWORD, 10);
+    await Utilizador.create({
+      nome: 'Gestor Impersonar',
+      email: 'gestor.impersonar@teste.pt',
+      password_hash: hash,
+      empresa_id: new mongoose.Types.ObjectId(empresaId),
+      role: 'gestor',
+      ativo: true,
+    });
+
+    const res = await authPost(`/api/admin/empresas/${empresaId}/impersonar`, {});
+    expect(res.status).toBe(200);
+    expect(res.body.token).toBeTruthy();
+    expect(res.body.utilizador.role).toBe('gestor');
+    expect(res.body.utilizador.empresa_id).toBe(empresaId);
+    expect(res.body.impersonado).toBe(true);
+    expect(res.body.empresa).toBeTruthy();
+    expect(res.body.empresa.id).toBe(empresaId);
+
+    // Verifica que o token funciona (pode ser usado para aceder a /api/gestor).
+    const verifyRes = await request(app)
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${res.body.token}`);
+    expect(verifyRes.status).toBe(200);
+    expect(verifyRes.body.utilizador.role).toBe('gestor');
+  });
+
+  it('POST /api/admin/empresas/:id/impersonar com gestor → 403', async () => {
+    const hash = await bcrypt.hash(PASSWORD, 10);
+    await Utilizador.create({
+      nome: 'Gestor Block',
+      email: 'gestor.block@teste.pt',
+      password_hash: hash,
+      empresa_id: new mongoose.Types.ObjectId(empresaId),
+      role: 'gestor',
+      ativo: true,
+    });
+    const gestorLogin = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'gestor.block@teste.pt', password: PASSWORD });
+
+    const res = await request(app)
+      .post(`/api/admin/empresas/${empresaId}/impersonar`)
+      .set('Authorization', `Bearer ${gestorLogin.body.token}`)
+      .send({});
+    expect(res.status).toBe(403);
+  });
+
+  it('POST /api/admin/empresas/:id/impersonar empresa inexistente → 404', async () => {
+    const idInexistente = new mongoose.Types.ObjectId();
+    const res = await authPost(`/api/admin/empresas/${idInexistente}/impersonar`, {});
+    expect(res.status).toBe(404);
+  });
+});

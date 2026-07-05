@@ -111,7 +111,9 @@ A API arranca na porta definida em `PORT` (por defeito **5000**).
 | `POST` | `/api/gestor/smoobu/sincronizar` | Sincroniza reservas futuras do Smoobu via REST API (pull). Idempotente. Requer `SMOOBU_API_KEY`. **Auth:** JWT. |
 | `GET`  | `/api/gestor/smoobu/propriedades` | Lista apartamentos do Smoobu (para dropdown no fluxo de criação). Requer `SMOOBU_API_KEY`. **Auth:** JWT. |
 | `POST` | `/api/gestor/smoobu/sincronizar-propriedades` | Importa apartamentos do Smoobu em massa (upsert `$setOnInsert` — não altera existentes). Requer `SMOOBU_API_KEY`. **Auth:** JWT. |
-| `GET`  | `/api/gestor/setup` | Bootstrap do "Cliente Zero" (Empresa + Admin + Manager + Staff + Propriedade de teste). Idempotente. **PÚBLICO.** |
+| `GET`  | `/api/gestor/setup` | Bootstrap do "Cliente Zero" (Empresa + Admin + Gestor + Staff + Propriedade de teste). Idempotente. **PÚBLICO.** |
+| `GET`  | `/api/admin/empresas` | Lista todas as empresas (cross-tenant) com gestor principal. **Auth:** JWT + `isAdmin`. |
+| `POST` | `/api/admin/empresas/:id/impersonar` | Gera token JWT do gestor de uma empresa (impersonation). **Auth:** JWT + `isAdmin`. |
 
 > Detalhes completos da lógica de atribuição (regras de negócio) em [`docs/BACKEND.md`](docs/BACKEND.md#32-lógica-central--atribuição-de-tarefas-webhook-smoobu).
 
