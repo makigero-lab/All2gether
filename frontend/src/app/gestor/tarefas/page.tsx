@@ -245,11 +245,20 @@ export default function AdminTarefasPage() {
       // Atualiza a grelha de tarefas para mostrar as novas.
       await carregar();
     } catch (e) {
-      setErro(
-        e instanceof Error
-          ? `Sincronização falhou: ${e.message}`
-          : "Erro ao sincronizar com o Smoobu."
-      );
+      const msg = e instanceof Error ? e.message : "";
+      // 504/502/timeout — a sincronização continua no backend mesmo sem o frontend.
+      if (msg.includes("504") || msg.includes("502") || msg.includes("Timeout") || msg.includes("fetch")) {
+        setSincronizacaoOk(
+          "⏳ A sincronização está a decorrer em segundo plano (o Smoobu tem muitas reservas). " +
+          "As tarefas aparecerão na lista daqui a 1-2 minutos. Clica em atualizar ↻."
+        );
+      } else {
+        setErro(
+          e instanceof Error
+            ? `Sincronização falhou: ${e.message}`
+            : "Erro ao sincronizar com o Smoobu."
+        );
+      }
     } finally {
       setSincronizando(false);
     }
