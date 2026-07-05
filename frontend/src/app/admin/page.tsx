@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   Loader2,
   RefreshCw,
+  Siren,
 } from "lucide-react";
 
 import {
@@ -20,7 +21,7 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { adminGet } from "@/lib/api";
+import { adminGet, adminPatch } from "@/lib/api";
 
 interface DashboardData {
   totalPropriedades: number;
@@ -32,6 +33,14 @@ interface DashboardData {
   tarefasPorStaff: { utilizador_id: string; nome: string; tarefas: number; carga_minutos: number }[];
 }
 
+interface EmergenciaDTO {
+  _id: string;
+  utilizador_id: string;
+  utilizador: { _id: string; nome: string; email: string } | null;
+  justificacao?: string;
+  createdAt: string;
+}
+
 /**
  * Dashboard do Admin (/admin) — dados reais.
  * Consome GET /api/admin/dashboard (via proxy same-origin).
@@ -41,12 +50,23 @@ export default function AdminDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
 
+  // Emergências pendentes (faltas reportadas pelo staff para hoje).
+  const [emergencias, setEmergencias] = useState<EmergenciaDTO[]>([]);
+  const [aprovandoEmergencia, setAprovandoEmergencia] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ tipo: "sucesso" | "erro"; msg: string } | null>(null);
+
   const carregar = useCallback(async () => {
     setLoading(true);
     setErro(null);
     try {
-      const res = await adminGet<DashboardData>("/api/admin/dashboard");
-      setData(res);
+      const [dashRes, emergRes] = await Promise.all([
+        adminGet<DashboardData>("/api/admin/dashboard"),
+        adminGet<{ ausencias: EmergenciaDTO[] }>(
+          "/api/admin/ausencias?estado=pendente_emergencia"
+        ),
+      ]);
+      setData(dashRes);
+      setEmergencias(emergRes.ausencias ?? []);
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Erro ao carregar dashboard.");
     } finally {
@@ -57,6 +77,42 @@ export default function AdminDashboardPage() {
   useEffect(() => {
     carregar();
   }, [carregar]);
+
+  // Auto-esconde o toast após 6s.
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 6000);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  /** Aprova uma emergência e dispara a redistribuição. */
+  async function handleConfirmarEmergencia(em: EmergenciaDTO) {
+    setAprovandoEmergencia(em._id);
+    try {
+      const res = await adminPatch<{
+        redistribuicao: { total: number; reatribuidas: number; orfas: number } | null;
+      }>(`/api/admin/ausencias/${em._id}/estado`, { estado: "aprovada" });
+
+      const r = res.redistribuicao;
+      const msg =
+        r && r.total > 0
+          ? `Falta confirmada. ${r.reatribuidas} tarefa(s) redistribuída(s)${r.orfas > 0 ? `, ${r.orfas} órfã(s)` : ""}.`
+          : "Falta confirmada. Sem tarefas para redistribuir hoje.";
+      setToast({ tipo: "sucesso", msg });
+
+      // Remove a emergência da lista (já foi confirmada).
+      setEmergencias((prev) => prev.filter((e) => e._id !== em._id));
+      // Recarrega o dashboard para refletir as tarefas redistribuídas.
+      await carregar();
+    } catch (e) {
+      setToast({
+        tipo: "erro",
+        msg: e instanceof Error ? `Erro: ${e.message}` : "Erro ao confirmar falta.",
+      });
+    } finally {
+      setAprovandoEmergencia(null);
+    }
+  }
 
   const stats = data
     ? [
@@ -81,6 +137,89 @@ export default function AdminDashboardPage() {
           Visão operacional das limpezas de hoje (dados em tempo real).
         </p>
       </div>
+
+      {/* Notificações Críticas — banner de emergência */}
+      {emergencias.length > 0 && (
+        <div className="space-y-3">
+          {emergencias.map((em) => (
+            <div
+              key={em._id}
+              className="animate-pulse rounded-lg border-2 border-destructive bg-destructive/10 p-4 shadow-lg"
+            >
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-destructive text-destructive-foreground">
+                    <Siren className="h-5 w-5" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-destructive">
+                      🚨 {em.utilizador?.nome ?? "Funcionário"} reportou que vai faltar hoje!
+                    </p>
+                    {em.justificacao && (
+                      <p className="mt-0.5 text-sm text-destructive/80">
+                        Justificação: {em.justificacao}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={() => handleConfirmarEmergencia(em)}
+                  disabled={aprovandoEmergencia !== null}
+                >
+                  {aprovandoEmergencia === em._id ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      A confirmar…
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="mr-2 h-4 w-4" />
+                      Confirmar e Redistribuir
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Toast */}
+      {toast && (
+        <Card
+          className={
+            toast.tipo === "sucesso"
+              ? "border-emerald-500/50"
+              : "border-destructive/50"
+          }
+        >
+          <CardContent
+            className={`flex items-center gap-3 p-4 text-sm ${
+              toast.tipo === "sucesso"
+                ? "text-emerald-600 dark:text-emerald-400"
+                : "text-destructive"
+            }`}
+          >
+            {toast.tipo === "sucesso" ? (
+              <CheckCircle2 className="h-5 w-5 shrink-0" />
+            ) : (
+              <AlertCircle className="h-5 w-5 shrink-0" />
+            )}
+            <span className="flex-1">{toast.msg}</span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2"
+              onClick={() => setToast(null)}
+            >
+              ×
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center gap-2 py-20 text-sm text-muted-foreground">

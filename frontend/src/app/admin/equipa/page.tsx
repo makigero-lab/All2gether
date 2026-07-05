@@ -194,15 +194,42 @@ export default function EquipaPage() {
     (u) => u.role === "admin" || u.role === "manager"
   );
 
-  /** Carrega os utilizadores da API. */
+  // IDs dos utilizadores com ausência aprovada para hoje (para mostrar badge).
+  const [ausentesHoje, setAusentesHoje] = useState<Set<string>>(new Set());
+
+  /** Carrega os utilizadores da API + ausências aprovadas para hoje. */
   const carregar = useCallback(async () => {
     setLoading(true);
     setErro(null);
     try {
-      const data = await adminGet<{ utilizadores: UtilizadorDTO[] }>(
-        "/api/admin/equipa"
-      );
+      const hoje = new Date();
+
+      const [data, ausenciasRes] = await Promise.all([
+        adminGet<{ utilizadores: UtilizadorDTO[] }>("/api/admin/equipa"),
+        adminGet<{
+          ausencias: {
+            utilizador_id: string;
+            data_inicio: string;
+            data_fim: string;
+            estado: string;
+          }[];
+        }>("/api/admin/ausencias?estado=aprovada"),
+      ]);
       setUtilizadores(data.utilizadores ?? []);
+
+      // Filtra as ausências aprovadas que cobrem hoje.
+      const hojeUTC = new Date(
+        Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth(), hoje.getUTCDate())
+      );
+      const setAusentes = new Set<string>();
+      for (const a of ausenciasRes.ausencias ?? []) {
+        const ini = new Date(a.data_inicio);
+        const fim = new Date(a.data_fim);
+        if (hojeUTC >= ini && hojeUTC <= fim && a.utilizador_id) {
+          setAusentes.add(a.utilizador_id);
+        }
+      }
+      setAusentesHoje(setAusentes);
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Erro ao carregar equipa.");
     } finally {
@@ -584,9 +611,20 @@ export default function EquipaPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {utilizadoresPagina.map((u) => (
-                    <tr key={u._id} className="hover:bg-muted/30">
-                      <td className="px-4 py-3 font-medium">{u.nome}</td>
+                  {utilizadoresPagina.map((u) => {
+                    const ausenteHoje = ausentesHoje.has(u._id);
+                    return (
+                    <tr key={u._id} className={`hover:bg-muted/30 ${ausenteHoje ? "opacity-65" : ""}`}>
+                      <td className="px-4 py-3 font-medium">
+                        <div className="flex items-center gap-2">
+                          {u.nome}
+                          {ausenteHoje && (
+                            <Badge variant="destructive" className="text-[10px]">
+                              Ausente Hoje
+                            </Badge>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-4 py-3 text-muted-foreground">
                         {u.email}
                       </td>
@@ -687,7 +725,8 @@ export default function EquipaPage() {
                         )}
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
