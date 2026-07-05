@@ -203,6 +203,36 @@ export default function PropriedadesPage() {
     }
   }
 
+  /** Importa propriedades do Smoobu (scoped por empresa, morada='A definir'). */
+  async function handleImportarPropriedades() {
+    setSincronizando(true);
+    setSincronizacaoOk(null);
+    setErro(null);
+    try {
+      const res = await adminPost<{
+        totalRecebidas: number;
+        criadas: number;
+        existentes: number;
+        erros: number;
+      }>("/api/gestor/smoobu/propriedades", {});
+
+      let msg = `${res.criadas} propriedade(s) importada(s) com sucesso!`;
+      if (res.existentes > 0) msg += ` ${res.existentes} já existiam.`;
+      if (res.erros > 0) msg += ` ${res.erros} com erro.`;
+      setSincronizacaoOk(msg);
+
+      await carregar();
+    } catch (e) {
+      setErro(
+        e instanceof Error
+          ? `Importação falhou: ${e.message}`
+          : "Erro ao importar propriedades do Smoobu."
+      );
+    } finally {
+      setSincronizando(false);
+    }
+  }
+
   // Estado do modal de edição
   const [editando, setEditando] = useState<PropriedadeDTO | null>(null);
   const [editForm, setEditForm] = useState({
@@ -296,7 +326,7 @@ export default function PropriedadesPage() {
             variant="outline"
             onClick={handleSincronizarPropriedades}
             disabled={sincronizando}
-            title="Importa todos os apartamentos do Smoobu de uma vez. Não altera as propriedades já existentes (preserva as tuas edições)."
+            title="Sincroniza todos os apartamentos do Smoobu (upsert global). Não altera as propriedades já existentes."
           >
             {sincronizando ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -304,6 +334,19 @@ export default function PropriedadesPage() {
               <Download className="h-4 w-4" />
             )}
             <span className="hidden sm:inline">Sincronizar Smoobu</span>
+          </Button>
+          <Button
+            variant="outline"
+            onClick={handleImportarPropriedades}
+            disabled={sincronizando}
+            title="Importa apartamentos do Smoobu para a tua empresa. Morada fica 'A definir' para preencher depois."
+          >
+            {sincronizando ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+            <span className="hidden sm:inline">Importar do Smoobu</span>
           </Button>
           <Button onClick={() => setMostrarForm((v) => !v)}>
             <Plus className="h-4 w-4" />
@@ -556,8 +599,15 @@ export default function PropriedadesPage() {
                   {propriedades.map((p) => (
                     <tr key={p._id} className={`hover:bg-muted/30 ${!p.ativo ? "opacity-60" : ""}`}>
                       <td className="px-4 py-3">
-                        <div className="font-medium">{p.nome}</div>
-                        {p.morada && (
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{p.nome}</span>
+                          {p.morada === "A definir" && (
+                            <Badge className="bg-amber-500/15 text-amber-700 border-amber-500/30 hover:bg-amber-500/20">
+                              ⚠️ Morada por definir
+                            </Badge>
+                          )}
+                        </div>
+                        {p.morada && p.morada !== "A definir" && (
                           <div className="text-xs text-muted-foreground mt-0.5">
                             {p.morada}
                           </div>
