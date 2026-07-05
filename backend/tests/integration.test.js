@@ -502,6 +502,15 @@ describe('GET /api/gestor/calendario/dados', () => {
     expect(res.body.tarefas.every((t) => t.estado === 'concluida')).toBe(true);
   });
 
+  it('filtro por estado=cancelada → só devolve canceladas', async () => {
+    const res = await authGet(
+      `/api/gestor/calendario/dados?inicio=${dataStr}&fim=${dataStr}&estado=cancelada`
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.tarefas.length).toBeGreaterThanOrEqual(1);
+    expect(res.body.tarefas.every((t) => t.estado === 'cancelada')).toBe(true);
+  });
+
   it('combina filtros (propriedade + utilizador)', async () => {
     const res = await authGet(
       `/api/gestor/calendario/dados?inicio=${dataStr}&fim=${dataStr}&propriedadeId=${prop1._id}&utilizadorId=${staff1._id}`
@@ -1271,6 +1280,28 @@ describe('POST /api/gestor/smoobu/sincronizar-propriedades', () => {
     expect(p.tempo_limpeza_minutos).toBe(120);
     expect(p.ativo).toBe(false);
   });
+
+  it('fetch devolve erro 502 (Bad Gateway do Smoobu) → 502 + mensagem', async () => {
+    process.env.SMOOBU_API_KEY = 'test-key-123';
+
+    const mockFetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 502,
+      statusText: 'Bad Gateway',
+      json: async () => ({}),
+      text: async () => 'Bad Gateway',
+    });
+    mockFetch.__isMock = true;
+    global.fetch = mockFetch;
+
+    const res = await authPost('/api/gestor/smoobu/sincronizar-propriedades', {});
+    expect(res.status).toBe(502);
+    expect(res.body.erro).toMatch(/502/);
+
+    // Confirma que nenhuma propriedade foi criada (a chamada falhou).
+    const p = await Propriedade.findOne({ smoobu_id: 'sync-502-test' });
+    expect(p).toBeNull();
+  });
 });
 
 /* ------------------------------------------------------------------ */
@@ -1733,5 +1764,148 @@ describe('PATCH /api/staff/tarefas/:id/concluir', () => {
       .send({});
 
     expect(res.status).toBe(404);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* 16. Staff — reportar avaria (v1.38.0)                               */
+/* ------------------------------------------------------------------ */
+
+describe('POST /api/staff/tarefas/:id/avaria', () => {
+  let tarefaAvaria, propAvaria, staffAvariaToken, staffAvariaId;
+
+  beforeAll(async () => {
+    // Cria um staff próprio para este bloco.
+    const hash = await bcrypt.hash(PASSWORD, 10);
+    const staffAvaria = await Utilizador.create({
+      nome: 'Staff Avaria',
+      email: 'staff.avaria@teste.pt',
+      password_hash: hash,
+      empresa_id: new mongoose.Types.ObjectId(empresaId),
+      role: 'staff',
+      ativo: true,
+    });
+    staffAvariaId = String(staffAvaria._id);
+    const loginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'staff.avaria@teste.pt', password: PASSWORD });
+    staffAvariaToken = loginRes.body.token;
+
+    // Cria uma propriedade para os testes.
+    const Propriedade = require('../models/Propriedade');
+    propAvaria = await Propriedade.create({
+      smoobu_id: 'avaria-test-prop',
+      nome: 'Casa Teste Avaria',
+      morada: 'Rua Avaria',
+      empresa_id: new mongoose.Types.ObjectId(empresaId),
+      tempo_limpeza_minutos: 45,
+    });
+
+    // Cria uma tarefa atribuída ao staff de teste.
+    const amanha = new Date(Date.now() + 86400000);
+    tarefaAvaria = await Tarefa.create({
+      empresa_id: new mongoose.Types.ObjectId(empresaId),
+      propriedade_id: propAvaria._id,
+      utilizador_id: staffAvariaId,
+      data: amanha,
+      tempo_limpeza_minutos: 45,
+      tipo: 'limpeza',
+      estado: 'atribuida',
+    });
+  });
+
+  it('sem token → 401', async () => {
+    const res = await request(app)
+      .post(`/api/staff/tarefas/${tarefaAvaria._id}/avaria`)
+      .send({ descricao: 'Torreira partida' });
+    expect(res.status).toBe(401);
+  });
+
+  it('sem descrição → 400', async () => {
+    const res = await request(app)
+      .post(`/api/staff/tarefas/${tarefaAvaria._id}/avaria`)
+      .set('Authorization', `Bearer ${staffAvariaToken}`)
+      .send({ descricao: '   ' });
+    expect(res.status).toBe(400);
+    expect(res.body.erro).toMatch(/descrição/i);
+  });
+
+  it('staff reporta avaria → 200 + cria tarefa de manutenção para a mesma propriedade', async () => {
+    const tarefasAntes = await Tarefa.countDocuments({
+      empresa_id: new mongoose.Types.ObjectId(empresaId),
+      tipo: 'manutencao',
+    });
+
+    const res = await request(app)
+      .post(`/api/staff/tarefas/${tarefaAvaria._id}/avaria`)
+      .set('Authorization', `Bearer ${staffAvariaToken}`)
+      .send({ descricao: 'Torreira da cozinha está a deitar água' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.mensagem).toBeTruthy();
+
+    // A tarefa original passa a ter a avaria no array.
+    expect(res.body.tarefa.avarias).toBeInstanceOf(Array);
+    expect(res.body.tarefa.avarias.length).toBeGreaterThanOrEqual(1);
+    expect(res.body.tarefa.avarias[0]).toMatch(/Torreira/);
+
+    // Cria uma nova tarefa de manutenção.
+    const manutencao = res.body.tarefa_manutencao;
+    expect(manutencao).toBeTruthy();
+    expect(manutencao.tipo).toBe('manutencao');
+    expect(manutencao.estado).toBe('por_atribuir');
+    expect(manutencao.utilizador_id).toBeNull();
+    // Mesma propriedade da tarefa original.
+    expect(String(manutencao.propriedade_id)).toBe(
+      String(tarefaAvaria.propriedade_id)
+    );
+
+    // Confirma na BD que foi criada uma nova tarefa de manutenção.
+    const tarefasDepois = await Tarefa.countDocuments({
+      empresa_id: new mongoose.Types.ObjectId(empresaId),
+      tipo: 'manutencao',
+    });
+    expect(tarefasDepois).toBe(tarefasAntes + 1);
+  });
+
+  it('staff reporta avaria em tarefa de outro utilizador → 404', async () => {
+    // Cria tarefa atribuída ao admin (não ao staff).
+    const tarefaAdmin = await Tarefa.create({
+      empresa_id: new mongoose.Types.ObjectId(empresaId),
+      propriedade_id: propAvaria._id,
+      utilizador_id: new mongoose.Types.ObjectId(adminId),
+      data: new Date(Date.now() + 86400000),
+      tempo_limpeza_minutos: 45,
+      tipo: 'limpeza',
+      estado: 'atribuida',
+    });
+
+    const res = await request(app)
+      .post(`/api/staff/tarefas/${tarefaAdmin._id}/avaria`)
+      .set('Authorization', `Bearer ${staffAvariaToken}`)
+      .send({ descricao: 'Outra avaria' });
+
+    expect(res.status).toBe(404);
+  });
+
+  it('staff reporta avaria em tarefa cancelada → 400', async () => {
+    // Cria tarefa cancelada atribuída ao staff.
+    const tarefaCancelada = await Tarefa.create({
+      empresa_id: new mongoose.Types.ObjectId(empresaId),
+      propriedade_id: propAvaria._id,
+      utilizador_id: staffAvariaId,
+      data: new Date(Date.now() + 86400000),
+      tempo_limpeza_minutos: 45,
+      tipo: 'limpeza',
+      estado: 'cancelada',
+    });
+
+    const res = await request(app)
+      .post(`/api/staff/tarefas/${tarefaCancelada._id}/avaria`)
+      .set('Authorization', `Bearer ${staffAvariaToken}`)
+      .send({ descricao: 'Avaria em tarefa cancelada' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.erro).toMatch(/cancelada/i);
   });
 });

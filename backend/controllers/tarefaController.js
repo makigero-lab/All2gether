@@ -9,6 +9,7 @@ const Tarefa = require('../models/Tarefa');
 const Propriedade = require('../models/Propriedade');
 const Utilizador = require('../models/Utilizador');
 const { obterEmpresaId } = require('./gestorController');
+const { notificarUtilizador } = require('../utils/notificar');
 
 const CAPACIDADE_MAXIMA_MINUTOS = 420;
 
@@ -259,6 +260,33 @@ exports.atribuirTarefa = async (req, res) => {
     }
 
     await tarefa.save();
+
+    // Notifica o NOVO utilizador atribuído (fire-and-forget).
+    // Só envia se foi uma (re)atribuição real — não no caso de remover atribuição.
+    if (utilizador_id) {
+      try {
+        const propriedade = await Propriedade.findById(
+          tarefa.propriedade_id
+        )
+          .select('nome')
+          .lean();
+        const dataFmt = new Date(tarefa.data).toLocaleDateString('pt-PT', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+        });
+        notificarUtilizador(
+          String(tarefa.utilizador_id),
+          '🔄 Tarefa reatribuída',
+          `${propriedade?.nome ?? 'Propriedade'} — ${dataFmt}`,
+          '/staff'
+        );
+      } catch (e) {
+        // Fire-and-forget: não bloqueia a resposta.
+        console.error('⚠️  notificar reatribuição:', e.message);
+      }
+    }
+
     return res.status(200).json({ tarefa });
   } catch (err) {
     console.error('❌ atribuirTarefa:', err.message);

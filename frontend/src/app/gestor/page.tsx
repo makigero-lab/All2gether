@@ -22,6 +22,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { adminGet, adminPatch } from "@/lib/api";
+import { PushNotificationSetup } from "@/components/gestor/push-notification-setup";
 
 interface DashboardData {
   totalPropriedades: number;
@@ -137,6 +138,9 @@ export default function AdminDashboardPage() {
           Visão operacional das limpezas de hoje (dados em tempo real).
         </p>
       </div>
+
+      {/* Banner para ativar notificações push */}
+      <PushNotificationSetup />
 
       {/* Notificações Críticas — banner de emergência */}
       {emergencias.length > 0 && (

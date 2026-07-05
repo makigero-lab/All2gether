@@ -11,6 +11,8 @@ import {
   SprayCan,
   Download,
   CheckCircle2,
+  Wrench,
+  Filter,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -49,6 +51,7 @@ interface TarefaAdmin {
   tipo: string;
   estado: string;
   tempo_limpeza_minutos: number;
+  avarias?: string[];
 }
 
 const ESTADO_LABEL: Record<string, string> = {
@@ -86,12 +89,20 @@ export default function AdminTarefasPage() {
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
 
+  // Filtro: mostrar só tarefas com avarias.
+  const [soAvarias, setSoAvarias] = useState(false);
+
+  // Aplica filtro de avarias client-side (a lista original vem do backend).
+  const tarefasFiltradas = soAvarias
+    ? tarefas.filter((t) => Array.isArray(t.avarias) && t.avarias.length > 0)
+    : tarefas;
+
   // Paginação client-side.
   const [pagina, setPagina] = useState(1);
   const [tamPagina, setTamPagina] = useState(25);
-  const totalPaginas = Math.max(1, Math.ceil(tarefas.length / tamPagina));
+  const totalPaginas = Math.max(1, Math.ceil(tarefasFiltradas.length / tamPagina));
   const paginaSegura = Math.min(pagina, totalPaginas);
-  const tarefasPagina = tarefas.slice(
+  const tarefasPagina = tarefasFiltradas.slice(
     (paginaSegura - 1) * tamPagina,
     paginaSegura * tamPagina
   );
@@ -254,7 +265,22 @@ export default function AdminTarefasPage() {
             Gestão manual de tarefas de limpeza.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant={soAvarias ? "destructive" : "outline"}
+            size="sm"
+            onClick={() => {
+              setSoAvarias((v) => !v);
+              setPagina(1);
+            }}
+            title="Mostrar só tarefas com avarias reportadas"
+            aria-pressed={soAvarias}
+          >
+            <Wrench className="h-4 w-4" />
+            <span className="hidden sm:inline">
+              {soAvarias ? "A mostrar avarias" : "Só avarias"}
+            </span>
+          </Button>
           <Button
             variant="outline"
             size="icon"
@@ -283,6 +309,24 @@ export default function AdminTarefasPage() {
           </Button>
         </div>
       </div>
+
+      {/* Indicador de filtro ativo */}
+      {soAvarias && (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Filter className="h-3.5 w-3.5" />
+          <span>
+            A mostrar {tarefasFiltradas.length} tarefa(s) com avarias reportadas.
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2"
+            onClick={() => setSoAvarias(false)}
+          >
+            Limpar filtro
+          </Button>
+        </div>
+      )}
 
       {/* Formulário de criação */}
       {mostrarForm && (
@@ -384,10 +428,12 @@ export default function AdminTarefasPage() {
             <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
               <Loader2 className="h-5 w-5 animate-spin" />A carregar tarefas…
             </div>
-          ) : tarefas.length === 0 ? (
+          ) : tarefasFiltradas.length === 0 ? (
             <div className="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">
               <ClipboardList className="h-10 w-10 opacity-40" />
-              <p className="text-sm">Sem tarefas.</p>
+              <p className="text-sm">
+                {soAvarias ? "Sem tarefas com avarias reportadas." : "Sem tarefas."}
+              </p>
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -402,10 +448,26 @@ export default function AdminTarefasPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {tarefasPagina.map((t) => (
+                  {tarefasPagina.map((t) => {
+                    const temAvarias = Array.isArray(t.avarias) && t.avarias.length > 0;
+                    return (
                     <tr key={t._id} className="hover:bg-muted/30">
                       <td className="px-4 py-3">{formatarData(t.data)}</td>
-                      <td className="px-4 py-3 font-medium">{t.propriedade_id?.nome ?? "—"}</td>
+                      <td className="px-4 py-3 font-medium">
+                        <div className="flex items-center gap-2">
+                          <span>{t.propriedade_id?.nome ?? "—"}</span>
+                          {temAvarias && (
+                            <Badge
+                              variant="destructive"
+                              className="shrink-0 gap-1 whitespace-nowrap text-[10px] px-1.5 py-0"
+                              title={`${t.avarias!.length} avaria(s) reportada(s)`}
+                            >
+                              <Wrench className="h-3 w-3" />
+                              Avaria
+                            </Badge>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-4 py-3 text-muted-foreground">{t.utilizador_id?.nome ?? "—"}</td>
                       <td className="px-4 py-3">
                         <Badge variant={ESTADO_VARIANT[t.estado] ?? "secondary"}>
@@ -441,17 +503,18 @@ export default function AdminTarefasPage() {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           )}
           {/* Paginação */}
-          {!loading && tarefas.length > 0 && (
+          {!loading && tarefasFiltradas.length > 0 && (
             <PaginationBar
               page={paginaSegura}
               totalPages={totalPaginas}
-              total={tarefas.length}
+              total={tarefasFiltradas.length}
               pageSize={tamPagina}
               onPageChange={setPagina}
               onPageSizeChange={(n) => {

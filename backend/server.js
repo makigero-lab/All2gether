@@ -63,9 +63,11 @@ app.use(express.json());
 
 // Rate limiting global: 100 pedidos por IP a cada 15 minutos.
 // Não se aplica ao webhook do Smoobu (que tem o seu próprio padrão).
+// Em ambiente de teste (Jest) o limite é desativado para não bloquear
+// os testes de integração que fazem centenas de pedidos seguidos.
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
+  max: process.env.NODE_ENV === 'test' ? Infinity : 100,
   standardHeaders: true,
   legacyHeaders: false,
   message: { erro: 'Muitos pedidos. Tente novamente mais tarde.' },

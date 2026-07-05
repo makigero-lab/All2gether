@@ -59,7 +59,9 @@ function round1(n) {
  *       emAtraso,               // tarefas não concluídas cuja data já passou
  *       taxaAtraso,             // 0..1 (emAtraso / total)
  *       cargaTotalMinutos,      // soma de tempo_limpeza_minutos (exclui canceladas)
- *       tempoMedioMinutos       // média de tempo das concluídas
+ *       tempoMedioMinutos,      // média de tempo estimado das concluídas (= tempoEstimadoMedioMinutos)
+ *       tempoEstimadoMedioMinutos, // alias de tempoMedioMinutos
+ *       tempoRealMedioMinutos   // média de (hora_conclusao - data) das concluídas, em minutos
  *     },
  *     porStaff: [{ utilizador_id, nome, total, concluidas, carga_minutos, taxaConclusao }],
  *     porDia:   [{ data, total, concluidas, carga_minutos }],
@@ -98,6 +100,7 @@ exports.getRelatorioProdutividade = async (req, res) => {
       cargaTotal,
       tempoMedioAgg,
       porEstadoAgg,
+      tempoRealAgg,
     ] = await Promise.all([
       // Total (exclui canceladas).
       Tarefa.countDocuments({ ...matchBase, estado: { $ne: 'cancelada' } }),
@@ -114,7 +117,7 @@ exports.getRelatorioProdutividade = async (req, res) => {
         { $match: { ...matchBase, estado: { $ne: 'cancelada' } } },
         { $group: { _id: null, total: { $sum: '$tempo_limpeza_minutos' } } },
       ]),
-      // Tempo médio das concluídas.
+      // Tempo médio estimado das concluídas.
       Tarefa.aggregate([
         { $match: { ...matchBase, estado: 'concluida' } },
         { $group: { _id: null, media: { $avg: '$tempo_limpeza_minutos' } } },
@@ -125,11 +128,40 @@ exports.getRelatorioProdutividade = async (req, res) => {
         { $group: { _id: '$estado', total: { $sum: 1 } } },
         { $sort: { total: -1 } },
       ]),
+      // Tempo real médio: média da diferença entre hora_conclusao e data
+      // (em minutos) das tarefas concluídas com hora_conclusao definida.
+      Tarefa.aggregate([
+        {
+          $match: {
+            ...matchBase,
+            estado: 'concluida',
+            hora_conclusao: { $ne: null, $type: 'date' },
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            media: {
+              $avg: {
+                $divide: [
+                  { $subtract: ['$hora_conclusao', '$data'] },
+                  60 * 1000, // ms → minutos
+                ],
+              },
+            },
+          },
+        },
+      ]),
     ]);
 
     const cargaTotalMinutos = cargaTotal[0]?.total || 0;
     const tempoMedioMinutos = tempoMedioAgg[0]?.media
       ? Math.round(tempoMedioAgg[0].media)
+      : 0;
+    // Tempo real médio em minutos — arredondado. Se não houver tarefas
+    // concluídas com hora_conclusao, devolve 0.
+    const tempoRealMedioMinutos = tempoRealAgg[0]?.media
+      ? Math.round(tempoRealAgg[0].media)
       : 0;
 
     /* ---- Por staff (produtividade individual) ---- */
@@ -230,6 +262,8 @@ exports.getRelatorioProdutividade = async (req, res) => {
         taxaAtraso: totalTarefas > 0 ? round1(emAtraso / totalTarefas) : 0,
         cargaTotalMinutos,
         tempoMedioMinutos,
+        tempoEstimadoMedioMinutos: tempoMedioMinutos,
+        tempoRealMedioMinutos,
       },
       porStaff,
       porDia,

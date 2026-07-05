@@ -21,6 +21,7 @@ const cron = require('node-cron');
 const mongoose = require('mongoose');
 const Tarefa = require('../models/Tarefa');
 const Utilizador = require('../models/Utilizador');
+const { notificarUtilizador } = require('../utils/notificar');
 
 /**
  * Envia uma mensagem WhatsApp para um número de telefone.
@@ -116,26 +117,40 @@ async function executarBriefing() {
     }
 
     // 4) Para cada utilizador com telefone, gera e envia a mensagem.
+    //    Além do WhatsApp, envia também uma notificação push (se o staff
+    //    tiver pushSubscription ativa) com um resumo das tarefas do dia.
     let enviados = 0;
     let semTelefone = 0;
+    let pushesEnviados = 0;
 
     for (const [, { utilizador, tarefas: tarefasUser }] of porUtilizador) {
       const telefone = utilizador.telefone?.trim();
 
       if (!telefone) {
         semTelefone++;
-        console.log(`⚠️  [Daily Briefing] ${utilizador.nome} não tem telefone — skipping.`);
-        continue;
+        console.log(`⚠️  [Daily Briefing] ${utilizador.nome} não tem telefone — skipping WhatsApp.`);
+      } else {
+        const mensagem = gerarMensagem(utilizador, tarefasUser);
+        enviarWhatsApp(telefone, mensagem);
+        enviados++;
       }
 
-      const mensagem = gerarMensagem(utilizador, tarefasUser);
-      enviarWhatsApp(telefone, mensagem);
-      enviados++;
+      // Push notification (fire-and-forget) — além do WhatsApp.
+      // notificarUtilizador valida internamente se há pushSubscription.
+      const staffId = String(utilizador._id);
+      const count = tarefasUser.length;
+      notificarUtilizador(
+        staffId,
+        '📋 Daily Briefing',
+        `Tens ${count} tarefa(s) hoje.`,
+        '/staff'
+      );
+      pushesEnviados++;
     }
 
     console.log(
-      `✅ [Daily Briefing] Concluído: ${enviados} mensagem(s) enviada(s), ` +
-        `${semTelefone} utilizador(es) sem telefone.`
+      `✅ [Daily Briefing] Concluído: ${enviados} mensagem(s) WhatsApp enviada(s), ` +
+        `${semTelefone} utilizador(es) sem telefone, ${pushesEnviados} push(es) enviados(s).`
     );
   } catch (err) {
     console.error('❌ [Daily Briefing] Erro:', err.message);

@@ -82,6 +82,8 @@ interface RelatorioData {
     taxaAtraso: number;
     cargaTotalMinutos: number;
     tempoMedioMinutos: number;
+    tempoEstimadoMedioMinutos?: number;
+    tempoRealMedioMinutos?: number;
   };
   porStaff: PorStaff[];
   porDia: PorDia[];
@@ -205,6 +207,22 @@ export default function RelatoriosPage() {
   const stats = useMemo(() => {
     if (!data) return [];
     const r = data.resumo;
+    const tempoEstimado = r.tempoEstimadoMedioMinutos ?? r.tempoMedioMinutos ?? 0;
+    const tempoReal = r.tempoRealMedioMinutos ?? 0;
+    // Diferença real - estimado. Negativo = staff demorou menos (verde).
+    // Positivo = staff demorou mais (vermelho).
+    const diff = tempoReal - tempoEstimado;
+    const diffCor = tempoReal === 0
+      ? CORES.muted
+      : diff <= 0
+        ? CORES.verde
+        : CORES.vermelho;
+    const diffLabel =
+      tempoReal === 0
+        ? "Sem dados"
+        : diff <= 0
+          ? `${formatarHoras(Math.abs(diff))} mais rápido`
+          : `${formatarHoras(diff)} mais lento`;
     return [
       {
         label: "Total tarefas",
@@ -233,10 +251,24 @@ export default function RelatoriosPage() {
         cor: CORES.amber,
       },
       {
-        label: "Tempo médio",
-        value: formatarHoras(r.tempoMedioMinutos),
+        label: "Tempo médio estimado",
+        value: formatarHoras(tempoEstimado),
         icon: TrendingUp,
         cor: CORES.muted,
+      },
+      {
+        label: "Tempo real médio",
+        value: formatarHoras(tempoReal),
+        sub: tempoReal > 0 ? "Concluídas" : undefined,
+        icon: Clock,
+        cor: CORES.amber,
+      },
+      {
+        label: "Diferença (real - estimado)",
+        value: tempoReal === 0 ? "—" : formatarHoras(Math.abs(diff)),
+        sub: diffLabel,
+        icon: diff <= 0 && tempoReal > 0 ? CheckCircle2 : AlertTriangle,
+        cor: diffCor,
       },
     ];
   }, [data]);
@@ -347,7 +379,7 @@ export default function RelatoriosPage() {
       ) : data ? (
         <>
           {/* Cartões de resumo */}
-          <div className="grid gap-4 sm:grid-cols-3 xl:grid-cols-5">
+          <div className="grid gap-4 sm:grid-cols-3 xl:grid-cols-7">
             {stats.map((s) => {
               const Icon = s.icon;
               return (

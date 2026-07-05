@@ -41,7 +41,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { adminPost, adminPatch } from "@/lib/api";
-import type { TarefaMock } from "@/lib/mock-data";
+import type { TarefaMock, EstadoTarefa, TipoTarefa } from "@/lib/api";
 
 const tipoIcon: Record<TarefaMock["tipo"], React.ComponentType<{ className?: string }>> = {
   limpeza: SprayCan,
