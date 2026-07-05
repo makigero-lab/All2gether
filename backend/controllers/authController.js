@@ -209,7 +209,7 @@ exports.minhasTarefas = async (req, res) => {
       data: { $gte: hoje, $lt: amanha },
       estado: { $ne: 'cancelada' },
     })
-      .populate({ path: 'propriedade_id', select: 'nome morada coordenadas' })
+      .populate({ path: 'propriedade_id', select: 'nome morada coordenadas checklist' })
       .sort({ createdAt: 1 })
       .lean();
 
@@ -244,7 +244,7 @@ exports.minhaTarefaDetalhe = async (req, res) => {
       _id: id,
       utilizador_id: req.user.id,
     })
-      .populate({ path: 'propriedade_id', select: 'nome morada coordenadas' })
+      .populate({ path: 'propriedade_id', select: 'nome morada coordenadas checklist' })
       .lean();
 
     if (!tarefa) {

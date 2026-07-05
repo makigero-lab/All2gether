@@ -93,6 +93,8 @@ export function DetalheTarefaClient({
   );
   const [observacoes, setObservacoes] = useState("");
   const [concluida, setConcluida] = useState(false);
+  const [concluindo, setConcluindo] = useState(false);
+  const [erroConcluir, setErroConcluir] = useState<string | null>(null);
 
   // Modal de reportar atraso
   const [mostrarAtraso, setMostrarAtraso] = useState(false);
@@ -106,7 +108,8 @@ export function DetalheTarefaClient({
     () => itensMarcados.filter(Boolean).length,
     [itensMarcados]
   );
-  const todasMarcadas = itensConcluidos === totalItens && totalItens > 0;
+  // Se a checklist estiver vazia, o botão fica sempre ativo (não há itens para marcar).
+  const todasMarcadas = totalItens === 0 || itensConcluidos === totalItens;
 
   const toggleItem = (index: number, value: boolean) => {
     setItensMarcados((prev) => {
@@ -117,18 +120,26 @@ export function DetalheTarefaClient({
   };
 
   const handleConcluir = async () => {
-    if (!todasMarcadas || concluida) return;
-    // PATCH real para marcar a tarefa como concluída + guardar observações.
+    if (!todasMarcadas || concluida || concluindo) return;
+    setConcluindo(true);
+    setErroConcluir(null);
+    // PATCH real para a rota do staff (v1.34.0) — envia observacoes_staff.
     try {
-      await adminPatch(`/api/auth/me/tarefas/${tarefa.id}/concluir`, {
-        observacoes,
+      await fetch(`/api/staff/tarefas/${tarefa.id}/concluir`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ observacoes_staff: observacoes }),
       });
       setConcluida(true);
-      setTimeout(() => router.push("/staff"), 800);
-    } catch {
-      // Mesmo com erro, marca visualmente como concluída (best-effort).
-      setConcluida(true);
-      setTimeout(() => router.push("/staff"), 800);
+      // Mostra a mensagem verde durante 1.2s antes de redirecionar.
+      setTimeout(() => router.push("/staff"), 1200);
+    } catch (e) {
+      setErroConcluir(
+        e instanceof Error ? e.message : "Erro ao concluir tarefa."
+      );
+    } finally {
+      setConcluindo(false);
     }
   };
 
@@ -294,6 +305,19 @@ export function DetalheTarefaClient({
 
       {/* Botão Concluir Tarefa — fixo no fundo */}
       <footer className="sticky bottom-0 space-y-2 border-t bg-background/95 p-4 backdrop-blur">
+        {/* Mensagem de erro */}
+        {erroConcluir && (
+          <p className="text-center text-sm text-destructive">{erroConcluir}</p>
+        )}
+
+        {/* Mensagem de sucesso verde vibrante */}
+        {concluida && (
+          <div className="flex items-center justify-center gap-2 rounded-lg bg-emerald-500 p-3 text-center text-white">
+            <CheckCircle2 className="h-5 w-5" />
+            <span className="font-semibold">Limpeza Concluída!</span>
+          </div>
+        )}
+
         {/* Botão Reportar Atraso */}
         {!concluida && (
           <Button
@@ -310,27 +334,29 @@ export function DetalheTarefaClient({
           </Button>
         )}
 
-        <Button
-          size="lg"
-          className="w-full"
-          disabled={!todasMarcadas || concluida}
-          onClick={handleConcluir}
-        >
-          {concluida ? (
-            <>
-              <Check className="h-5 w-5" />
-              Tarefa concluída!
-            </>
-          ) : todasMarcadas ? (
-            <>
-              <CheckCircle2 className="h-5 w-5" />
-              Concluir Tarefa
-            </>
-          ) : (
-            `Concluir Tarefa (${itensConcluidos}/${totalItens})`
-          )}
-        </Button>
-        {!todasMarcadas && !concluida && (
+        {!concluida && (
+          <Button
+            size="lg"
+            className="w-full bg-emerald-600 text-white hover:bg-emerald-700"
+            disabled={!todasMarcadas || concluindo}
+            onClick={handleConcluir}
+          >
+            {concluindo ? (
+              <>
+                <Loader2 className="h-5 w-5 animate-spin" />
+                A concluir…
+              </>
+            ) : todasMarcadas ? (
+              <>
+                <CheckCircle2 className="h-5 w-5" />
+                Concluir Limpeza
+              </>
+            ) : (
+              `Concluir Limpeza (${itensConcluidos}/${totalItens})`
+            )}
+          </Button>
+        )}
+        {!todasMarcadas && !concluida && totalItens > 0 && (
           <p className="mt-2 text-center text-xs text-muted-foreground">
             Marca todos os itens da checklist para concluir a tarefa.
           </p>
