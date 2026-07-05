@@ -2,8 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ChevronLeft,
-  ChevronRight,
   CalendarRange,
   Loader2,
   AlertCircle,
@@ -13,32 +11,18 @@ import {
   User,
   X,
 } from "lucide-react";
-import {
-  format,
-  parseISO,
-  startOfMonth,
-  endOfMonth,
-  startOfWeek,
-  endOfWeek,
-  eachDayOfInterval,
-  isSameMonth,
-  isToday,
-  isSameDay,
-  addMonths,
-  addWeeks,
-  addDays,
-} from "date-fns";
+import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
+
+import FullCalendar from "@fullcalendar/react";
+import dayGridPlugin from "@fullcalendar/daygrid";
+import timeGridPlugin from "@fullcalendar/timegrid";
+import interactionPlugin from "@fullcalendar/interaction";
+import ptLocale from "@fullcalendar/core/locales/pt";
+import type { DatesSetArg, EventClickArg, EventInput } from "@fullcalendar/core";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import {
   Dialog,
@@ -72,7 +56,10 @@ interface FiltrosState {
   estado: string;
 }
 
-type Vista = "mensal" | "semanal" | "diaria";
+interface PeriodoState {
+  inicio: string;
+  fim: string;
+}
 
 const ESTADO_OPTS = [
   { value: "", label: "Todos os estados" },
@@ -83,14 +70,6 @@ const ESTADO_OPTS = [
   { value: "cancelada", label: "Cancelada" },
 ];
 
-const ESTADO_LABEL: Record<string, string> = {
-  por_atribuir: "Por atribuir",
-  atribuida: "Atribuída",
-  em_curso: "Em curso",
-  concluida: "Concluída",
-  cancelada: "Cancelada",
-};
-
 const TIPO_LABEL: Record<string, string> = {
   limpeza: "Limpeza",
   manutencao: "Manutenção",
@@ -99,40 +78,25 @@ const TIPO_LABEL: Record<string, string> = {
   check_out: "Check-out",
 };
 
-const DIAS_SEMANA = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
-const DIAS_SEMANA_FULL = [
-  "Domingo",
-  "Segunda",
-  "Terça",
-  "Quarta",
-  "Quinta",
-  "Sexta",
-  "Sábado",
-];
-
 /* ------------------------------------------------------------------ */
-/* Helpers de estilo por estado                                        */
+/* Helpers                                                             */
 /* ------------------------------------------------------------------ */
 
-function estiloPorEstado(estado: string): string {
+/** Cor de fundo/borda do evento do FullCalendar por estado da tarefa. */
+function corPorEstado(estado: string): string {
   switch (estado) {
     case "por_atribuir":
-      return "bg-destructive/10 text-destructive border-destructive/20 hover:bg-destructive/15";
+      return "#ef4444"; // vermelho
     case "atribuida":
     case "em_curso":
-      return "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20 hover:bg-amber-500/15";
+      return "#f59e0b"; // âmbar
     case "concluida":
-      return "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/15";
+      return "#10b981"; // verde
     case "cancelada":
-      return "bg-muted/40 text-muted-foreground border-muted line-through opacity-60";
+      return "#9ca3af"; // cinza
     default:
-      return "bg-muted/40 text-muted-foreground border-muted";
+      return "#6b7280";
   }
-}
-
-function nomeCurto(nome: string | undefined, max = 14): string {
-  if (!nome) return "—";
-  return nome.length > max ? nome.slice(0, max) + "…" : nome;
 }
 
 function primeiroNome(nome: string | undefined): string {
@@ -162,18 +126,11 @@ function horaFimTarefa(dataISO: string, minutos: number): string {
   }
 }
 
-/** "Segunda 15" — nome curto do dia (sem "-feira") + dia do mês. */
-function headerDia(dia: Date): string {
-  return `${DIAS_SEMANA_FULL[dia.getDay()]} ${format(dia, "d")}`;
-}
-
 /* ------------------------------------------------------------------ */
 /* Página                                                              */
 /* ------------------------------------------------------------------ */
 
 export default function CalendarioOperacionalPage() {
-  const [vista, setVista] = useState<Vista>("mensal");
-  const [mesAtual, setMesAtual] = useState(new Date());
   const [filtros, setFiltros] = useState<FiltrosState>({
     propriedadeId: "",
     utilizadorId: "",
@@ -186,10 +143,21 @@ export default function CalendarioOperacionalPage() {
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
 
+  // SSR-safe mount: FullCalendar só pode ser renderizado no cliente.
+  const [mounted, setMounted] = useState(false);
+
+  // Período atual do calendário (definido via datesSet do FullCalendar).
+  const [periodo, setPeriodo] = useState<PeriodoState | null>(null);
+
   // Modal de detalhe.
   const [tarefaSelecionada, setTarefaSelecionada] = useState<TarefaCalendario | null>(null);
   const [reatribuindoPara, setReatribuindoPara] = useState<string>("");
   const [reatribuindo, setReatribuindo] = useState(false);
+
+  /* --- Marca montação no cliente (inibe o SSR do FullCalendar) --- */
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   /* --- Carregar propriedades + equipa (uma vez) --- */
   const carregarFiltros = useCallback(async () => {
@@ -214,14 +182,13 @@ export default function CalendarioOperacionalPage() {
     carregarFiltros();
   }, [carregarFiltros]);
 
-  /* --- Carregar tarefas do mês + filtros (lógica original — NÃO MUDAR) --- */
+  /* --- Carregar tarefas do período + filtros (lógica original — NÃO MUDAR) --- */
   const carregarTarefas = useCallback(async () => {
+    if (!periodo) return;
     setLoading(true);
     setErro(null);
     try {
-      const inicio = format(startOfMonth(mesAtual), "yyyy-MM-dd");
-      const fim = format(endOfMonth(mesAtual), "yyyy-MM-dd");
-      const params = new URLSearchParams({ inicio, fim });
+      const params = new URLSearchParams({ inicio: periodo.inicio, fim: periodo.fim });
       if (filtros.propriedadeId) params.set("propriedadeId", filtros.propriedadeId);
       if (filtros.utilizadorId) params.set("utilizadorId", filtros.utilizadorId);
       if (filtros.estado) params.set("estado", filtros.estado);
@@ -235,81 +202,60 @@ export default function CalendarioOperacionalPage() {
     } finally {
       setLoading(false);
     }
-  }, [mesAtual, filtros]);
+  }, [periodo, filtros]);
 
-  // Recarrega quando o mês ou os filtros mudam.
+  // Recarrega quando o período (definido pelo FullCalendar) ou os filtros mudam.
   useEffect(() => {
-    carregarTarefas();
-  }, [carregarTarefas]);
+    if (periodo) carregarTarefas();
+  }, [carregarTarefas, periodo]);
 
-  /* --- Agrupar tarefas por dia --- */
-  const tarefasPorDia = useMemo(() => {
-    const mapa = new Map<string, TarefaCalendario[]>();
-    for (const t of tarefas) {
-      const key = format(parseISO(t.data), "yyyy-MM-dd");
-      if (!mapa.has(key)) mapa.set(key, []);
-      mapa.get(key)!.push(t);
-    }
-    return mapa;
+  /* --- Mapear tarefas → eventos do FullCalendar --- */
+  const eventos = useMemo<EventInput[]>(() => {
+    return tarefas.map((t) => {
+      // Folga fixa semanal — bloco cinzento claro, todo o dia.
+      if (t.tipo === "folga_fixa") {
+        return {
+          id: t._id,
+          title: `Folga - ${t.utilizador_id?.nome ?? "Staff"}`,
+          start: t.data,
+          allDay: true,
+          backgroundColor: "#e2e8f0",
+          borderColor: "#cbd5e1",
+          textColor: "#475569",
+          extendedProps: t,
+        } as EventInput;
+      }
+
+      const inicio = new Date(t.data);
+      const fim = new Date(inicio.getTime() + (t.tempo_limpeza_minutos || 45) * 60000);
+      const cor = corPorEstado(t.estado);
+      return {
+        id: t._id,
+        title: `${t.propriedade_id?.nome ?? "—"} - ${
+          t.utilizador_id?.nome ?? "Sem atribuição"
+        }`,
+        start: inicio.toISOString(),
+        end: fim.toISOString(),
+        backgroundColor: cor,
+        borderColor: cor,
+        extendedProps: t,
+      } as EventInput;
+    });
   }, [tarefas]);
 
-  /* --- Dias a mostrar conforme a vista ativa --- */
-  const diasVisiveis = useMemo<Date[]>(() => {
-    if (vista === "mensal") {
-      const inicio = startOfWeek(startOfMonth(mesAtual), { weekStartsOn: 1 });
-      const fim = endOfWeek(endOfMonth(mesAtual), { weekStartsOn: 1 });
-      return eachDayOfInterval({ start: inicio, end: fim });
-    }
-    if (vista === "semanal") {
-      const inicio = startOfWeek(mesAtual, { weekStartsOn: 1 });
-      const fim = endOfWeek(mesAtual, { weekStartsOn: 1 });
-      return eachDayOfInterval({ start: inicio, end: fim });
-    }
-    // Diária: só o próprio dia.
-    return [mesAtual];
-  }, [vista, mesAtual]);
-
-  /* --- Navegação conforme a vista ativa --- */
-  function navegarAnterior() {
-    setMesAtual((m) => {
-      if (vista === "mensal") return addMonths(m, -1);
-      if (vista === "semanal") return addWeeks(m, -1);
-      return addDays(m, -1);
+  /* --- Callbacks do FullCalendar --- */
+  const handleDatesSet = useCallback((arg: DatesSetArg) => {
+    setPeriodo({
+      inicio: format(arg.start, "yyyy-MM-dd"),
+      fim: format(arg.end, "yyyy-MM-dd"),
     });
-  }
-  function navegarSeguinte() {
-    setMesAtual((m) => {
-      if (vista === "mensal") return addMonths(m, 1);
-      if (vista === "semanal") return addWeeks(m, 1);
-      return addDays(m, 1);
-    });
-  }
+  }, []);
 
-  /* --- Etiqueta do período (badge) --- */
-  const periodoLabel = useMemo(() => {
-    if (vista === "mensal") {
-      return format(mesAtual, "MMMM yyyy", { locale: pt });
-    }
-    if (vista === "semanal") {
-      const inicio = startOfWeek(mesAtual, { weekStartsOn: 1 });
-      const fim = endOfWeek(mesAtual, { weekStartsOn: 1 });
-      if (isSameMonth(inicio, fim)) {
-        return `${format(inicio, "d", { locale: pt })}–${format(fim, "d 'de' MMMM yyyy", {
-          locale: pt,
-        })}`;
-      }
-      if (inicio.getFullYear() === fim.getFullYear()) {
-        return `${format(inicio, "d MMM", { locale: pt })} – ${format(fim, "d MMM yyyy", {
-          locale: pt,
-        })}`;
-      }
-      return `${format(inicio, "d MMM yyyy", { locale: pt })} – ${format(fim, "d MMM yyyy", {
-        locale: pt,
-      })}`;
-    }
-    // Diária.
-    return format(mesAtual, "EEEE, d 'de' MMMM yyyy", { locale: pt });
-  }, [vista, mesAtual]);
+  const handleEventClick = useCallback((arg: EventClickArg) => {
+    const tarefa = arg.event.extendedProps as TarefaCalendario;
+    setTarefaSelecionada(tarefa);
+    setReatribuindoPara(tarefa.utilizador_id?._id ?? "");
+  }, []);
 
   /* --- Reatribuição rápida --- */
   async function handleReatribuir() {
@@ -343,14 +289,6 @@ export default function CalendarioOperacionalPage() {
     }
   }
 
-  /* --- Abrir detalhe da tarefa --- */
-  function abrirTarefa(t: TarefaCalendario) {
-    setTarefaSelecionada(t);
-    setReatribuindoPara(t.utilizador_id?._id ?? "");
-  }
-
-  const carregandoInicial = loading && tarefas.length === 0;
-
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
       {/* Cabeçalho */}
@@ -361,21 +299,20 @@ export default function CalendarioOperacionalPage() {
             variant="outline"
             size="icon"
             onClick={carregarTarefas}
-            disabled={loading}
+            disabled={loading || !periodo}
             aria-label="Atualizar"
           >
             <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
           </Button>
         </div>
         <p className="text-sm text-muted-foreground">
-          Vista mensal, semanal e diária de todas as tarefas de limpeza. Filtra por propriedade,
-          staff ou estado.
+          Vista mensal, semanal e diária de todas as tarefas de limpeza. Filtra por
+          propriedade, staff ou estado. Clica numa tarefa para ver o detalhe e reatribuir.
         </p>
       </div>
 
-      {/* Zona de Filtros + Navegação */}
+      {/* Zona de Filtros */}
       <div className="flex flex-col gap-4 rounded-lg border bg-card p-4 lg:flex-row lg:items-end lg:justify-between">
-        {/* Filtros */}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 lg:flex lg:gap-3">
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-medium text-muted-foreground">Propriedade</label>
@@ -438,22 +375,13 @@ export default function CalendarioOperacionalPage() {
           )}
         </div>
 
-        {/* Navegação de período */}
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="icon" onClick={navegarAnterior} aria-label="Anterior">
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setMesAtual(new Date())}>
-            Hoje
-          </Button>
-          <Button variant="outline" size="icon" onClick={navegarSeguinte} aria-label="Seguinte">
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-          <Badge variant="default" className="ml-2 px-3 py-1.5 text-sm capitalize">
-            <CalendarRange className="mr-1.5 h-3.5 w-3.5" />
-            {periodoLabel}
+        {/* Indicador de loading discreto */}
+        {loading && (
+          <Badge variant="secondary" className="self-start px-3 py-1.5 text-xs lg:self-end">
+            <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+            A sincronizar…
           </Badge>
-        </div>
+        )}
       </div>
 
       {/* Erro */}
@@ -467,252 +395,88 @@ export default function CalendarioOperacionalPage() {
         </div>
       )}
 
-      {/* Tabs de vistas */}
-      <Tabs value={vista} onValueChange={(v) => setVista(v as Vista)}>
-        <TabsList>
-          <TabsTrigger value="mensal">Mensal</TabsTrigger>
-          <TabsTrigger value="semanal">Semanal</TabsTrigger>
-          <TabsTrigger value="diaria">Diária</TabsTrigger>
-        </TabsList>
-
-        {/* ============= VISTA MENSAL ============= */}
-        <TabsContent value="mensal" className="space-y-3">
-          {carregandoInicial ? (
-            <div className="flex items-center justify-center gap-2 py-20 text-sm text-muted-foreground">
-              <Loader2 className="h-5 w-5 animate-spin" />
-              A carregar calendário…
-            </div>
-          ) : (
-            <>
-              {/* Cabeçalho dos dias da semana */}
-              <div className="grid grid-cols-7 gap-2">
-                {DIAS_SEMANA.map((d) => (
-                  <div
-                    key={d}
-                    className="py-2 text-center text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-                  >
-                    {d}
-                  </div>
-                ))}
-              </div>
-
-              {/* Grelha do calendário */}
-              <div className="grid grid-cols-7 gap-2">
-                {diasVisiveis.map((dia) => {
-                  const key = format(dia, "yyyy-MM-dd");
-                  const tarefasDoDia = tarefasPorDia.get(key) ?? [];
-                  const noMes = isSameMonth(dia, mesAtual);
-                  const hoje = isToday(dia);
-
-                  return (
-                    <div
-                      key={key}
-                      className={cn(
-                        "min-h-[110px] rounded-lg border p-1.5 transition-colors",
-                        noMes ? "bg-card" : "bg-muted/30",
-                        hoje && "border-primary ring-1 ring-primary/30"
-                      )}
-                    >
-                      <div
-                        className={cn(
-                          "mb-1 text-right text-xs font-medium",
-                          noMes ? "text-muted-foreground" : "text-muted-foreground/50",
-                          hoje && "text-primary"
-                        )}
-                      >
-                        {format(dia, "d")}
-                      </div>
-                      <div className="flex max-h-32 flex-col gap-1 overflow-y-auto">
-                        {tarefasDoDia.map((t) => {
-                          // Folga fixa semanal — bloco cinzento suave.
-                          if (t.tipo === "folga_fixa") {
-                            return (
-                              <div
-                                key={t._id}
-                                className="rounded-md border border-slate-200 bg-slate-100 px-1.5 py-1 text-left text-[11px] leading-tight text-slate-500 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-400"
-                                title={`Folga semanal — ${t.utilizador_id?.nome ?? "Staff"}`}
-                              >
-                                <div className="truncate font-medium">
-                                  Folga — {primeiroNome(t.utilizador_id?.nome)}
-                                </div>
-                              </div>
-                            );
-                          }
-                          return (
-                            <button
-                              key={t._id}
-                              onClick={() => abrirTarefa(t)}
-                              className={cn(
-                                "rounded-md border px-1.5 py-1 text-left text-[11px] leading-tight transition-all",
-                                "hover:shadow-md hover:-translate-y-0.5 hover:z-10",
-                                estiloPorEstado(t.estado)
-                              )}
-                              title={`${t.propriedade_id?.nome ?? "—"}${
-                                t.utilizador_id ? " · " + t.utilizador_id.nome : ""
-                              }`}
-                            >
-                              <div className="truncate font-medium">
-                                {nomeCurto(t.propriedade_id?.nome)}
-                              </div>
-                              {t.utilizador_id && (
-                                <div className="truncate opacity-80">
-                                  {primeiroNome(t.utilizador_id.nome)}
-                                </div>
-                              )}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          )}
-        </TabsContent>
-
-        {/* ============= VISTA SEMANAL ============= */}
-        <TabsContent value="semanal" className="space-y-3">
-          {carregandoInicial ? (
-            <div className="flex items-center justify-center gap-2 py-20 text-sm text-muted-foreground">
-              <Loader2 className="h-5 w-5 animate-spin" />
-              A carregar calendário…
-            </div>
-          ) : (
-            <>
-              {/* Cabeçalho dos dias da semana */}
-              <div className="grid grid-cols-7 gap-2">
-                {diasVisiveis.map((dia) => {
-                  const hoje = isSameDay(dia, new Date());
-                  return (
-                    <div
-                      key={format(dia, "yyyy-MM-dd")}
-                      className={cn(
-                        "py-2 text-center text-xs font-semibold uppercase tracking-wide",
-                        hoje ? "text-primary" : "text-muted-foreground"
-                      )}
-                    >
-                      {headerDia(dia)}
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Colunas verticais com tarefas */}
-              <div className="grid grid-cols-7 gap-2">
-                {diasVisiveis.map((dia) => {
-                  const key = format(dia, "yyyy-MM-dd");
-                  const tarefasDoDia = tarefasPorDia.get(key) ?? [];
-                  const hoje = isSameDay(dia, new Date());
-
-                  return (
-                    <div
-                      key={key}
-                      className={cn(
-                        "flex min-h-[400px] flex-col gap-2 rounded-lg border bg-card p-2",
-                        hoje && "border-primary ring-1 ring-primary/30"
-                      )}
-                    >
-                      <div
-                        className={cn(
-                          "max-h-[60vh] flex-1 space-y-2 overflow-y-auto pr-0.5",
-                          "[&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/30 [&::-webkit-scrollbar-track]:bg-transparent"
-                        )}
-                      >
-                        {tarefasDoDia.length === 0 && (
-                          <div className="py-6 text-center text-xs text-muted-foreground/60">
-                            —
-                          </div>
-                        )}
-                        {tarefasDoDia.map((t) => {
-                          // Folga fixa semanal.
-                          if (t.tipo === "folga_fixa") {
-                            return (
-                              <div
-                                key={t._id}
-                                className="rounded-md border border-slate-200 bg-slate-100 px-2 py-1.5 text-left text-xs leading-tight text-slate-500 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-400"
-                                title={`Folga semanal — ${t.utilizador_id?.nome ?? "Staff"}`}
-                              >
-                                <div className="truncate font-medium">
-                                  Folga — {primeiroNome(t.utilizador_id?.nome)}
-                                </div>
-                              </div>
-                            );
-                          }
-                          return (
-                            <button
-                              key={t._id}
-                              onClick={() => abrirTarefa(t)}
-                              className={cn(
-                                "w-full rounded-md border px-2 py-1.5 text-left text-xs leading-tight transition-all",
-                                "hover:shadow-md hover:-translate-y-0.5 hover:z-10",
-                                estiloPorEstado(t.estado)
-                              )}
-                              title={`${t.propriedade_id?.nome ?? "—"}${
-                                t.utilizador_id ? " · " + t.utilizador_id.nome : ""
-                              }`}
-                            >
-                              <div className="flex items-center gap-1 text-[10px] font-mono opacity-80">
-                                <Clock className="h-2.5 w-2.5" />
-                                {horaTarefa(t.data)} - {horaFimTarefa(t.data, t.tempo_limpeza_minutos)}
-                              </div>
-                              <div className="truncate font-medium">
-                                {nomeCurto(t.propriedade_id?.nome, 18)}
-                              </div>
-                              <div className="truncate opacity-80">
-                                {primeiroNome(t.utilizador_id?.nome) || "Sem atribuição"}
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          )}
-        </TabsContent>
-
-        {/* ============= VISTA DIÁRIA ============= */}
-        <TabsContent value="diaria" className="space-y-3">
-          {carregandoInicial ? (
-            <div className="flex items-center justify-center gap-2 py-20 text-sm text-muted-foreground">
-              <Loader2 className="h-5 w-5 animate-spin" />
-              A carregar calendário…
-            </div>
-          ) : (
-            <DiariaList
-              dia={mesAtual}
-              tarefasPorDia={tarefasPorDia}
-              abrirTarefa={abrirTarefa}
-            />
-          )}
-        </TabsContent>
-      </Tabs>
+      {/* FullCalendar */}
+      <div className="rounded-lg border bg-card p-2 sm:p-4">
+        {mounted ? (
+          <FullCalendar
+            plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
+            initialView="dayGridMonth"
+            locale={ptLocale}
+            headerToolbar={{
+              left: "prev,next today",
+              center: "title",
+              right: "dayGridMonth,timeGridWeek,timeGridDay",
+            }}
+            slotMinTime="08:00:00"
+            slotMaxTime="20:00:00"
+            height={700}
+            nowIndicator
+            editable={false}
+            eventStartEditable={false}
+            eventDurationEditable={false}
+            events={eventos}
+            eventClick={handleEventClick}
+            datesSet={handleDatesSet}
+            dayMaxEvents
+            eventDisplay="block"
+            eventTimeFormat={{
+              hour: "2-digit",
+              minute: "2-digit",
+              meridiem: false,
+            }}
+            slotLabelFormat={{
+              hour: "2-digit",
+              minute: "2-digit",
+              meridiem: false,
+            }}
+          />
+        ) : (
+          <div className="flex h-[700px] items-center justify-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            A preparar calendário…
+          </div>
+        )}
+      </div>
 
       {/* Legenda */}
-      {!carregandoInicial && (
-        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-          <span className="font-medium">Legenda:</span>
-          <span className="flex items-center gap-1.5">
-            <span className="h-3 w-3 rounded border bg-destructive/10 border-destructive/20" />
-            Por atribuir
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="h-3 w-3 rounded border bg-amber-500/10 border-amber-500/20" />
-            Atribuída
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="h-3 w-3 rounded border bg-emerald-500/10 border-emerald-500/20" />
-            Concluída
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="h-3 w-3 rounded border bg-muted/40 border-muted" />
-            Cancelada
-          </span>
-        </div>
-      )}
+      <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+        <span className="font-medium">Legenda:</span>
+        <span className="flex items-center gap-1.5">
+          <span
+            className="h-3 w-3 rounded border"
+            style={{ backgroundColor: "#ef4444", borderColor: "#ef4444" }}
+          />
+          Por atribuir
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span
+            className="h-3 w-3 rounded border"
+            style={{ backgroundColor: "#f59e0b", borderColor: "#f59e0b" }}
+          />
+          Atribuída / Em curso
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span
+            className="h-3 w-3 rounded border"
+            style={{ backgroundColor: "#10b981", borderColor: "#10b981" }}
+          />
+          Concluída
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span
+            className="h-3 w-3 rounded border"
+            style={{ backgroundColor: "#9ca3af", borderColor: "#9ca3af" }}
+          />
+          Cancelada
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span
+            className="h-3 w-3 rounded border"
+            style={{ backgroundColor: "#e2e8f0", borderColor: "#cbd5e1" }}
+          />
+          Folga fixa
+        </span>
+      </div>
 
       {/* Modal de detalhe + reatribuição */}
       <Dialog
@@ -759,7 +523,14 @@ export default function CalendarioOperacionalPage() {
               </div>
               <div className="flex items-center gap-2">
                 <Clock className="h-4 w-4 text-muted-foreground" />
-                <span>Tempo estimado: {tarefaSelecionada.tempo_limpeza_minutos} min</span>
+                <span>
+                  {horaTarefa(tarefaSelecionada.data)} -{" "}
+                  {horaFimTarefa(
+                    tarefaSelecionada.data,
+                    tarefaSelecionada.tempo_limpeza_minutos
+                  )}{" "}
+                  · {tarefaSelecionada.tempo_limpeza_minutos} min
+                </span>
               </div>
               {tarefaSelecionada.propriedade_id?.morada && (
                 <div className="flex items-start gap-2">
@@ -833,105 +604,6 @@ export default function CalendarioOperacionalPage() {
           </Button>
         </DialogFooter>
       </Dialog>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Componente: Vista Diária                                            */
-/* ------------------------------------------------------------------ */
-
-interface DiariaListProps {
-  dia: Date;
-  tarefasPorDia: Map<string, TarefaCalendario[]>;
-  abrirTarefa: (t: TarefaCalendario) => void;
-}
-
-function DiariaList({ dia, tarefasPorDia, abrirTarefa }: DiariaListProps) {
-  const key = format(dia, "yyyy-MM-dd");
-  const tarefasDoDia = tarefasPorDia.get(key) ?? [];
-  const hoje = isSameDay(dia, new Date());
-
-  if (tarefasDoDia.length === 0) {
-    return (
-      <div
-        className={cn(
-          "flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-card py-16 text-center",
-          hoje && "border-primary/40"
-        )}
-      >
-        <CalendarRange className="h-8 w-8 text-muted-foreground/40" />
-        <p className="text-sm text-muted-foreground">Sem tarefas neste dia.</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-col gap-3">
-      {tarefasDoDia.map((t) => {
-        // Folga fixa semanal — Card cinzento.
-        if (t.tipo === "folga_fixa") {
-          return (
-            <Card
-              key={t._id}
-              className="border-slate-200 bg-slate-100 p-4 dark:border-slate-700 dark:bg-slate-800/40"
-            >
-              <div className="flex items-center gap-3">
-                <Badge
-                  variant="secondary"
-                  className="bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-300"
-                >
-                  Folga
-                </Badge>
-                <span className="font-medium text-slate-700 dark:text-slate-200">
-                  Folga Semanal — {t.utilizador_id?.nome ?? "Staff"}
-                </span>
-              </div>
-            </Card>
-          );
-        }
-
-        const estadoLabel = ESTADO_LABEL[t.estado] ?? t.estado;
-        const estadoVariant =
-          t.estado === "concluida"
-            ? "default"
-            : t.estado === "cancelada"
-            ? "secondary"
-            : t.estado === "por_atribuir"
-            ? "destructive"
-            : "outline";
-        const tipoLabel = TIPO_LABEL[t.tipo] ?? t.tipo;
-
-        return (
-          <Card
-            key={t._id}
-            onClick={() => abrirTarefa(t)}
-            className="cursor-pointer p-4 transition-all hover:shadow-md hover:-translate-y-0.5"
-          >
-            <div className="flex items-start gap-3">
-              <Badge variant={estadoVariant} className="mt-0.5 shrink-0">
-                {estadoLabel}
-              </Badge>
-              <div className="min-w-0 flex-1">
-                <div className="font-medium">{t.propriedade_id?.nome ?? "—"}</div>
-                <div className="text-sm text-muted-foreground">
-                  {t.utilizador_id?.nome ?? "Sem atribuição"}
-                </div>
-                <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                  <Badge variant="outline" className="text-xs">
-                    {tipoLabel}
-                  </Badge>
-                  <span className="flex items-center gap-1 text-xs font-mono text-muted-foreground">
-                    <Clock className="h-3 w-3" />
-                    {horaTarefa(t.data)} - {horaFimTarefa(t.data, t.tempo_limpeza_minutos)}
-                    <span className="opacity-60">({t.tempo_limpeza_minutos} min)</span>
-                  </span>
-                </div>
-              </div>
-            </div>
-          </Card>
-        );
-      })}
     </div>
   );
 }
