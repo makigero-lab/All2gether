@@ -15,6 +15,7 @@ const express = require('express');
 const router = express.Router();
 
 const { auth } = require('../middleware/auth');
+const { requireManager } = require('../middleware/requireRole');
 const {
   listarAusencias,
   registarAusencia,
@@ -22,9 +23,11 @@ const {
   aprovarRejeitarAusencia,
 } = require('../controllers/ausenciaController');
 
-router.get('/', auth, listarAusencias);
-router.post('/', auth, registarAusencia);
-router.delete('/:id', auth, eliminarAusencia);
-router.patch('/:id/estado', auth, aprovarRejeitarAusencia);
+// v1.28.0: endpoints de gestão de ausências exigem role admin OU manager
+// (o staff não pode aprovar/rejeitar nem ver ausências de outros).
+router.get('/', auth, requireManager, listarAusencias);
+router.post('/', auth, requireManager, registarAusencia);
+router.delete('/:id', auth, requireManager, eliminarAusencia);
+router.patch('/:id/estado', auth, requireManager, aprovarRejeitarAusencia);
 
 module.exports = router;

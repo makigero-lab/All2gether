@@ -1350,6 +1350,22 @@ describe('Fluxo de aprovação de ausências', () => {
     expect(res.status).toBe(401);
   });
 
+  it('staff não pode aceder a endpoints de gestão (/api/admin/ausencias) → 403', async () => {
+    // O staff tem token válido, mas role 'staff' não tem permissão de manager/admin.
+    const res = await request(app)
+      .get('/api/admin/ausencias')
+      .set('Authorization', `Bearer ${staffToken}`);
+    expect(res.status).toBe(403);
+  });
+
+  it('staff não pode aprovar ausências (PATCH /api/admin/ausencias/:id/estado) → 403', async () => {
+    const res = await request(app)
+      .patch('/api/admin/ausencias/000000000000000000000000/estado')
+      .set('Authorization', `Bearer ${staffToken}`)
+      .send({ estado: 'aprovada' });
+    expect(res.status).toBe(403);
+  });
+
   it('admin aprova ausência → 200 + redistribui tarefas do período', async () => {
     // Busca a ausência pendente criada pelo staff.
     const Ausencia = require('../models/Ausencia');
