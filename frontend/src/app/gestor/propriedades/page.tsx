@@ -49,6 +49,7 @@ export default function PropriedadesPage() {
     smoobu_id: "",
     morada: "",
     tempo_limpeza_minutos: "45",
+    checklist: "",
   });
   const [submitting, setSubmitting] = useState(false);
   const [formErro, setFormErro] = useState<string | null>(null);
@@ -133,9 +134,13 @@ export default function PropriedadesPage() {
         smoobu_id: form.smoobu_id.trim(),
         morada: form.morada.trim(),
         tempo_limpeza_minutos: tempo,
+        checklist: form.checklist
+          .split("\n")
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0),
       });
       // Limpa o formulário e atualiza a tabela automaticamente.
-      setForm({ nome: "", smoobu_id: "", morada: "", tempo_limpeza_minutos: "45" });
+      setForm({ nome: "", smoobu_id: "", morada: "", tempo_limpeza_minutos: "45", checklist: "" });
       setMostrarForm(false);
       await carregar();
     } catch (e) {
@@ -205,6 +210,7 @@ export default function PropriedadesPage() {
     smoobu_id: "",
     morada: "",
     tempo_limpeza_minutos: "45",
+    checklist: "",
   });
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editErro, setEditErro] = useState<string | null>(null);
@@ -217,6 +223,7 @@ export default function PropriedadesPage() {
       smoobu_id: p.smoobu_id,
       morada: p.morada ?? "",
       tempo_limpeza_minutos: String(p.tempo_limpeza_minutos ?? 45),
+      checklist: (p.checklist ?? []).join("\n"),
     });
     setEditErro(null);
   }
@@ -246,6 +253,10 @@ export default function PropriedadesPage() {
           nome: editForm.nome.trim(),
           morada: editForm.morada.trim(),
           tempo_limpeza_minutos: tempo,
+          checklist: editForm.checklist
+            .split("\n")
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0),
         }
       );
       // Atualiza a linha na tabela.
@@ -423,6 +434,26 @@ export default function PropriedadesPage() {
                 </div>
               </div>
 
+              {/* Checklist de Limpeza */}
+              <div className="space-y-1.5">
+                <label htmlFor="checklist" className="text-sm font-medium">
+                  Checklist de Limpeza (um item por linha)
+                </label>
+                <textarea
+                  id="checklist"
+                  value={form.checklist}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, checklist: e.target.value }))
+                  }
+                  rows={4}
+                  placeholder={"Verificar toalhas\nEsvaziar lixo\nTrocar roupa de cama"}
+                  className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                />
+                <p className="text-xs text-muted-foreground">
+                  O staff verá estes itens ao concluir a tarefa de limpeza desta propriedade.
+                </p>
+              </div>
+
               {formErro && (
                 <p className="flex items-center gap-2 text-sm text-destructive">
                   <AlertCircle className="h-4 w-4" />
@@ -447,7 +478,7 @@ export default function PropriedadesPage() {
                   onClick={() => {
                     setMostrarForm(false);
                     setFormErro(null);
-                    setForm({ nome: "", smoobu_id: "", morada: "", tempo_limpeza_minutos: "45" });
+                    setForm({ nome: "", smoobu_id: "", morada: "", tempo_limpeza_minutos: "45", checklist: "" });
                   }}
                   disabled={submitting}
                 >
@@ -654,6 +685,27 @@ export default function PropriedadesPage() {
                 required
               />
             </div>
+
+            {/* Checklist de Limpeza (edição) */}
+            <div className="space-y-1.5">
+              <label htmlFor="edit-checklist" className="text-sm font-medium">
+                Checklist de Limpeza (um item por linha)
+              </label>
+              <textarea
+                id="edit-checklist"
+                value={editForm.checklist}
+                onChange={(e) =>
+                  setEditForm((f) => ({ ...f, checklist: e.target.value }))
+                }
+                rows={4}
+                placeholder={"Verificar toalhas\nEsvaziar lixo\nTrocar roupa de cama"}
+                className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+              <p className="text-xs text-muted-foreground">
+                O staff verá estes itens ao concluir a tarefa de limpeza desta propriedade.
+              </p>
+            </div>
+
             {editErro && (
               <p className="text-sm text-destructive">{editErro}</p>
             )}

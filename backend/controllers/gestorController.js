@@ -243,6 +243,9 @@ exports.criarPropriedade = async (req, res) => {
       coordenadas,
       empresa_id: empresaId,
       tempo_limpeza_minutos: tempo,
+      checklist: Array.isArray(req.body?.checklist)
+        ? req.body.checklist.filter((s) => typeof s === 'string' && s.trim())
+        : [],
     });
 
     // Auditoria.
@@ -610,6 +613,13 @@ exports.atualizarPropriedade = async (req, res) => {
           );
         }
       }
+    }
+
+    // v1.34.0: atualiza checklist (array de strings).
+    if (req.body?.checklist !== undefined) {
+      propriedade.checklist = Array.isArray(req.body.checklist)
+        ? req.body.checklist.filter((s) => typeof s === 'string' && s.trim())
+        : [];
     }
 
     await propriedade.save();

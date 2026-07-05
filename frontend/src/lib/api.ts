@@ -114,6 +114,7 @@ export interface PropriedadeDTO {
   empresa_id: string;
   tempo_limpeza_minutos: number;
   ativo: boolean;
+  checklist?: string[];
   createdAt?: string;
   updatedAt?: string;
 }
