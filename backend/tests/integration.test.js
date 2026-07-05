@@ -965,7 +965,7 @@ describe('POST /api/gestor/smoobu/sincronizar', () => {
     // Confirma que o fetch foi chamado com o URL e header corretos.
     expect(mockFetch).toHaveBeenCalledTimes(1);
     const [url, opts] = mockFetch.mock.calls[0];
-    expect(url).toMatch(/login\.smoobu\.com\/api\/reservations\?arrivalFrom=/);
+    expect(url).toMatch(/login\.smoobu\.com\/api\/reservations\?from=/);
     expect(opts.headers['Api-Key']).toBe('test-key-123');
   });
 
