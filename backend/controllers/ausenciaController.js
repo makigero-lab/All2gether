@@ -64,11 +64,18 @@ exports.listarAusencias = async (req, res) => {
     }
     // v1.25.0: filtro por estado (pendente/aprovada/rejeitada) — usado pelo
     // Centro de Aprovações de RH para mostrar só pendentes.
-    if (
-      req.query.estado &&
-      ['pendente', 'aprovada', 'rejeitada'].includes(req.query.estado)
-    ) {
-      filtro.estado = req.query.estado;
+    // v1.26.0: suporta comma-separated (ex: ?estado=pendente,pendente_emergencia)
+    const ESTADOS_VALIDOS = ['pendente', 'pendente_emergencia', 'aprovada', 'rejeitada'];
+    if (req.query.estado) {
+      const estados = String(req.query.estado)
+        .split(',')
+        .map((s) => s.trim())
+        .filter((s) => ESTADOS_VALIDOS.includes(s));
+      if (estados.length === 1) {
+        filtro.estado = estados[0];
+      } else if (estados.length > 1) {
+        filtro.estado = { $in: estados };
+      }
     }
 
     const ausencias = await Ausencia.find(filtro)

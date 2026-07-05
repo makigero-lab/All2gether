@@ -100,6 +100,7 @@ A API arranca na porta definida em `PORT` (por defeito **5000**).
 | `PATCH`| `/api/admin/ausencias/:id/estado` | Aprovar/rejeitar pedido do staff. Body: `{ estado: 'aprovada'\|'rejeitada' }`. Aprovar → redistribui tarefas. **Auth:** JWT. |
 | `GET`  | `/api/staff/ausencias` | Staff vê as SUAS ausências (histórico). **Auth:** JWT. |
 | `POST` | `/api/staff/ausencias` | Staff cria pedido de ausência (sempre 'pendente'). Body: `{ data_inicio, data_fim, tipo, notas? }`. **Auth:** JWT. |
+| `POST` | `/api/staff/falta-hoje` | Staff reporta falta de emergência para o dia atual (estado 'pendente_emergencia'). Body: `{ justificacao? }`. **Auth:** JWT. |
 | `GET`  | `/api/admin/auditoria` | Histórico de ações administrativas. Query: `?limit=`. **Auth:** JWT. |
 | `GET`  | `/api/admin/relatorios/produtividade` | Relatório de produtividade (resumo + por staff/dia/estado/propriedade). Query: `?inicio=&fim=`. **Auth:** JWT. |
 | `GET`  | `/api/admin/webhooks` | Lista logs de webhooks do Smoobu (status + payload + erro). Query: `?status=&limit=`. **Auth:** JWT. |

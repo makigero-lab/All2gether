@@ -178,7 +178,7 @@ exports.cancelarAusencia = async (req, res) => {
       });
     }
 
-    if (ausencia.estado !== 'pendente') {
+    if (!['pendente', 'pendente_emergencia'].includes(ausencia.estado)) {
       return res.status(403).json({
         erro: `Não podes cancelar um pedido já ${ausencia.estado}.`,
       });
@@ -192,6 +192,64 @@ exports.cancelarAusencia = async (req, res) => {
     });
   } catch (err) {
     console.error('❌ cancelarAusencia:', err.message);
+    return res.status(500).json({ erro: 'Erro interno do servidor.' });
+  }
+};
+
+/**
+ * POST /api/staff/falta-hoje
+ *
+ * Cria um pedido de falta de emergência para o dia atual (doença súbita).
+ * O pedido fica com estado 'pendente_emergencia' — o admin é notificado e,
+ * ao aprovar, dispara a redistribuição imediata das tarefas do dia.
+ *
+ * Body: { justificacao?: string }
+ *
+ * Resposta 201: { ausencia }
+ */
+exports.faltaHoje = async (req, res) => {
+  try {
+    const utilizadorId = req.user && req.user.id;
+    const empresaId = req.user && req.user.empresa_id;
+    if (!utilizadorId || !empresaId) {
+      return res.status(401).json({ erro: 'Não autenticado.' });
+    }
+
+    const { justificacao } = req.body || {};
+
+    const agora = new Date();
+    const hoje = new Date(
+      Date.UTC(agora.getUTCFullYear(), agora.getUTCMonth(), agora.getUTCDate())
+    );
+
+    // Valida sobreposição: não pode haver outra ausência que cubra hoje.
+    const sobreposta = await Ausencia.findOne({
+      utilizador_id: utilizadorId,
+      data_inicio: { $lte: hoje },
+      data_fim: { $gte: hoje },
+    });
+    if (sobreposta) {
+      return res.status(409).json({
+        erro: `Já tens uma ausência registada para hoje (estado: ${sobreposta.estado}).`,
+      });
+    }
+
+    const nova = await Ausencia.create({
+      utilizador_id: utilizadorId,
+      empresa_id: empresaId,
+      data_inicio: hoje,
+      data_fim: hoje,
+      tipo: 'doenca',
+      estado: 'pendente_emergencia',
+      justificacao: justificacao ? String(justificacao).trim() : '',
+    });
+
+    return res.status(201).json({ ausencia: nova });
+  } catch (err) {
+    console.error('❌ faltaHoje:', err.message);
+    if (err.name === 'ValidationError') {
+      return res.status(400).json({ erro: err.message });
+    }
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
   }
 };

@@ -42,6 +42,7 @@ interface AusenciaDTO {
   data_fim: string;
   tipo: string;
   estado: string;
+  justificacao?: string;
   notas?: string;
   createdAt: string;
 }
@@ -99,7 +100,7 @@ export default function AprovacoesPage() {
     setErro(null);
     try {
       const res = await adminGet<{ ausencias: AusenciaDTO[] }>(
-        "/api/admin/ausencias?estado=pendente"
+        "/api/admin/ausencias?estado=pendente,pendente_emergencia"
       );
       setPendentes(res.ausencias ?? []);
     } catch (e) {
@@ -288,12 +289,24 @@ export default function AprovacoesPage() {
                         <div className="flex items-center gap-2">
                           <User className="h-4 w-4 text-muted-foreground" />
                           <div>
-                            <div className="font-medium">
-                              {a.utilizador?.nome ?? "—"}
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-medium">
+                                {a.utilizador?.nome ?? "—"}
+                              </span>
+                              {a.estado === "pendente_emergencia" && (
+                                <Badge variant="destructive" className="text-[10px]">
+                                  🚨 Emergência
+                                </Badge>
+                              )}
                             </div>
                             {a.utilizador?.email && (
                               <div className="text-xs text-muted-foreground">
                                 {a.utilizador.email}
+                              </div>
+                            )}
+                            {a.justificacao && (
+                              <div className="mt-0.5 text-xs text-amber-600 dark:text-amber-500">
+                                {a.justificacao}
                               </div>
                             )}
                           </div>
@@ -368,11 +381,21 @@ export default function AprovacoesPage() {
                       <span className="font-medium">
                         {a.utilizador?.nome ?? "—"}
                       </span>
+                      {a.estado === "pendente_emergencia" && (
+                        <Badge variant="destructive" className="text-[10px]">
+                          🚨
+                        </Badge>
+                      )}
                     </div>
                     <Badge variant={TIPO_VARIANT[a.tipo] ?? "outline"}>
                       {TIPO_LABEL[a.tipo] ?? a.tipo}
                     </Badge>
                   </div>
+                  {a.justificacao && (
+                    <p className="text-xs text-amber-600 dark:text-amber-500">
+                      {a.justificacao}
+                    </p>
+                  )}
                   <div className="text-sm text-muted-foreground">
                     {formatarData(a.data_inicio)}
                     {a.data_inicio !== a.data_fim && (

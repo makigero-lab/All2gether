@@ -57,12 +57,21 @@ const ausenciaSchema = new mongoose.Schema(
       required: true,
     },
     // v1.24.0: fluxo de aprovação.
+    // v1.26.0: adicionado 'pendente_emergencia' — falta criada pelo próprio
+    // funcionário para o dia atual (doença súbita). O admin aprova e dispara
+    // a redistribuição imediata das tarefas do dia.
     estado: {
       type: String,
-      enum: ['pendente', 'aprovada', 'rejeitada'],
+      enum: ['pendente', 'pendente_emergencia', 'aprovada', 'rejeitada'],
       default: 'pendente',
       required: true,
       index: true,
+    },
+    // v1.26.0: justificação enviada pelo staff ao reportar falta de emergência.
+    justificacao: {
+      type: String,
+      trim: true,
+      default: '',
     },
     notas: {
       type: String,
