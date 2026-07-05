@@ -75,6 +75,9 @@ A API arranca na porta definida em `PORT` (por defeito **5000**).
 | `GET`  | `/api/auth/me/calendario` | Calendário pessoal (tarefas + ausências). **Auth:** JWT. |
 | `GET`  | `/api/auth/me/tarefas` | Tarefas de hoje do utilizador. **Auth:** JWT. |
 | `PATCH`| `/api/auth/me/tarefas/:id/concluir` | Concluir tarefa (staff). **Auth:** JWT. |
+| `GET`  | `/api/auth/me/push-vapid-public-key` | Devolve a chave pública VAPID para subscrição push. **Auth:** JWT. |
+| `POST` | `/api/auth/me/push-subscribe` | Guarda a subscrição push do browser no utilizador. Body: `{ subscription }`. **Auth:** JWT. |
+| `POST` | `/api/auth/me/push-unsubscribe` | Remove a subscrição push do utilizador. **Auth:** JWT. |
 | `GET`  | `/api/admin/dashboard` | Estatísticas em tempo real (propriedades, equipa, tarefas hoje, carga por staff). **Auth:** JWT. |
 | `GET`  | `/api/admin/propriedades` | Lista as propriedades da empresa. **Auth:** JWT. |
 | `POST` | `/api/admin/propriedades` | Cria propriedade (com geocoding da morada). **Auth:** JWT; **Body:** `smoobu_id`, `nome`, `morada`, `tempo_limpeza_minutos?` |

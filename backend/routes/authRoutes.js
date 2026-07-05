@@ -66,4 +66,20 @@ router.get('/me/tarefas/:id', auth, minhaTarefaDetalhe);
 // Concluir tarefa — requer JWT.
 router.patch('/me/tarefas/:id/concluir', auth, concluirMinhaTarefa);
 
+// Notificações Push (Web Push API) — v1.27.0.
+const {
+  pushVapidPublicKey,
+  pushSubscribe,
+  pushUnsubscribe,
+} = require('../controllers/authController');
+
+// Devolve a chave pública VAPID (para o frontend pedir a subscrição).
+router.get('/me/push-vapid-public-key', auth, pushVapidPublicKey);
+
+// Guarda a subscrição push do browser no utilizador logado.
+router.post('/me/push-subscribe', auth, pushSubscribe);
+
+// Remove a subscrição push do utilizador.
+router.post('/me/push-unsubscribe', auth, pushUnsubscribe);
+
 module.exports = router;

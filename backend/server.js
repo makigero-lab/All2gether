@@ -11,6 +11,10 @@
  *   - SMOOBU_API_KEY     — API Key do Smoobu para sincronização em massa
  *                          (POST /api/admin/smoobu/sincronizar). Opcional:
  *                          sem ela, a sincronização devolve 400.
+ *   - VAPID_PUBLIC_KEY   — Chave pública VAPID para Web Push (notificações push)
+ *   - VAPID_PRIVATE_KEY  — Chave privada VAPID (assina as notificações)
+ *   - VAPID_SUBJECT      — Identificador do emissor (mailto:admin@autocell.com)
+ *                          Gerar com: npx web-push generate-vapid-keys
  *
  * NOTA: a instância `app` é exportada (module.exports) para poder ser
  * usada nos testes com supertest SEM iniciar o servidor HTTP nem ligar
@@ -32,9 +36,13 @@ const ausenciaRoutes = require('./routes/ausenciaRoutes');
 const relatorioRoutes = require('./routes/relatorioRoutes');
 const staffRoutes = require('./routes/staffRoutes');
 const { iniciarDailyBriefing } = require('./jobs/dailyBriefing');
+const { configurarWebPush } = require('./utils/push');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+
+// Configura Web Push (VAPID) — silencioso se as chaves não estiverem definidas.
+configurarWebPush();
 
 /* ------------------------------------------------------------------ */
 /* Middlewares                                                         */

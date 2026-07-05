@@ -1472,3 +1472,49 @@ describe('Fluxo de aprovação de ausências', () => {
     expect(res.status).toBe(403);
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* 13. Notificações Push (Web Push API) — v1.27.0                     */
+/* ------------------------------------------------------------------ */
+
+describe('Notificações Push (Web Push API)', () => {
+  // Como os testes correm sem chaves VAPID configuradas, os endpoints
+  // devolvem 503 (serviço não configurado). Isto é o comportamento esperado
+  // e garante que o servidor não parte se as chaves não estiverem definidas.
+
+  it('GET /api/auth/me/push-vapid-public-key sem token → 401', async () => {
+    const res = await request(app).get('/api/auth/me/push-vapid-public-key');
+    expect(res.status).toBe(401);
+  });
+
+  it('GET /api/auth/me/push-vapid-public-key com token (sem VAPID) → 503', async () => {
+    const res = await authGet('/api/auth/me/push-vapid-public-key');
+    expect(res.status).toBe(503);
+  });
+
+  it('POST /api/auth/me/push-subscribe sem token → 401', async () => {
+    const res = await request(app).post('/api/auth/me/push-subscribe');
+    expect(res.status).toBe(401);
+  });
+
+  it('POST /api/auth/me/push-subscribe com token (sem VAPID) → 503', async () => {
+    const res = await authPost('/api/auth/me/push-subscribe', {
+      subscription: { endpoint: 'https://fcm.googleapis.com/test', keys: {} },
+    });
+    expect(res.status).toBe(503);
+  });
+
+  it('POST /api/auth/me/push-subscribe com subscription inválida → 400 (se VAPID ativo)', async () => {
+    // Sem VAPID configurado, devolve 503 antes de validar a subscription.
+    // Este teste confirma a ordem: VAPID é verificado primeiro.
+    const res = await authPost('/api/auth/me/push-subscribe', {
+      subscription: null,
+    });
+    expect(res.status).toBe(503);
+  });
+
+  it('POST /api/auth/me/push-unsubscribe sem token → 401', async () => {
+    const res = await request(app).post('/api/auth/me/push-unsubscribe');
+    expect(res.status).toBe(401);
+  });
+});

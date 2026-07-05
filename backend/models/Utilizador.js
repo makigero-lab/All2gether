@@ -91,6 +91,14 @@ const utilizadorSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+    // v1.27.0 — Notificações Push (Web Push API).
+    // Subscrição gerada pelo browser (Service Worker) via PushManager.subscribe().
+    // Guarda o objeto PushSubscription completo (endpoint + keys.p256dh + keys.auth).
+    // Null = ainda não subscreveu. Se expirar (410 Gone), volta a null.
+    pushSubscription: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
   },
   { timestamps: true }
 );

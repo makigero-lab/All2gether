@@ -19,7 +19,8 @@
     "express-rate-limit": "^8.5.2",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^8.5.1",
-    "node-cron": "^4.5.0"
+    "node-cron": "^4.5.0",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "jest": "^30.4.2",
