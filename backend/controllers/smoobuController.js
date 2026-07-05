@@ -76,7 +76,7 @@ exports.sincronizarReservas = async (req, res) => {
   let respostaSmoobu;
   try {
     respostaSmoobu = await fetch(
-      `https://login.smoobu.com/api/reservations?arrivalFrom=${from}`,
+      `https://login.smoobu.com/api/reservations?from=${from}`,
       {
         method: 'GET',
         headers: {
@@ -117,12 +117,16 @@ exports.sincronizarReservas = async (req, res) => {
     });
   }
 
-  // O Smoobu devolve { reservations: [...] } ou { data: { reservations: [...] } }
-  // consoante a versão da API. Cobrimos ambas.
+  // O Smoobu devolve { bookings: [...] } (oficial) ou { reservations: [...] }
+  // em algumas variantes. Lemos bookings primeiro para garantir compatibilidade.
   const reservas =
+    body?.bookings ??
     body?.reservations ??
     body?.data?.reservations ??
+    body?.data?.bookings ??
     (Array.isArray(body) ? body : []);
+
+  console.log('Total recebido do Smoobu:', reservas.length);
 
   if (!Array.isArray(reservas)) {
     return res.status(502).json({
