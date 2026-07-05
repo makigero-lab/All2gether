@@ -102,6 +102,12 @@ export function DetalheTarefaClient({
   const [atrasoSubmitting, setAtrasoSubmitting] = useState(false);
   const [atrasoResultado, setAtrasoResultado] = useState<string | null>(null);
 
+  // Modal de reportar avaria (v1.38.0)
+  const [mostrarAvaria, setMostrarAvaria] = useState(false);
+  const [avariaDesc, setAvariaDesc] = useState("");
+  const [avariaSubmitting, setAvariaSubmitting] = useState(false);
+  const [avariaResultado, setAvariaResultado] = useState<string | null>(null);
+
   // Número de itens concluídos e total — para o contador e a regra do botão.
   const totalItens = checklist.length;
   const itensConcluidos = useMemo(
@@ -167,6 +173,36 @@ export function DetalheTarefaClient({
       );
     } finally {
       setAtrasoSubmitting(false);
+    }
+  }
+
+  // v1.38.0 — Reportar avaria
+  async function handleReportarAvaria() {
+    if (!avariaDesc.trim()) return;
+    setAvariaSubmitting(true);
+    setAvariaResultado(null);
+    try {
+      const res = await fetch(`/api/staff/tarefas/${tarefa.id}/avaria`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ descricao: avariaDesc.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.erro || `Erro ${res.status}`);
+      setAvariaResultado("Avaria reportada com sucesso. O gestor será notificado.");
+      setAvariaDesc("");
+      // Fecha o dialog após 1.5s.
+      setTimeout(() => {
+        setMostrarAvaria(false);
+        setAvariaResultado(null);
+      }, 1500);
+    } catch (e) {
+      setAvariaResultado(
+        e instanceof Error ? e.message : "Erro ao reportar avaria."
+      );
+    } finally {
+      setAvariaSubmitting(false);
     }
   }
 
@@ -320,18 +356,33 @@ export function DetalheTarefaClient({
 
         {/* Botão Reportar Atraso */}
         {!concluida && (
-          <Button
-            variant="outline"
-            className="w-full gap-2 text-amber-600 border-amber-300 hover:bg-amber-50"
-            onClick={() => {
-              setMostrarAtraso(true);
-              setMinutosAtraso(null);
-              setAtrasoResultado(null);
-            }}
-          >
-            <AlertTriangle className="h-4 w-4" />
-            Reportar Atraso
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              className="flex-1 gap-2 text-amber-600 border-amber-300 hover:bg-amber-50"
+              onClick={() => {
+                setMostrarAtraso(true);
+                setMinutosAtraso(null);
+                setAtrasoResultado(null);
+              }}
+            >
+              <AlertTriangle className="h-4 w-4" />
+              Atraso
+            </Button>
+            {/* Botão Reportar Avaria (v1.38.0) */}
+            <Button
+              variant="outline"
+              className="flex-1 gap-2 text-destructive border-destructive/40 hover:bg-destructive/10"
+              onClick={() => {
+                setMostrarAvaria(true);
+                setAvariaDesc("");
+                setAvariaResultado(null);
+              }}
+            >
+              <AlertTriangle className="h-4 w-4" />
+              Avaria
+            </Button>
+          </div>
         )}
 
         {!concluida && (
@@ -431,6 +482,76 @@ export function DetalheTarefaClient({
                 <>
                   <AlertTriangle className="h-4 w-4" />
                   Confirmar Atraso
+                </>
+              )}
+            </Button>
+          )}
+        </DialogFooter>
+      </Dialog>
+
+      {/* Modal de Reportar Avaria (v1.38.0) */}
+      <Dialog
+        open={mostrarAvaria}
+        onOpenChange={(o) => !o && setMostrarAvaria(false)}
+      >
+        <DialogHeader>
+          <div>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-destructive" />
+              Reportar Avaria
+            </DialogTitle>
+            <DialogDescription>
+              Descreve o problema encontrado na propriedade.
+            </DialogDescription>
+          </div>
+          <DialogClose onClick={() => setMostrarAvaria(false)} />
+        </DialogHeader>
+        <DialogContent className="space-y-4">
+          {!avariaResultado ? (
+            <div className="space-y-1.5">
+              <label htmlFor="avaria-desc" className="text-sm font-medium">
+                Descreva o problema
+              </label>
+              <textarea
+                id="avaria-desc"
+                value={avariaDesc}
+                onChange={(e) => setAvariaDesc(e.target.value)}
+                rows={3}
+                placeholder="Ex.: torneira da cozinha a pingar; lâmpada fundida no WC…"
+                className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+            </div>
+          ) : (
+            <div className="rounded-md bg-emerald-50 dark:bg-emerald-950/20 p-3 text-sm text-emerald-800 dark:text-emerald-200">
+              {avariaResultado}
+            </div>
+          )}
+        </DialogContent>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setMostrarAvaria(false)}
+            disabled={avariaSubmitting}
+          >
+            {avariaResultado ? "Fechar" : "Cancelar"}
+          </Button>
+          {!avariaResultado && (
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={!avariaDesc.trim() || avariaSubmitting}
+              onClick={handleReportarAvaria}
+            >
+              {avariaSubmitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  A enviar…
+                </>
+              ) : (
+                <>
+                  <AlertTriangle className="mr-2 h-4 w-4" />
+                  Reportar Avaria
                 </>
               )}
             </Button>

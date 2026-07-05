@@ -332,3 +332,93 @@ exports.concluirTarefa = async (req, res) => {
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
   }
 };
+
+/* ------------------------------------------------------------------ */
+/* POST /api/staff/tarefas/:id/avaria — reportar avaria (v1.38.0)     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Permite ao staff reportar uma avaria durante a limpeza.
+ * Adiciona a descrição ao array `avarias` da tarefa.
+ *
+ * Body: { descricao: string }
+ *
+ * Validações:
+ *   - A tarefa tem de pertencer ao req.user.id.
+ *   - descricao obrigatória (não vazia).
+ *   - Não pode reportar avaria em tarefa cancelada.
+ *
+ * Resposta 200: { tarefa, mensagem }
+ */
+exports.reportarAvaria = async (req, res) => {
+  try {
+    const utilizadorId = req.user && req.user.id;
+    const empresaId = req.user && req.user.empresa_id;
+    if (!utilizadorId || !empresaId) {
+      return res.status(401).json({ erro: 'Não autenticado.' });
+    }
+
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ erro: 'ID de tarefa inválido.' });
+    }
+
+    const { descricao } = req.body || {};
+    if (!descricao || !String(descricao).trim()) {
+      return res.status(400).json({ erro: 'Descrição da avaria é obrigatória.' });
+    }
+
+    const tarefa = await Tarefa.findOne({
+      _id: id,
+      utilizador_id: utilizadorId,
+    });
+
+    if (!tarefa) {
+      return res.status(404).json({
+        erro: 'Tarefa não encontrada (ou não te está atribuída).',
+      });
+    }
+
+    if (tarefa.estado === 'cancelada') {
+      return res.status(400).json({ erro: 'Não podes reportar avaria numa tarefa cancelada.' });
+    }
+
+    // v1.39.0 — Guarda a avaria no array da tarefa original (auditoria).
+    if (!Array.isArray(tarefa.avarias)) {
+      tarefa.avarias = [];
+    }
+    tarefa.avarias.push(String(descricao).trim());
+    await tarefa.save();
+
+    // Cria uma NOVA tarefa de manutenção para a mesma propriedade,
+    // para o gestor atribuir a alguém (ex: reparador).
+    const hoje = new Date();
+    const hojeMeiaNoite = new Date(
+      Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth(), hoje.getUTCDate())
+    );
+
+    const novaTarefaManutencao = await Tarefa.create({
+      empresa_id: tarefa.empresa_id,
+      propriedade_id: tarefa.propriedade_id,
+      utilizador_id: null, // por atribuir — o gestor decide
+      data: hojeMeiaNoite,
+      tempo_limpeza_minutos: 60, // estimativa padrão para manutenção
+      tipo: 'manutencao',
+      estado: 'por_atribuir',
+      observacoes: `Avaria reportada por staff: ${String(descricao).trim()}`,
+    });
+
+    console.log(
+      `🔧 Avaria reportada na tarefa ${tarefa._id} → nova tarefa de manutenção ${novaTarefaManutencao._id} criada.`
+    );
+
+    return res.status(200).json({
+      tarefa,
+      mensagem: 'Avaria reportada com sucesso. Foi criada uma tarefa de manutenção.',
+      tarefa_manutencao: novaTarefaManutencao,
+    });
+  } catch (err) {
+    console.error('❌ reportarAvaria:', err.message);
+    return res.status(500).json({ erro: 'Erro interno do servidor.' });
+  }
+};

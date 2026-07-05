@@ -32,7 +32,7 @@ import {
 /**
  * Página de Propriedades — Painel de Administração.
  *
- * Consome a API real (GET/POST /api/gestor/propriedades) em vez do mock-data.
+ * Consome a API real (GET/POST /api/gestor/propriedades).
  *
  * O JWT é enviado automaticamente pelo helper `adminGet`/`adminPost`
  * (header `Authorization: Bearer <token>`, ver `src/lib/api.ts`).

@@ -23,6 +23,7 @@ const {
   cancelarAusencia,
   faltaHoje,
   concluirTarefa,
+  reportarAvaria,
 } = require('../controllers/staffController');
 
 router.get('/ausencias', auth, minhasAusencias);
@@ -30,5 +31,6 @@ router.post('/ausencias', auth, criarAusencia);
 router.delete('/ausencias/:id', auth, cancelarAusencia);
 router.post('/falta-hoje', auth, faltaHoje);
 router.patch('/tarefas/:id/concluir', auth, concluirTarefa);
+router.post('/tarefas/:id/avaria', auth, reportarAvaria);
 
 module.exports = router;

@@ -128,12 +128,12 @@ function extrairDadosReserva(payload) {
 /* Lógica de atribuição (passos 3 a 6)                                */
 /* ------------------------------------------------------------------ */
 
-// Capacidade máxima diária por utilizador (7 horas = 420 minutos).
-// Inclui tempo de limpeza + tempo de viagem. Se um utilizador exceder
-// este limite ao receber a nova tarefa, é excluído da atribuição.
-// Justificação: as limpezas devem terminar antes do check-in (ex: 16h00),
-// pelo que 7h de trabalho produtivo é um SLA razoável.
-const CAPACIDADE_MAXIMA_MINUTOS = 420;
+// Capacidade máxima diária por utilizador (8 horas = 480 minutos).
+// v1.39.0: alargado de 420 (7h) para 480 (8h). A única restrição de
+// capacidade é esta carga diária — sem lógicas rígidas de horário de almoço.
+// Se um utilizador exceder 480 min ao receber a nova tarefa, é excluído
+// e o algoritmo tenta o próximo disponível.
+const CAPACIDADE_MAXIMA_MINUTOS = 480;
 
 /**
  * Calcula o tempo de viagem entre duas coordenadas usando a Fórmula de
@@ -187,7 +187,7 @@ function calcularTempoViagem(coordA, coordB) {
  *
  * v1.15.0 — SLA de Capacidade Máxima:
  *   Após calcular a carga_total (limpeza + viagem + nova tarefa), se
- *   carga_total > CAPACIDADE_MAXIMA_MINUTOS (420 min = 7h), o utilizador
+ *   carga_total > CAPACIDADE_MAXIMA_MINUTOS (480 min = 8h), o utilizador
  *   é excluído. Se TODOS excederem, devolve null (tarefa por_atribuir).
  *
  * Devolve null se não houver ninguém disponível.
@@ -505,6 +505,16 @@ async function criarTarefaPorReserva(reservaId, smoobuPropId, dataCheckInRaw, co
   if (utilizadorAtribuido) {
     console.log(
       `✅ Tarefa ${novaTarefa._id} atribuída ao utilizador ${utilizadorAtribuido} (carga do dia calculada).`
+    );
+
+    // v1.37.0 — Notificação push ao staff (se tiver subscrição ativa).
+    const { notificarUtilizador } = require('../utils/notificar');
+    const propNome = propriedade?.nome ?? 'Propriedade';
+    notificarUtilizador(
+      String(utilizadorAtribuido),
+      '🧹 Nova tarefa atribuída',
+      `${propNome} — ${new Date(range.start).toLocaleDateString('pt-PT')}`,
+      '/staff'
     );
   } else {
     console.log(

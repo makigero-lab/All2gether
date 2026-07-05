@@ -14,7 +14,7 @@ import { lerUtilizador, rotaPorRole } from "@/lib/auth";
  * Estética premium: fundo limpo, marca minimalista, um único botão de ação.
  *
  * Se o utilizador já tiver um token válido (cookie httpOnly), é redirecionado
- * automaticamente para o seu painel (admin → /admin, manager → /manager,
+ * automaticamente para o seu painel (admin → /admin, gestor → /gestor,
  * staff → /staff). A verificação é feita via fetch a /api/auth/me (proxy
  * que lê o cookie httpOnly no servidor).
  */

@@ -188,7 +188,7 @@ export default function EquipaPage() {
   const [baixaSubmitting, setBaixaSubmitting] = useState(false);
   const [baixaResultado, setBaixaResultado] = useState<string | null>(null);
 
-  // Utilizadores que podem ser responsáveis (admin + manager).
+  // Utilizadores que podem ser responsáveis (admin + gestor).
   // Usado para popular o select de Responsável nos formulários.
   const responsaveisPossiveis = utilizadores.filter(
     (u) => u.role === "admin" || u.role === "gestor"

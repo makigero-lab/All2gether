@@ -5,7 +5,7 @@
  * cookie httpOnly `autocell_token` (o Edge consegue ler cookies httpOnly
  * via req.cookies) e descodifica o payload para saber o role.
  *
- *   1. **Rotas privadas** (`/admin/*`, `/manager/*`, `/staff/*`):
+ *   1. **Rotas privadas** (`/admin/*`, `/gestor/*`, `/staff/*`):
  *      - Sem token → redireciona para /login
  *      - Token inválido → redireciona para /login
  *      - Token válido + role errado → redireciona para o painel correto
@@ -111,5 +111,5 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/", "/login", "/admin/:path*", "/gestor/:path*", "/manager/:path*", "/staff/:path*"],
+  matcher: ["/", "/login", "/admin/:path*", "/gestor/:path*", "/staff/:path*"],
 };

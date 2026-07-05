@@ -94,9 +94,6 @@ A aplicação tem **três áreas privadas** (cada uma com layout próprio), uma 
 | `/admin/calendario-operacional` | Calendário operacional avançado (filtros + navegação meses + cartões coloridos por estado + modal com reatribuição rápida) | Desktop-first |
 | `/admin/relatorios`   | Relatórios/Analytics com gráficos (recharts: linha, barras, pie) | Desktop-first |
 | `/admin/webhooks`     | Logs de webhooks do Smoobu (status, payload, erro, reproccessar) | Desktop-first |
-| `/manager`      | Painel do Responsável de Limpezas — **protegido** (role manager) | Desktop-first |
-| `/manager/tarefas`    | Placeholder (Tarefas)                        | Desktop-first |
-| `/manager/equipa`     | Placeholder (Equipa)                         | Desktop-first |
 | `/staff`        | Área do Staff — tarefas de limpeza do dia — **protegida** (role staff) | Mobile-first |
 | `/staff/ausencias` | Pedidos de ausência do staff (férias/doença/outro) — criar + histórico + cancelar pendentes | Mobile-first |
 | `/staff/tarefas/[id]` | Detalhe da Tarefa (checklist + concluir)      | Mobile-first |
@@ -306,7 +303,7 @@ Isto força o framework para `nextjs`, pelo que o output directory passa a `.nex
   - `Secure` — o cookie só é enviado over HTTPS (em `http://localhost` o cookie não será definido — testar em HTTPS ou ajustar temporariamente em dev).
 - `lerUtilizadorDoToken()` — descodifica o payload JWT (base64url) **sem verificar assinatura** (isso é responsabilidade do backend); devolve `{ id, role, empresa_id }` ou `null` se inválido/expirado.
 - `estaAutenticado()` — true se houver token válido.
-- `rotaPorRole(role)` — devolve `/admin` para admin, `/manager` para manager, `/staff` para staff (usado no redirect pós-login).
+- `rotaPorRole(role)` — devolve `/admin` para admin, `/gestor` para gestor, `/staff` para staff (usado no redirect pós-login).
 
 ### `src/lib/api.ts` — Helpers de fetch
 - `API_URL` — lê `process.env.NEXT_PUBLIC_API_URL`.
@@ -362,18 +359,18 @@ A proteção de rotas usa **duas camadas complementares**:
 ### 12.1 `src/middleware.ts` (camada servidor / Edge)
 Executado antes de renderizar qualquer página. Lê o cookie `autocell_token` (definido por `lib/auth.ts` após login):
 
-- **Rotas privadas** (`/admin/*`, `/manager/*`, `/staff/*`):
+- **Rotas privadas** (`/admin/*`, `/gestor/*`, `/staff/*`):
   - Sem token (ou token inválido/expirado) → redireciona para `/login?from=<rota>` (preserva a rota pretendida).
   - Token válido mas role errado (ex.: staff tenta aceder a `/admin`) → redireciona para o painel do role.
   - Token válido + role certo → deixa passar.
 - **Rotas públicas para autenticados** (`/`, `/login`):
-  - Com token válido → redireciona para o painel do role (`/admin`, `/manager` ou `/staff`).
+  - Com token válido → redireciona para o painel do role (`/admin`, `/gestor` ou `/staff`).
   - Sem token → deixa passar (mostra landing/login).
-- `matcher`: `/`, `/login`, `/admin/:path*`, `/manager/:path*`, `/staff/:path*` (ignora `_next`, `api`, estáticos).
+- `matcher`: `/`, `/login`, `/admin/:path*`, `/gestor/:path*`, `/staff/:path*` (ignora `_next`, `api`, estáticos).
 - **Não verifica a assinatura** do JWT (seria arriscado no Edge); valida apenas formato + `exp`. A verificação real é feita pelo backend em cada pedido à API.
 
 ### 12.2 `components/auth/route-guard.tsx` (camada client-side)
-Client Component aplicado nos layouts de `/admin`, `/manager` e `/staff` (envolve o conteúdo). Segunda camada de defesa:
+Client Component aplicado nos layouts de `/admin`, `/gestor` e `/staff` (envolve o conteúdo). Segunda camada de defesa:
 
 - Re-valida o token no client (`lerUtilizadorDoToken` — descodifica e verifica `exp`).
 - Confirma que o `role` do utilizador corresponde ao role da área.
@@ -385,11 +382,11 @@ O token passou a ser guardado num **cookie** (`autocell_token`, SameSite=Lax, 7 
 
 ### 12.4 Fluxo de redirecionamento pós-login
 - Login com sucesso → `guardarToken(token)` (define cookie) → redirect para `?from=` (se vier de rota protegida) ou `rotaPorRole(role)`.
-- `rotaPorRole`: admin → `/admin`, manager → `/manager`, staff → `/staff`.
+- `rotaPorRole`: admin → `/admin`, gestor → `/gestor`, staff → `/staff`.
 - Se um utilizador autenticado aceder a `/login` ou `/` → middleware redireciona para o painel.
 
-### 12.5 Área `/manager` (Responsável de Limpezas) — v1.6.0
-Nova área privada (role `manager`) com sidebar própria (Dashboard, Tarefas, Equipa). Dashboard mostra tarefas do dia + estado da equipa operacional (staff + managers com carga de trabalho). Sub-rotas `/manager/tarefas` e `/manager/equipa` são placeholders por agora.
+### 12.5 Área `/manager` (Responsável de Limpezas) — v1.6.0 (removida)
+Área privada original (role `manager`) com sidebar própria. **Removida em v1.37.0** — o painel operacional passou a ser `/gestor/*` (role `gestor`) e o painel `/manager/*` foi eliminado por redundância. O conteúdo (Dashboard, Tarefas, Equipa, Pedidos de Férias, Calendário Operacional) está agora integralmente em `/gestor/*`.
 
 ---
 

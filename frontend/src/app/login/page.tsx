@@ -24,7 +24,7 @@ import type { LoginResponse } from "@/lib/api";
  *   1. POST /api/auth/login (proxy same-origin que encaminha para o backend
  *      e guarda o token num cookie httpOnly no servidor).
  *   2. Em caso de sucesso, consulta /api/auth/me para confirmar o role e
- *      redireciona para o painel correto (admin→/admin, manager→/manager,
+ *      redireciona para o painel correto (admin→/admin, gestor→/gestor,
  *      staff→/staff) ou para ?from= se vier de uma rota protegida.
  *
  * Se o utilizador já tiver sessão, é redirecionado automaticamente.
