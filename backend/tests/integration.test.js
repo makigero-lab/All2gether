@@ -931,12 +931,12 @@ describe('POST /api/gestor/smoobu/sincronizar', () => {
 
     const amanha = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
 
-    // Mocka o fetch global para devolver 2 reservas (uma nova, uma duplicada).
+    // Mocka o fetch global para devolver 2 reservas com paginação (page_count: 1).
     const mockFetch = jest.fn().mockResolvedValue({
       ok: true,
       status: 200,
       json: async () => ({
-        reservations: [
+        bookings: [
           {
             id: 2001,
             arrival: amanha,
@@ -948,6 +948,8 @@ describe('POST /api/gestor/smoobu/sincronizar', () => {
             apartment: { id: 200, name: 'Apartamento Teste' },
           },
         ],
+        page_count: 1,
+        page_count: 1,
       }),
       text: async () => '',
     });
@@ -965,7 +967,8 @@ describe('POST /api/gestor/smoobu/sincronizar', () => {
     // Confirma que o fetch foi chamado com o URL e header corretos.
     expect(mockFetch).toHaveBeenCalledTimes(1);
     const [url, opts] = mockFetch.mock.calls[0];
-    expect(url).toMatch(/login\.smoobu\.com\/api\/reservations\?from=/);
+    expect(url).toMatch(/login\.smoobu\.com\/api\/reservations\?arrivalFrom=/);
+    expect(url).toMatch(/page=1/);
     expect(opts.headers['Api-Key']).toBe('test-key-123');
   });
 
@@ -977,13 +980,14 @@ describe('POST /api/gestor/smoobu/sincronizar', () => {
       ok: true,
       status: 200,
       json: async () => ({
-        reservations: [
+        bookings: [
           {
             id: 3001,
             arrival: amanha,
             apartment: { id: 200, name: 'X' },
           },
         ],
+        page_count: 1,
       }),
       text: async () => '',
     });
@@ -1021,7 +1025,7 @@ describe('POST /api/gestor/smoobu/sincronizar', () => {
 
     const res = await authPost('/api/gestor/smoobu/sincronizar', {});
     expect(res.status).toBe(502);
-    expect(res.body.erro).toMatch(/500/);
+    expect(res.body.erro).toMatch(/Não foi possível ligar ao Smoobu/);
   });
 
   it('reserva com propriedade inexistente → conta como erro mas não falha o todo', async () => {
@@ -1032,7 +1036,7 @@ describe('POST /api/gestor/smoobu/sincronizar', () => {
       ok: true,
       status: 200,
       json: async () => ({
-        reservations: [
+        bookings: [
           {
             id: 4001,
             arrival: amanha,
@@ -1044,6 +1048,7 @@ describe('POST /api/gestor/smoobu/sincronizar', () => {
             apartment: { id: 200, name: 'Existe' },
           },
         ],
+        page_count: 1,
       }),
       text: async () => '',
     });
@@ -1106,6 +1111,7 @@ describe('GET /api/gestor/smoobu/propriedades', () => {
           { id: 101, name: 'Casa da Praia', someField: 'ignored' },
           { id: 102, name: 'Apartamento Centro' },
         ],
+        page_count: 1,
       }),
       text: async () => '',
     });
@@ -1194,6 +1200,7 @@ describe('POST /api/gestor/smoobu/sincronizar-propriedades', () => {
           { id: 'sync-1', name: 'Casa A' },
           { id: 'sync-2', name: 'Casa B' },
         ],
+        page_count: 1,
       }),
       text: async () => '',
     });
