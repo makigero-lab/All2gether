@@ -76,7 +76,7 @@ exports.sincronizarReservas = async (req, res) => {
   let respostaSmoobu;
   try {
     respostaSmoobu = await fetch(
-      `https://login.smoobu.com/api/reservations?from=${from}`,
+      `https://login.smoobu.com/api/reservations?arrivalfrom=${from}`,
       {
         method: 'GET',
         headers: {
