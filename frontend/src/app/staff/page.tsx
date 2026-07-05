@@ -2,11 +2,29 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Clock, ClipboardList, LogOut, CalendarDays, CalendarOff, Loader2 } from "lucide-react";
+import {
+  Clock,
+  ClipboardList,
+  LogOut,
+  CalendarDays,
+  CalendarOff,
+  Loader2,
+  AlertTriangle,
+  Send,
+} from "lucide-react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { TaskCard } from "@/components/staff/task-card";
+import {
+  Dialog,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogClose,
+  DialogContent,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { fazerLogout, lerUtilizador } from "@/lib/auth";
 import type { UtilizadorAuth } from "@/lib/auth";
 
@@ -51,12 +69,20 @@ export default function StaffPage() {
   const [tarefas, setTarefas] = useState<TarefaReal[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Estado da funcionalidade "Reportar Falta Hoje".
+  const [faltaPendente, setFaltaPendente] = useState(false); // já reportou hoje?
+  const [mostrarDialogFalta, setMostrarDialogFalta] = useState(false);
+  const [justificacao, setJustificacao] = useState("");
+  const [submetendoFalta, setSubmetendoFalta] = useState(false);
+  const [erroFalta, setErroFalta] = useState<string | null>(null);
+
   const carregar = useCallback(async () => {
     setLoading(true);
     try {
-      const [userRes, tarefasRes] = await Promise.all([
+      const [userRes, tarefasRes, ausenciasRes] = await Promise.all([
         fetch("/api/auth/me", { credentials: "include", cache: "no-store" }),
         fetch("/api/auth/me/tarefas", { credentials: "include", cache: "no-store" }),
+        fetch("/api/staff/ausencias", { credentials: "include", cache: "no-store" }),
       ]);
 
       if (userRes.ok) {
@@ -68,6 +94,22 @@ export default function StaffPage() {
         const data = await tarefasRes.json();
         setTarefas(data.tarefas ?? []);
       }
+
+      // Verifica se já existe uma ausência pendente_emergencia para hoje.
+      if (ausenciasRes.ok) {
+        const ausData = await ausenciasRes.json();
+        const hoje = new Date();
+        const hojeUTC = new Date(
+          Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth(), hoje.getUTCDate())
+        );
+        const temFaltaHoje = (ausData.ausencias ?? []).some((a: { estado: string; data_inicio: string; data_fim: string }) => {
+          if (a.estado !== "pendente_emergencia") return false;
+          const ini = new Date(a.data_inicio);
+          const fim = new Date(a.data_fim);
+          return hojeUTC >= ini && hojeUTC <= fim;
+        });
+        setFaltaPendente(temFaltaHoje);
+      }
     } catch {
       // silencioso
     } finally {
@@ -78,6 +120,35 @@ export default function StaffPage() {
   useEffect(() => {
     carregar();
   }, [carregar]);
+
+  /** Submete a falta de emergência para o dia atual. */
+  async function handleReportarFalta(e: React.FormEvent) {
+    e.preventDefault();
+    setErroFalta(null);
+    setSubmetendoFalta(true);
+    try {
+      const res = await fetch("/api/staff/falta-hoje", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          justificacao: justificacao.trim() || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.erro || `Erro ${res.status}`);
+      }
+      // Sucesso: fecha dialog, mostra aviso amarelo.
+      setMostrarDialogFalta(false);
+      setJustificacao("");
+      setFaltaPendente(true);
+    } catch (e) {
+      setErroFalta(e instanceof Error ? e.message : "Erro ao reportar falta.");
+    } finally {
+      setSubmetendoFalta(false);
+    }
+  }
 
   const nome = user?.nome ?? "Staff";
   const iniciais = nome
@@ -149,6 +220,28 @@ export default function StaffPage() {
 
       {/* Lista de tarefas */}
       <main className="flex-1 space-y-4 p-5">
+        {/* Reportar Falta Hoje — botão ou aviso de já reportado */}
+        {faltaPendente ? (
+          <div className="flex items-start gap-2 rounded-lg border border-amber-500/50 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>
+              <strong>Falta reportada.</strong> Aguarda confirmação do Administrador.
+            </span>
+          </div>
+        ) : (
+          <Button
+            variant="outline"
+            className="w-full justify-center gap-2 border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive"
+            onClick={() => {
+              setMostrarDialogFalta(true);
+              setErroFalta(null);
+            }}
+          >
+            <AlertTriangle className="h-4 w-4" />
+            Reportar Falta Hoje
+          </Button>
+        )}
+
         {/* Botão Ver a minha Agenda */}
         <Link href="/staff/calendario" prefetch>
           <Button variant="outline" className="w-full justify-center gap-2">
@@ -208,6 +301,68 @@ export default function StaffPage() {
       <footer className="border-t px-5 py-4 text-center text-xs text-muted-foreground">
         Autocell · Área do Staff
       </footer>
+
+      {/* Dialog: Reportar Falta Hoje */}
+      <Dialog open={mostrarDialogFalta} onOpenChange={setMostrarDialogFalta}>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <AlertTriangle className="h-5 w-5 text-destructive" />
+            Reportar Falta Hoje
+          </DialogTitle>
+          <DialogDescription>
+            Tem a certeza que não pode trabalhar hoje? O Administrador será
+            notificado para redistribuir as suas tarefas.
+          </DialogDescription>
+          <DialogClose onClick={() => setMostrarDialogFalta(false)} />
+        </DialogHeader>
+        <form onSubmit={handleReportarFalta}>
+          <DialogContent className="space-y-4">
+            <div className="space-y-1.5">
+              <label htmlFor="justificacao" className="text-sm font-medium">
+                Motivo / Justificação (opcional)
+              </label>
+              <textarea
+                id="justificacao"
+                value={justificacao}
+                onChange={(e) => setJustificacao(e.target.value)}
+                rows={3}
+                placeholder="Ex.: Doença súbita, emergência familiar…"
+                className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+            </div>
+            {erroFalta && (
+              <p className="text-sm text-destructive">{erroFalta}</p>
+            )}
+          </DialogContent>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setMostrarDialogFalta(false)}
+              disabled={submetendoFalta}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="submit"
+              variant="destructive"
+              disabled={submetendoFalta}
+            >
+              {submetendoFalta ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  A enviar…
+                </>
+              ) : (
+                <>
+                  <Send className="mr-2 h-4 w-4" />
+                  Confirmar Falta
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </form>
+      </Dialog>
     </div>
   );
 }
