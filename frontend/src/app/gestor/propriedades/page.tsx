@@ -324,19 +324,6 @@ export default function PropriedadesPage() {
           </Button>
           <Button
             variant="outline"
-            onClick={handleSincronizarPropriedades}
-            disabled={sincronizando}
-            title="Sincroniza todos os apartamentos do Smoobu (upsert global). Não altera as propriedades já existentes."
-          >
-            {sincronizando ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Download className="h-4 w-4" />
-            )}
-            <span className="hidden sm:inline">Sincronizar Smoobu</span>
-          </Button>
-          <Button
-            variant="outline"
             onClick={handleImportarPropriedades}
             disabled={sincronizando}
             title="Importa apartamentos do Smoobu para a tua empresa. Morada fica 'A definir' para preencher depois."
@@ -344,9 +331,11 @@ export default function PropriedadesPage() {
             {sincronizando ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <RefreshCw className="h-4 w-4" />
+              <Download className="h-4 w-4" />
             )}
-            <span className="hidden sm:inline">Importar do Smoobu</span>
+            <span className="hidden sm:inline">
+              {sincronizando ? "A importar…" : "Importar do Smoobu"}
+            </span>
           </Button>
           <Button onClick={() => setMostrarForm((v) => !v)}>
             <Plus className="h-4 w-4" />
