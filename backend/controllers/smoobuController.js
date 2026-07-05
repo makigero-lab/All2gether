@@ -72,21 +72,46 @@ exports.sincronizarReservas = async (req, res) => {
     .toISOString()
     .slice(0, 10);
 
-  // Fetch ao Smoobu.
-  let respostaSmoobu;
+  // v1.47.0 — Fetch ao Smoobu com paginação.
+  // O parâmetro oficial é arrivalFrom (case-sensitive, 'F' maiúsculo).
+  // O array vem em body.bookings (oficial) ou body.reservations (variantes).
+  // A API pode paginar — lê todas as páginas com o loop while.
+  let currentPage = 1;
+  let totalPages = 1;
+  let todasReservas = [];
+
   try {
-    respostaSmoobu = await fetch(
-      `https://login.smoobu.com/api/reservations?from=${from}`,
-      {
+    while (currentPage <= totalPages) {
+      const url = `https://login.smoobu.com/api/reservations?arrivalFrom=${from}&page=${currentPage}`;
+      const respostaSmoobu = await fetch(url, {
         method: 'GET',
         headers: {
           'Api-Key': apiKey.trim(),
           Accept: 'application/json',
         },
-        // Timeout de 30s — o Smoobu pode demorar se houver muitas reservas.
         signal: AbortSignal.timeout(30000),
+      });
+
+      if (!respostaSmoobu.ok) {
+        const texto = await respostaSmoobu.text().catch(() => '');
+        throw new Error(`Smoobu devolveu erro ${respostaSmoobu.status}: ${texto.slice(0, 200) || respostaSmoobu.statusText}`);
       }
-    );
+
+      const body = await respostaSmoobu.json();
+
+      const reservasPagina =
+        body?.bookings ??
+        body?.reservations ??
+        body?.data?.reservations ??
+        body?.data?.bookings ??
+        (Array.isArray(body) ? body : []);
+
+      todasReservas = todasReservas.concat(reservasPagina);
+
+      // Atualiza o total de páginas (se o Smoobu não enviar page_count, para no 1).
+      totalPages = body?.page_count || 1;
+      currentPage++;
+    }
   } catch (err) {
     console.error('❌ sincronizarReservas: fetch falhou:', err.message);
     return res.status(502).json({
@@ -95,43 +120,14 @@ exports.sincronizarReservas = async (req, res) => {
     });
   }
 
-  if (!respostaSmoobu.ok) {
-    const texto = await respostaSmoobu.text().catch(() => '');
-    console.error(
-      `❌ sincronizarReservas: Smoobu devolveu ${respostaSmoobu.status} ${respostaSmoobu.statusText}`
-    );
-    return res.status(502).json({
-      erro: `Smoobu devolveu erro ${respostaSmoobu.status}.`,
-      detalhe: texto.slice(0, 500) || respostaSmoobu.statusText,
-    });
-  }
-
-  let body;
-  try {
-    body = await respostaSmoobu.json();
-  } catch (err) {
-    console.error('❌ sincronizarReservas: JSON inválido:', err.message);
-    return res.status(502).json({
-      erro: 'Resposta do Smoobu não é JSON válido.',
-      detalhe: err.message,
-    });
-  }
-
-  // O Smoobu devolve { bookings: [...] } (oficial) ou { reservations: [...] }
-  // em algumas variantes. Lemos bookings primeiro para garantir compatibilidade.
-  const reservas =
-    body?.bookings ??
-    body?.reservations ??
-    body?.data?.reservations ??
-    body?.data?.bookings ??
-    (Array.isArray(body) ? body : []);
+  const reservas = todasReservas;
 
   console.log('Total recebido do Smoobu:', reservas.length);
 
   if (!Array.isArray(reservas)) {
     return res.status(502).json({
-      erro: 'Resposta do Smoobu não contém array "reservations".',
-      detalhe: JSON.stringify(body).slice(0, 500),
+      erro: 'Resposta do Smoobu não contém array "bookings" ou "reservations".',
+      detalhe: 'Verifica a resposta da API do Smoobu.',
     });
   }
 
