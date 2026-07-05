@@ -168,6 +168,7 @@ exports.sincronizarReservas = async (req, res) => {
         data: {
           id: reserva.id,
           arrival: reserva.arrival ?? reserva.start_date ?? reserva.startDate,
+          departure: reserva.departure ?? reserva.end_date ?? reserva.endDate,
           apartment: {
             id: reserva.apartment?.id ?? reserva.apartment_id ?? reserva.apartmentId,
             name: reserva.apartment?.name ?? reserva.apartment_name,

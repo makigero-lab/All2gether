@@ -199,13 +199,13 @@ function calcularTempoViagem(coordA, coordB) {
  * @returns {Promise<mongoose.Types.ObjectId|null>}
  */
 async function determinarUtilizadorAtribuido(empresaId, range, coordenadasNovaPropriedade, tempoNovaTarefa) {
-  // Passo 3 — Procurar todos os Staff e Managers ativos da empresa.
-  // (O gestor — responsável de limpezas — também pode executar limpezas,
-  //  pelo que entra no load balancing como qualquer staff.)
+  // Passo 3 — Procurar todos os Staff ativos da empresa.
+  // v1.45.0: só role 'staff' (gestores não recebem tarefas de limpeza).
   const staff = await Utilizador.find({
     empresa_id: empresaId,
-    role: { $in: ['staff', 'gestor'] },
+    role: 'staff',
     ativo: true,
+    eliminado_em: null,
   }).lean();
 
   if (staff.length === 0) return null;

@@ -402,8 +402,8 @@ export default function CalendarioOperacionalPage() {
                   >
                     {format(dia, "d")}
                   </div>
-                  <div className="flex flex-col gap-1">
-                    {tarefasDoDia.slice(0, 4).map((t) => {
+                  <div className="flex max-h-[120px] flex-col gap-1 overflow-y-auto">
+                    {tarefasDoDia.map((t) => {
                       // Folga fixa semanal — bloco cinzento suave.
                       if (t.tipo === "folga_fixa") {
                         return (
@@ -447,11 +447,6 @@ export default function CalendarioOperacionalPage() {
                       </button>
                       );
                     })}
-                    {tarefasDoDia.length > 4 && (
-                      <div className="px-1 text-[10px] text-muted-foreground">
-                        +{tarefasDoDia.length - 4} mais
-                      </div>
-                    )}
                   </div>
                 </div>
               );
