@@ -105,6 +105,31 @@ async function handleResponse<T>(res: Response): Promise<T> {
 
 export type Role = "admin" | "gestor" | "staff";
 
+export type EstadoTarefa =
+  | "por_atribuir"
+  | "atribuida"
+  | "em_curso"
+  | "concluida"
+  | "cancelada";
+
+export type TipoTarefa =
+  | "limpeza"
+  | "check_in"
+  | "check_out"
+  | "manutencao"
+  | "outro";
+
+export interface TarefaMock {
+  id: string;
+  propriedade_nome: string;
+  hora_limite: string;
+  tempo_estimado_minutos: number;
+  estado: EstadoTarefa;
+  tipo: TipoTarefa;
+  endereco?: string;
+  checklist?: string[];
+}
+
 export interface PropriedadeDTO {
   _id: string;
   smoobu_id: string;

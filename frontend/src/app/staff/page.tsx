@@ -44,7 +44,7 @@ interface TarefaReal {
 
 /**
  * Adapta a tarefa real da API para o formato que o TaskCard espera
- * (que foi desenhado para o mock-data).
+ *
  */
 function adaptarTarefa(t: TarefaReal) {
   return {
@@ -63,7 +63,7 @@ function adaptarTarefa(t: TarefaReal) {
  * Cabeçalho "Bem-vindo, [Nome]" + lista de cartões de tarefas do dia.
  *
  * Dados reais: busca o nome do utilizador via /api/auth/me e as tarefas
- * de hoje via /api/auth/me/tarefas (substitui o mock-data).
+ * de hoje via /api/auth/me/tarefas.
  */
 export default function StaffPage() {
   const [user, setUser] = useState<UtilizadorAuth | null>(null);

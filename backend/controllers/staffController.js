@@ -13,6 +13,7 @@ const mongoose = require('mongoose');
 const Ausencia = require('../models/Ausencia');
 const Utilizador = require('../models/Utilizador');
 const Tarefa = require('../models/Tarefa');
+const { notificarUtilizador } = require('../utils/notificar');
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -244,6 +245,37 @@ exports.faltaHoje = async (req, res) => {
       estado: 'pendente_emergencia',
       justificacao: justificacao ? String(justificacao).trim() : '',
     });
+
+    // Notifica todos os gestores da empresa via push (fire-and-forget).
+    // Inclui o admin (role 'admin') como gestor de topo.
+    try {
+      const staffNome = await Utilizador.findById(utilizadorId)
+        .select('nome')
+        .lean();
+      const nomeStaff = staffNome?.nome ?? 'Funcionário';
+
+      const gestores = await Utilizador.find({
+        empresa_id: empresaId,
+        role: { $in: ['gestor', 'admin'] },
+        ativo: true,
+        eliminado_em: null,
+        pushSubscription: { $ne: null },
+      })
+        .select('_id')
+        .lean();
+
+      for (const g of gestores) {
+        notificarUtilizador(
+          String(g._id),
+          '🚨 Falta de emergência',
+          `${nomeStaff} reportou falta para hoje.`,
+          '/gestor/aprovacoes'
+        );
+      }
+    } catch (e) {
+      // Fire-and-forget: não bloqueia a resposta.
+      console.error('⚠️  notificar gestores (faltaHoje):', e.message);
+    }
 
     return res.status(201).json({ ausencia: nova });
   } catch (err) {

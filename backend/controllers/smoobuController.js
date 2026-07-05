@@ -456,3 +456,131 @@ exports.sincronizarPropriedades = async (req, res) => {
     detalheErros,
   });
 };
+
+/* ------------------------------------------------------------------ */
+/* POST /api/gestor/smoobu/propriedades — importar (v1.41.0)          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Importa propriedades do Smoobu para a empresa do gestor.
+ *
+ * Diferença para sincronizarPropriedades:
+ *   - Verifica se já existe uma Propriedade com aquele smoobu_id QUE
+ *     PERTENÇA à empresa_id do gestor (não global).
+ *   - Cria com morada: 'A definir' (para o gestor preencher depois).
+ *   - Não usa upsert global (respeita o multi-tenant).
+ *
+ * Resposta 200: { totalRecebidas, criadas, existentes, erros, detalheErros }
+ */
+exports.importarPropriedades = async (req, res) => {
+  const apiKey = process.env.SMOOBU_API_KEY;
+  if (!apiKey || !apiKey.trim()) {
+    return res.status(400).json({
+      erro: 'SMOOBU_API_KEY não configurada. Define-a nas variáveis de ambiente do backend.',
+    });
+  }
+
+  const empresaId = req.user && req.user.empresa_id;
+  if (!empresaId) {
+    return res.status(400).json({ erro: 'empresa_id em falta no token.' });
+  }
+
+  let respostaSmoobu;
+  try {
+    respostaSmoobu = await fetch('https://login.smoobu.com/api/apartments', {
+      method: 'GET',
+      headers: {
+        'Api-Key': apiKey.trim(),
+        Accept: 'application/json',
+      },
+      signal: AbortSignal.timeout(15000),
+    });
+  } catch (err) {
+    console.error('❌ importarPropriedades: fetch falhou:', err.message);
+    return res.status(502).json({
+      erro: 'Não foi possível ligar ao Smoobu.',
+      detalhe: err.message,
+    });
+  }
+
+  if (!respostaSmoobu.ok) {
+    const texto = await respostaSmoobu.text().catch(() => '');
+    return res.status(502).json({
+      erro: `Smoobu devolveu erro ${respostaSmoobu.status}.`,
+      detalhe: texto.slice(0, 500) || respostaSmoobu.statusText,
+    });
+  }
+
+  let body;
+  try {
+    body = await respostaSmoobu.json();
+  } catch (err) {
+    return res.status(502).json({
+      erro: 'Resposta do Smoobu não é JSON válido.',
+      detalhe: err.message,
+    });
+  }
+
+  const apartments =
+    body?.apartments ?? body?.data?.apartments ?? (Array.isArray(body) ? body : []);
+
+  if (!Array.isArray(apartments)) {
+    return res.status(502).json({
+      erro: 'Resposta do Smoobu não contém array "apartments".',
+      detalhe: JSON.stringify(body).slice(0, 500),
+    });
+  }
+
+  let criadas = 0;
+  let existentes = 0;
+  let erros = 0;
+  const detalheErros = [];
+
+  for (const apt of apartments) {
+    const smoobuId = apt?.id != null ? String(apt.id) : null;
+    try {
+      if (!smoobuId) {
+        throw new Error('Apartamento sem id.');
+      }
+
+      // Verifica se JÁ EXISTE uma propriedade com este smoobu_id QUE PERTENÇA
+      // a esta empresa (multi-tenant).
+      const existente = await Propriedade.findOne({
+        smoobu_id: smoobuId,
+        empresa_id: empresaId,
+      });
+
+      if (existente) {
+        existentes++;
+        continue;
+      }
+
+      // Cria nova propriedade para esta empresa.
+      await Propriedade.create({
+        smoobu_id: smoobuId,
+        nome: apt.name || `Propriedade ${smoobuId}`,
+        morada: 'A definir',
+        empresa_id: empresaId,
+        tempo_limpeza_minutos: 45,
+      });
+      criadas++;
+    } catch (err) {
+      erros++;
+      detalheErros.push({ smoobuId, erro: err.message });
+      console.error(`⚠️  importarPropriedades: apartamento ${smoobuId} falhou:`, err.message);
+    }
+  }
+
+  console.log(
+    `✅ importarPropriedades: ${apartments.length} recebidas, ${criadas} criadas, ` +
+      `${existentes} já existiam, ${erros} com erro.`
+  );
+
+  return res.status(200).json({
+    totalRecebidas: apartments.length,
+    criadas,
+    existentes,
+    erros,
+    detalheErros,
+  });
+};

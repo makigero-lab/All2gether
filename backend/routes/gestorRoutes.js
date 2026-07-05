@@ -48,7 +48,7 @@ const {
   setupClienteZero,
 } = require('../controllers/gestorController');
 const { reportarAtrasoTarefa, criarTarefa, atribuirTarefa, atualizarEstadoTarefa } = require('../controllers/tarefaController');
-const { sincronizarReservas, getPropriedadesSmoobu, sincronizarPropriedades } = require('../controllers/smoobuController');
+const { sincronizarReservas, getPropriedadesSmoobu, sincronizarPropriedades, importarPropriedades } = require('../controllers/smoobuController');
 
 // Bootstrap do ambiente de testes — Cliente Zero. PÚBLICO (sem auth).
 router.get('/setup', setupClienteZero);
@@ -107,5 +107,8 @@ router.get('/smoobu/propriedades', auth, isGestor, getPropriedadesSmoobu);
 
 // Smoobu — sincronizar propriedades (upsert em massa do /api/apartments).
 router.post('/smoobu/sincronizar-propriedades', auth, isGestor, sincronizarPropriedades);
+
+// Smoobu — importar propriedades (scoped por empresa_id, morada='A definir').
+router.post('/smoobu/propriedades', auth, isGestor, importarPropriedades);
 
 module.exports = router;

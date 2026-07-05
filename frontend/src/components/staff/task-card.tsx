@@ -19,7 +19,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import type { TarefaMock } from "@/lib/mock-data";
+import type { TarefaMock, EstadoTarefa, TipoTarefa } from "@/lib/api";
 
 const tipoIcon: Record<TarefaMock["tipo"], React.ComponentType<{ className?: string }>> = {
   limpeza: SprayCan,

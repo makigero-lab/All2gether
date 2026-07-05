@@ -40,6 +40,11 @@ const { iniciarDailyBriefing } = require('./jobs/dailyBriefing');
 const { configurarWebPush } = require('./utils/push');
 
 const app = express();
+
+// Trust proxy — necessário no Render (e outros PaaS) para que o express-rate-limit
+// leia correctamente o IP do cliente do header X-Forwarded-For. Sem isto, o
+// rate-limit lança 'ERR_ERL_UNEXPECTED_X_FORWARDED_FOR'.
+app.set('trust proxy', 1);
 const PORT = process.env.PORT || 5000;
 
 // Configura Web Push (VAPID) — silencioso se as chaves não estiverem definidas.
@@ -63,9 +68,11 @@ app.use(express.json());
 
 // Rate limiting global: 100 pedidos por IP a cada 15 minutos.
 // Não se aplica ao webhook do Smoobu (que tem o seu próprio padrão).
+// Em ambiente de teste (Jest) o limite é desativado para não bloquear
+// os testes de integração que fazem centenas de pedidos seguidos.
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
+  max: process.env.NODE_ENV === 'test' ? Infinity : 100,
   standardHeaders: true,
   legacyHeaders: false,
   message: { erro: 'Muitos pedidos. Tente novamente mais tarde.' },
