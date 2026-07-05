@@ -40,6 +40,11 @@ const { iniciarDailyBriefing } = require('./jobs/dailyBriefing');
 const { configurarWebPush } = require('./utils/push');
 
 const app = express();
+
+// Trust proxy — necessário no Render (e outros PaaS) para que o express-rate-limit
+// leia correctamente o IP do cliente do header X-Forwarded-For. Sem isto, o
+// rate-limit lança 'ERR_ERL_UNEXPECTED_X_FORWARDED_FOR'.
+app.set('trust proxy', 1);
 const PORT = process.env.PORT || 5000;
 
 // Configura Web Push (VAPID) — silencioso se as chaves não estiverem definidas.
