@@ -13,6 +13,7 @@ const mongoose = require('mongoose');
 const Ausencia = require('../models/Ausencia');
 const Utilizador = require('../models/Utilizador');
 const Tarefa = require('../models/Tarefa');
+const Propriedade = require('../models/Propriedade');
 const { notificarUtilizador } = require('../utils/notificar');
 
 /* ------------------------------------------------------------------ */
@@ -443,6 +444,42 @@ exports.reportarAvaria = async (req, res) => {
     console.log(
       `🔧 Avaria reportada na tarefa ${tarefa._id} → nova tarefa de manutenção ${novaTarefaManutencao._id} criada.`
     );
+
+    // v1.65.0 (Prompt 88) — Notifica os gestores da empresa sobre a nova avaria.
+    // A tarefa de manutenção fica 'por_atribuir' — o gestor decide quem resolve.
+    try {
+      const [propInfo, gestores] = await Promise.all([
+        Propriedade.findById(tarefa.propriedade_id).select('nome').lean(),
+        Utilizador.find({
+          empresa_id: tarefa.empresa_id,
+          role: 'gestor',
+          ativo: true,
+          eliminado_em: null,
+        })
+          .select('_id nome')
+          .lean(),
+      ]);
+
+      const propNome = propInfo?.nome ?? 'Propriedade';
+      const descricaoCurta = String(descricao).trim().slice(0, 80);
+
+      // Dispara notificação a cada gestor ativo da empresa (fire-and-forget).
+      for (const g of gestores) {
+        try {
+          notificarUtilizador(
+            String(g._id),
+            '🛠️ Nova Avaria Reportada',
+            `${propNome}: ${descricaoCurta}`,
+            '/gestor/tarefas'
+          );
+        } catch (e) {
+          // Fire-and-forget por gestor: não bloqueia os outros.
+        }
+      }
+    } catch (e) {
+      // Fire-and-forget: a avaria já foi registada, a notificação é best-effort.
+      console.error('⚠️  notificar gestores (avaria):', e.message);
+    }
 
     return res.status(200).json({
       tarefa,

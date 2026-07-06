@@ -47,7 +47,7 @@ const {
   reprocessarWebhook,
   setupClienteZero,
 } = require('../controllers/gestorController');
-const { reportarAtrasoTarefa, criarTarefa, atribuirTarefa, reatribuirTarefa, atualizarEstadoTarefa, apagarTarefasFuturas, listarIndisponiveisData } = require('../controllers/tarefaController');
+const { reportarAtrasoTarefa, criarTarefa, atribuirTarefa, reatribuirTarefa, atualizarEstadoTarefa, apagarTarefasFuturas, listarIndisponiveisData, autoAtribuirTarefas } = require('../controllers/tarefaController');
 const { sincronizarReservas, getPropriedadesSmoobu, sincronizarPropriedades, importarPropriedades } = require('../controllers/smoobuController');
 
 // Bootstrap do ambiente de testes — Cliente Zero. PÚBLICO (sem auth).
@@ -82,6 +82,10 @@ router.patch('/tarefas/:id/estado', auth, isGestor, atualizarEstadoTarefa);
 
 // Apagar tarefas futuras não concluídas (reset do calendário).
 router.delete('/tarefas/futuras', auth, isGestor, apagarTarefasFuturas);
+
+// v1.63.0 (Prompt 86) — Auto-atribuição em lote (corre o load balancer para
+// todas as tarefas órfãs a partir de hoje).
+router.post('/tarefas/auto-atribuir', auth, isGestor, autoAtribuirTarefas);
 
 // v1.59.0 (Prompt 81) — Staff indisponíveis (férias/doença) numa data.
 router.get('/tarefas/indisponiveis', auth, isGestor, listarIndisponiveisData);

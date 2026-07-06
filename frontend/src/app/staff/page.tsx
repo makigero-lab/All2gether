@@ -16,7 +16,6 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { TaskCard } from "@/components/staff/task-card";
-import { PushNotificationSetup } from "@/components/staff/push-notification-setup";
 import {
   Dialog,
   DialogHeader,
@@ -230,8 +229,8 @@ export default function StaffPage() {
 
       {/* Lista de tarefas */}
       <main className="flex-1 space-y-4 p-5">
-        {/* Banner de ativar notificações push */}
-        <PushNotificationSetup />
+        {/* v1.66.0 (Prompt 89) — PushNotificationSetup movido para staff/layout.tsx
+            para que apareça em TODAS as páginas do staff, não só no dashboard. */}
 
         {/* Reportar Falta Hoje — botão ou aviso de já reportado */}
         {faltaPendente ? (

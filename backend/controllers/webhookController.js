@@ -503,12 +503,13 @@ async function criarTarefaPorReserva(reservaId, smoobuPropId, dataCheckInRaw, co
     );
 
     // v1.37.0 — Notificação push ao staff (se tiver subscrição ativa).
+    // v1.65.0 (Prompt 88) — Mensagem mais descritiva.
     const { notificarUtilizador } = require('../utils/notificar');
     const propNome = propriedade?.nome ?? 'Propriedade';
     notificarUtilizador(
       String(utilizadorAtribuido),
-      '🧹 Nova tarefa atribuída',
-      `${propNome} — ${new Date(range.start).toLocaleDateString('pt-PT')}`,
+      '🧹 Nova Limpeza Atribuída',
+      `Foste escalado para limpar a ${propNome}.`,
       '/staff'
     );
   } else {
@@ -760,3 +761,7 @@ exports.webhookSmoobu = async (req, res) => {
 // Exporta a função de processamento para permitir reproccessamento manual
 // a partir do painel de admin (POST /api/admin/webhooks/:id/reprocessar).
 exports._processarReservaSmoobu = processarReservaSmoobu;
+
+// v1.63.0 (Prompt 86) — Exporta o load balancer para a auto-atribuição em
+// lote do tarefaController (POST /api/gestor/tarefas/auto-atribuir).
+exports._determinarUtilizadorAtribuido = determinarUtilizadorAtribuido;

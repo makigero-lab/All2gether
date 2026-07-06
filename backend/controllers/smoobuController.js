@@ -20,6 +20,8 @@
 
 const Tarefa = require('../models/Tarefa');
 const Propriedade = require('../models/Propriedade');
+// v1.60.0 (Prompt 83) — Geocoding automático de moradas importadas do Smoobu.
+const { obterCoordenadas } = require('../utils/geocoding');
 
 /**
  * POST /api/admin/smoobu/sincronizar
@@ -401,10 +403,12 @@ exports.sincronizarPropriedades = async (req, res) => {
     });
   }
 
-  // Upsert de cada apartamento. $setOnInsert garante que só escreve na
-  // criação — propriedades existentes não são tocadas (preserva edições).
+  // v1.61.0 (Prompt 84) — Upsert inteligente: cria novas propriedades com
+  // morada + geocoding + capacidade, e ATUALIZA propriedades existentes se
+  // a morada for 'A definir' ou se faltar a capacidade_hospedes.
   let criadas = 0;
   let existentes = 0;
+  let atualizadas = 0;
   let erros = 0;
   const detalheErros = [];
 
@@ -415,23 +419,68 @@ exports.sincronizarPropriedades = async (req, res) => {
         throw new Error('Apartamento sem id.');
       }
 
-      const resultado = await Propriedade.updateOne(
-        { smoobu_id: smoobuId },
-        {
-          $setOnInsert: {
-            nome: apt.name || `Propriedade ${smoobuId}`,
-            empresa_id: empresaId,
-            tempo_limpeza_minutos: 45,
-          },
-        },
-        { upsert: true }
-      );
+      // Extrair capacidade de hóspedes (Smoobu usa rooms.maxOccupancy ou maxOccupancy).
+      const capacidade = apt.rooms?.maxOccupancy || apt.maxOccupancy || null;
 
-      // upsertedCount > 0 → nova; modifiedCount/existing → já existia.
-      if (resultado.upsertedCount > 0) {
+      // Constrói morada dinamicamente a partir do location do Smoobu.
+      let moradaTexto = 'A definir';
+      if (apt.location) {
+        const partes = [apt.location.street, apt.location.zip, apt.location.city].filter(Boolean);
+        if (partes.length > 0) moradaTexto = partes.join(', ');
+      }
+
+      const existente = await Propriedade.findOne({ smoobu_id: smoobuId });
+
+      if (!existente) {
+        // É NOVA: Faz geocoding e cria.
+        let coords = { lat: null, lng: null };
+        if (moradaTexto !== 'A definir') {
+          try {
+            const result = await obterCoordenadas(moradaTexto);
+            if (result) coords = result;
+          } catch (e) {
+            console.warn('Geocoding falhou no sincronizar (nova):', e.message);
+          }
+        }
+        await Propriedade.create({
+          smoobu_id: smoobuId,
+          nome: apt.name || `Propriedade ${smoobuId}`,
+          morada: moradaTexto,
+          coordenadas: coords,
+          empresa_id: empresaId,
+          tempo_limpeza_minutos: 45,
+          capacidade_hospedes: capacidade,
+        });
         criadas++;
       } else {
-        existentes++;
+        // JÁ EXISTE: Atualiza APENAS se a morada for 'A definir' ou se
+        // faltar a capacidade_hospedes. Preserva edições manuais do gestor.
+        let mudou = false;
+
+        // Morada: só preenche se estiver vazia ('A definir') e o Smoobu trouxer uma real.
+        if (existente.morada === 'A definir' && moradaTexto !== 'A definir') {
+          existente.morada = moradaTexto;
+          try {
+            const coords = await obterCoordenadas(moradaTexto);
+            if (coords) existente.coordenadas = coords;
+          } catch (e) {
+            console.warn('Geocoding falhou no sincronizar (update morada):', e.message);
+          }
+          mudou = true;
+        }
+
+        // Capacidade: só atualiza se trouxermos um valor e for diferente.
+        if (capacidade && existente.capacidade_hospedes !== capacidade) {
+          existente.capacidade_hospedes = capacidade;
+          mudou = true;
+        }
+
+        if (mudou) {
+          await existente.save();
+          atualizadas++;
+        } else {
+          existentes++;
+        }
       }
     } catch (err) {
       erros++;
@@ -446,12 +495,13 @@ exports.sincronizarPropriedades = async (req, res) => {
 
   console.log(
     `✅ sincronizarPropriedades: ${apartments.length} recebidas, ${criadas} criadas, ` +
-      `${existentes} já existiam, ${erros} com erro.`
+      `${atualizadas} atualizadas, ${existentes} já existiam, ${erros} com erro.`
   );
 
   return res.status(200).json({
     totalRecebidas: apartments.length,
     criadas,
+    atualizadas,
     existentes,
     erros,
     detalheErros,
@@ -556,13 +606,37 @@ exports.importarPropriedades = async (req, res) => {
         continue;
       }
 
-      // Cria nova propriedade para esta empresa.
+      // v1.60.0 (Prompt 83) — Constrói morada dinamicamente a partir do
+      // objeto location do Smoobu (street, zip, city).
+      let moradaTexto = 'A definir';
+      if (apt.location) {
+        const partes = [apt.location.street, apt.location.zip, apt.location.city].filter(Boolean);
+        if (partes.length > 0) moradaTexto = partes.join(', ');
+      }
+
+      // v1.61.0 (Prompt 84) — Extrai capacidade de hóspedes.
+      const capacidade = apt.rooms?.maxOccupancy || apt.maxOccupancy || null;
+
+      // Geocoding: se temos morada real, obter coordenadas (lat, lng).
+      let coords = { lat: null, lng: null };
+      if (moradaTexto !== 'A definir') {
+        try {
+          const result = await obterCoordenadas(moradaTexto);
+          if (result) coords = result;
+        } catch (e) {
+          console.warn('Geocoding falhou no import:', e.message);
+        }
+      }
+
+      // Cria nova propriedade para esta empresa com morada + coordenadas + capacidade.
       await Propriedade.create({
         smoobu_id: smoobuId,
         nome: apt.name || `Propriedade ${smoobuId}`,
-        morada: 'A definir',
+        morada: moradaTexto,
+        coordenadas: coords,
         empresa_id: empresaId,
         tempo_limpeza_minutos: 45,
+        capacidade_hospedes: capacidade,
       });
       criadas++;
     } catch (err) {
