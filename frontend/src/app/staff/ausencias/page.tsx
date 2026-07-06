@@ -10,6 +10,7 @@ import {
   AlertCircle,
   CheckCircle2,
   Trash2,
+  Send,
 } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -78,6 +79,26 @@ function formatarData(iso: string): string {
   }
 }
 
+/**
+ * v1.56.0 (Prompt 78) — Formata "YYYY-MM-DD" (vindo de <input type="date">)
+ * para "d MMM yyyy" legível no modal de confirmação.
+ * O parseISO do date-fns interpreta "YYYY-MM-DD" como meia-noite UTC, e o
+ * format converte para a timezone local — pode deslocar -1 dia em some TZ.
+ * Por isso usamos new Date(year, month-1, day) que é local.
+ */
+function formatarDataISO(yyyymmdd: string): string {
+  if (!yyyymmdd) return "—";
+  const parts = yyyymmdd.split("-");
+  if (parts.length !== 3) return yyyymmdd;
+  const [y, m, d] = parts.map(Number);
+  if (!y || !m || !d) return yyyymmdd;
+  try {
+    return format(new Date(y, m - 1, d), "d MMM yyyy", { locale: pt });
+  } catch {
+    return yyyymmdd;
+  }
+}
+
 /** Faz fetch autenticado ao proxy /api/staff/* (cookie httpOnly). */
 async function staffFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(path, {
@@ -117,6 +138,9 @@ export default function StaffAusenciasPage() {
   const [submitting, setSubmitting] = useState(false);
   const [formErro, setFormErro] = useState<string | null>(null);
 
+  // v1.56.0 (Prompt 78) — Modal de confirmação antes de submeter.
+  const [mostrarConfirmacao, setMostrarConfirmacao] = useState(false);
+
   // Cancelar pedido.
   const [cancelando, setCancelando] = useState<string | null>(null);
 
@@ -140,8 +164,11 @@ export default function StaffAusenciasPage() {
     carregar();
   }, [carregar]);
 
-  /** Submete o novo pedido de ausência. */
-  async function handleSubmeter(e: React.FormEvent) {
+  /**
+   * v1.56.0 (Prompt 78) — Valida o formulário e abre o modal de confirmação
+   * (NÃO submete imediatamente). A submissão real acontece em handleConfirmarEnvio.
+   */
+  function handleValidarEConfirmar(e: React.FormEvent) {
     e.preventDefault();
     setFormErro(null);
 
@@ -154,6 +181,13 @@ export default function StaffAusenciasPage() {
       return;
     }
 
+    // Validação OK — abre o modal de confirmação.
+    setMostrarConfirmacao(true);
+  }
+
+  /** Submete o pedido após confirmação do utilizador. */
+  async function handleConfirmarEnvio() {
+    setFormErro(null);
     setSubmitting(true);
     try {
       await staffFetch("/api/staff/ausencias", {
@@ -167,10 +201,12 @@ export default function StaffAusenciasPage() {
       });
       setSucesso("Pedido enviado para aprovação.");
       setForm({ tipo: "ferias", data_inicio: "", data_fim: "", notas: "" });
+      setMostrarConfirmacao(false);
       setMostrarForm(false);
       await carregar();
     } catch (e) {
       setFormErro(e instanceof Error ? e.message : "Erro ao criar pedido.");
+      setMostrarConfirmacao(false);
     } finally {
       setSubmitting(false);
     }
@@ -345,7 +381,7 @@ export default function StaffAusenciasPage() {
           </DialogDescription>
           <DialogClose onClick={() => setMostrarForm(false)} />
         </DialogHeader>
-        <form onSubmit={handleSubmeter}>
+        <form onSubmit={handleValidarEConfirmar}>
           <DialogContent className="space-y-4">
             <div className="space-y-1.5">
               <label htmlFor="tipo" className="text-sm font-medium">
@@ -434,11 +470,89 @@ export default function StaffAusenciasPage() {
                   A enviar…
                 </>
               ) : (
-                "Enviar Pedido"
+                <>
+                  <CheckCircle2 className="mr-2 h-4 w-4" />
+                  Rever Pedido
+                </>
               )}
             </Button>
           </DialogFooter>
         </form>
+      </Dialog>
+
+      {/* ---------------------------------------------------------------
+          Modal de Confirmação (Prompt 78, ponto 3)
+          Mostra Tipo + Data Início + Data Fim antes de submeter.
+          --------------------------------------------------------------- */}
+      <Dialog open={mostrarConfirmacao} onOpenChange={setMostrarConfirmacao}>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <CheckCircle2 className="h-5 w-5 text-primary" />
+            Confirmar Pedido de Ausência
+          </DialogTitle>
+          <DialogDescription>
+            Confirma os dados abaixo antes de enviar para aprovação.
+          </DialogDescription>
+          <DialogClose onClick={() => !submitting && setMostrarConfirmacao(false)} />
+        </DialogHeader>
+        <DialogContent className="space-y-3">
+          <div className="rounded-lg border bg-muted/30 p-4 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm text-muted-foreground">Tipo</span>
+              <span className="text-sm font-semibold">
+                {TIPO_LABEL[form.tipo]}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm text-muted-foreground">Data de Início</span>
+              <span className="text-sm font-semibold tabular-nums">
+                {formatarDataISO(form.data_inicio)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm text-muted-foreground">Data de Fim</span>
+              <span className="text-sm font-semibold tabular-nums">
+                {formatarDataISO(form.data_fim)}
+              </span>
+            </div>
+            {form.notas.trim() && (
+              <div className="border-t pt-2">
+                <span className="text-xs text-muted-foreground">Notas:</span>
+                <p className="mt-0.5 text-sm">{form.notas.trim()}</p>
+              </div>
+            )}
+          </div>
+          {formErro && (
+            <p className="text-sm text-destructive">{formErro}</p>
+          )}
+        </DialogContent>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setMostrarConfirmacao(false)}
+            disabled={submitting}
+          >
+            Cancelar
+          </Button>
+          <Button
+            type="button"
+            onClick={handleConfirmarEnvio}
+            disabled={submitting}
+          >
+            {submitting ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                A enviar…
+              </>
+            ) : (
+              <>
+                <Send className="mr-2 h-4 w-4" />
+                Confirmar Envio
+              </>
+            )}
+          </Button>
+        </DialogFooter>
       </Dialog>
     </div>
   );
