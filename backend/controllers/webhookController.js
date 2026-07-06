@@ -760,3 +760,7 @@ exports.webhookSmoobu = async (req, res) => {
 // Exporta a função de processamento para permitir reproccessamento manual
 // a partir do painel de admin (POST /api/admin/webhooks/:id/reprocessar).
 exports._processarReservaSmoobu = processarReservaSmoobu;
+
+// v1.63.0 (Prompt 86) — Exporta o load balancer para a auto-atribuição em
+// lote do tarefaController (POST /api/gestor/tarefas/auto-atribuir).
+exports._determinarUtilizadorAtribuido = determinarUtilizadorAtribuido;

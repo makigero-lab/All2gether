@@ -20,6 +20,9 @@ const {
   verificarDisponibilidadeUtilizador,
   mensagemIndisponivel,
 } = require('../utils/disponibilidade');
+// v1.63.0 (Prompt 86) — Load balancer partilhado do webhookController para
+// a auto-atribuição em lote.
+const { _determinarUtilizadorAtribuido: determinarUtilizadorAtribuido } = require('./webhookController');
 
 /**
  * Limite de capacidade usado pelo reportarAtrasoTarefa para desatribuir a
@@ -662,6 +665,183 @@ exports.apagarTarefasFuturas = async (req, res) => {
     });
   } catch (err) {
     console.error('❌ apagarTarefasFuturas:', err.message);
+    return res.status(500).json({ erro: 'Erro interno do servidor.' });
+  }
+};
+
+/* ------------------------------------------------------------------ */
+/* POST /api/gestor/tarefas/auto-atribuir — Load Balancer em lote      */
+/* (v1.63.0 — Prompt 86)                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * POST /api/gestor/tarefas/auto-atribuir
+ *
+ * Corre o Load Balancer manualmente para todas as tarefas órfãs
+ * (estado 'por_atribuir') da empresa a partir de hoje (meia-noite UTC).
+ *
+ * Para cada tarefa órfã:
+ *   1. Calcula o range do dia da tarefa (início/fim do dia UTC).
+ *   2. Carrega a propriedade para obter coordenadas.
+ *   3. Invoca determinarUtilizadorAtribuido (load balancer partilhado com
+ *      o webhook: filtra ausências, folgas fixas, calcula carga + viagem,
+ *      respeita SLA 480min).
+ *   4. Se encontrar staff: atualiza tarefa (utilizador_id + estado
+ *      'atribuida') + recalcula hora de início via scheduler sequencial.
+ *   5. Se não encontrar: mantém 'por_atribuir' (conta como órfã).
+ *
+ * Resposta 200: { sucesso: true, processadas: N, reatribuidas: X, orfas: Y, detalhe: [{...}] }
+ */
+exports.autoAtribuirTarefas = async (req, res) => {
+  try {
+    const { ok, empresaId } = obterEmpresaId(req, res);
+    if (!ok) return;
+
+    // Data de hoje à meia-noite UTC.
+    const agora = new Date();
+    const hojeInicio = new Date(
+      Date.UTC(agora.getUTCFullYear(), agora.getUTCMonth(), agora.getUTCDate())
+    );
+
+    // Busca todas as tarefas órfãs (por_atribuir) da empresa desde hoje.
+    const tarefasOrfas = await Tarefa.find({
+      empresa_id: empresaId,
+      data: { $gte: hojeInicio },
+      estado: 'por_atribuir',
+    })
+      .populate({ path: 'propriedade_id', select: 'nome coordenadas' })
+      .sort({ data: 1 })
+      .lean();
+
+    if (tarefasOrfas.length === 0) {
+      return res.status(200).json({
+        sucesso: true,
+        processadas: 0,
+        reatribuidas: 0,
+        orfas: 0,
+        mensagem: 'Não há tarefas por atribuir a partir de hoje.',
+      });
+    }
+
+    let reatribuidas = 0;
+    let orfas = 0;
+    const detalhe = [];
+
+    for (const tarefa of tarefasOrfas) {
+      try {
+        // Range do dia da tarefa (meia-noite UTC a meia-noite do dia seguinte).
+        const d = new Date(tarefa.data);
+        const start = new Date(
+          Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
+        );
+        const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+        const range = { start, end };
+
+        // Coordenadas da propriedade (para cálculo de tempo de viagem).
+        const coordenadas = tarefa.propriedade_id?.coordenadas ?? null;
+        const tempoNovaTarefa = tarefa.tempo_limpeza_minutos || 45;
+
+        // Invoca o load balancer partilhado.
+        const utilizadorAtribuido = await determinarUtilizadorAtribuido(
+          empresaId,
+          range,
+          coordenadas,
+          tempoNovaTarefa
+        );
+
+        if (utilizadorAtribuido) {
+          // Encontrou staff: recalcula hora de início via scheduler sequencial
+          // (respeita viagem Haversine + almoço 13h-14h) e atualiza a tarefa.
+          let novaData = tarefa.data;
+          try {
+            const resultadoScheduler = await calcularInicioTarefaUtilizador(
+              utilizadorAtribuido,
+              start,
+              coordenadas,
+              tempoNovaTarefa
+            );
+            novaData = resultadoScheduler.data;
+          } catch (errScheduler) {
+            console.warn(
+              `⚠️  auto-atribuir: scheduler falhou para tarefa ${tarefa._id} (mantém data original):`,
+              errScheduler.message
+            );
+          }
+
+          await Tarefa.updateOne(
+            { _id: tarefa._id },
+            {
+              $set: {
+                utilizador_id: utilizadorAtribuido,
+                estado: 'atribuida',
+                data: novaData,
+              },
+            }
+          );
+
+          reatribuidas++;
+          detalhe.push({
+            tarefa_id: String(tarefa._id),
+            propriedade: tarefa.propriedade_id?.nome ?? '—',
+            utilizador_id: String(utilizadorAtribuido),
+            novo_inicio: novaData,
+            status: 'atribuida',
+          });
+
+          // Notifica o staff (fire-and-forget).
+          try {
+            const propNome = tarefa.propriedade_id?.nome ?? 'Propriedade';
+            const dataFmt = new Date(novaData).toLocaleDateString('pt-PT');
+            notificarUtilizador(
+              String(utilizadorAtribuido),
+              '🧹 Tarefa atribuída',
+              `${propNome} — ${dataFmt}`,
+              '/staff'
+            );
+          } catch (e) {
+            // Fire-and-forget: não bloqueia.
+          }
+        } else {
+          // Não há staff disponível: mantém por_atribuir.
+          orfas++;
+          detalhe.push({
+            tarefa_id: String(tarefa._id),
+            propriedade: tarefa.propriedade_id?.nome ?? '—',
+            utilizador_id: null,
+            status: 'orfa',
+          });
+        }
+      } catch (errTarefa) {
+        // Erro numa tarefa específica não aborta o lote.
+        orfas++;
+        detalhe.push({
+          tarefa_id: String(tarefa._id),
+          propriedade: tarefa.propriedade_id?.nome ?? '—',
+          utilizador_id: null,
+          status: 'erro',
+          erro: errTarefa.message,
+        });
+        console.error(
+          `⚠️  auto-atribuir: erro na tarefa ${tarefa._id}:`,
+          errTarefa.message
+        );
+      }
+    }
+
+    console.log(
+      `🤖 autoAtribuirTarefas: ${tarefasOrfas.length} processadas, ` +
+        `${reatribuidas} reatribuídas, ${orfas} órfãs (empresa ${empresaId}).`
+    );
+
+    return res.status(200).json({
+      sucesso: true,
+      processadas: tarefasOrfas.length,
+      reatribuidas,
+      orfas,
+      detalhe,
+    });
+  } catch (err) {
+    console.error('❌ autoAtribuirTarefas:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
   }
 };
