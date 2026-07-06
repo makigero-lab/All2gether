@@ -466,6 +466,8 @@ export default function EquipaPage() {
     msg: string;
   } | null>(null);
   const [aprProcessando, setAprProcessando] = useState<string | null>(null);
+  // v1.62.0 (Prompt 85) — Alvo do dialog de eliminação de ausência.
+  const [aprEliminarAlvo, setAprEliminarAlvo] = useState<AusenciaDTO | null>(null);
 
   /** Carrega as ausências pendentes da empresa. */
   const aprCarregar = useCallback(async () => {
@@ -530,6 +532,31 @@ export default function EquipaPage() {
       setAprToast({
         tipo: "erro",
         msg: e instanceof Error ? `Erro ao rejeitar: ${e.message}` : "Erro ao rejeitar pedido.",
+      });
+    } finally {
+      setAprProcessando(null);
+    }
+  }
+
+  /**
+   * v1.62.0 (Prompt 85) — Elimina definitivamente uma ausência.
+   * Chamado após confirmação no Dialog. Faz DELETE /api/gestor/ausencias/:id.
+   */
+  async function aprEliminar() {
+    if (!aprEliminarAlvo) return;
+    const alvo = aprEliminarAlvo;
+    setAprProcessando(`eliminar-${alvo._id}`);
+    setAprErro(null);
+    try {
+      await adminDelete(`/api/gestor/ausencias/${alvo._id}`);
+      setAprToast({ tipo: "sucesso", msg: "Ausência eliminada com sucesso." });
+      // Remove da lista de pendentes.
+      setAprPendentes((prev) => prev.filter((p) => p._id !== alvo._id));
+      setAprEliminarAlvo(null);
+    } catch (e) {
+      setAprToast({
+        tipo: "erro",
+        msg: e instanceof Error ? `Erro ao eliminar: ${e.message}` : "Erro ao eliminar ausência.",
       });
     } finally {
       setAprProcessando(null);
@@ -1539,6 +1566,18 @@ export default function EquipaPage() {
                                 )}
                                 Rejeitar
                               </Button>
+                              {/* v1.62.0 (Prompt 85) — Eliminar definitivamente */}
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-8 w-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                onClick={() => setAprEliminarAlvo(a)}
+                                disabled={aprProcessando !== null}
+                                aria-label="Eliminar ausência"
+                                title="Eliminar ausência"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
                             </div>
                           </td>
                         </tr>
@@ -1612,6 +1651,22 @@ export default function EquipaPage() {
                           )}
                           Rejeitar
                         </Button>
+                        {/* v1.62.0 (Prompt 85) — Eliminar definitivamente */}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                          onClick={() => setAprEliminarAlvo(a)}
+                          disabled={aprProcessando !== null}
+                          aria-label="Eliminar ausência"
+                          title="Eliminar ausência"
+                        >
+                          {aprProcessando === `eliminar-${a._id}` ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-3.5 w-3.5" />
+                          )}
+                        </Button>
                       </div>
                     </div>
                   ))}
@@ -1621,6 +1676,79 @@ export default function EquipaPage() {
           )}
         </TabsContent>
       </Tabs>
+
+      {/* v1.62.0 (Prompt 85) — Dialog de confirmação de eliminação de ausência */}
+      <Dialog
+        open={aprEliminarAlvo !== null}
+        onOpenChange={(o) => !o && setAprEliminarAlvo(null)}
+      >
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Trash2 className="h-5 w-5 text-destructive" />
+            Eliminar Ausência
+          </DialogTitle>
+          <DialogDescription>
+            Tens a certeza que queres eliminar esta ausência? Esta ação é
+            definitiva e não pode ser desfeita.
+          </DialogDescription>
+          <DialogClose onClick={() => setAprEliminarAlvo(null)} />
+        </DialogHeader>
+        <DialogContent className="space-y-3">
+          {aprEliminarAlvo && (
+            <div className="rounded-lg border bg-muted/30 p-4 space-y-2 text-sm">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">Funcionário</span>
+                <span className="font-medium">
+                  {aprEliminarAlvo.utilizador?.nome ?? "—"}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">Tipo</span>
+                <span className="font-medium">
+                  {TIPO_LABEL[aprEliminarAlvo.tipo] ?? aprEliminarAlvo.tipo}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">Período</span>
+                <span className="font-medium tabular-nums">
+                  {formatarData(aprEliminarAlvo.data_inicio)}
+                  {aprEliminarAlvo.data_inicio !== aprEliminarAlvo.data_fim && (
+                    <> → {formatarData(aprEliminarAlvo.data_fim)}</>
+                  )}
+                </span>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setAprEliminarAlvo(null)}
+            disabled={aprProcessando !== null}
+          >
+            Cancelar
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            onClick={aprEliminar}
+            disabled={aprProcessando !== null}
+          >
+            {aprProcessando !== null ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                A eliminar…
+              </>
+            ) : (
+              <>
+                <Trash2 className="mr-2 h-4 w-4" />
+                Eliminar Definitivamente
+              </>
+            )}
+          </Button>
+        </DialogFooter>
+      </Dialog>
     </div>
   );
 }
