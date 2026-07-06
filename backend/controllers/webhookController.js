@@ -492,6 +492,9 @@ async function criarTarefaPorReserva(reservaId, smoobuPropId, dataCheckInRaw, co
     tempo_limpeza_minutos: Number(tempoLimpeza) || 45,
     tipo: 'limpeza',
     estado: utilizadorAtribuido ? 'atribuida' : 'por_atribuir',
+    // v1.55.0 (Prompt 77) — Snapshot da checklist da propriedade no momento
+    // da criação. Sem isto, as tarefas nasciam sem itens para o staff picar.
+    checklist: propriedade.checklist || [],
   });
 
   if (utilizadorAtribuido) {
