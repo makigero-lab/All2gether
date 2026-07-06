@@ -509,7 +509,13 @@ exports.getDadosCalendario = async (req, res) => {
  * Alterna o campo `ativo` da propriedade (true ↔ false).
  * Propriedades inativas são ignoradas pelo webhook do Smoobu.
  *
- * Resposta 200: { propriedade: { ... }, ativo: boolean }
+ * v1.35.0 — Limpeza cirúrgica (Prompt 73): quando uma propriedade é
+ * DESATIVADA (ativo=false), apaga-se apenas as tarefas FUTURAS (a partir
+ * de hoje) dessa propriedade que ainda não foram executadas (estado ∉
+ * ['concluida','cancelada']). Isto mantém o histórico de limpezas já
+ * feitas e evita o custo de re-sincronizar todo o calendário.
+ *
+ * Resposta 200: { propriedade: { ... }, ativo: boolean, tarefasApagadas: number }
  */
 exports.alternarEstadoPropriedade = async (req, res) => {
   try {
@@ -545,9 +551,35 @@ exports.alternarEstadoPropriedade = async (req, res) => {
       { new: true }
     ).lean();
 
+    // ----------------------------------------------------------------
+    // v1.35.0 (Prompt 73) — Limpeza cirúrgica ao DESATIVAR propriedade.
+    // Apaga apenas as tarefas FUTURAS (data >= hoje 00:00 UTC) desta
+    // propriedade que ainda NÃO foram concluídas nem canceladas.
+    // ----------------------------------------------------------------
+    let tarefasApagadas = 0;
+    if (!novoEstado) {
+      const agora = new Date();
+      const hojeInicio = new Date(
+        Date.UTC(agora.getUTCFullYear(), agora.getUTCMonth(), agora.getUTCDate())
+      );
+
+      const resultadoDelete = await Tarefa.deleteMany({
+        propriedade_id: id,
+        empresa_id: empresaId,
+        data: { $gte: hojeInicio },
+        estado: { $nin: ['concluida', 'cancelada'] },
+      });
+
+      tarefasApagadas = resultadoDelete?.deletedCount || 0;
+      console.log(
+        `🧹 Propriedade "${propriedade.nome || id}" desativada — ${tarefasApagadas} tarefa(s) futura(s) apagada(s).`
+      );
+    }
+
     return res.status(200).json({
       propriedade: atualizada,
       ativo: novoEstado,
+      tarefasApagadas,
     });
   } catch (err) {
     console.error('❌ alternarEstadoPropriedade:', err.message);
