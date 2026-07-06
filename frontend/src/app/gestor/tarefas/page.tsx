@@ -151,6 +151,36 @@ export default function AdminTarefasPage() {
   const [atribuirUserId, setAtribuirUserId] = useState("");
   const [atribuirSubmitting, setAtribuirSubmitting] = useState(false);
 
+  // v1.59.0 (Prompt 81) — Staff indisponíveis (férias/doença) no dia da tarefa.
+  const [indisponiveis, setIndisponiveis] = useState<Array<{
+    utilizador_id: string;
+    tipo: string;
+    data_inicio: string;
+    data_fim: string;
+  }>>([]);
+
+  // Busca indisponíveis quando o modal de atribuição abre.
+  useEffect(() => {
+    if (!atribuindo) {
+      setIndisponiveis([]);
+      return;
+    }
+    let cancelado = false;
+    (async () => {
+      try {
+        const dia = atribuindo.data?.slice(0, 10);
+        if (!dia) return;
+        const res = await adminGet<{ indisponiveis: typeof indisponiveis }>(
+          `/api/gestor/tarefas/indisponiveis?data=${dia}`
+        );
+        if (!cancelado) setIndisponiveis(res.indisponiveis ?? []);
+      } catch {
+        if (!cancelado) setIndisponiveis([]);
+      }
+    })();
+    return () => { cancelado = true; };
+  }, [atribuindo]);
+
   const carregar = useCallback(async () => {
     setLoading(true);
     setErro(null);
@@ -676,10 +706,24 @@ export default function AdminTarefasPage() {
               className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <option value="">Selecionar…</option>
-              {staff.map((u) => (
-                <option key={u._id} value={u._id}>{u.nome}</option>
-              ))}
+              {staff.map((u) => {
+                // v1.59.0 — Marca e desabilita staff de férias/ausência.
+                const ind = indisponiveis.find((i) => i.utilizador_id === u._id);
+                const label = ind
+                  ? `${u.nome} — 🌴 Indisponível (${ind.tipo === "ferias" ? "Férias" : ind.tipo === "doenca" ? "Doença" : "Ausência"})`
+                  : u.nome;
+                return (
+                  <option key={u._id} value={u._id} disabled={!!ind}>
+                    {label}
+                  </option>
+                );
+              })}
             </select>
+            {indisponiveis.length > 0 && (
+              <p className="text-xs text-amber-600 dark:text-amber-400">
+                ⚠️ {indisponiveis.length} membro(s) da equipa está(ão) de férias/ausência neste dia e não podem receber tarefas.
+              </p>
+            )}
           </div>
         </DialogContent>
         <DialogFooter>

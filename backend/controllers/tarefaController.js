@@ -8,6 +8,7 @@ const mongoose = require('mongoose');
 const Tarefa = require('../models/Tarefa');
 const Propriedade = require('../models/Propriedade');
 const Utilizador = require('../models/Utilizador');
+const Ausencia = require('../models/Ausencia');
 const { obterEmpresaId } = require('./gestorController');
 const { notificarUtilizador } = require('../utils/notificar');
 const {
@@ -15,6 +16,10 @@ const {
   calcularCargaDiaUtilizador,
   calcularInicioTarefaUtilizador,
 } = require('../utils/scheduler');
+const {
+  verificarDisponibilidadeUtilizador,
+  mensagemIndisponivel,
+} = require('../utils/disponibilidade');
 
 /**
  * Limite de capacidade usado pelo reportarAtrasoTarefa para desatribuir a
@@ -178,6 +183,15 @@ exports.criarTarefa = async (req, res) => {
       });
     }
 
+    // Normaliza data para meia-noite UTC (necessário para validar disponibilidade).
+    const d = new Date(data);
+    if (isNaN(d.getTime())) {
+      return res.status(400).json({ erro: 'data inválida.' });
+    }
+    const dataNormalizada = new Date(
+      Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
+    );
+
     // Valida utilizador_id se vier.
     let utilizadorValidado = null;
     if (utilizador_id) {
@@ -196,17 +210,18 @@ exports.criarTarefa = async (req, res) => {
           erro: 'Utilizador não encontrado (ou não é staff/gestor ativo da empresa).',
         });
       }
+
+      // v1.59.0 (Prompt 81) — Não permitir atribuir a staff de férias/ausência.
+      const disp = await verificarDisponibilidadeUtilizador(user._id, dataNormalizada);
+      if (disp.indisponivel) {
+        return res.status(409).json({
+          erro: `${user.nome} está indisponível: ${mensagemIndisponivel(disp.ausencia)}`,
+          codigo: 'UTILIZADOR_INDISPONIVEL',
+        });
+      }
+
       utilizadorValidado = user._id;
     }
-
-    // Normaliza data para meia-noite UTC.
-    const d = new Date(data);
-    if (isNaN(d.getTime())) {
-      return res.status(400).json({ erro: 'data inválida.' });
-    }
-    const dataNormalizada = new Date(
-      Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
-    );
 
     const nova = await Tarefa.create({
       empresa_id: empresaId,
@@ -273,6 +288,16 @@ exports.atribuirTarefa = async (req, res) => {
           erro: 'Utilizador não encontrado (ou não é staff/gestor ativo).',
         });
       }
+
+      // v1.59.0 (Prompt 81) — Não permitir atribuir a staff de férias/ausência.
+      const disp = await verificarDisponibilidadeUtilizador(user._id, tarefa.data);
+      if (disp.indisponivel) {
+        return res.status(409).json({
+          erro: `${user.nome} está indisponível: ${mensagemIndisponivel(disp.ausencia)}`,
+          codigo: 'UTILIZADOR_INDISPONIVEL',
+        });
+      }
+
       tarefa.utilizador_id = user._id;
       tarefa.estado = 'atribuida';
     }
@@ -443,6 +468,15 @@ exports.reatribuirTarefa = async (req, res) => {
       });
     }
 
+    // v1.59.0 (Prompt 81) — Verifica ausências aprovadas (férias/doença).
+    const disp = await verificarDisponibilidadeUtilizador(novoUser._id, tarefa.data);
+    if (disp.indisponivel) {
+      return res.status(409).json({
+        erro: `${novoUser.nome} está indisponível: ${mensagemIndisponivel(disp.ausencia)}`,
+        codigo: 'UTILIZADOR_INDISPONIVEL',
+      });
+    }
+
     // 4. Verifica capacidade do novo utilizador no dia.
     const cargaAtual = await calcularCargaDiaUtilizador(
       utilizador_id,
@@ -520,6 +554,65 @@ exports.reatribuirTarefa = async (req, res) => {
     });
   } catch (err) {
     console.error('❌ reatribuirTarefa:', err.message);
+    return res.status(500).json({ erro: 'Erro interno do servidor.' });
+  }
+};
+
+/* ------------------------------------------------------------------ */
+/* DELETE /api/gestor/tarefas/futuras — apagar tarefas futuras (v1.50) */
+/* ------------------------------------------------------------------ */
+
+/* ------------------------------------------------------------------ */
+/* GET /api/gestor/tarefas/indisponiveis — staff de férias numa data    */
+/* (v1.59.0 — Prompt 81)                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * GET /api/gestor/tarefas/indisponiveis?data=YYYY-MM-DD
+ *
+ * Devolve os IDs dos utilizadores que têm ausência APROVADA a cobrir o
+ * dia indicado. Usado pelo frontend para desabilitar/marcar essas opções
+ * nos selects de atribuição de tarefas.
+ *
+ * Resposta 200: { indisponiveis: [{ utilizador_id, tipo, data_inicio, data_fim }] }
+ */
+exports.listarIndisponiveisData = async (req, res) => {
+  try {
+    const { ok, empresaId } = obterEmpresaId(req, res);
+    if (!ok) return;
+
+    const { data } = req.query;
+    if (!data) {
+      return res.status(400).json({ erro: 'Parâmetro data é obrigatório (YYYY-MM-DD).' });
+    }
+
+    const d = new Date(data);
+    if (isNaN(d.getTime())) {
+      return res.status(400).json({ erro: 'data inválida.' });
+    }
+    const dia = new Date(
+      Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
+    );
+
+    const ausencias = await Ausencia.find({
+      empresa_id: empresaId,
+      estado: 'aprovada',
+      data_inicio: { $lte: dia },
+      data_fim: { $gte: dia },
+    })
+      .select('utilizador_id tipo data_inicio data_fim')
+      .lean();
+
+    const indisponiveis = ausencias.map((a) => ({
+      utilizador_id: String(a.utilizador_id),
+      tipo: a.tipo,
+      data_inicio: a.data_inicio,
+      data_fim: a.data_fim,
+    }));
+
+    return res.status(200).json({ indisponiveis });
+  } catch (err) {
+    console.error('❌ listarIndisponiveisData:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
   }
 };

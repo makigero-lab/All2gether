@@ -197,6 +197,14 @@ export default function CalendarioOperacionalPage() {
   const [reatribuindoPara, setReatribuindoPara] = useState<string>("");
   const [reatribuindo, setReatribuindo] = useState(false);
 
+  // v1.59.0 (Prompt 81) — Staff indisponíveis (férias/doença) no dia da tarefa selecionada.
+  const [indisponiveis, setIndisponiveis] = useState<Array<{
+    utilizador_id: string;
+    tipo: string;
+    data_inicio: string;
+    data_fim: string;
+  }>>([]);
+
   /* --- Marca montação no cliente (inibe o SSR do FullCalendar) --- */
   useEffect(() => {
     setMounted(true);
@@ -409,6 +417,36 @@ export default function CalendarioOperacionalPage() {
     setTarefaSelecionada(tarefa);
     setReatribuindoPara(tarefa.utilizador_id?._id ?? "");
   }, []);
+
+  /* --- v1.59.0 (Prompt 81): busca staff indisponíveis para o dia da tarefa --- */
+  useEffect(() => {
+    if (!tarefaSelecionada) {
+      setIndisponiveis([]);
+      return;
+    }
+    let cancelado = false;
+    (async () => {
+      try {
+        // Extrai YYYY-MM-DD da data da tarefa.
+        const dia = tarefaSelecionada.data?.slice(0, 10);
+        if (!dia) {
+          setIndisponiveis([]);
+          return;
+        }
+        const res = await adminGet<{ indisponiveis: typeof indisponiveis }>(
+          `/api/gestor/tarefas/indisponiveis?data=${dia}`
+        );
+        if (!cancelado) {
+          setIndisponiveis(res.indisponiveis ?? []);
+        }
+      } catch {
+        if (!cancelado) setIndisponiveis([]);
+      }
+    })();
+    return () => {
+      cancelado = true;
+    };
+  }, [tarefaSelecionada]);
 
   /* --- Reatribuição Inteligente (Prompt 75) --- */
   // Chama PATCH /api/gestor/tarefas/:id/reatribuir, que recalcula a hora de
@@ -751,12 +789,24 @@ export default function CalendarioOperacionalPage() {
                 className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
               >
                 <option value="">— Selecionar staff —</option>
-                {equipa.map((u) => (
-                  <option key={u._id} value={u._id}>
-                    {u.nome}
-                  </option>
-                ))}
+                {equipa.map((u) => {
+                  const ind = indisponiveis.find((i) => i.utilizador_id === u._id);
+                  const label = ind
+                    ? `${u.nome} — 🌴 Indisponível (${ind.tipo === "ferias" ? "Férias" : ind.tipo === "doenca" ? "Doença" : "Ausência"})`
+                    : u.nome;
+                  return (
+                    <option key={u._id} value={u._id} disabled={!!ind}>
+                      {label}
+                    </option>
+                  );
+                })}
               </select>
+              {/* v1.59.0 — Aviso visual de staff indisponível */}
+              {indisponiveis.length > 0 && (
+                <p className="text-xs text-amber-600 dark:text-amber-400">
+                  ⚠️ {indisponiveis.length} membro(s) da equipa está(ão) de férias/ausência neste dia e não podem receber tarefas.
+                </p>
+              )}
             </div>
 
             {tarefaSelecionada.observacoes && (

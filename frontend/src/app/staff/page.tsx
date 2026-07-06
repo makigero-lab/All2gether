@@ -88,6 +88,13 @@ export default function StaffPage() {
         fetch("/api/staff/ausencias", { credentials: "include", cache: "no-store" }),
       ]);
 
+      // v1.59.0 (Prompt 81) — Se a sessão expirou (401), redireciona para login
+      // em vez de ficar preso na página com chamadas falhadas acumuladas.
+      if (userRes.status === 401) {
+        window.location.href = "/login?from=" + encodeURIComponent("/staff");
+        return;
+      }
+
       if (userRes.ok) {
         const userData = await userRes.json();
         if (userData?.utilizador) setUser(userData.utilizador);
