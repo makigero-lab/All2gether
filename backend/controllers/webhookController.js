@@ -24,6 +24,11 @@ const Utilizador = require('../models/Utilizador');
 const Ausencia = require('../models/Ausencia');
 const Tarefa = require('../models/Tarefa');
 const WebhookLog = require('../models/WebhookLog');
+const {
+  CAPACIDADE_MAXIMA_MINUTOS,
+  calcularTempoViagem,
+  calcularInicioTarefaUtilizador,
+} = require('../utils/scheduler');
 
 /* ------------------------------------------------------------------ */
 /* Utilitários                                                         */
@@ -128,50 +133,9 @@ function extrairDadosReserva(payload) {
 /* Lógica de atribuição (passos 3 a 6)                                */
 /* ------------------------------------------------------------------ */
 
-// Capacidade máxima diária por utilizador (8 horas = 480 minutos).
-// v1.39.0: alargado de 420 (7h) para 480 (8h). A única restrição de
-// capacidade é esta carga diária — sem lógicas rígidas de horário de almoço.
-// Se um utilizador exceder 480 min ao receber a nova tarefa, é excluído
-// e o algoritmo tenta o próximo disponível.
-const CAPACIDADE_MAXIMA_MINUTOS = 480;
-
-/**
- * Calcula o tempo de viagem entre duas coordenadas usando a Fórmula de
- * Haversine (distância em linha reta) e uma velocidade média urbana de
- * 30 km/h.
- *
- * TODO (futuro): substituir por Google Maps Distance Matrix API para ter
- * em conta o trânsito real e a rota rodoviária.
- *
- * @param {{ lat: number, lng: number } | null} coordA
- * @param {{ lat: number, lng: number } | null} coordB
- * @returns {number} tempo de viagem em minutos (0 se coordenadas inválidas)
- */
-function calcularTempoViagem(coordA, coordB) {
-  if (!coordA || !coordB || coordA.lat == null || coordA.lng == null ||
-      coordB.lat == null || coordB.lng == null) {
-    return 0;
-  }
-
-  const R = 6371; // raio da Terra em km
-  const dLat = ((coordB.lat - coordA.lat) * Math.PI) / 180;
-  const dLng = ((coordB.lng - coordA.lng) * Math.PI) / 180;
-  const lat1 = (coordA.lat * Math.PI) / 180;
-  const lat2 = (coordB.lat * Math.PI) / 180;
-
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  const distanciaKm = R * c;
-
-  // Velocidade média urbana: 30 km/h → tempo em minutos.
-  const velocidadeKmh = 30;
-  const tempoHoras = distanciaKm / velocidadeKmh;
-  const tempoMinutos = Math.round(tempoHoras * 60);
-
-  return tempoMinutos;
-}
+// v1.53.0 — CAPACIDADE_MAXIMA_MINUTOS e calcularTempoViagem foram movidos
+// para backend/utils/scheduler.js (partilhados com tarefaController.js para
+// a reatribuição inteligente). Importados no topo do ficheiro.
 
 /**
  * Determina o utilizador (Staff) a quem atribuir a tarefa, aplicando:
@@ -495,73 +459,28 @@ async function criarTarefaPorReserva(reservaId, smoobuPropId, dataCheckInRaw, co
   // tarefa em vez de usar meia-noite (range.start). As limpezas começam
   // às 11:00 por defeito; se o staff já tiver tarefas nesse dia, a nova
   // tarefa é agendada após a última (fim + tempo de viagem).
-  // v1.51.0 — Proteção de hora de almoço (13:00-14:00 local):
-  //   Regra A: se o início cair no almoço, empurra para 14:00.
-  //   Regra B: se o início for antes do almoço mas o fim ultrapassar 13:15,
-  //     empurra para 14:00 (não partir a limpeza a meio).
-  let dataAgendada = new Date(range.start);
-  dataAgendada.setUTCHours(10, 0, 0, 0); // 11:00 local (UTC+1) = 10:00 UTC
-
+  // v1.51.0 — Proteção de hora de almoço (13:00-14:00 local).
+  // v1.53.0 — Lógica extraída para backend/utils/scheduler.js (partilhada
+  // com a reatribuição inteligente do tarefaController).
+  let dataAgendada;
   if (utilizadorAtribuido) {
     try {
-      // Procura a última tarefa do utilizador nesse dia (com coordenadas).
-      const ultimaTarefa = await Tarefa.findOne({
-        utilizador_id: utilizadorAtribuido,
-        data: { $gte: range.start, $lt: range.end },
-        estado: { $nin: ['cancelada'] },
-      })
-        .populate({ path: 'propriedade_id', select: 'coordenadas nome' })
-        .sort({ data: -1 })
-        .lean();
-
-      if (ultimaTarefa && ultimaTarefa.propriedade_id) {
-        // Calcula hora de fim da tarefa anterior.
-        const fimAnterior = new Date(ultimaTarefa.data);
-        fimAnterior.setMinutes(
-          fimAnterior.getMinutes() + (ultimaTarefa.tempo_limpeza_minutos || 45)
-        );
-
-        // Calcula tempo de viagem entre a propriedade anterior e a nova.
-        const coordAnterior = ultimaTarefa.propriedade_id.coordenadas;
-        const coordNova = propriedade.coordenadas;
-        const tempoViagem = calcularTempoViagem(coordAnterior, coordNova);
-
-        // Nova hora de início = fim anterior + tempo de viagem.
-        dataAgendada = new Date(fimAnterior.getTime() + tempoViagem * 60000);
-
-        console.log(
-          `📅 Scheduler: tarefa agendada para ${dataAgendada.toISOString()} ` +
-            `(fim anterior: ${fimAnterior.toISOString()}, viagem: ${tempoViagem}min)`
-        );
-      }
+      const resultadoScheduler = await calcularInicioTarefaUtilizador(
+        utilizadorAtribuido,
+        range.start,
+        propriedade.coordenadas,
+        Number(tempoLimpeza) || 45
+      );
+      dataAgendada = resultadoScheduler.data;
     } catch (err) {
       console.error('⚠️  Scheduler sequencial falhou (usa 11:00 padrão):', err.message);
-      // Mantém dataAgendada = 11:00 (já definido acima).
+      dataAgendada = new Date(range.start);
+      dataAgendada.setUTCHours(10, 0, 0, 0); // 11:00 local (UTC+1) = 10:00 UTC
     }
-  }
-
-  // v1.51.0 — Proteção de hora de almoço (13:00-14:00, hora local PT = UTC+1).
-  // Em UTC: almoço = 12:00-13:00 UTC.
-  try {
-    const inicioUTC = dataAgendada.getUTCHours() * 60 + dataAgendada.getUTCMinutes();
-    const ALMOCO_INICIO = 12 * 60;       // 13:00 local = 12:00 UTC
-    const ALMOCO_FIM = 13 * 60;          // 14:00 local = 13:00 UTC
-    const ALMOCO_TOLERANCIA = 12 * 60 + 15; // 13:15 local = 12:15 UTC
-    const duracaoMin = Number(tempoLimpeza) || 45;
-    const fimPrevistoMin = inicioUTC + duracaoMin;
-
-    // Regra A: início dentro do almoço → empurra para 14:00 (13:00 UTC).
-    if (inicioUTC >= ALMOCO_INICIO && inicioUTC < ALMOCO_FIM) {
-      dataAgendada.setUTCHours(13, 0, 0, 0);
-      console.log(`🍽️ Scheduler: início no almoço → empurrado para 14:00 local`);
-    }
-    // Regra B: início antes do almoço mas fim ultrapassa 13:15 → empurra para 14:00.
-    else if (inicioUTC < ALMOCO_INICIO && fimPrevistoMin > ALMOCO_TOLERANCIA) {
-      dataAgendada.setUTCHours(13, 0, 0, 0);
-      console.log(`🍽️ Scheduler: fim ultrapassa 13:15 → empurrado para 14:00 local`);
-    }
-  } catch (err) {
-    console.error('⚠️  Proteção de almoço falhou:', err.message);
+  } else {
+    // Sem atribuição: mantém 11:00 padrão (sem cálculo de viagem).
+    dataAgendada = new Date(range.start);
+    dataAgendada.setUTCHours(10, 0, 0, 0); // 11:00 local (UTC+1) = 10:00 UTC
   }
 
   const novaTarefa = await Tarefa.create({
@@ -573,6 +492,9 @@ async function criarTarefaPorReserva(reservaId, smoobuPropId, dataCheckInRaw, co
     tempo_limpeza_minutos: Number(tempoLimpeza) || 45,
     tipo: 'limpeza',
     estado: utilizadorAtribuido ? 'atribuida' : 'por_atribuir',
+    // v1.55.0 (Prompt 77) — Snapshot da checklist da propriedade no momento
+    // da criação. Sem isto, as tarefas nasciam sem itens para o staff picar.
+    checklist: propriedade.checklist || [],
   });
 
   if (utilizadorAtribuido) {

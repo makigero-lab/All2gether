@@ -34,6 +34,7 @@ import {
   DialogContent,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   adminGet,
   adminPost,
@@ -94,10 +95,31 @@ export default function AdminTarefasPage() {
   // Filtro: mostrar só tarefas com avarias.
   const [soAvarias, setSoAvarias] = useState(false);
 
-  // Aplica filtro de avarias client-side (a lista original vem do backend).
-  const tarefasFiltradas = soAvarias
-    ? tarefas.filter((t) => Array.isArray(t.avarias) && t.avarias.length > 0)
-    : tarefas;
+  // v1.58.0 (Prompt 80, ponto 3) — Aba de filtragem por estado.
+  // 'todas' | 'por_atribuir' | 'pendentes' | 'concluidas'
+  type AbaEstado = "todas" | "por_atribuir" | "pendentes" | "concluidas";
+  const [abaEstado, setAbaEstado] = useState<AbaEstado>("todas");
+
+  // Aplica filtros client-side (avarias + aba de estado).
+  const tarefasFiltradas = tarefas.filter((t) => {
+    // Filtro de avarias (toggle existente).
+    if (soAvarias && !(Array.isArray(t.avarias) && t.avarias.length > 0)) {
+      return false;
+    }
+    // Filtro da aba de estado.
+    switch (abaEstado) {
+      case "por_atribuir":
+        return t.estado === "por_atribuir";
+      case "pendentes":
+        // Pendentes = atribuídas/em_curso (ainda não concluídas nem canceladas).
+        return t.estado === "atribuida" || t.estado === "em_curso";
+      case "concluidas":
+        return t.estado === "concluida";
+      case "todas":
+      default:
+        return true;
+    }
+  });
 
   // Paginação client-side.
   const [pagina, setPagina] = useState(1);
@@ -386,7 +408,7 @@ export default function AdminTarefasPage() {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmeter} className="space-y-4">
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium">Propriedade</label>
                   <select
@@ -412,6 +434,22 @@ export default function AdminTarefasPage() {
                     {staff.map((u) => (
                       <option key={u._id} value={u._id}>{u.nome}</option>
                     ))}
+                  </select>
+                </div>
+                {/* v1.57.0 (Prompt 79) — Select de tipo para permitir criar
+                    tarefas de manutenção (avarias) manualmente, não só limpezas. */}
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">Tipo</label>
+                  <select
+                    value={form.tipo}
+                    onChange={(e) => setForm((f) => ({ ...f, tipo: e.target.value }))}
+                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <option value="limpeza">Limpeza</option>
+                    <option value="manutencao">Manutenção</option>
+                    <option value="check_in">Check-in</option>
+                    <option value="check_out">Check-out</option>
+                    <option value="outro">Outro</option>
                   </select>
                 </div>
                 <div className="space-y-1.5">
@@ -468,6 +506,42 @@ export default function AdminTarefasPage() {
         </Card>
       )}
 
+      {/* v1.58.0 (Prompt 80, ponto 3) — Abas de filtragem por estado */}
+      <Tabs value={abaEstado} onValueChange={(v) => setAbaEstado(v as AbaEstado)}>
+        <TabsList className="grid w-full grid-cols-4 sm:inline-flex sm:w-auto">
+          <TabsTrigger value="todas" className="gap-1.5">
+            Todas
+            <Badge variant="secondary" className="ml-1 px-1.5 py-0 text-[10px]">
+              {tarefas.length}
+            </Badge>
+          </TabsTrigger>
+          <TabsTrigger value="por_atribuir" className="gap-1.5">
+            Por Atribuir
+            {tarefas.filter((t) => t.estado === "por_atribuir").length > 0 && (
+              <Badge variant="destructive" className="ml-1 px-1.5 py-0 text-[10px]">
+                {tarefas.filter((t) => t.estado === "por_atribuir").length}
+              </Badge>
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="pendentes" className="gap-1.5">
+            Pendentes
+            {tarefas.filter((t) => t.estado === "atribuida" || t.estado === "em_curso").length > 0 && (
+              <Badge variant="secondary" className="ml-1 px-1.5 py-0 text-[10px]">
+                {tarefas.filter((t) => t.estado === "atribuida" || t.estado === "em_curso").length}
+              </Badge>
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="concluidas" className="gap-1.5">
+            Concluídas
+            {tarefas.filter((t) => t.estado === "concluida").length > 0 && (
+              <Badge variant="secondary" className="ml-1 px-1.5 py-0 text-[10px]">
+                {tarefas.filter((t) => t.estado === "concluida").length}
+              </Badge>
+            )}
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
+
       {/* Tabela */}
       <Card>
         <CardContent className="p-0">
@@ -479,7 +553,15 @@ export default function AdminTarefasPage() {
             <div className="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">
               <ClipboardList className="h-10 w-10 opacity-40" />
               <p className="text-sm">
-                {soAvarias ? "Sem tarefas com avarias reportadas." : "Sem tarefas."}
+                {soAvarias
+                  ? "Sem tarefas com avarias reportadas."
+                  : abaEstado === "por_atribuir"
+                  ? "Sem tarefas por atribuir. Tudo sob controlo! ✅"
+                  : abaEstado === "pendentes"
+                  ? "Sem tarefas pendentes."
+                  : abaEstado === "concluidas"
+                  ? "Sem tarefas concluídas."
+                  : "Sem tarefas."}
               </p>
             </div>
           ) : (

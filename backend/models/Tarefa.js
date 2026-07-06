@@ -80,6 +80,14 @@ const tarefaSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
+    // v1.55.0 (Prompt 77) — Checklist snapshot da propriedade no momento
+    // da criação da tarefa. Copiada de Propriedade.checklist para que a
+    // tarefa mantenha os itens originais mesmo se o gestor editar a
+    // checklist da propriedade depois. O staff vê esta lista ao concluir.
+    checklist: {
+      type: [String],
+      default: [],
+    },
   },
   { timestamps: true }
 );

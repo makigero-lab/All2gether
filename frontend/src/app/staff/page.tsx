@@ -55,6 +55,8 @@ function adaptarTarefa(t: TarefaReal) {
     estado: t.estado as "por_atribuir" | "atribuida" | "em_curso" | "concluida" | "cancelada",
     tipo: t.tipo as "limpeza" | "check_in" | "check_out" | "manutencao" | "outro",
     endereco: t.propriedade_id?.morada,
+    // v1.56.0 (Prompt 78) — data ISO real para extrair hora de início no TaskCard.
+    data: t.data,
   };
 }
 

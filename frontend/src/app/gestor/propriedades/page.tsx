@@ -152,12 +152,28 @@ export default function PropriedadesPage() {
 
   /** Alterna ativo/inativo com otimismo. */
   async function handleToggleAtivo(p: PropriedadeDTO) {
+    const novoEstado = !p.ativo;
     // Otimismo: atualiza UI imediatamente.
     setPropriedades((prev) =>
-      prev.map((x) => (x._id === p._id ? { ...x, ativo: !x.ativo } : x))
+      prev.map((x) => (x._id === p._id ? { ...x, ativo: novoEstado } : x))
     );
+    setSincronizacaoOk(null);
     try {
-      await adminPatch(`/api/gestor/propriedades/${p._id}/estado`);
+      const res = await adminPatch<{
+        ativo: boolean;
+        tarefasApagadas?: number;
+      }>(`/api/gestor/propriedades/${p._id}/estado`);
+
+      // Feedback cirúrgico (Prompt 73): se a propriedade foi desativada e
+      // houve tarefas futuras apagadas, informa o gestor.
+      if (!novoEstado && typeof res?.tarefasApagadas === "number") {
+        const n = res.tarefasApagadas;
+        setSincronizacaoOk(
+          n > 0
+            ? `Propriedade desativada. ${n} tarefa(s) futura(s) não concluída(s) foram apagada(s).`
+            : `Propriedade desativada. Não havia tarefas futuras por executar.`
+        );
+      }
     } catch (e) {
       // Reverte em caso de erro.
       setPropriedades((prev) =>

@@ -62,7 +62,8 @@ exports.obterEmpresaId = obterEmpresaId;
  * Resposta 200: {
  *   totalPropriedades, propriedadesAtivas,
  *   membrosEquipaAtivos, tarefasHoje, tarefasPorAtribuir,
- *   tarefasConcluidasHoje, tarefasPorStaff: [{ nome, tarefas, carga_minutos }]
+ *   tarefasConcluidasHoje, tarefasPorStaff: [{ nome, tarefas, carga_minutos }],
+ *   checkinsEmRisco: { total: number, tarefas: [{ _id, data, propriedade_nome, estado }] }
  * }
  */
 exports.getDashboard = async (req, res) => {
@@ -76,6 +77,8 @@ exports.getDashboard = async (req, res) => {
       Date.UTC(agora.getUTCFullYear(), agora.getUTCMonth(), agora.getUTCDate())
     );
     const amanhaInicio = new Date(hojeInicio.getTime() + 24 * 60 * 60 * 1000);
+    // Janela de risco: próximas 48h a partir de agora.
+    const limiteRisco48h = new Date(agora.getTime() + 48 * 60 * 60 * 1000);
 
     // Contagens em paralelo.
     const [
@@ -144,6 +147,32 @@ exports.getDashboard = async (req, res) => {
       carga_minutos: c.carga_minutos,
     }));
 
+    // ----------------------------------------------------------------
+    // v1.54.0 (Prompt 76) — Radar de Risco: check-ins sem limpeza
+    // atribuída nas próximas 48h. Tarefas 'por_atribuir' (sem staff)
+    // que podem comprometer check-ins. Devolve contagem + detalhes.
+    // ----------------------------------------------------------------
+    const tarefasRiscoRaw = await Tarefa.find({
+      empresa_id: empresaId,
+      data: { $gte: agora, $lte: limiteRisco48h },
+      estado: 'por_atribuir',
+    })
+      .populate({ path: 'propriedade_id', select: 'nome' })
+      .select('data estado propriedade_id tempo_limpeza_minutos')
+      .sort({ data: 1 })
+      .lean();
+
+    const checkinsEmRisco = {
+      total: tarefasRiscoRaw.length,
+      tarefas: tarefasRiscoRaw.map((t) => ({
+        _id: String(t._id),
+        data: t.data,
+        estado: t.estado,
+        tempo_limpeza_minutos: t.tempo_limpeza_minutos,
+        propriedade_nome: t.propriedade_id?.nome ?? '—',
+      })),
+    };
+
     return res.status(200).json({
       totalPropriedades,
       propriedadesAtivas,
@@ -152,6 +181,7 @@ exports.getDashboard = async (req, res) => {
       tarefasPorAtribuir,
       tarefasConcluidasHoje,
       tarefasPorStaff,
+      checkinsEmRisco,
     });
   } catch (err) {
     console.error('❌ getDashboard:', err.message);
@@ -485,8 +515,65 @@ exports.getDadosCalendario = async (req, res) => {
         diaAtual.setDate(diaAtual.getDate() + 1);
       }
 
-      // Junta as folgas fixas com as tarefas e ordena por data.
-      const resultado = [...tarefas, ...diasFolga].sort(
+      // ----------------------------------------------------------------
+      // v1.57.0 (Prompt 79) — Injeta ausências APROVADAS (férias/doença)
+      // como eventos virtuais no calendário, para o gestor ver quem está
+      // indisponível em cada dia. Só ausências 'aprovada' (pendentes/
+      // rejeitadas não contam — não são garantidas).
+      // ----------------------------------------------------------------
+      const filtroAusencias = {
+        empresa_id: empresaId,
+        estado: 'aprovada',
+        // Sobreposição de intervalos: a ausência cobre o período se
+        // data_inicio < fimDoPeriodo E data_fim >= inicioDoPeriodo.
+        data_inicio: { $lt: dataFim },
+        data_fim: { $gte: dataInicio },
+      };
+      // Se o filtro utilizadorId for específico, filtra só esse staff.
+      if (filtro.utilizador_id && filtro.utilizador_id !== null) {
+        filtroAusencias.utilizador_id = filtro.utilizador_id;
+      }
+
+      const ausenciasAprovadas = await Ausencia.find(filtroAusencias)
+        .populate({ path: 'utilizador_id', select: 'nome' })
+        .select('data_inicio data_fim tipo utilizador_id notas')
+        .lean();
+
+      // Converte cada ausência num evento virtual tipo 'ausencia'.
+      // FullCalendar com allDay espera que `end` seja EXCLUSIVE (o dia
+      // seguinte ao último dia de férias) para cobrir o bloco inteiro.
+      const eventosAusencias = ausenciasAprovadas.map((a) => {
+        const endExclusive = new Date(a.data_fim);
+        endExclusive.setDate(endExclusive.getDate() + 1); // +1 dia
+
+        const tituloPorTipo =
+          a.tipo === 'ferias' ? '🌴 Férias'
+          : a.tipo === 'doenca' ? '🤒 Doença'
+          : '📅 Ausência';
+
+        return {
+          _id: `ausencia_${a._id}`,
+          tipo: 'ausencia',
+          // Para compatibilidade com o frontend (que lê `data` como Date):
+          // usamos data_inicio como `data` (início do bloco).
+          data: new Date(a.data_inicio),
+          // Campos extras para o FullCalendar (eventos allDay multi-dia).
+          start: new Date(a.data_inicio),
+          end: endExclusive,
+          allDay: true,
+          title: `${tituloPorTipo}: ${a.utilizador_id?.nome ?? 'Staff'}`,
+          utilizador_id: a.utilizador_id
+            ? { _id: String(a.utilizador_id._id), nome: a.utilizador_id.nome }
+            : null,
+          estado: 'concluida', // ausência não é uma tarefa ativa
+          tempo_limpeza_minutos: 0,
+          propriedade_id: null,
+          notas: a.notas || '',
+        };
+      });
+
+      // Junta tarefas + folgas fixas + ausências e ordena por data.
+      const resultado = [...tarefas, ...diasFolga, ...eventosAusencias].sort(
         (a, b) => new Date(a.data).getTime() - new Date(b.data).getTime()
       );
 
@@ -509,7 +596,13 @@ exports.getDadosCalendario = async (req, res) => {
  * Alterna o campo `ativo` da propriedade (true ↔ false).
  * Propriedades inativas são ignoradas pelo webhook do Smoobu.
  *
- * Resposta 200: { propriedade: { ... }, ativo: boolean }
+ * v1.35.0 — Limpeza cirúrgica (Prompt 73): quando uma propriedade é
+ * DESATIVADA (ativo=false), apaga-se apenas as tarefas FUTURAS (a partir
+ * de hoje) dessa propriedade que ainda não foram executadas (estado ∉
+ * ['concluida','cancelada']). Isto mantém o histórico de limpezas já
+ * feitas e evita o custo de re-sincronizar todo o calendário.
+ *
+ * Resposta 200: { propriedade: { ... }, ativo: boolean, tarefasApagadas: number }
  */
 exports.alternarEstadoPropriedade = async (req, res) => {
   try {
@@ -545,9 +638,35 @@ exports.alternarEstadoPropriedade = async (req, res) => {
       { new: true }
     ).lean();
 
+    // ----------------------------------------------------------------
+    // v1.35.0 (Prompt 73) — Limpeza cirúrgica ao DESATIVAR propriedade.
+    // Apaga apenas as tarefas FUTURAS (data >= hoje 00:00 UTC) desta
+    // propriedade que ainda NÃO foram concluídas nem canceladas.
+    // ----------------------------------------------------------------
+    let tarefasApagadas = 0;
+    if (!novoEstado) {
+      const agora = new Date();
+      const hojeInicio = new Date(
+        Date.UTC(agora.getUTCFullYear(), agora.getUTCMonth(), agora.getUTCDate())
+      );
+
+      const resultadoDelete = await Tarefa.deleteMany({
+        propriedade_id: id,
+        empresa_id: empresaId,
+        data: { $gte: hojeInicio },
+        estado: { $nin: ['concluida', 'cancelada'] },
+      });
+
+      tarefasApagadas = resultadoDelete?.deletedCount || 0;
+      console.log(
+        `🧹 Propriedade "${propriedade.nome || id}" desativada — ${tarefasApagadas} tarefa(s) futura(s) apagada(s).`
+      );
+    }
+
     return res.status(200).json({
       propriedade: atualizada,
       ativo: novoEstado,
+      tarefasApagadas,
     });
   } catch (err) {
     console.error('❌ alternarEstadoPropriedade:', err.message);

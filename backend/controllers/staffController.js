@@ -454,3 +454,127 @@ exports.reportarAvaria = async (req, res) => {
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
   }
 };
+
+/* ------------------------------------------------------------------ */
+/* POST /api/staff/tarefas/:id/atraso — reportar atraso (v1.55.0)     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Reporta um atraso numa tarefa atribuída ao próprio staff.
+ *
+ * Validações (Prompt 77):
+ *   - A tarefa tem de pertencer ao req.user.id (staff só nas suas).
+ *   - minutos_atraso tem de ser número positivo.
+ *   - Não pode reportar atraso em tarefa concluída/cancelada.
+ *
+ * Lógica (espelhada do tarefaController.reportarAtrasoTarefa, mas scoped
+ * ao utilizador e sem necessidade de isGestor):
+ *   - Soma minutos_atraso ao tempo_limpeza_minutos da tarefa.
+ *   - Recalcula a carga total do dia (tarefas não concluídas/canceladas).
+ *   - Se a carga exceder CAPACIDADE_ATRASO_MINUTOS (420 min = 7h), a
+ *     ÚLTIMA tarefa do dia desse utilizador é desatribuída (null +
+ *     por_atribuir) para não comprometer as limpezas seguintes.
+ *
+ * Body: { minutos_atraso: number }
+ *
+ * Resposta 200: { tarefa, carga_total, cascata_desatribuida, tarefa_desatribuida_id }
+ */
+const CAPACIDADE_ATRASO_MINUTOS = 420; // 7h — mais conservador que o SLA (480)
+
+exports.reportarAtraso = async (req, res) => {
+  try {
+    const utilizadorId = req.user && req.user.id;
+    const empresaId = req.user && req.user.empresa_id;
+    if (!utilizadorId || !empresaId) {
+      return res.status(401).json({ erro: 'Não autenticado.' });
+    }
+
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ erro: 'ID de tarefa inválido.' });
+    }
+
+    const { minutos_atraso } = req.body || {};
+    const minutos = Number(minutos_atraso);
+    if (!Number.isFinite(minutos) || minutos <= 0) {
+      return res.status(400).json({
+        erro: 'minutos_atraso deve ser um número positivo.',
+      });
+    }
+
+    // --- Validação de pertença (Prompt 77, ponto 3) ---
+    // A tarefa tem de pertencer ao req.user.id.findOne com utilizador_id
+    // garante que staff só mexe nas suas tarefas (404 se não for dele).
+    const tarefa = await Tarefa.findOne({
+      _id: id,
+      utilizador_id: utilizadorId,
+    });
+    if (!tarefa) {
+      return res.status(404).json({
+        erro: 'Tarefa não encontrada (ou não te está atribuída).',
+      });
+    }
+
+    if (tarefa.estado === 'concluida' || tarefa.estado === 'cancelada') {
+      return res.status(400).json({
+        erro: `Não podes reportar atraso numa tarefa ${tarefa.estado}.`,
+      });
+    }
+
+    // Soma o atraso ao tempo de limpeza.
+    tarefa.tempo_limpeza_minutos += minutos;
+    await tarefa.save();
+
+    // Calcula a carga total do dia do utilizador.
+    const d = new Date(tarefa.data);
+    const inicioDia = new Date(
+      Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
+    );
+    const fimDia = new Date(inicioDia.getTime() + 24 * 60 * 60 * 1000);
+
+    const tarefasDoDia = await Tarefa.find({
+      utilizador_id: utilizadorId,
+      data: { $gte: inicioDia, $lt: fimDia },
+      estado: { $nin: ['cancelada', 'concluida'] },
+    }).lean();
+
+    const cargaTotal = tarefasDoDia.reduce(
+      (acc, t) => acc + t.tempo_limpeza_minutos,
+      0
+    );
+
+    // Se exceder a capacidade, desatribui a última tarefa do dia.
+    let cascataDesatribuida = false;
+    let tarefaDesatribuidaId = null;
+
+    if (cargaTotal > CAPACIDADE_ATRASO_MINUTOS) {
+      const ultimaTarefa = await Tarefa.findOne({
+        utilizador_id: utilizadorId,
+        data: { $gte: inicioDia, $lt: fimDia },
+        estado: { $nin: ['cancelada', 'concluida'] },
+        _id: { $ne: tarefa._id },
+      }).sort({ createdAt: -1 });
+
+      if (ultimaTarefa) {
+        ultimaTarefa.utilizador_id = null;
+        ultimaTarefa.estado = 'por_atribuir';
+        await ultimaTarefa.save();
+        cascataDesatribuida = true;
+        tarefaDesatribuidaId = String(ultimaTarefa._id);
+      }
+    }
+
+    const tarefaResp = tarefa.toObject();
+    delete tarefaResp.__v;
+
+    return res.status(200).json({
+      tarefa: tarefaResp,
+      carga_total: cargaTotal,
+      cascata_desatribuida: cascataDesatribuida,
+      tarefa_desatribuida_id: tarefaDesatribuidaId,
+    });
+  } catch (err) {
+    console.error('❌ reportarAtraso (staff):', err.message);
+    return res.status(500).json({ erro: 'Erro interno do servidor.' });
+  }
+};

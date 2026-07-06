@@ -154,8 +154,10 @@ export function DetalheTarefaClient({
     setAtrasoSubmitting(true);
     setAtrasoResultado(null);
     try {
+      // v1.55.0 (Prompt 77) — usa o endpoint do staff (não do gestor) para
+      // evitar 403. O backend valida que a tarefa pertence ao req.user.id.
       const res = await adminPost<{ carga_total: number; cascata_desatribuida: boolean }>(
-        `/api/gestor/tarefas/${tarefa.id}/atraso`,
+        `/api/staff/tarefas/${tarefa.id}/atraso`,
         { minutos_atraso: minutosAtraso }
       );
       if (res.cascata_desatribuida) {

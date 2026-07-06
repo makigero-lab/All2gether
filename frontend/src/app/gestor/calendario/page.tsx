@@ -19,7 +19,7 @@ import dayGridPlugin from "@fullcalendar/daygrid";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import interactionPlugin from "@fullcalendar/interaction";
 import ptLocale from "@fullcalendar/core/locales/pt";
-import type { DatesSetArg, EventClickArg, EventInput } from "@fullcalendar/core";
+import type { DatesSetArg, EventClickArg, EventContentArg, EventInput } from "@fullcalendar/core";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -48,6 +48,11 @@ interface TarefaCalendario {
   tipo: string;
   estado: string;
   observacoes?: string;
+  // v1.57.0 (Prompt 79) — Campos extras para eventos de ausência (FullCalendar allDay multi-dia).
+  title?: string;
+  start?: string;
+  end?: string;
+  allDay?: boolean;
 }
 
 interface FiltrosState {
@@ -76,27 +81,65 @@ const TIPO_LABEL: Record<string, string> = {
   folga_fixa: "Folga Semanal",
   check_in: "Check-in",
   check_out: "Check-out",
+  ausencia: "Ausência",
 };
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
 /* ------------------------------------------------------------------ */
 
-/** Cor de fundo/borda do evento do FullCalendar por estado da tarefa. */
-function corPorEstado(estado: string): string {
+/**
+ * Paleta pastel por estado da tarefa (Prompt 74, ponto 5).
+ * Retorna fundo suave + borda + texto escuro para não cansar a vista.
+ */
+interface PaletaEvento {
+  bg: string;
+  border: string;
+  text: string;
+  dot: string; // cor da bolinha (saturada, para destaque)
+}
+
+function paletaPorEstado(estado: string): PaletaEvento {
   switch (estado) {
-    case "por_atribuir":
-      return "#ef4444"; // vermelho
+    case "concluida":
+      // Verde suave
+      return { bg: "#dcfce7", border: "#86efac", text: "#166534", dot: "#22c55e" };
     case "atribuida":
     case "em_curso":
-      return "#f59e0b"; // âmbar
-    case "concluida":
-      return "#10b981"; // verde
+      // Amarelo suave (pendente/em curso)
+      return { bg: "#fef9c3", border: "#fde047", text: "#854d0e", dot: "#eab308" };
+    case "por_atribuir":
+      // Vermelho suave
+      return { bg: "#fee2e2", border: "#fca5a5", text: "#991b1b", dot: "#ef4444" };
     case "cancelada":
-      return "#9ca3af"; // cinza
+      // Cinza suave
+      return { bg: "#f1f5f9", border: "#cbd5e1", text: "#475569", dot: "#94a3b8" };
     default:
-      return "#6b7280";
+      return { bg: "#f1f5f9", border: "#cbd5e1", text: "#475569", dot: "#94a3b8" };
   }
+}
+
+/** Emoji por tipo de tarefa (Prompt 74, ponto 4). */
+function emojiPorTipo(tipo: string): string {
+  switch (tipo) {
+    case "manutencao":
+      return "🛠️";
+    case "limpeza":
+      return "🧹";
+    case "check_in":
+      return "🔑";
+    case "check_out":
+      return "🚪";
+    case "folga_fixa":
+      return "🏖️";
+    default:
+      return "🧹";
+  }
+}
+
+/** Cor de fundo/borda do evento do FullCalendar por estado da tarefa. */
+function corPorEstado(estado: string): string {
+  return paletaPorEstado(estado).dot;
 }
 
 function primeiroNome(nome: string | undefined): string {
@@ -212,6 +255,27 @@ export default function CalendarioOperacionalPage() {
   /* --- Mapear tarefas → eventos do FullCalendar --- */
   const eventos = useMemo<EventInput[]>(() => {
     return tarefas.map((t) => {
+      // Ausência aprovada (férias/doença) — banner horizontal contínuo
+      // cinzento/roxo pastel atravessando os dias (Prompt 80, ponto 2).
+      if (t.tipo === "ausencia") {
+        // O backend já envia start/end/allDay/title. Usamos esses campos
+        // e aplicamos uma classe CSS para o estilo de banner.
+        return {
+          id: t._id,
+          title: t.title ?? `Ausência: ${t.utilizador_id?.nome ?? "Staff"}`,
+          start: t.start ?? t.data,
+          end: t.end,
+          allDay: true,
+          // Roxo pastel suave com opacidade — distinto de tarefas normais.
+          backgroundColor: "#ede9fe",
+          borderColor: "#c4b5fd",
+          textColor: "#5b21b6",
+          extendedProps: t,
+          // Flag custom para o eventContent aplicar a classe de banner.
+          classNames: ["fc-evt-ausencia"],
+        } as EventInput;
+      }
+
       // Folga fixa semanal — bloco cinzento claro, todo o dia.
       if (t.tipo === "folga_fixa") {
         return {
@@ -228,20 +292,109 @@ export default function CalendarioOperacionalPage() {
 
       const inicio = new Date(t.data);
       const fim = new Date(inicio.getTime() + (t.tempo_limpeza_minutos || 45) * 60000);
-      const cor = corPorEstado(t.estado);
+      // Prompt 74, ponto 5 — cores pastel por estado
+      const paleta = paletaPorEstado(t.estado);
+      // Prompt 80, ponto 1 — classe extra para destaque forte de por_atribuir.
+      const classNames =
+        t.estado === "por_atribuir" ? ["fc-evt-por-atribuir"] : [];
       return {
         id: t._id,
-        title: `${t.propriedade_id?.nome ?? "—"} - ${
-          t.utilizador_id?.nome ?? "Sem atribuição"
-        }`,
+        title: t.propriedade_id?.nome ?? "—",
         start: inicio.toISOString(),
         end: fim.toISOString(),
-        backgroundColor: cor,
-        borderColor: cor,
+        backgroundColor: paleta.bg,
+        borderColor: paleta.border,
+        textColor: paleta.text,
         extendedProps: t,
+        classNames,
       } as EventInput;
     });
   }, [tarefas]);
+
+  /* --- Renderização customizada do bloco de evento (Prompt 74, ponto 4) --- */
+  /* --- Prompt 80: destaque por_atribuir + banner ausência --- */
+  const renderEventContent = useCallback((arg: EventContentArg) => {
+    const t = arg.event.extendedProps as TarefaCalendario;
+    const isMonthView = arg.view.type === "dayGridMonth";
+    const paleta = paletaPorEstado(t.estado);
+    const emoji = emojiPorTipo(t.tipo);
+    const titulo = t.propriedade_id?.nome ?? "—";
+    const staff = t.utilizador_id?.nome ?? null;
+    const isFolga = t.tipo === "folga_fixa";
+    const isAusencia = t.tipo === "ausencia";
+    const isPorAtribuir = t.estado === "por_atribuir";
+
+    // --- Ausência: banner contínuo (não tem propriedade, só staff) ---
+    // Renderiza um conteúdo minimalista — o título já vem do backend
+    // ("🌴 Férias: Nome"). Não mostra hora nem bolinha.
+    if (isAusencia) {
+      const bannerTitle = t.title ?? `Ausência: ${staff ?? "Staff"}`;
+      return (
+        <div className="fc-evt-ausencia__content" title={bannerTitle}>
+          <span className="fc-evt-ausencia__title">{bannerTitle}</span>
+        </div>
+      );
+    }
+
+    // --- Vista mensal: layout compacto em linha ---
+    if (isMonthView) {
+      // Prompt 80, ponto 1 — destaque forte para por_atribuir na vista mensal.
+      if (isPorAtribuir) {
+        return (
+          <div className="fc-evt-month fc-evt-month--alert" title={`⚠️ Por atribuir — ${titulo}`}>
+            <span className="fc-evt-month__alert-icon" aria-hidden>⚠️</span>
+            <span className="fc-evt-month__title">
+              {emoji} {titulo}
+            </span>
+            <span className="fc-evt-month__alert-tag">Por Atribuir</span>
+          </div>
+        );
+      }
+      return (
+        <div className="fc-evt-month">
+          <span
+            className="fc-evt-month__dot"
+            style={{ backgroundColor: isFolga ? "#94a3b8" : paleta.dot }}
+            aria-hidden
+          />
+          <span className="fc-evt-month__time">{arg.timeText}</span>
+          <span className="fc-evt-month__title" title={titulo}>
+            {emoji} {titulo}
+          </span>
+        </div>
+      );
+    }
+
+    // --- Vistas semanal/diária: bloco rico com título + subtítulo ---
+    return (
+      <div className={isPorAtribuir ? "fc-evt-block fc-evt-block--alert" : "fc-evt-block"}>
+        <div className="fc-evt-block__header">
+          <span
+            className="fc-evt-block__dot"
+            style={{ backgroundColor: isFolga ? "#94a3b8" : paleta.dot }}
+            aria-hidden
+          />
+          <span className="fc-evt-block__emoji" aria-hidden>
+            {emoji}
+          </span>
+          <span className="fc-evt-block__time">{arg.timeText}</span>
+        </div>
+        <div className="fc-evt-block__title" title={titulo}>
+          {titulo}
+        </div>
+        <div className="fc-evt-block__subtitle">
+          {staff ? (
+            <>
+              <User className="fc-evt-block__icon" />
+              <span>{primeiroNome(staff)}</span>
+            </>
+          ) : (
+            <span className="fc-evt-block__unassigned">⚠️ Por Atribuir</span>
+          )}
+        </div>
+      </div>
+    );
+  }, []);
 
   /* --- Callbacks do FullCalendar --- */
   const handleDatesSet = useCallback((arg: DatesSetArg) => {
@@ -257,21 +410,32 @@ export default function CalendarioOperacionalPage() {
     setReatribuindoPara(tarefa.utilizador_id?._id ?? "");
   }, []);
 
-  /* --- Reatribuição rápida --- */
+  /* --- Reatribuição Inteligente (Prompt 75) --- */
+  // Chama PATCH /api/gestor/tarefas/:id/reatribuir, que recalcula a hora de
+  // início via scheduler sequencial (Haversine + almoço 13h-14h) no backend.
   async function handleReatribuir() {
     if (!tarefaSelecionada || !reatribuindoPara) return;
     setReatribuindo(true);
     try {
-      await adminPatch(`/api/gestor/tarefas/${tarefaSelecionada._id}/atribuir`, {
+      const res = await adminPatch<{
+        tarefa: TarefaCalendario;
+        novo_inicio: string;
+        origem: string;
+        tempo_viagem: number;
+      }>(`/api/gestor/tarefas/${tarefaSelecionada._id}/reatribuir`, {
         utilizador_id: reatribuindoPara,
       });
-      // Atualiza localmente a tarefa no estado.
+
+      // Atualiza localmente a tarefa no estado com a data recalculada.
       const novoStaff = equipa.find((u) => u._id === reatribuindoPara);
       setTarefas((prev) =>
         prev.map((t) =>
           t._id === tarefaSelecionada._id
             ? {
                 ...t,
+                // O backend devolve a tarefa atualizada; usamos essa versão
+                // para garantir consistência (data + utilizador + estado).
+                ...(res?.tarefa ?? {}),
                 utilizador_id: novoStaff
                   ? { _id: novoStaff._id, nome: novoStaff.nome }
                   : null,
@@ -283,6 +447,8 @@ export default function CalendarioOperacionalPage() {
       setTarefaSelecionada(null);
       setReatribuindoPara("");
     } catch (e) {
+      // O backend pode devolver 400 (folga) ou 409 (capacidade excedida).
+      // O helper adminPatch lança Error com a mensagem do corpo.
       setErro(e instanceof Error ? e.message : "Erro ao reatribuir tarefa.");
     } finally {
       setReatribuindo(false);
@@ -402,15 +568,21 @@ export default function CalendarioOperacionalPage() {
             plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
             initialView="dayGridMonth"
             locale={ptLocale}
+            timeZone="local"
             headerToolbar={{
               left: "prev,next today",
               center: "title",
               right: "dayGridMonth,timeGridWeek,timeGridDay",
             }}
+            // Ponto 1 — Horário comercial (esconde madrugada/noite)
             slotMinTime="08:00:00"
             slotMaxTime="20:00:00"
-            height={700}
+            // Ponto 2 — Grelha de tempo: linhas de 15min, label de 1h
+            slotDuration="00:15:00"
+            slotLabelInterval="01:00:00"
+            // Ponto 3 — Indicador de tempo real (linha vermelha)
             nowIndicator
+            height={700}
             editable={false}
             eventStartEditable={false}
             eventDurationEditable={false}
@@ -419,15 +591,20 @@ export default function CalendarioOperacionalPage() {
             datesSet={handleDatesSet}
             dayMaxEvents
             eventDisplay="block"
+            // Ponto 4 — Renderização customizada do bloco
+            eventContent={renderEventContent}
+            // Formato 24h europeu (Prompt 72)
             eventTimeFormat={{
               hour: "2-digit",
               minute: "2-digit",
               meridiem: false,
+              hour12: false,
             }}
             slotLabelFormat={{
               hour: "2-digit",
               minute: "2-digit",
               meridiem: false,
+              hour12: false,
             }}
           />
         ) : (
@@ -444,28 +621,28 @@ export default function CalendarioOperacionalPage() {
         <span className="flex items-center gap-1.5">
           <span
             className="h-3 w-3 rounded border"
-            style={{ backgroundColor: "#ef4444", borderColor: "#ef4444" }}
+            style={{ backgroundColor: "#fee2e2", borderColor: "#fca5a5" }}
           />
           Por atribuir
         </span>
         <span className="flex items-center gap-1.5">
           <span
             className="h-3 w-3 rounded border"
-            style={{ backgroundColor: "#f59e0b", borderColor: "#f59e0b" }}
+            style={{ backgroundColor: "#fef9c3", borderColor: "#fde047" }}
           />
           Atribuída / Em curso
         </span>
         <span className="flex items-center gap-1.5">
           <span
             className="h-3 w-3 rounded border"
-            style={{ backgroundColor: "#10b981", borderColor: "#10b981" }}
+            style={{ backgroundColor: "#dcfce7", borderColor: "#86efac" }}
           />
           Concluída
         </span>
         <span className="flex items-center gap-1.5">
           <span
             className="h-3 w-3 rounded border"
-            style={{ backgroundColor: "#9ca3af", borderColor: "#9ca3af" }}
+            style={{ backgroundColor: "#f1f5f9", borderColor: "#cbd5e1" }}
           />
           Cancelada
         </span>
@@ -490,8 +667,8 @@ export default function CalendarioOperacionalPage() {
         </DialogHeader>
         {tarefaSelecionada && (
           <DialogContent className="space-y-4">
-            {/* Estado + propriedade */}
-            <div className="flex items-center gap-2">
+            {/* Estado + tipo + propriedade */}
+            <div className="flex flex-wrap items-center gap-2">
               <Badge
                 variant={
                   tarefaSelecionada.estado === "concluida"
@@ -506,6 +683,13 @@ export default function CalendarioOperacionalPage() {
                 {ESTADO_OPTS.find((o) => o.value === tarefaSelecionada.estado)?.label ??
                   tarefaSelecionada.estado}
               </Badge>
+              {/* v1.58.0 (Prompt 80, ponto 4) — Badge de tipo para deixar claro
+                  que manutenções também podem ser atribuídas/reatribuídas. */}
+              {tarefaSelecionada.tipo && TIPO_LABEL[tarefaSelecionada.tipo] && (
+                <Badge variant="outline" className="gap-1">
+                  {emojiPorTipo(tarefaSelecionada.tipo)} {TIPO_LABEL[tarefaSelecionada.tipo]}
+                </Badge>
+              )}
               <span className="font-medium">
                 {tarefaSelecionada.propriedade_id?.nome ?? "—"}
               </span>
@@ -551,11 +735,15 @@ export default function CalendarioOperacionalPage() {
               </div>
             </div>
 
-            {/* Reatribuição rápida */}
+            {/* Reatribuição Inteligente (Prompt 75) */}
             <div className="space-y-1.5">
               <label htmlFor="reatribuir" className="text-sm font-medium">
-                Reatribuir a (rápido)
+                Reatribuir a (recalcula horário)
               </label>
+              <p className="text-xs text-muted-foreground">
+                O sistema recalcula a hora de início com base nas tarefas
+                existentes do staff, tempo de viagem e hora de almoço (13h-14h).
+              </p>
               <select
                 id="reatribuir"
                 value={reatribuindoPara}

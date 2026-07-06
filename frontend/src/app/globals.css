@@ -91,3 +91,376 @@
     font-feature-settings: "ss01", "cv01";
   }
 }
+
+/* ==========================================================================
+   FullCalendar — overrides UX/UI (Prompt 74)
+   Cores pastel, grelha 15min, indicador de tempo real, blocos ricos.
+   ========================================================================== */
+
+.fc {
+  font-family: inherit;
+}
+
+/* Toolbar — botões alinhados com o tema Autocell (dourado) */
+.fc .fc-toolbar.fc-header-toolbar {
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.fc .fc-button {
+  border-radius: var(--radius);
+  font-weight: 500;
+  font-size: 0.8125rem;
+  padding: 0.375rem 0.75rem;
+  text-transform: capitalize;
+  box-shadow: none;
+  background-color: hsl(var(--primary));
+  border-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+
+.fc .fc-button:hover {
+  background-color: hsl(var(--primary) / 0.9);
+  border-color: hsl(var(--primary) / 0.9);
+}
+
+.fc .fc-button:disabled {
+  opacity: 0.5;
+}
+
+.fc .fc-button-primary:not(:disabled).fc-button-active {
+  background-color: hsl(var(--primary) / 0.85);
+  border-color: hsl(var(--primary) / 0.85);
+}
+
+/* Cabeçalho dos dias */
+.fc .fc-col-header-cell-cushion {
+  padding: 0.5rem 0.25rem;
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: hsl(var(--muted-foreground));
+}
+
+/* Eixo de horas (vistas semanal/diária) — tabular, discreto */
+.fc .fc-timegrid-slot-label-cushion,
+.fc .fc-timegrid-axis-cushion {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.6875rem;
+  color: hsl(var(--muted-foreground));
+}
+
+/* Linhas de 15min mais subtis, linhas de 1h mais visíveis */
+.fc .fc-timegrid-slot-minor {
+  border-top-style: dotted;
+  border-top-color: hsl(var(--border) / 0.5);
+}
+
+.fc .fc-timegrid-slot-lambda {
+  border-top-style: solid;
+  border-top-color: hsl(var(--border));
+}
+
+/* Indicador de tempo real (linha vermelha) */
+.fc .fc-timegrid-now-indicator-line {
+  border-color: hsl(var(--destructive));
+  border-width: 2px;
+}
+
+.fc .fc-timegrid-now-indicator-arrow {
+  border-color: hsl(var(--destructive));
+  color: hsl(var(--destructive));
+}
+
+/* Eventos — base (overrides do background pastel aplicado via inline style) */
+.fc .fc-event {
+  border-radius: calc(var(--radius) + 1px);
+  padding: 2px 6px;
+  font-size: 0.75rem;
+  line-height: 1.2;
+  cursor: pointer;
+  border-width: 1px;
+  border-style: solid;
+}
+
+.fc .fc-daygrid-event {
+  border-radius: calc(var(--radius) + 1px);
+  margin-top: 1px;
+}
+
+.fc .fc-timegrid-event {
+  font-size: 0.75rem;
+}
+
+/* "more" link */
+.fc .fc-daygrid-more-link {
+  font-size: 0.6875rem;
+  color: hsl(var(--muted-foreground));
+  font-weight: 500;
+}
+
+/* Scrollbar styling */
+.fc .fc-scroller {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--border)) transparent;
+}
+
+.fc .fc-scroller::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.fc .fc-scroller::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--border));
+  border-radius: 4px;
+}
+
+.fc .fc-scroller::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* --------------------------------------------------------------------------
+   Vista mensal — layout compacto em linha
+   [bolinha] HH:mm 🧹 Propriedade
+   -------------------------------------------------------------------------- */
+
+.fc-evt-month {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+  width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.fc-evt-month__dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  display: inline-block;
+}
+
+.fc-evt-month__time {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  opacity: 0.85;
+  font-size: 0.6875rem;
+}
+
+.fc-evt-month__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+/* Em ecrãs muito estreitos, esconde a hora (deixa bolinha + título) */
+@media (max-width: 640px) {
+  .fc-evt-month__time {
+    display: none;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Vista semanal/diária — bloco rico
+   [bolinha] 🧹 HH:mm
+   Propriedade (bold)
+   👤 Ana  |  ⚠️ Por Atribuir
+   -------------------------------------------------------------------------- */
+
+.fc-evt-block {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.fc-evt-block__header {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.625rem;
+  opacity: 0.85;
+}
+
+.fc-evt-block__dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  display: inline-block;
+}
+
+.fc-evt-block__emoji {
+  font-size: 0.75rem;
+  line-height: 1;
+}
+
+.fc-evt-block__time {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.fc-evt-block__title {
+  font-weight: 700;
+  font-size: 0.75rem;
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fc-evt-block__subtitle {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  font-size: 0.625rem;
+  opacity: 0.8;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fc-evt-block__icon {
+  width: 0.625rem;
+  height: 0.625rem;
+  flex: 0 0 auto;
+}
+
+.fc-evt-block__unassigned {
+  color: hsl(var(--destructive));
+  font-weight: 600;
+}
+
+/* Em blocos curtos (duração < 30min), esconde o subtítulo para evitar overflow */
+.fc-timegrid-event-short .fc-evt-block__subtitle {
+  display: none;
+}
+
+/* ==========================================================================
+   Prompt 80 — Destaques visuais
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   Ponto 1 — Alerta forte para tarefas "por_atribuir" na vista mensal
+   Fundo vermelho intenso + ícone ⚠️ + tag "Por Atribuir" à direita.
+   -------------------------------------------------------------------------- */
+
+.fc-evt-por-atribuir {
+  /* Aumenta o peso visual do evento inteiro (borda mais grossa). */
+  border-width: 2px !important;
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.3);
+}
+
+.fc-evt-month--alert {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+  width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  background-color: #fee2e2 !important;
+  border-left: 3px solid #ef4444 !important;
+  padding: 1px 4px !important;
+  border-radius: calc(var(--radius) - 1px);
+  font-weight: 600;
+  color: #991b1b !important;
+}
+
+.fc-evt-month--alert .fc-evt-month__alert-icon {
+  flex: 0 0 auto;
+  font-size: 0.75rem;
+  line-height: 1;
+}
+
+.fc-evt-month--alert .fc-evt-month__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+  color: #991b1b;
+}
+
+.fc-evt-month--alert .fc-evt-month__alert-tag {
+  flex: 0 0 auto;
+  font-size: 0.625rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background-color: #ef4444;
+  color: #ffffff;
+  padding: 1px 4px;
+  border-radius: 3px;
+  line-height: 1.2;
+}
+
+/* Em ecrãs estreitos, esconde a tag (deixa ícone + título). */
+@media (max-width: 640px) {
+  .fc-evt-month--alert .fc-evt-month__alert-tag {
+    display: none;
+  }
+}
+
+/* Variante alerta nas vistas semanal/diária — borda vermelha mais forte. */
+.fc-evt-block--alert {
+  border-left: 3px solid #ef4444 !important;
+  background-color: #fef2f2 !important;
+}
+
+/* --------------------------------------------------------------------------
+   Ponto 2 — Banner contínuo para ausências (férias/doença)
+   Roxo pastel suave com opacidade, atravessa os dias sem confundir com tarefas.
+   -------------------------------------------------------------------------- */
+
+.fc-evt-ausencia {
+  /* Override do background para um tom roxo pastel mais suave com opacidade. */
+  background-color: rgba(237, 233, 254, 0.85) !important;
+  border-color: #c4b5fd !important;
+  border-left: 3px solid #8b5cf6 !important;
+  opacity: 0.9;
+}
+
+.fc-evt-ausencia:hover {
+  opacity: 1;
+}
+
+.fc-evt-ausencia__content {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+  width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  padding: 2px 6px;
+}
+
+.fc-evt-ausencia__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #5b21b6;
+  font-style: italic;
+}
+
+/* Em vista mensal, ausências aparecem como blocos allDay no topo do dia.
+   Garantimos que têm cantos arredondados e não parecem tarefas normais. */
+.fc-daygrid-day-frame .fc-evt-ausencia {
+  border-radius: calc(var(--radius) - 1px);
+  margin-top: 1px;
+}

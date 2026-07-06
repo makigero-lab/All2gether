@@ -128,6 +128,8 @@ export interface TarefaMock {
   tipo: TipoTarefa;
   endereco?: string;
   checklist?: string[];
+  // v1.56.0 (Prompt 78) — data ISO real da tarefa (para extrair hora de início).
+  data?: string;
 }
 
 export interface PropriedadeDTO {
