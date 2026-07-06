@@ -584,6 +584,7 @@ exports.importarPropriedades = async (req, res) => {
 
   let criadas = 0;
   let existentes = 0;
+  let atualizadas = 0;
   let erros = 0;
   const detalheErros = [];
 
@@ -594,6 +595,15 @@ exports.importarPropriedades = async (req, res) => {
         throw new Error('Apartamento sem id.');
       }
 
+      // Extrai capacidade e morada do Smoobu (usados tanto para criar como
+      // para atualizar propriedades existentes).
+      const capacidade = apt.rooms?.maxOccupancy || apt.maxOccupancy || null;
+      let moradaTexto = 'A definir';
+      if (apt.location) {
+        const partes = [apt.location.street, apt.location.zip, apt.location.city].filter(Boolean);
+        if (partes.length > 0) moradaTexto = partes.join(', ');
+      }
+
       // Verifica se JÁ EXISTE uma propriedade com este smoobu_id QUE PERTENÇA
       // a esta empresa (multi-tenant).
       const existente = await Propriedade.findOne({
@@ -602,20 +612,34 @@ exports.importarPropriedades = async (req, res) => {
       });
 
       if (existente) {
-        existentes++;
+        // v1.67.0 (Prompt 90) — Update inteligente: em vez de fazer continue,
+        // preenche a morada se estiver 'A definir' e atualiza a capacidade.
+        let mudou = false;
+
+        if (existente.morada === 'A definir' && moradaTexto !== 'A definir') {
+          existente.morada = moradaTexto;
+          try {
+            const coords = await obterCoordenadas(moradaTexto);
+            if (coords) existente.coordenadas = coords;
+          } catch (e) {
+            console.warn('Geocoding falhou no import (update morada):', e.message);
+          }
+          mudou = true;
+        }
+
+        if (capacidade && existente.capacidade_hospedes !== capacidade) {
+          existente.capacidade_hospedes = capacidade;
+          mudou = true;
+        }
+
+        if (mudou) {
+          await existente.save();
+          atualizadas++;
+        } else {
+          existentes++;
+        }
         continue;
       }
-
-      // v1.60.0 (Prompt 83) — Constrói morada dinamicamente a partir do
-      // objeto location do Smoobu (street, zip, city).
-      let moradaTexto = 'A definir';
-      if (apt.location) {
-        const partes = [apt.location.street, apt.location.zip, apt.location.city].filter(Boolean);
-        if (partes.length > 0) moradaTexto = partes.join(', ');
-      }
-
-      // v1.61.0 (Prompt 84) — Extrai capacidade de hóspedes.
-      const capacidade = apt.rooms?.maxOccupancy || apt.maxOccupancy || null;
 
       // Geocoding: se temos morada real, obter coordenadas (lat, lng).
       let coords = { lat: null, lng: null };
@@ -648,12 +672,13 @@ exports.importarPropriedades = async (req, res) => {
 
   console.log(
     `✅ importarPropriedades: ${apartments.length} recebidas, ${criadas} criadas, ` +
-      `${existentes} já existiam, ${erros} com erro.`
+      `${atualizadas} atualizadas, ${existentes} já existiam, ${erros} com erro.`
   );
 
   return res.status(200).json({
     totalRecebidas: apartments.length,
     criadas,
+    atualizadas,
     existentes,
     erros,
     detalheErros,

@@ -360,6 +360,14 @@ exports.getTarefas = async (req, res) => {
       if (Object.keys(dataFiltro).length > 0) {
         filtro.data = dataFiltro;
       }
+    } else {
+      // v1.67.0 (Prompt 90) — Se não vierem filtros de data, aplica por defeito
+      // data >= hoje (meia-noite UTC) para não devolver tarefas do passado.
+      const agora = new Date();
+      const hojeInicio = new Date(
+        Date.UTC(agora.getUTCFullYear(), agora.getUTCMonth(), agora.getUTCDate())
+      );
+      filtro.data = { $gte: hojeInicio };
     }
 
     const tarefas = await Tarefa.find(filtro)

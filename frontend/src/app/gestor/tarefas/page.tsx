@@ -56,6 +56,8 @@ interface TarefaAdmin {
   estado: string;
   tempo_limpeza_minutos: number;
   avarias?: string[];
+  // v1.68.0 (Prompt 91) — Observações (descrição da avaria em manutenções).
+  observacoes?: string;
 }
 
 const ESTADO_LABEL: Record<string, string> = {
@@ -81,6 +83,32 @@ function formatarData(iso: string): string {
       month: "2-digit",
       year: "numeric",
     });
+  } catch {
+    return iso;
+  }
+}
+
+/**
+ * v1.68.0 (Prompt 91) — Formata data + hora (ex: "06/07/2026 - 14:30").
+ * Se a data for meia-noite exata (sem hora definida), mostra só a data.
+ */
+function formatarDataHora(iso: string): string {
+  try {
+    const d = new Date(iso);
+    const data = d.toLocaleDateString("pt-PT", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    });
+    // Se for meia-noite exata (00:00), não mostra hora.
+    if (d.getHours() === 0 && d.getMinutes() === 0) {
+      return data;
+    }
+    const hora = d.toLocaleTimeString("pt-PT", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    return `${data} - ${hora}`;
   } catch {
     return iso;
   }
@@ -659,6 +687,8 @@ export default function AdminTarefasPage() {
                     <th className="px-4 py-3 font-medium">Propriedade</th>
                     <th className="px-4 py-3 font-medium">Funcionário</th>
                     <th className="px-4 py-3 font-medium">Estado</th>
+                    {/* v1.68.0 (Prompt 91) — Coluna Observações / Avaria */}
+                    <th className="px-4 py-3 font-medium">Observações / Avaria</th>
                     <th className="px-4 py-3 text-right font-medium">Ações</th>
                   </tr>
                 </thead>
@@ -667,7 +697,8 @@ export default function AdminTarefasPage() {
                     const temAvarias = Array.isArray(t.avarias) && t.avarias.length > 0;
                     return (
                     <tr key={t._id} className="hover:bg-muted/30">
-                      <td className="px-4 py-3">{formatarData(t.data)}</td>
+                      {/* v1.68.0 (Prompt 91) — Data + hora (ex: 06/07/2026 - 14:30) */}
+                      <td className="px-4 py-3 whitespace-nowrap tabular-nums">{formatarDataHora(t.data)}</td>
                       <td className="px-4 py-3 font-medium">
                         <div className="flex items-center gap-2">
                           <span>{t.propriedade_id?.nome ?? "—"}</span>
@@ -688,6 +719,23 @@ export default function AdminTarefasPage() {
                         <Badge variant={ESTADO_VARIANT[t.estado] ?? "secondary"}>
                           {ESTADO_LABEL[t.estado] ?? t.estado}
                         </Badge>
+                      </td>
+                      {/* v1.68.0 (Prompt 91) — Excerto das observações (descrição da avaria) */}
+                      <td className="px-4 py-3 max-w-xs">
+                        {t.observacoes ? (
+                          <span
+                            className={`line-clamp-2 text-xs ${
+                              t.tipo === "manutencao"
+                                ? "text-amber-700 dark:text-amber-400 font-medium"
+                                : "text-muted-foreground"
+                            }`}
+                            title={t.observacoes}
+                          >
+                            {t.observacoes}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground/50">—</span>
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1">
