@@ -33,6 +33,12 @@ export interface UtilizadorAuth {
  * no servidor — o browser nunca o vê.
  *
  * Devolve null se não estiver autenticado (sem cookie, token inválido, etc.).
+ *
+ * v1.59.0 (Prompt 81) — Em caso de 401 (token expirado/inválido), se NÃO
+ * estivermos já em /login, redireciona para /login para evitar loops de
+ * chamadas autenticadas falhadas. Isto resolve o problema de o utilizador
+ * ficar preso numa página protegida após expirar a sessão, com dezenas de
+ * pedidos 401 acumulados no console.
  */
 export async function lerUtilizador(): Promise<UtilizadorAuth | null> {
   try {
@@ -41,7 +47,19 @@ export async function lerUtilizador(): Promise<UtilizadorAuth | null> {
       credentials: "include",
     });
 
-    if (!res.ok) return null;
+    if (!res.ok) {
+      // 401 = token expirado ou inválido. Redireciona para login se não
+      // estivermos já lá (evita loop na própria página de login).
+      if (res.status === 401 && typeof window !== "undefined") {
+        const pathname = window.location.pathname;
+        if (pathname !== "/login" && pathname !== "/") {
+          // Adiciona ?from= para o utilizador voltar após login.
+          const from = encodeURIComponent(pathname + window.location.search);
+          window.location.href = `/login?from=${from}`;
+        }
+      }
+      return null;
+    }
 
     const data = await res.json();
     if (!data?.utilizador) return null;
