@@ -48,6 +48,11 @@ interface TarefaCalendario {
   tipo: string;
   estado: string;
   observacoes?: string;
+  // v1.57.0 (Prompt 79) — Campos extras para eventos de ausência (FullCalendar allDay multi-dia).
+  title?: string;
+  start?: string;
+  end?: string;
+  allDay?: boolean;
 }
 
 interface FiltrosState {
@@ -76,6 +81,7 @@ const TIPO_LABEL: Record<string, string> = {
   folga_fixa: "Folga Semanal",
   check_in: "Check-in",
   check_out: "Check-out",
+  ausencia: "Ausência",
 };
 
 /* ------------------------------------------------------------------ */
@@ -249,6 +255,27 @@ export default function CalendarioOperacionalPage() {
   /* --- Mapear tarefas → eventos do FullCalendar --- */
   const eventos = useMemo<EventInput[]>(() => {
     return tarefas.map((t) => {
+      // Ausência aprovada (férias/doença) — banner horizontal contínuo
+      // cinzento/roxo pastel atravessando os dias (Prompt 80, ponto 2).
+      if (t.tipo === "ausencia") {
+        // O backend já envia start/end/allDay/title. Usamos esses campos
+        // e aplicamos uma classe CSS para o estilo de banner.
+        return {
+          id: t._id,
+          title: t.title ?? `Ausência: ${t.utilizador_id?.nome ?? "Staff"}`,
+          start: t.start ?? t.data,
+          end: t.end,
+          allDay: true,
+          // Roxo pastel suave com opacidade — distinto de tarefas normais.
+          backgroundColor: "#ede9fe",
+          borderColor: "#c4b5fd",
+          textColor: "#5b21b6",
+          extendedProps: t,
+          // Flag custom para o eventContent aplicar a classe de banner.
+          classNames: ["fc-evt-ausencia"],
+        } as EventInput;
+      }
+
       // Folga fixa semanal — bloco cinzento claro, todo o dia.
       if (t.tipo === "folga_fixa") {
         return {
@@ -267,6 +294,9 @@ export default function CalendarioOperacionalPage() {
       const fim = new Date(inicio.getTime() + (t.tempo_limpeza_minutos || 45) * 60000);
       // Prompt 74, ponto 5 — cores pastel por estado
       const paleta = paletaPorEstado(t.estado);
+      // Prompt 80, ponto 1 — classe extra para destaque forte de por_atribuir.
+      const classNames =
+        t.estado === "por_atribuir" ? ["fc-evt-por-atribuir"] : [];
       return {
         id: t._id,
         title: t.propriedade_id?.nome ?? "—",
@@ -276,11 +306,13 @@ export default function CalendarioOperacionalPage() {
         borderColor: paleta.border,
         textColor: paleta.text,
         extendedProps: t,
+        classNames,
       } as EventInput;
     });
   }, [tarefas]);
 
   /* --- Renderização customizada do bloco de evento (Prompt 74, ponto 4) --- */
+  /* --- Prompt 80: destaque por_atribuir + banner ausência --- */
   const renderEventContent = useCallback((arg: EventContentArg) => {
     const t = arg.event.extendedProps as TarefaCalendario;
     const isMonthView = arg.view.type === "dayGridMonth";
@@ -289,9 +321,35 @@ export default function CalendarioOperacionalPage() {
     const titulo = t.propriedade_id?.nome ?? "—";
     const staff = t.utilizador_id?.nome ?? null;
     const isFolga = t.tipo === "folga_fixa";
+    const isAusencia = t.tipo === "ausencia";
+    const isPorAtribuir = t.estado === "por_atribuir";
+
+    // --- Ausência: banner contínuo (não tem propriedade, só staff) ---
+    // Renderiza um conteúdo minimalista — o título já vem do backend
+    // ("🌴 Férias: Nome"). Não mostra hora nem bolinha.
+    if (isAusencia) {
+      const bannerTitle = t.title ?? `Ausência: ${staff ?? "Staff"}`;
+      return (
+        <div className="fc-evt-ausencia__content" title={bannerTitle}>
+          <span className="fc-evt-ausencia__title">{bannerTitle}</span>
+        </div>
+      );
+    }
 
     // --- Vista mensal: layout compacto em linha ---
     if (isMonthView) {
+      // Prompt 80, ponto 1 — destaque forte para por_atribuir na vista mensal.
+      if (isPorAtribuir) {
+        return (
+          <div className="fc-evt-month fc-evt-month--alert" title={`⚠️ Por atribuir — ${titulo}`}>
+            <span className="fc-evt-month__alert-icon" aria-hidden>⚠️</span>
+            <span className="fc-evt-month__title">
+              {emoji} {titulo}
+            </span>
+            <span className="fc-evt-month__alert-tag">Por Atribuir</span>
+          </div>
+        );
+      }
       return (
         <div className="fc-evt-month">
           <span
@@ -309,7 +367,7 @@ export default function CalendarioOperacionalPage() {
 
     // --- Vistas semanal/diária: bloco rico com título + subtítulo ---
     return (
-      <div className="fc-evt-block">
+      <div className={isPorAtribuir ? "fc-evt-block fc-evt-block--alert" : "fc-evt-block"}>
         <div className="fc-evt-block__header">
           <span
             className="fc-evt-block__dot"
@@ -609,8 +667,8 @@ export default function CalendarioOperacionalPage() {
         </DialogHeader>
         {tarefaSelecionada && (
           <DialogContent className="space-y-4">
-            {/* Estado + propriedade */}
-            <div className="flex items-center gap-2">
+            {/* Estado + tipo + propriedade */}
+            <div className="flex flex-wrap items-center gap-2">
               <Badge
                 variant={
                   tarefaSelecionada.estado === "concluida"
@@ -625,6 +683,13 @@ export default function CalendarioOperacionalPage() {
                 {ESTADO_OPTS.find((o) => o.value === tarefaSelecionada.estado)?.label ??
                   tarefaSelecionada.estado}
               </Badge>
+              {/* v1.58.0 (Prompt 80, ponto 4) — Badge de tipo para deixar claro
+                  que manutenções também podem ser atribuídas/reatribuídas. */}
+              {tarefaSelecionada.tipo && TIPO_LABEL[tarefaSelecionada.tipo] && (
+                <Badge variant="outline" className="gap-1">
+                  {emojiPorTipo(tarefaSelecionada.tipo)} {TIPO_LABEL[tarefaSelecionada.tipo]}
+                </Badge>
+              )}
               <span className="font-medium">
                 {tarefaSelecionada.propriedade_id?.nome ?? "—"}
               </span>

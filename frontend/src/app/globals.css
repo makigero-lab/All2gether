@@ -344,3 +344,123 @@
 .fc-timegrid-event-short .fc-evt-block__subtitle {
   display: none;
 }
+
+/* ==========================================================================
+   Prompt 80 — Destaques visuais
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   Ponto 1 — Alerta forte para tarefas "por_atribuir" na vista mensal
+   Fundo vermelho intenso + ícone ⚠️ + tag "Por Atribuir" à direita.
+   -------------------------------------------------------------------------- */
+
+.fc-evt-por-atribuir {
+  /* Aumenta o peso visual do evento inteiro (borda mais grossa). */
+  border-width: 2px !important;
+  box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.3);
+}
+
+.fc-evt-month--alert {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+  width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  background-color: #fee2e2 !important;
+  border-left: 3px solid #ef4444 !important;
+  padding: 1px 4px !important;
+  border-radius: calc(var(--radius) - 1px);
+  font-weight: 600;
+  color: #991b1b !important;
+}
+
+.fc-evt-month--alert .fc-evt-month__alert-icon {
+  flex: 0 0 auto;
+  font-size: 0.75rem;
+  line-height: 1;
+}
+
+.fc-evt-month--alert .fc-evt-month__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+  color: #991b1b;
+}
+
+.fc-evt-month--alert .fc-evt-month__alert-tag {
+  flex: 0 0 auto;
+  font-size: 0.625rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background-color: #ef4444;
+  color: #ffffff;
+  padding: 1px 4px;
+  border-radius: 3px;
+  line-height: 1.2;
+}
+
+/* Em ecrãs estreitos, esconde a tag (deixa ícone + título). */
+@media (max-width: 640px) {
+  .fc-evt-month--alert .fc-evt-month__alert-tag {
+    display: none;
+  }
+}
+
+/* Variante alerta nas vistas semanal/diária — borda vermelha mais forte. */
+.fc-evt-block--alert {
+  border-left: 3px solid #ef4444 !important;
+  background-color: #fef2f2 !important;
+}
+
+/* --------------------------------------------------------------------------
+   Ponto 2 — Banner contínuo para ausências (férias/doença)
+   Roxo pastel suave com opacidade, atravessa os dias sem confundir com tarefas.
+   -------------------------------------------------------------------------- */
+
+.fc-evt-ausencia {
+  /* Override do background para um tom roxo pastel mais suave com opacidade. */
+  background-color: rgba(237, 233, 254, 0.85) !important;
+  border-color: #c4b5fd !important;
+  border-left: 3px solid #8b5cf6 !important;
+  opacity: 0.9;
+}
+
+.fc-evt-ausencia:hover {
+  opacity: 1;
+}
+
+.fc-evt-ausencia__content {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+  width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  padding: 2px 6px;
+}
+
+.fc-evt-ausencia__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #5b21b6;
+  font-style: italic;
+}
+
+/* Em vista mensal, ausências aparecem como blocos allDay no topo do dia.
+   Garantimos que têm cantos arredondados e não parecem tarefas normais. */
+.fc-daygrid-day-frame .fc-evt-ausencia {
+  border-radius: calc(var(--radius) - 1px);
+  margin-top: 1px;
+}
