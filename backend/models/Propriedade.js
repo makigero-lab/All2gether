@@ -56,6 +56,14 @@ const propriedadeSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
+    // v1.61.0 (Prompt 84) — Capacidade máxima de hóspedes (vinda do Smoobu:
+    // apt.rooms.maxOccupancy ou apt.maxOccupancy). Usada para estimar tempo
+    // de limpeza e para display no gestor.
+    capacidade_hospedes: {
+      type: Number,
+      default: null,
+      min: 0,
+    },
   },
   { timestamps: true }
 );

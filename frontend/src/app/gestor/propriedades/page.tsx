@@ -604,8 +604,14 @@ export default function PropriedadesPage() {
                   {propriedades.map((p) => (
                     <tr key={p._id} className={`hover:bg-muted/30 ${!p.ativo ? "opacity-60" : ""}`}>
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <span className="font-medium">{p.nome}</span>
+                          {/* v1.61.0 (Prompt 84) — Capacidade de hóspedes */}
+                          {p.capacidade_hospedes != null && p.capacidade_hospedes > 0 && (
+                            <Badge variant="outline" className="gap-1 text-xs" title="Capacidade de hóspedes">
+                              👥 {p.capacidade_hospedes}
+                            </Badge>
+                          )}
                           {p.morada === "A definir" && (
                             <Badge className="bg-amber-500/15 text-amber-700 border-amber-500/30 hover:bg-amber-500/20">
                               ⚠️ Morada por definir

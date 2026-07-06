@@ -142,6 +142,8 @@ export interface PropriedadeDTO {
   tempo_limpeza_minutos: number;
   ativo: boolean;
   checklist?: string[];
+  // v1.61.0 (Prompt 84) — Capacidade máxima de hóspedes (do Smoobu).
+  capacidade_hospedes?: number | null;
   createdAt?: string;
   updatedAt?: string;
 }
