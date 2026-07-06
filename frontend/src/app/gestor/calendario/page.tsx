@@ -881,10 +881,36 @@ export default function CalendarioOperacionalPage() {
               )}
             </div>
 
+            {/* v1.68.0 (Prompt 91) — Bloco de destaque para observações.
+                Se for manutenção (avaria), fundo amarelado/vermelho claro
+                com ícone de alerta. Caso contrário, bloco neutro normal. */}
             {tarefaSelecionada.observacoes && (
-              <div className="rounded-md bg-muted/30 p-3 text-sm">
-                <p className="mb-1 text-xs font-medium text-muted-foreground">Observações:</p>
-                <p>{tarefaSelecionada.observacoes}</p>
+              <div
+                className={
+                  tarefaSelecionada.tipo === "manutencao"
+                    ? "rounded-lg border border-amber-500/50 bg-amber-50 p-4 text-sm dark:bg-amber-950/20"
+                    : "rounded-md bg-muted/30 p-3 text-sm"
+                }
+              >
+                <p
+                  className={
+                    "mb-1 flex items-center gap-1.5 text-xs font-semibold " +
+                    (tarefaSelecionada.tipo === "manutencao"
+                      ? "text-amber-700 dark:text-amber-400"
+                      : "text-muted-foreground")
+                  }
+                >
+                  {tarefaSelecionada.tipo === "manutencao" ? "🛠️ Avaria Reportada:" : "Observações:"}
+                </p>
+                <p
+                  className={
+                    tarefaSelecionada.tipo === "manutencao"
+                      ? "text-amber-900 dark:text-amber-100"
+                      : ""
+                  }
+                >
+                  {tarefaSelecionada.observacoes}
+                </p>
               </div>
             )}
           </DialogContent>

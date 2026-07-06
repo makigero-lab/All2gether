@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   Plus,
   Users,
@@ -200,7 +201,20 @@ function FolgasSemanaisCheckboxes({
 /* Página                                                              */
 /* ------------------------------------------------------------------ */
 
-export default function EquipaPage() {
+export default function EquipaPageWrapper() {
+  return (
+    <Suspense fallback={null}>
+      <EquipaPage />
+    </Suspense>
+  );
+}
+
+function EquipaPage() {
+  // v1.68.0 (Prompt 91) — Permite abrir diretamente na tab de Aprovações
+  // via ?tab=aprovacoes (usado pelo redirect /gestor/ausencias).
+  const searchParams = useSearchParams();
+  const tabInicial = searchParams.get("tab") === "aprovacoes" ? "aprovacoes" : "staff";
+
   // ===== Estado — Equipa (Staff) =====
   const [utilizadores, setUtilizadores] = useState<UtilizadorDTO[]>([]);
   const [loading, setLoading] = useState(true);
@@ -580,7 +594,7 @@ export default function EquipaPage() {
         </p>
       </div>
 
-      <Tabs defaultValue="staff" className="w-full">
+      <Tabs defaultValue={tabInicial} className="w-full">
         <TabsList>
           <TabsTrigger value="staff" className="gap-1.5">
             <Users className="h-4 w-4" />
