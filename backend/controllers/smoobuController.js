@@ -20,6 +20,8 @@
 
 const Tarefa = require('../models/Tarefa');
 const Propriedade = require('../models/Propriedade');
+// v1.60.0 (Prompt 83) — Geocoding automático de moradas importadas do Smoobu.
+const { obterCoordenadas } = require('../utils/geocoding');
 
 /**
  * POST /api/admin/smoobu/sincronizar
@@ -415,6 +417,25 @@ exports.sincronizarPropriedades = async (req, res) => {
         throw new Error('Apartamento sem id.');
       }
 
+      // v1.60.0 (Prompt 83) — Constrói morada dinamicamente a partir do
+      // objeto location do Smoobu (street, zip, city).
+      let moradaTexto = 'A definir';
+      if (apt.location) {
+        const partes = [apt.location.street, apt.location.zip, apt.location.city].filter(Boolean);
+        if (partes.length > 0) moradaTexto = partes.join(', ');
+      }
+
+      // Geocoding: se temos morada real, obter coordenadas (lat, lng).
+      let coords = { lat: null, lng: null };
+      if (moradaTexto !== 'A definir') {
+        try {
+          const result = await obterCoordenadas(moradaTexto);
+          if (result) coords = result;
+        } catch (e) {
+          console.warn('Geocoding falhou no sincronizar:', e.message);
+        }
+      }
+
       const resultado = await Propriedade.updateOne(
         { smoobu_id: smoobuId },
         {
@@ -422,6 +443,8 @@ exports.sincronizarPropriedades = async (req, res) => {
             nome: apt.name || `Propriedade ${smoobuId}`,
             empresa_id: empresaId,
             tempo_limpeza_minutos: 45,
+            morada: moradaTexto,
+            coordenadas: coords,
           },
         },
         { upsert: true }
@@ -556,11 +579,31 @@ exports.importarPropriedades = async (req, res) => {
         continue;
       }
 
-      // Cria nova propriedade para esta empresa.
+      // v1.60.0 (Prompt 83) — Constrói morada dinamicamente a partir do
+      // objeto location do Smoobu (street, zip, city).
+      let moradaTexto = 'A definir';
+      if (apt.location) {
+        const partes = [apt.location.street, apt.location.zip, apt.location.city].filter(Boolean);
+        if (partes.length > 0) moradaTexto = partes.join(', ');
+      }
+
+      // Geocoding: se temos morada real, obter coordenadas (lat, lng).
+      let coords = { lat: null, lng: null };
+      if (moradaTexto !== 'A definir') {
+        try {
+          const result = await obterCoordenadas(moradaTexto);
+          if (result) coords = result;
+        } catch (e) {
+          console.warn('Geocoding falhou no import:', e.message);
+        }
+      }
+
+      // Cria nova propriedade para esta empresa com morada + coordenadas.
       await Propriedade.create({
         smoobu_id: smoobuId,
         nome: apt.name || `Propriedade ${smoobuId}`,
-        morada: 'A definir',
+        morada: moradaTexto,
+        coordenadas: coords,
         empresa_id: empresaId,
         tempo_limpeza_minutos: 45,
       });
