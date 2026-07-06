@@ -10,7 +10,12 @@ import {
   Loader2,
   RefreshCw,
   Siren,
+  TriangleAlert,
+  ArrowRight,
 } from "lucide-react";
+import Link from "next/link";
+import { format, parseISO } from "date-fns";
+import { pt } from "date-fns/locale";
 
 import {
   Card,
@@ -32,6 +37,17 @@ interface DashboardData {
   tarefasPorAtribuir: number;
   tarefasConcluidasHoje: number;
   tarefasPorStaff: { utilizador_id: string; nome: string; tarefas: number; carga_minutos: number }[];
+  // v1.54.0 (Prompt 76) — Radar de Risco: check-ins sem limpeza nas próximas 48h.
+  checkinsEmRisco?: {
+    total: number;
+    tarefas: {
+      _id: string;
+      data: string;
+      estado: string;
+      tempo_limpeza_minutos: number;
+      propriedade_nome: string;
+    }[];
+  };
 }
 
 interface EmergenciaDTO {
@@ -141,6 +157,58 @@ export default function AdminDashboardPage() {
 
       {/* Banner para ativar notificações push */}
       <PushNotificationSetup />
+
+      {/* Radar de Risco (Prompt 76) — check-ins sem limpeza nas próximas 48h */}
+      {!loading && !erro && data?.checkinsEmRisco && data.checkinsEmRisco.total > 0 && (
+        <div className="rounded-lg border-2 border-orange-500/60 bg-orange-50 p-4 shadow-lg dark:bg-orange-950/30">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-orange-500 text-white">
+                <TriangleAlert className="h-5 w-5" />
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-orange-900 dark:text-orange-100">
+                  ⚠️ Tens {data.checkinsEmRisco.total} limpeza(s) crítica(s) pendente(s) para as próximas 48h!
+                </p>
+                <p className="mt-0.5 text-xs text-orange-800/80 dark:text-orange-200/80">
+                  Estas tarefas estão <strong>por atribuir</strong> e podem comprometer check-ins.
+                </p>
+                {/* Lista das tarefas em risco (máx. 3, depois "e mais N") */}
+                <ul className="mt-2 space-y-1">
+                  {data.checkinsEmRisco.tarefas.slice(0, 3).map((t) => (
+                    <li key={t._id} className="flex items-center gap-2 text-xs text-orange-900 dark:text-orange-100">
+                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-orange-600" />
+                      <span className="font-medium">{t.propriedade_nome}</span>
+                      <span className="text-orange-700/70 dark:text-orange-300/70">·</span>
+                      <span>
+                        {(() => {
+                          try {
+                            return format(parseISO(t.data), "EEE d MMM 'às' HH:mm", { locale: pt });
+                          } catch {
+                            return t.data;
+                          }
+                        })()}
+                      </span>
+                    </li>
+                  ))}
+                  {data.checkinsEmRisco.total > 3 && (
+                    <li className="text-xs italic text-orange-700/70 dark:text-orange-300/70">
+                      e mais {data.checkinsEmRisco.total - 3}…
+                    </li>
+                  )}
+                </ul>
+              </div>
+            </div>
+            <Link
+              href="/gestor/calendario"
+              className="inline-flex h-8 shrink-0 items-center gap-2 rounded-md bg-orange-600 px-3 text-xs font-medium text-white transition-colors hover:bg-orange-700"
+            >
+              Resolver agora
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          </div>
+        </div>
+      )}
 
       {/* Notificações Críticas — banner de emergência */}
       {emergencias.length > 0 && (

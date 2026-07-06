@@ -62,7 +62,8 @@ exports.obterEmpresaId = obterEmpresaId;
  * Resposta 200: {
  *   totalPropriedades, propriedadesAtivas,
  *   membrosEquipaAtivos, tarefasHoje, tarefasPorAtribuir,
- *   tarefasConcluidasHoje, tarefasPorStaff: [{ nome, tarefas, carga_minutos }]
+ *   tarefasConcluidasHoje, tarefasPorStaff: [{ nome, tarefas, carga_minutos }],
+ *   checkinsEmRisco: { total: number, tarefas: [{ _id, data, propriedade_nome, estado }] }
  * }
  */
 exports.getDashboard = async (req, res) => {
@@ -76,6 +77,8 @@ exports.getDashboard = async (req, res) => {
       Date.UTC(agora.getUTCFullYear(), agora.getUTCMonth(), agora.getUTCDate())
     );
     const amanhaInicio = new Date(hojeInicio.getTime() + 24 * 60 * 60 * 1000);
+    // Janela de risco: próximas 48h a partir de agora.
+    const limiteRisco48h = new Date(agora.getTime() + 48 * 60 * 60 * 1000);
 
     // Contagens em paralelo.
     const [
@@ -144,6 +147,32 @@ exports.getDashboard = async (req, res) => {
       carga_minutos: c.carga_minutos,
     }));
 
+    // ----------------------------------------------------------------
+    // v1.54.0 (Prompt 76) — Radar de Risco: check-ins sem limpeza
+    // atribuída nas próximas 48h. Tarefas 'por_atribuir' (sem staff)
+    // que podem comprometer check-ins. Devolve contagem + detalhes.
+    // ----------------------------------------------------------------
+    const tarefasRiscoRaw = await Tarefa.find({
+      empresa_id: empresaId,
+      data: { $gte: agora, $lte: limiteRisco48h },
+      estado: 'por_atribuir',
+    })
+      .populate({ path: 'propriedade_id', select: 'nome' })
+      .select('data estado propriedade_id tempo_limpeza_minutos')
+      .sort({ data: 1 })
+      .lean();
+
+    const checkinsEmRisco = {
+      total: tarefasRiscoRaw.length,
+      tarefas: tarefasRiscoRaw.map((t) => ({
+        _id: String(t._id),
+        data: t.data,
+        estado: t.estado,
+        tempo_limpeza_minutos: t.tempo_limpeza_minutos,
+        propriedade_nome: t.propriedade_id?.nome ?? '—',
+      })),
+    };
+
     return res.status(200).json({
       totalPropriedades,
       propriedadesAtivas,
@@ -152,6 +181,7 @@ exports.getDashboard = async (req, res) => {
       tarefasPorAtribuir,
       tarefasConcluidasHoje,
       tarefasPorStaff,
+      checkinsEmRisco,
     });
   } catch (err) {
     console.error('❌ getDashboard:', err.message);
