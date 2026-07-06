@@ -10,6 +10,7 @@ import {
   Clock,
   User,
   X,
+  Sparkles,
 } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -33,7 +34,7 @@ import {
   DialogContent,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { adminGet, adminPatch, type PropriedadeDTO, type UtilizadorDTO } from "@/lib/api";
+import { adminGet, adminPost, adminPatch, type PropriedadeDTO, type UtilizadorDTO } from "@/lib/api";
 
 /* ------------------------------------------------------------------ */
 /* Tipos                                                               */
@@ -493,6 +494,47 @@ export default function CalendarioOperacionalPage() {
     }
   }
 
+  /* --- v1.64.0 (Prompt 87): Auto-Atribuição em lote --- */
+  const [autoAtribuindo, setAutoAtribuindo] = useState(false);
+  const [confirmarAutoAtribuir, setConfirmarAutoAtribuir] = useState(false);
+  const [autoAtribuirResultado, setAutoAtribuirResultado] = useState<string | null>(null);
+
+  async function handleAutoAtribuir() {
+    setAutoAtribuindo(true);
+    setConfirmarAutoAtribuir(false);
+    setErro(null);
+    setAutoAtribuirResultado(null);
+    try {
+      const res = await adminPost<{
+        sucesso: boolean;
+        processadas: number;
+        reatribuidas: number;
+        orfas: number;
+        mensagem?: string;
+      }>("/api/gestor/tarefas/auto-atribuir", {});
+
+      const msg =
+        res.processadas === 0
+          ? res.mensagem ?? "Não há tarefas por atribuir a partir de hoje."
+          : `Foram reatribuídas ${res.reatribuidas} tarefa(s). ` +
+            (res.orfas > 0
+              ? `${res.orfas} continuam órfãs (sem staff disponível).`
+              : "Nenhuma ficou órfã. ✅");
+      setAutoAtribuirResultado(msg);
+
+      // Atualiza o calendário para mostrar os blocos a mudarem de vermelho para as cores dos funcionários.
+      await carregarTarefas();
+    } catch (e) {
+      setErro(
+        e instanceof Error
+          ? `Auto-atribuição falhou: ${e.message}`
+          : "Erro ao auto-atribuir tarefas."
+      );
+    } finally {
+      setAutoAtribuindo(false);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
       {/* Cabeçalho */}
@@ -507,6 +549,20 @@ export default function CalendarioOperacionalPage() {
             aria-label="Atualizar"
           >
             <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
+          </Button>
+          {/* v1.64.0 (Prompt 87) — Auto-Atribuir Pendentes */}
+          <Button
+            onClick={() => setConfirmarAutoAtribuir(true)}
+            disabled={autoAtribuindo || loading}
+            title="Corre o load balancer para atribuir automaticamente todas as tarefas futuras sem funcionário."
+            className="gap-2"
+          >
+            {autoAtribuindo ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Sparkles className="h-4 w-4" />
+            )}
+            {autoAtribuindo ? "A atribuir…" : "Auto-Atribuir Pendentes"}
           </Button>
         </div>
         <p className="text-sm text-muted-foreground">
@@ -595,6 +651,22 @@ export default function CalendarioOperacionalPage() {
           <span>{erro}</span>
           <Button variant="outline" size="sm" onClick={carregarTarefas} className="ml-auto">
             Tentar novamente
+          </Button>
+        </div>
+      )}
+
+      {/* v1.64.0 (Prompt 87) — Banner de resultado da auto-atribuição */}
+      {autoAtribuirResultado && (
+        <div className="flex items-center gap-3 rounded-lg border border-emerald-500/50 bg-emerald-500/5 p-4 text-sm text-emerald-700 dark:text-emerald-400">
+          <Sparkles className="h-5 w-5 shrink-0" />
+          <span className="flex-1">{autoAtribuirResultado}</span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setAutoAtribuirResultado(null)}
+            className="ml-auto"
+          >
+            Fechar
           </Button>
         </div>
       )}
@@ -838,6 +910,56 @@ export default function CalendarioOperacionalPage() {
               </>
             ) : (
               "Reatribuir"
+            )}
+          </Button>
+        </DialogFooter>
+      </Dialog>
+
+      {/* v1.64.0 (Prompt 87) — Dialog de confirmação: Auto-Atribuir Pendentes */}
+      <Dialog open={confirmarAutoAtribuir} onOpenChange={setConfirmarAutoAtribuir}>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Sparkles className="h-5 w-5 text-primary" />
+            Auto-Atribuir Pendentes
+          </DialogTitle>
+          <DialogDescription>
+            O sistema vai tentar atribuir automaticamente todas as tarefas
+            futuras que estão sem funcionário. Continuar?
+          </DialogDescription>
+          <DialogClose onClick={() => setConfirmarAutoAtribuir(false)} />
+        </DialogHeader>
+        <DialogContent className="space-y-2">
+          <p className="text-sm text-muted-foreground">
+            O load balancer vai procurar o staff com menor carga para cada
+            tarefa, respeitando férias, folgas fixas, tempo de viagem e hora
+            de almoço (13h-14h). As tarefas que não conseguirem ser atribuídas
+            (sem staff disponível) continuam por atribuir.
+          </p>
+        </DialogContent>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setConfirmarAutoAtribuir(false)}
+            disabled={autoAtribuindo}
+          >
+            Cancelar
+          </Button>
+          <Button
+            type="button"
+            onClick={handleAutoAtribuir}
+            disabled={autoAtribuindo}
+          >
+            {autoAtribuindo ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                A atribuir…
+              </>
+            ) : (
+              <>
+                <Sparkles className="mr-2 h-4 w-4" />
+                Sim, auto-atribuir
+              </>
             )}
           </Button>
         </DialogFooter>

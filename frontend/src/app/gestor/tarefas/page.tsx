@@ -14,6 +14,7 @@ import {
   Wrench,
   Filter,
   Trash2,
+  Sparkles,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -338,6 +339,45 @@ export default function AdminTarefasPage() {
     }
   }
 
+  // v1.64.0 (Prompt 87) — Auto-atribuição em lote (load balancer manual).
+  const [autoAtribuindo, setAutoAtribuindo] = useState(false);
+  const [confirmarAutoAtribuir, setConfirmarAutoAtribuir] = useState(false);
+
+  async function handleAutoAtribuir() {
+    setAutoAtribuindo(true);
+    setConfirmarAutoAtribuir(false);
+    setErro(null);
+    try {
+      const res = await adminPost<{
+        sucesso: boolean;
+        processadas: number;
+        reatribuidas: number;
+        orfas: number;
+        mensagem?: string;
+      }>("/api/gestor/tarefas/auto-atribuir", {});
+
+      const msg =
+        res.processadas === 0
+          ? res.mensagem ?? "Não há tarefas por atribuir a partir de hoje."
+          : `Foram reatribuídas ${res.reatribuidas} tarefa(s). ` +
+            (res.orfas > 0
+              ? `${res.orfas} continuam órfãs (sem staff disponível).`
+              : "Nenhuma ficou órfã. ✅");
+      setSincronizacaoOk(msg);
+
+      // Atualiza a grelha para mostrar os blocos a mudarem de vermelho para as cores dos funcionários.
+      await carregar();
+    } catch (e) {
+      setErro(
+        e instanceof Error
+          ? `Auto-atribuição falhou: ${e.message}`
+          : "Erro ao auto-atribuir tarefas."
+      );
+    } finally {
+      setAutoAtribuindo(false);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
       {/* Cabeçalho */}
@@ -401,6 +441,22 @@ export default function AdminTarefasPage() {
               <Trash2 className="h-4 w-4" />
             )}
             <span className="hidden sm:inline">Limpar Futuras</span>
+          </Button>
+          {/* v1.64.0 (Prompt 87) — Auto-Atribuir Pendentes (load balancer manual) */}
+          <Button
+            onClick={() => setConfirmarAutoAtribuir(true)}
+            disabled={autoAtribuindo || sincronizando || limpando}
+            title="Corre o load balancer para atribuir automaticamente todas as tarefas futuras sem funcionário."
+            className="bg-primary text-primary-foreground hover:bg-primary/90"
+          >
+            {autoAtribuindo ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Sparkles className="h-4 w-4" />
+            )}
+            <span className="hidden sm:inline">
+              {autoAtribuindo ? "A atribuir…" : "Auto-Atribuir Pendentes"}
+            </span>
           </Button>
           <Button onClick={() => setMostrarForm((v) => !v)}>
             <Plus className="h-4 w-4" />
@@ -777,6 +833,56 @@ export default function AdminTarefasPage() {
               <>
                 <Trash2 className="mr-2 h-4 w-4" />
                 Sim, apagar
+              </>
+            )}
+          </Button>
+        </DialogFooter>
+      </Dialog>
+
+      {/* v1.64.0 (Prompt 87) — Dialog de confirmação: Auto-Atribuir Pendentes */}
+      <Dialog open={confirmarAutoAtribuir} onOpenChange={setConfirmarAutoAtribuir}>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Sparkles className="h-5 w-5 text-primary" />
+            Auto-Atribuir Pendentes
+          </DialogTitle>
+          <DialogDescription>
+            O sistema vai tentar atribuir automaticamente todas as tarefas
+            futuras que estão sem funcionário. Continuar?
+          </DialogDescription>
+          <DialogClose onClick={() => setConfirmarAutoAtribuir(false)} />
+        </DialogHeader>
+        <DialogContent className="space-y-2">
+          <p className="text-sm text-muted-foreground">
+            O load balancer vai procurar o staff com menor carga para cada
+            tarefa, respeitando férias, folgas fixas, tempo de viagem e hora
+            de almoço (13h-14h). As tarefas que não conseguirem ser atribuídas
+            (sem staff disponível) continuam por atribuir.
+          </p>
+        </DialogContent>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setConfirmarAutoAtribuir(false)}
+            disabled={autoAtribuindo}
+          >
+            Cancelar
+          </Button>
+          <Button
+            type="button"
+            onClick={handleAutoAtribuir}
+            disabled={autoAtribuindo}
+          >
+            {autoAtribuindo ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                A atribuir…
+              </>
+            ) : (
+              <>
+                <Sparkles className="mr-2 h-4 w-4" />
+                Sim, auto-atribuir
               </>
             )}
           </Button>
