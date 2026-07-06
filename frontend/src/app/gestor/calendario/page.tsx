@@ -19,7 +19,7 @@ import dayGridPlugin from "@fullcalendar/daygrid";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import interactionPlugin from "@fullcalendar/interaction";
 import ptLocale from "@fullcalendar/core/locales/pt";
-import type { DatesSetArg, EventClickArg, EventInput } from "@fullcalendar/core";
+import type { DatesSetArg, EventClickArg, EventContentArg, EventInput } from "@fullcalendar/core";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -82,21 +82,58 @@ const TIPO_LABEL: Record<string, string> = {
 /* Helpers                                                             */
 /* ------------------------------------------------------------------ */
 
-/** Cor de fundo/borda do evento do FullCalendar por estado da tarefa. */
-function corPorEstado(estado: string): string {
+/**
+ * Paleta pastel por estado da tarefa (Prompt 74, ponto 5).
+ * Retorna fundo suave + borda + texto escuro para não cansar a vista.
+ */
+interface PaletaEvento {
+  bg: string;
+  border: string;
+  text: string;
+  dot: string; // cor da bolinha (saturada, para destaque)
+}
+
+function paletaPorEstado(estado: string): PaletaEvento {
   switch (estado) {
-    case "por_atribuir":
-      return "#ef4444"; // vermelho
+    case "concluida":
+      // Verde suave
+      return { bg: "#dcfce7", border: "#86efac", text: "#166534", dot: "#22c55e" };
     case "atribuida":
     case "em_curso":
-      return "#f59e0b"; // âmbar
-    case "concluida":
-      return "#10b981"; // verde
+      // Amarelo suave (pendente/em curso)
+      return { bg: "#fef9c3", border: "#fde047", text: "#854d0e", dot: "#eab308" };
+    case "por_atribuir":
+      // Vermelho suave
+      return { bg: "#fee2e2", border: "#fca5a5", text: "#991b1b", dot: "#ef4444" };
     case "cancelada":
-      return "#9ca3af"; // cinza
+      // Cinza suave
+      return { bg: "#f1f5f9", border: "#cbd5e1", text: "#475569", dot: "#94a3b8" };
     default:
-      return "#6b7280";
+      return { bg: "#f1f5f9", border: "#cbd5e1", text: "#475569", dot: "#94a3b8" };
   }
+}
+
+/** Emoji por tipo de tarefa (Prompt 74, ponto 4). */
+function emojiPorTipo(tipo: string): string {
+  switch (tipo) {
+    case "manutencao":
+      return "🛠️";
+    case "limpeza":
+      return "🧹";
+    case "check_in":
+      return "🔑";
+    case "check_out":
+      return "🚪";
+    case "folga_fixa":
+      return "🏖️";
+    default:
+      return "🧹";
+  }
+}
+
+/** Cor de fundo/borda do evento do FullCalendar por estado da tarefa. */
+function corPorEstado(estado: string): string {
+  return paletaPorEstado(estado).dot;
 }
 
 function primeiroNome(nome: string | undefined): string {
@@ -228,20 +265,78 @@ export default function CalendarioOperacionalPage() {
 
       const inicio = new Date(t.data);
       const fim = new Date(inicio.getTime() + (t.tempo_limpeza_minutos || 45) * 60000);
-      const cor = corPorEstado(t.estado);
+      // Prompt 74, ponto 5 — cores pastel por estado
+      const paleta = paletaPorEstado(t.estado);
       return {
         id: t._id,
-        title: `${t.propriedade_id?.nome ?? "—"} - ${
-          t.utilizador_id?.nome ?? "Sem atribuição"
-        }`,
+        title: t.propriedade_id?.nome ?? "—",
         start: inicio.toISOString(),
         end: fim.toISOString(),
-        backgroundColor: cor,
-        borderColor: cor,
+        backgroundColor: paleta.bg,
+        borderColor: paleta.border,
+        textColor: paleta.text,
         extendedProps: t,
       } as EventInput;
     });
   }, [tarefas]);
+
+  /* --- Renderização customizada do bloco de evento (Prompt 74, ponto 4) --- */
+  const renderEventContent = useCallback((arg: EventContentArg) => {
+    const t = arg.event.extendedProps as TarefaCalendario;
+    const isMonthView = arg.view.type === "dayGridMonth";
+    const paleta = paletaPorEstado(t.estado);
+    const emoji = emojiPorTipo(t.tipo);
+    const titulo = t.propriedade_id?.nome ?? "—";
+    const staff = t.utilizador_id?.nome ?? null;
+    const isFolga = t.tipo === "folga_fixa";
+
+    // --- Vista mensal: layout compacto em linha ---
+    if (isMonthView) {
+      return (
+        <div className="fc-evt-month">
+          <span
+            className="fc-evt-month__dot"
+            style={{ backgroundColor: isFolga ? "#94a3b8" : paleta.dot }}
+            aria-hidden
+          />
+          <span className="fc-evt-month__time">{arg.timeText}</span>
+          <span className="fc-evt-month__title" title={titulo}>
+            {emoji} {titulo}
+          </span>
+        </div>
+      );
+    }
+
+    // --- Vistas semanal/diária: bloco rico com título + subtítulo ---
+    return (
+      <div className="fc-evt-block">
+        <div className="fc-evt-block__header">
+          <span
+            className="fc-evt-block__dot"
+            style={{ backgroundColor: isFolga ? "#94a3b8" : paleta.dot }}
+            aria-hidden
+          />
+          <span className="fc-evt-block__emoji" aria-hidden>
+            {emoji}
+          </span>
+          <span className="fc-evt-block__time">{arg.timeText}</span>
+        </div>
+        <div className="fc-evt-block__title" title={titulo}>
+          {titulo}
+        </div>
+        <div className="fc-evt-block__subtitle">
+          {staff ? (
+            <>
+              <User className="fc-evt-block__icon" />
+              <span>{primeiroNome(staff)}</span>
+            </>
+          ) : (
+            <span className="fc-evt-block__unassigned">⚠️ Por Atribuir</span>
+          )}
+        </div>
+      </div>
+    );
+  }, []);
 
   /* --- Callbacks do FullCalendar --- */
   const handleDatesSet = useCallback((arg: DatesSetArg) => {
@@ -402,15 +497,21 @@ export default function CalendarioOperacionalPage() {
             plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
             initialView="dayGridMonth"
             locale={ptLocale}
+            timeZone="local"
             headerToolbar={{
               left: "prev,next today",
               center: "title",
               right: "dayGridMonth,timeGridWeek,timeGridDay",
             }}
+            // Ponto 1 — Horário comercial (esconde madrugada/noite)
             slotMinTime="08:00:00"
             slotMaxTime="20:00:00"
-            height={700}
+            // Ponto 2 — Grelha de tempo: linhas de 15min, label de 1h
+            slotDuration="00:15:00"
+            slotLabelInterval="01:00:00"
+            // Ponto 3 — Indicador de tempo real (linha vermelha)
             nowIndicator
+            height={700}
             editable={false}
             eventStartEditable={false}
             eventDurationEditable={false}
@@ -419,15 +520,20 @@ export default function CalendarioOperacionalPage() {
             datesSet={handleDatesSet}
             dayMaxEvents
             eventDisplay="block"
+            // Ponto 4 — Renderização customizada do bloco
+            eventContent={renderEventContent}
+            // Formato 24h europeu (Prompt 72)
             eventTimeFormat={{
               hour: "2-digit",
               minute: "2-digit",
               meridiem: false,
+              hour12: false,
             }}
             slotLabelFormat={{
               hour: "2-digit",
               minute: "2-digit",
               meridiem: false,
+              hour12: false,
             }}
           />
         ) : (
@@ -444,28 +550,28 @@ export default function CalendarioOperacionalPage() {
         <span className="flex items-center gap-1.5">
           <span
             className="h-3 w-3 rounded border"
-            style={{ backgroundColor: "#ef4444", borderColor: "#ef4444" }}
+            style={{ backgroundColor: "#fee2e2", borderColor: "#fca5a5" }}
           />
           Por atribuir
         </span>
         <span className="flex items-center gap-1.5">
           <span
             className="h-3 w-3 rounded border"
-            style={{ backgroundColor: "#f59e0b", borderColor: "#f59e0b" }}
+            style={{ backgroundColor: "#fef9c3", borderColor: "#fde047" }}
           />
           Atribuída / Em curso
         </span>
         <span className="flex items-center gap-1.5">
           <span
             className="h-3 w-3 rounded border"
-            style={{ backgroundColor: "#10b981", borderColor: "#10b981" }}
+            style={{ backgroundColor: "#dcfce7", borderColor: "#86efac" }}
           />
           Concluída
         </span>
         <span className="flex items-center gap-1.5">
           <span
             className="h-3 w-3 rounded border"
-            style={{ backgroundColor: "#9ca3af", borderColor: "#9ca3af" }}
+            style={{ backgroundColor: "#f1f5f9", borderColor: "#cbd5e1" }}
           />
           Cancelada
         </span>
