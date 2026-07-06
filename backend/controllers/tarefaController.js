@@ -236,6 +236,27 @@ exports.criarTarefa = async (req, res) => {
       estado: utilizadorValidado ? 'atribuida' : 'por_atribuir',
     });
 
+    // v1.65.0 (Prompt 88) — Notifica o staff se a tarefa foi criada já atribuída.
+    if (utilizadorValidado) {
+      try {
+        const tituloNotif = tipo === 'manutencao'
+          ? '🛠️ Nova Manutenção Atribuída'
+          : '🧹 Nova Limpeza Atribuída';
+        const corpoNotif = tipo === 'manutencao'
+          ? `Foste escalado para resolver uma avaria na ${propriedade.nome}.`
+          : `Foste escalado para limpar a ${propriedade.nome}.`;
+        notificarUtilizador(
+          String(utilizadorValidado),
+          tituloNotif,
+          corpoNotif,
+          '/staff'
+        );
+      } catch (e) {
+        // Fire-and-forget: não bloqueia a criação.
+        console.error('⚠️  notificar criarTarefa:', e.message);
+      }
+    }
+
     return res.status(201).json({ tarefa: nova });
   } catch (err) {
     console.error('❌ criarTarefa:', err.message);
@@ -324,7 +345,7 @@ exports.atribuirTarefa = async (req, res) => {
         notificarUtilizador(
           String(tarefa.utilizador_id),
           '🔄 Tarefa reatribuída',
-          `${propriedade?.nome ?? 'Propriedade'} — ${dataFmt}`,
+          `Foste escalado para limpar a ${propriedade?.nome ?? 'Propriedade'}.`,
           '/staff'
         );
       } catch (e) {
@@ -539,7 +560,7 @@ exports.reatribuirTarefa = async (req, res) => {
       notificarUtilizador(
         String(novoUser._id),
         '🔄 Tarefa reatribuída',
-        `${propriedade.nome ?? 'Propriedade'} — ${dataFmt}`,
+        `Foste escalado para limpar a ${propriedade.nome ?? 'Propriedade'}.`,
         '/staff'
       );
     } catch (e) {
@@ -791,11 +812,10 @@ exports.autoAtribuirTarefas = async (req, res) => {
           // Notifica o staff (fire-and-forget).
           try {
             const propNome = tarefa.propriedade_id?.nome ?? 'Propriedade';
-            const dataFmt = new Date(novaData).toLocaleDateString('pt-PT');
             notificarUtilizador(
               String(utilizadorAtribuido),
-              '🧹 Tarefa atribuída',
-              `${propNome} — ${dataFmt}`,
+              '🧹 Nova Limpeza Atribuída',
+              `Foste escalado para limpar a ${propNome}.`,
               '/staff'
             );
           } catch (e) {
