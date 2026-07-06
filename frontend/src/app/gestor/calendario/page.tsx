@@ -352,21 +352,32 @@ export default function CalendarioOperacionalPage() {
     setReatribuindoPara(tarefa.utilizador_id?._id ?? "");
   }, []);
 
-  /* --- Reatribuição rápida --- */
+  /* --- Reatribuição Inteligente (Prompt 75) --- */
+  // Chama PATCH /api/gestor/tarefas/:id/reatribuir, que recalcula a hora de
+  // início via scheduler sequencial (Haversine + almoço 13h-14h) no backend.
   async function handleReatribuir() {
     if (!tarefaSelecionada || !reatribuindoPara) return;
     setReatribuindo(true);
     try {
-      await adminPatch(`/api/gestor/tarefas/${tarefaSelecionada._id}/atribuir`, {
+      const res = await adminPatch<{
+        tarefa: TarefaCalendario;
+        novo_inicio: string;
+        origem: string;
+        tempo_viagem: number;
+      }>(`/api/gestor/tarefas/${tarefaSelecionada._id}/reatribuir`, {
         utilizador_id: reatribuindoPara,
       });
-      // Atualiza localmente a tarefa no estado.
+
+      // Atualiza localmente a tarefa no estado com a data recalculada.
       const novoStaff = equipa.find((u) => u._id === reatribuindoPara);
       setTarefas((prev) =>
         prev.map((t) =>
           t._id === tarefaSelecionada._id
             ? {
                 ...t,
+                // O backend devolve a tarefa atualizada; usamos essa versão
+                // para garantir consistência (data + utilizador + estado).
+                ...(res?.tarefa ?? {}),
                 utilizador_id: novoStaff
                   ? { _id: novoStaff._id, nome: novoStaff.nome }
                   : null,
@@ -378,6 +389,8 @@ export default function CalendarioOperacionalPage() {
       setTarefaSelecionada(null);
       setReatribuindoPara("");
     } catch (e) {
+      // O backend pode devolver 400 (folga) ou 409 (capacidade excedida).
+      // O helper adminPatch lança Error com a mensagem do corpo.
       setErro(e instanceof Error ? e.message : "Erro ao reatribuir tarefa.");
     } finally {
       setReatribuindo(false);
@@ -657,11 +670,15 @@ export default function CalendarioOperacionalPage() {
               </div>
             </div>
 
-            {/* Reatribuição rápida */}
+            {/* Reatribuição Inteligente (Prompt 75) */}
             <div className="space-y-1.5">
               <label htmlFor="reatribuir" className="text-sm font-medium">
-                Reatribuir a (rápido)
+                Reatribuir a (recalcula horário)
               </label>
+              <p className="text-xs text-muted-foreground">
+                O sistema recalcula a hora de início com base nas tarefas
+                existentes do staff, tempo de viagem e hora de almoço (13h-14h).
+              </p>
               <select
                 id="reatribuir"
                 value={reatribuindoPara}
