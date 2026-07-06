@@ -159,6 +159,14 @@ exports.criarTarefa = async (req, res) => {
       return res.status(400).json({ erro: 'propriedade_id inválido.' });
     }
 
+    // v1.57.0 (Prompt 79) — Valida tipo se vier (permite criar manutenções).
+    const TIPOS_VALIDOS = ['limpeza', 'check_in', 'check_out', 'manutencao', 'outro'];
+    if (tipo !== undefined && tipo !== null && !TIPOS_VALIDOS.includes(tipo)) {
+      return res.status(400).json({
+        erro: `Tipo inválido. Valores permitidos: ${TIPOS_VALIDOS.join(', ')}.`,
+      });
+    }
+
     // Valida que a propriedade pertence à empresa e está ativa.
     const propriedade = await Propriedade.findOne({
       _id: propriedade_id,
@@ -356,6 +364,10 @@ exports.atualizarEstadoTarefa = async (req, res) => {
  * Reatribui uma tarefa a um utilizador, recalculando a hora de início com
  * o scheduler sequencial (Haversine + proteção de almoço 13h-14h), exatamente
  * como na criação via webhook.
+ *
+ * v1.57.0 (Prompt 79): NÃO bloqueia por tipo — tarefas de 'manutencao'
+ * (avarias) podem ser reatribuídas livremente, tal como limpezas. Só
+ * bloqueia por estado (concluída/cancelada).
  *
  * Fluxo:
  *   1. Carrega a tarefa (valida pertença à empresa).

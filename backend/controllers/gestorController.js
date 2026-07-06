@@ -515,8 +515,65 @@ exports.getDadosCalendario = async (req, res) => {
         diaAtual.setDate(diaAtual.getDate() + 1);
       }
 
-      // Junta as folgas fixas com as tarefas e ordena por data.
-      const resultado = [...tarefas, ...diasFolga].sort(
+      // ----------------------------------------------------------------
+      // v1.57.0 (Prompt 79) — Injeta ausências APROVADAS (férias/doença)
+      // como eventos virtuais no calendário, para o gestor ver quem está
+      // indisponível em cada dia. Só ausências 'aprovada' (pendentes/
+      // rejeitadas não contam — não são garantidas).
+      // ----------------------------------------------------------------
+      const filtroAusencias = {
+        empresa_id: empresaId,
+        estado: 'aprovada',
+        // Sobreposição de intervalos: a ausência cobre o período se
+        // data_inicio < fimDoPeriodo E data_fim >= inicioDoPeriodo.
+        data_inicio: { $lt: dataFim },
+        data_fim: { $gte: dataInicio },
+      };
+      // Se o filtro utilizadorId for específico, filtra só esse staff.
+      if (filtro.utilizador_id && filtro.utilizador_id !== null) {
+        filtroAusencias.utilizador_id = filtro.utilizador_id;
+      }
+
+      const ausenciasAprovadas = await Ausencia.find(filtroAusencias)
+        .populate({ path: 'utilizador_id', select: 'nome' })
+        .select('data_inicio data_fim tipo utilizador_id notas')
+        .lean();
+
+      // Converte cada ausência num evento virtual tipo 'ausencia'.
+      // FullCalendar com allDay espera que `end` seja EXCLUSIVE (o dia
+      // seguinte ao último dia de férias) para cobrir o bloco inteiro.
+      const eventosAusencias = ausenciasAprovadas.map((a) => {
+        const endExclusive = new Date(a.data_fim);
+        endExclusive.setDate(endExclusive.getDate() + 1); // +1 dia
+
+        const tituloPorTipo =
+          a.tipo === 'ferias' ? '🌴 Férias'
+          : a.tipo === 'doenca' ? '🤒 Doença'
+          : '📅 Ausência';
+
+        return {
+          _id: `ausencia_${a._id}`,
+          tipo: 'ausencia',
+          // Para compatibilidade com o frontend (que lê `data` como Date):
+          // usamos data_inicio como `data` (início do bloco).
+          data: new Date(a.data_inicio),
+          // Campos extras para o FullCalendar (eventos allDay multi-dia).
+          start: new Date(a.data_inicio),
+          end: endExclusive,
+          allDay: true,
+          title: `${tituloPorTipo}: ${a.utilizador_id?.nome ?? 'Staff'}`,
+          utilizador_id: a.utilizador_id
+            ? { _id: String(a.utilizador_id._id), nome: a.utilizador_id.nome }
+            : null,
+          estado: 'concluida', // ausência não é uma tarefa ativa
+          tempo_limpeza_minutos: 0,
+          propriedade_id: null,
+          notas: a.notas || '',
+        };
+      });
+
+      // Junta tarefas + folgas fixas + ausências e ordena por data.
+      const resultado = [...tarefas, ...diasFolga, ...eventosAusencias].sort(
         (a, b) => new Date(a.data).getTime() - new Date(b.data).getTime()
       );
 

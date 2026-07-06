@@ -386,7 +386,7 @@ export default function AdminTarefasPage() {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmeter} className="space-y-4">
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium">Propriedade</label>
                   <select
@@ -412,6 +412,22 @@ export default function AdminTarefasPage() {
                     {staff.map((u) => (
                       <option key={u._id} value={u._id}>{u.nome}</option>
                     ))}
+                  </select>
+                </div>
+                {/* v1.57.0 (Prompt 79) — Select de tipo para permitir criar
+                    tarefas de manutenção (avarias) manualmente, não só limpezas. */}
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">Tipo</label>
+                  <select
+                    value={form.tipo}
+                    onChange={(e) => setForm((f) => ({ ...f, tipo: e.target.value }))}
+                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <option value="limpeza">Limpeza</option>
+                    <option value="manutencao">Manutenção</option>
+                    <option value="check_in">Check-in</option>
+                    <option value="check_out">Check-out</option>
+                    <option value="outro">Outro</option>
                   </select>
                 </div>
                 <div className="space-y-1.5">
