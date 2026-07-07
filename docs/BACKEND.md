@@ -80,13 +80,18 @@ Entidade principal do SaaS (multi-tenant). Cada empresa agrupa Propriedades e Ut
 ### `Propriedade`
 Representa um alojamento sincronizado com o Smoobu.
 
-| Campo                   | Tipo     | Notas                                                        |
-|-------------------------|----------|--------------------------------------------------------------|
-| `smoobu_id`             | String   | Único, indexado. ID do apartment no Smoobu (cruzamento webhook). |
-| `nome`                  | String   | Obrigatório.                                                 |
-| `empresa_id`            | ObjectId | `ref: 'Empresa'`. Obrigatório, indexado.                     |
-| `tempo_limpeza_minutos` | Number   | Default `60`. Usado se o payload do Smoobu não trouxer valor. |
-| `ativo`                 | Boolean  | Default `true`.                                              |
+| Campo                        | Tipo     | Notas                                                              |
+|------------------------------|----------|--------------------------------------------------------------------|
+| `smoobu_id`                  | String   | Único, indexado. ID do apartment no Smoobu (cruzamento webhook).   |
+| `nome`                       | String   | Obrigatório, trim.                                                 |
+| `morada`                     | String   | Obrigatório, trim. Geocoding automático (Nominatim) ao criar/editar. |
+| `coordenadas`                | Object   | `{ lat: Number, lng: Number }`. Preenchidas via geocoding (default null). |
+| `empresa_id`                 | ObjectId | `ref: 'Empresa'`. Obrigatório, indexado.                           |
+| `tempo_limpeza_minutos`      | Number   | Default `45`, `min: 0`. Usado se o payload do Smoobu não trouxer valor. |
+| `ativo`                      | Boolean  | Default `true`. Inativas são ignoradas pelo webhook.               |
+| `checklist`                  | [String] | Default `[]`. Itens de limpeza definidos pelo gestor (v1.34.0).    |
+| `capacidade_hospedes`        | Number   | Default `null`, `min: 0`. Vinda do Smoobu (v1.61.0 / Prompt 84).   |
+| `funcionario_preferencial_id`| ObjectId | `ref: 'Utilizador'`, default `null`, indexado. **Prompt 92 (Fase 1.5)** — staff preferencial da propriedade; a lógica de prioridade no load balancer será ativada num prompt seguinte. |
 
 ### `Utilizador`
 Admin, Manager ou Staff de uma empresa. Credenciais de login (email + password_hash).
@@ -136,9 +141,16 @@ Tarefa de limpeza gerada a partir de uma reserva do Smoobu.
 | `smoobu_reserva_id`     | String   | ID da reserva no Smoobu (auditoria / idempotência). Indexado.      |
 | `utilizador_id`         | ObjectId | `ref: 'Utilizador'`, **default `null`** → tarefa por atribuir.     |
 | `data`                  | Date     | Dia do check-in (meia-noite UTC). Obrigatório, indexado.           |
-| `tempo_limpeza_minutos` | Number   | Obrigatório, default `60`, `min: 0`. Unidade de carga.             |
+| `tempo_limpeza_minutos` | Number   | Obrigatório, default `45`, `min: 0`. Unidade de carga.             |
 | `tipo`                  | String   | `enum: ['limpeza','check_in','check_out','manutencao','outro']`.   |
 | `estado`                | String   | `enum: ['por_atribuir','atribuida','em_curso','concluida','cancelada']`. |
+| `observacoes`           | String   | Observações gerais (gestor/admin). Default `''`.                   |
+| `observacoes_staff`     | String   | Observações do staff ao concluir (v1.34.0). Default `''`.          |
+| `concluida_em`          | Date     | Data de conclusão (relatórios). Default `null`.                    |
+| `hora_conclusao`        | Date     | Timestamp preciso de conclusão (v1.34.0, auditoria). Default `null`. |
+| `avarias`               | [String] | Avarias reportadas pelo staff (v1.38.0). Default `[]`.             |
+| `checklist`             | [String] | Snapshot da checklist da propriedade na criação (v1.55.0 / Prompt 77). Default `[]`. |
+| `detalhes_reserva`      | Object   | **Prompt 92 (Fase 1.5)** — snapshot da reserva Smoobu. Sub-campos: `checkin` (String), `checkout` (String), `pax` (Number), `nome_hospede` (String). Preparado para Fase 1.5; o preenchimento via webhook/sincronização será feito num prompt seguinte. |
 
 > Nota: `empresa_id` é uma referência a `Empresa` (modelo criado na v1.2.0).
 
@@ -148,19 +160,55 @@ Tarefa de limpeza gerada a partir de uma reserva do Smoobu.
 
 Quando o Smoobu notifica uma **nova reserva** (`POST /webhooks/smoobu`), a API executa o seguinte fluxo **estrito**:
 
-1. **Receber o payload** — extrai o ID da propriedade, a data de check-in e o ID da reserva do payload do Smoobu. **Mapeamento primário (estrutura oficial):** `payload.data.apartment.id`, `payload.data.arrival`, `payload.data.id`. Fallbacks com `??` para variantes (`content.*`, campos achatados).
+1. **Receber o payload** — extrai o ID da propriedade, a data de check-in, o ID da reserva e os **detalhes da reserva** (checkin, checkout, pax, nome_hospede) do payload do Smoobu. **Mapeamento primário (estrutura oficial):** `payload.data.apartment.id`, `payload.data.arrival`, `payload.data.id`; `departure`, `guests`/`guestName` para os detalhes (Prompt 93). Fallbacks com `??` para variantes (`content.*`, campos achatados).
 2. **Encontrar a empresa** — procura a `Propriedade` por `smoobu_id` e obtém o respetivo `empresa_id`. Se não existir → erro (a tarefa não pode ser criada sem saber a empresa).
-3. **Procurar Staff/Managers** — lista todos os `Utilizador` com `role: { $in: ['staff','manager'] }`, `ativo: true` dessa empresa. (O manager também pode executar limpezas, pelo que entra no load balancing.)
-4. **Filtro de Ausências** — exclui os Staff que tenham uma `Ausencia` que cubra o dia do check-in. **v1.8.0:** verifica sobreposição de intervalos (`data_inicio <= dia AND data_fim >= dia`), mantendo também a query `data` legacy para retrocompatibilidade. Férias/folgas registadas via `/api/admin/ausencias` excluem automaticamente o staff da atribuição nesse período.
-5. **Cálculo de Carga (Load Balancing)** — para cada Staff disponível, soma `tempo_limpeza_minutos` de todas as `Tarefa` já atribuídas a esse Staff para o mesmo dia (excluindo `cancelada`/`concluida`). Staff sem tarefas conta como carga `0`.
-6. **Atribuição** — a nova Tarefa é atribuída ao Staff com **menor carga acumulada** (empate → primeiro encontrado).
-7. **Sem disponíveis** — se não houver Staff disponível (ou a lógica de atribuição falhar), a Tarefa é **mesmo assim criada** com `utilizador_id: null` e `estado: 'por_atribuir'`, para o Admin atribuir manualmente.
+3. **Procurar Staff** — lista todos os `Utilizador` com `role: 'staff'`, `ativo: true`, `eliminado_em: null` dessa empresa (v1.45.0: gestores já não recebem tarefas de limpeza).
+4. **Filtro de Ausências + Folgas** — exclui os Staff que tenham uma `Ausencia` **aprovada** que cubra o dia do check-in (`data_inicio <= dia AND data_fim >= dia`) e os Staff cujo dia da semana do check-in esteja no seu `dias_folga` (folgas fixas semanais).
+5. **Algoritmo VIP — Funcionário Preferencial (Prompt 93 / Fase 1.5)** — *antes* do load balancer geral, verifica se a propriedade tem `funcionario_preferencial_id`. Se tiver, e esse funcionário estiver **disponível** (passou os filtros de ausência + folga) e **dentro do SLA de 8h/dia** (`cargaLimpeza + tempoNovaTarefa ≤ CAPACIDADE_MAXIMA_MINUTOS` = 480 min), a tarefa é-lhe atribuída **obrigatoriamente**, ignorando o cálculo de distância/carga dos outros. Só se o preferencial não puder (folga/ausência/inativo ou excede o SLA) é que o sistema faz **fallback** para o load balancer geral.
+6. **Cálculo de Carga + Tempo de Viagem (Load Balancing geral)** — para cada Staff disponível, soma `tempo_limpeza_minutos` das tarefas já atribuídas nesse dia (excluindo `cancelada`/`concluida`) + tempo de viagem (Haversine entre a última tarefa do dia e a nova propriedade) + tempo da nova tarefa. Se a `carga_total > 480 min` (SLA de 8h), o utilizador é excluído (v1.15.0).
+7. **Atribuição** — a nova Tarefa é atribuída ao Staff com **menor `carga_total`** (empate → primeiro encontrado).
+8. **Sem disponíveis** — se não houver Staff disponível (ou a lógica de atribuição falhar), a Tarefa é **mesmo assim criada** com `utilizador_id: null` e `estado: 'por_atribuir'`, para o Admin atribuir manualmente.
+9. **Scheduler sequencial** — se a tarefa for atribuída, calcula a hora exata de início (11:00 por defeito; após a última tarefa do dia + viagem, com proteção de almoço 13h-14h). Guarda os **`detalhes_reserva`** (checkin, checkout, pax, nome_hospede) extraídos do payload (Prompt 93).
+
+> **Reação a ações do Smoobu (v1.19.0):** `newReservation` cria; `updateReservation` atualiza data/propriedade/tempo + `detalhes_reserva` (Prompt 93) e reavalia atribuição se a data mudou; `cancellation` cancela (respeita concluídas). Idempotente por `smoobu_reserva_id`.
 
 ### Regra de resposta (anti-timeout)
 > O handler devolve **`200 OK` imediato** (`{ status: 'recebido' }`) **antes** de qualquer acesso à BD. O processamento das regras decorre de forma **assíncrona** (`setImmediate`), porque o Smoobu cancela pedidos demorados. Erros do processamento assíncrono são capturados em `try/catch` e registados (não propagam para o cliente).
 
 ### Regra de robustez
-> A criação da Tarefa (passo 7) **nunca** é impedida por falhas na lógica de atribuição (passos 3–6): se algo falhar ao determinar o utilizador, a tarefa é criada com `utilizador_id: null` e o erro é registado. Apenas a falha nos passos 1–2 (payload inválido / propriedade inexistente) impede a criação, por serem pré-requisitos.
+> A criação da Tarefa (passo 8) **nunca** é impedida por falhas na lógica de atribuição (passos 3–7): se algo falhar ao determinar o utilizador, a tarefa é criada com `utilizador_id: null` e o erro é registado. Apenas a falha nos passos 1–2 (payload inválido / propriedade inexistente) impede a criação, por serem pré-requisitos.
+
+---
+
+## 3.3. Cron Jobs (node-cron)
+
+O backend tem três cron jobs diários, todos iniciados no arranque (`server.js`, dentro de `if (require.main === module)` — não correm nos testes):
+
+| Job | Ficheiro | Agenda (cron) | Timezone | Descrição |
+|-----|----------|---------------|----------|-----------|
+| **Daily Briefing** | `jobs/dailyBriefing.js` | `0 8 * * *` | servidor (configurar `TZ=Europe/Lisbon` no Render) | 08:00 — envia via WhatsApp (mock) + push o plano de limpezas de **hoje** a cada staff. |
+| **Cão de Guarda** (Prompt 96) | `jobs/caoGuarda.js` | `0 18 * * *` | `Europe/Lisbon` (opção nativa do node-cron) | 18:00 — envia push por cada tarefa de limpeza de **hoje** ainda não concluída (lembra o staff de fechar o dia). |
+| **Agenda de Amanhã** (Prompt 94) | `jobs/agendaAmanha.js` | `0 19 * * *` | `Europe/Lisbon` (opção nativa do node-cron) | 19:00 — envia push a cada staff com trabalho **amanhã**: `📅 Agenda de Amanhã: Tens X tarefa(s) agendada(s). Entra na app para ver o itinerário`. |
+
+### Cão de Guarda (`jobs/caoGuarda.js`) — Prompt 96
+1. Calcula o intervalo do dia **atual** (meia-noite UTC).
+2. Procura todas as `Tarefa` com `data` nesse intervalo, `tipo: 'limpeza'`, `utilizador_id` ≠ null e `estado` ∈ `{ atribuida, em_curso }` (atribuídas mas não concluídas), com populate de `propriedade_id` (nome) e `utilizador_id` (ativo, eliminado_em).
+3. Para cada tarefa "esquecida", chama `notificarUtilizador(staffId, '⚠️ Tarefa Incompleta', 'Ainda não marcaste a limpeza da [nome da propriedade] como concluída. Por favor, atualiza a app!', '/staff')` (fire-and-forget; skip silencioso se não houver `pushSubscription` ou Web Push não configurado).
+4. Ignora tarefas cujo staff foi entretanto desativado/eliminado.
+5. Devolve `{ encontradas, notificadas }` (estatísticas para testes/logs).
+
+> **Nota sobre estados:** o modelo `Tarefa` tem os estados `['por_atribuir','atribuida','em_curso','concluida','cancelada']`. Não existe `'pendente'` — o equivalente (atribuída mas ainda não iniciada) é `'atribuida'`. O prompt pede 'pendente' ou 'em_curso', pelo que o job usa `{ atribuida, em_curso }` (= atribuídas + não concluídas).
+>
+> **Uma push por tarefa:** ao contrário do `Agenda de Amanhã` (que agrupa por staff), o Cão de Guarda envia **uma push por tarefa esquecida** (a mensagem inclui o nome da propriedade, pelo que cada push é específica). Se um staff tiver 3 limpezas por concluir, recebe 3 pushes.
+
+### Agenda de Amanhã (`jobs/agendaAmanha.js`) — Prompt 94
+1. Calcula o intervalo do dia **seguinte** (meia-noite UTC).
+2. Procura todas as `Tarefa` com `data` nesse intervalo e `estado` ∈ `{ atribuida, por_atribuir }`, com populate de `utilizador_id` (nome, ativo, eliminado_em).
+3. Agrupa por `utilizador_id` — só interessam as atribuídas a staff **ativos** e não eliminados. Tarefas `por_atribuir` (sem utilizador) não têm destinatário → não geram push.
+4. Para cada staff, chama `notificarUtilizador(staffId, '📅 Agenda de Amanhã', 'Tens X tarefa(s) agendada(s). Entra na app para ver o itinerário', '/staff')` (fire-and-forget; skip silencioso se não houver `pushSubscription` ou Web Push não configurado).
+5. Devolve `{ processados, notificados, tarefas }` (estatísticas para testes/logs).
+
+> **Timezone:** o `Cão de Guarda` e o `Agenda de Amanhã` usam a opção `timezone: 'Europe/Lisbon'` do node-cron, pelo que os horários são estáveis mesmo que o servidor esteja em UTC (caso do Render) — acompanham automaticamente as mudanças legais de horário de Verão/Inverno de Portugal. O `Daily Briefing` usa o fuso do servidor (definir `TZ=Europe/Lisbon` no ambiente para alinhar).
 
 ---
 
@@ -610,9 +658,13 @@ Vai buscar a lista de apartamentos ao Smoobu (endpoint oficial `/api/apartments`
 
 #### `POST /api/admin/smoobu/sincronizar-propriedades`
 
-Importa em massa os apartamentos do Smoobu para a coleção `Propriedade`. Usa upsert com `$setOnInsert`: **insere apenas as propriedades que ainda não existem** (por `smoobu_id`). As propriedades já existentes **não são alteradas** — preserva edições manuais do Admin (nome, morada, tempo de limpeza, coordenadas, ativo).
+Importa em massa os apartamentos do Smoobu para a coleção `Propriedade`.
 
-Caso de uso: configuração inicial — em vez de criar cada propriedade à mão, o Admin sincroniza todas de uma vez e depois edita só as que precisam de ajustes (morada, tempo de limpeza).
+**Comportamento (Prompt 92 / Fase 1.5):**
+- **Propriedades novas** → criadas com `nome`, `morada`, `coordenadas` (geocoding via Nominatim), `capacidade_hospedes` e `tempo_limpeza_minutos` (45 min por defeito).
+- **Propriedades já existentes** → atualiza **SEMPRE** a `morada` e a `capacidade_hospedes` quando o Smoobu as trouxer no payload (a fonte de verdade destes dois campos passa a ser o Smoobu). Refaz o geocoding sempre que a morada for atualizada. Os restantes campos (`nome`, `tempo_limpeza_minutos`, `ativo`, `checklist`, `funcionario_preferencial_id`) continuam a ser preservados, mantendo as edições manuais do gestor.
+
+Caso de uso: configuração inicial **e** manutenção contínua — mantém as moradas e capacidades sincronizadas com o Smoobu ao longo do tempo.
 
 **Requer:** `SMOOBU_API_KEY`. O `empresa_id` vem do JWT.
 
@@ -621,7 +673,8 @@ Caso de uso: configuração inicial — em vez de criar cada propriedade à mão
 {
   "totalRecebidas": 20,
   "criadas": 15,
-  "existentes": 5,
+  "atualizadas": 3,
+  "existentes": 2,
   "erros": 0,
   "detalheErros": []
 }
@@ -630,6 +683,8 @@ Caso de uso: configuração inicial — em vez de criar cada propriedade à mão
 **Erros:** `400` (API key em falta), `502` (erro no fetch ao Smoobu).
 
 > **Nota sobre o `atualizarPropriedade`:** o endpoint `PUT /api/admin/propriedades/:id` já existe desde a v1.19.1 — permite editar `nome`, `smoobu_id`, `morada`, `tempo_limpeza_minutos` (com re-geocoding automático se a morada mudar). Não foi duplicado nesta versão.
+
+> **Diferença para o `importarPropriedades` (POST /api/gestor/smoobu/propriedades):** este é multi-tenant por `empresa_id` (só cria/atualiza propriedades da empresa do gestor) e mantém o comportamento conservador de **só preencher** a morada quando está `'A definir'` (não sobrescreve moradas reais). O `sincronizarPropriedades` (este endpoint) é mais agressivo: sobrescreve sempre morada + capacidade quando o Smoobu as traz.
 
 ---
 
@@ -770,3 +825,8 @@ As ações diretas do admin (falta súbita, baixa prolongada, registo manual) cr
 | v1.22.0    | 1.22.0 | **Sincronizar propriedades do Smoobu (upsert em massa):** novo endpoint `POST /api/admin/smoobu/sincronizar-propriedades` (`smoobuController` → `sincronizarPropriedades`) que faz `fetch https://login.smoobu.com/api/apartments` e faz upsert de cada apartamento com `$setOnInsert` — **insere só as que não existem**, não altera as existentes (preserva edições manuais do Admin: nome, morada, tempo, coordenadas, ativo). `empresa_id` vem do JWT. Devolve contadores: `totalRecebidas`, `criadas`, `existentes`, `erros`, `detalheErros`. Caso de uso: configuração inicial (importar todas as propriedades de uma vez). O endpoint `PUT /api/admin/propriedades/:id` (`atualizarPropriedade`) **já existia** desde a v1.19.1 (nome, smoobu_id, morada, tempo + re-geocoding) — não foi duplicado. 5 novos testes (61 no total): sem token 401, sem API key 400, cria propriedades novas, idempotente (2x não duplica), preserva edições manuais (propriedade com nome/tempo/ativo editados não é sobreposta). |
 | v1.23.0    | 1.23.0 | **Calendário Visual Avançado — endpoint unificado:** novo endpoint `GET /api/admin/calendario/dados` (`adminController` → `getDadosCalendario`) que devolve tarefas da empresa num intervalo de datas com filtros opcionais (`propriedadeId`, `utilizadorId`, `estado`) + populate de propriedade (`nome`, `morada`, `coordenadas`) e utilizador (`nome`). Diferença para `getTarefas`: não exclui canceladas por defeito (calendário pode mostrá-las a tracejado), aceita `utilizadorId=null` para filtrar tarefas por atribuir, e o populate inclui `morada`+`coordenadas` (para tooltips e futuro mapa de rotas). 8 novos testes (69 no total): sem token 401, sem filtros (inclui canceladas), populate (nome+morada+utilizador), filtro por propriedade, filtro por utilizador, filtro utilizadorId=null (por atribuir), filtro por estado=concluida, combina filtros. Fix de teste existente: o teste do webhook assumia que só havia 1 staff (quebrado pelo `beforeAll` do calendário que cria 2 staff extra) — corrigido para verificar apenas que a tarefa foi atribuída a algum staff ativo (não null), que é o comportamento correto do load balancer. |
 | v1.24.0    | 1.24.0 | **Fluxo de aprovação de ausências:** (1) Modelo `Ausencia` — novo campo `estado` (`pendente`\|`aprovada`\|`rejeitada`, default `pendente`); enum do `tipo` alargado para `ferias`\|`doenca`\|`outro` (as "folgas" fixas semanais continuam em `dias_folga` do Utilizador). (2) **Staff routes** — novo `controllers/staffController.js` + `routes/staffRoutes.js` montado em `/api/staff`: `GET /ausencias` (histórico próprio) + `POST /ausencias` (cria pedido sempre `pendente`; staff não pode auto-aprovar). (3) **Aprovação** — `PATCH /api/admin/ausencias/:id/estado` (`ausenciaController` → `aprovarRejeitarAusencia`): aprovar → redistribui tarefas do período via load balancer (helper `redistribuirTarefasPeriodo` extraído e reutilizável); rejeitar → só atualiza estado. (4) **Webhook** — `determinarUtilizadorAtribuido` e `atualizarTarefaPorReserva` agora só consideram ausências `aprovada` (pendentes/rejeitadas não bloqueiam atribuição). (5) Ações diretas do admin (falta súbita, baixa prolongada, registo manual) criam ausências com `estado: 'aprovada'`. 7 novos testes (76 no total): staff cria pedido (pendente), staff vê suas ausências, staff sem token 401, admin aprova (redistribui — verifica utilizador_id mudou), admin rejeita (não mexe em tarefas), estado inválido 400, ausência inexistente 404. |
+| Prompt 92  | —      | **Upgrade de modelos + force-update do Smoobu (Fase 1.5):** (1) Modelo `Propriedade` — novo campo `funcionario_preferencial_id` (ObjectId `ref: 'Utilizador'`, default `null`, indexado) para suportar staff preferencial por propriedade (lógica de prioridade no load balancer será ativada num prompt seguinte). (2) Modelo `Tarefa` — novo objeto `detalhes_reserva` com sub-campos `checkin` (String), `checkout` (String), `pax` (Number), `nome_hospede` (String) — snapshot da reserva Smoobu (preenchimento via webhook/sincronização num prompt seguinte). (3) `sincronizarPropriedades` (`smoobuController`) — deixa de preservar a morada/capacidade antigas: para propriedades já existentes, atualiza **SEMPRE** a `morada` e a `capacidade_hospedes` quando o Smoobu as trouxer no payload, refazendo o geocoding da morada nova e guardando com `await existente.save()`. Os restantes campos (`nome`, `tempo_limpeza_minutos`, `ativo`, `checklist`, `funcionario_preferencial_id`) continuam preservados. 1 novo teste (104 no total): força update de morada + capacidade em propriedade existente; o teste "preserva edições manuais" foi renomeado/refinado para "preserva nome/tempo/ativo quando o Smoobu não traz morada/capacidade no payload". |
+| Prompt 93  | —      | **Algoritmo VIP + Detalhes da Reserva (Fase 1.5):** (1) `webhookController.extrairDadosReserva` — extrai agora `detalhesReserva` ({ checkin, checkout, pax, nome_hospede }) do payload do Smoobu (variantes: arrival/departure, guests/numPeople/adults+children, guestName/firstName+lastName/guest.name). (2) `criarTarefaPorReserva` — guarda `detalhes_reserva` no `Tarefa.create`; ao re-activar tarefa cancelada, atualiza também os detalhes. (3) `atualizarTarefaPorReserva` — atualiza `detalhes_reserva` no update (reserva editada). (4) **Algoritmo VIP** em `determinarUtilizadorAtribuido` — novo parâmetro `propriedadeId`; antes do load balancer geral, se a propriedade tiver `funcionario_preferencial_id` e esse staff estiver disponível (passou filtros de ausência aprovada + folga fixa) e dentro do SLA de 8h/dia (`cargaLimpeza + novaTarefa ≤ 480min`), atribui obrigatoriamente a ele; só faz fallback para o load balancer geral (Haversine + menor carga) se o preferencial não puder. Novo helper `calcularCargaLimpezaDia`. (5) `tarefaController.autoAtribuirTarefas` — passa `propriedade_id._id` ao load balancer para o VIP também aplicar às tarefas órfãs. 4 novos testes (108 no total): guarda detalhes_reserva; VIP atribui ao preferencial; VIP fallback se exceder SLA; VIP fallback se tiver folga. |
+| Prompt 94  | —      | **Cron Job "Agenda de Amanhã" (19h):** novo ficheiro `jobs/agendaAmanha.js` — cron `0 19 * * *` com `timezone: 'Europe/Lisbon'` (estável mesmo em servidor UTC, acompanha horário de Verão/Inverno de PT). Lógica: calcula o intervalo do dia seguinte → procura `Tarefa` com `estado ∈ { atribuida, por_atribuir }` → agrupa por `utilizador_id` (só staff ativos não eliminados; `por_atribuir` sem utilizador não gera push) → para cada staff chama `notificarUtilizador(staffId, '📅 Agenda de Amanhã', 'Tens X tarefa(s) agendada(s). Entra na app para ver o itinerário', '/staff')` (fire-and-forget). `server.js` importa e inicia o job no arranque (dentro de `require.main === module`, não corre nos testes). `notificarUtilizador` carregado via `require` lazy dentro da função para permitir `jest.spyOn` nos testes. Nova secção 3.3 (Cron Jobs) no BACKEND.md. 4 novos testes (112 no total): notifica cada staff agrupado (verifica título, singular/plural, URL); ignora `por_atribuir`/concluídas/canceladas; sem tarefas → não notifica; ignora staff inativo. |
+| Prompt 95  | —      | **`atualizarPropriedade` aceita `funcionario_preferencial_id`:** o `PUT /api/gestor/propriedades/:id` (`gestorController`) passa a aceitar o campo `funcionario_preferencial_id` no body. Aceita `null`/string vazia (remove o preferencial) ou um ObjectId; valida que é um staff ativo (`role: 'staff'`, `ativo: true`, `eliminado_em: null`) da mesma empresa (400 se não for). Mensagem de "Nenhum campo para atualizar" atualizada para incluir o novo campo. Sem novos testes (coberto pelos testes existentes do PUT + a validação é inline). 112 testes mantêm-se a passar. |
+| Prompt 96  | —      | **Cron Job "Cão de Guarda" (18h):** novo ficheiro `jobs/caoGuarda.js` — cron `0 18 * * *` com `timezone: 'Europe/Lisbon'`. Lógica: calcula o intervalo do dia atual → procura `Tarefa` com `tipo: 'limpeza'`, `utilizador_id` ≠ null e `estado ∈ { atribuida, em_curso }` (atribuídas mas não concluídas; nota: o modelo não tem `'pendente'` — `'atribuida'` é o equivalente) → populate de `propriedade_id` (nome) + `utilizador_id` (ativo, eliminado_em) → para cada tarefa esquecida chama `notificarUtilizador(staffId, '⚠️ Tarefa Incompleta', 'Ainda não marcaste a limpeza da [nome da propriedade] como concluída. Por favor, atualiza a app!', '/staff')` (fire-and-forget; uma push por tarefa, não agrupado por staff). Ignora staff inativo/eliminado. `server.js` importa e inicia no arranque (`require.main === module`). `notificarUtilizador` via require lazy (permite `jest.spyOn` nos testes). Secção 3.3 (Cron Jobs) atualizada com a tabela dos 3 jobs + descrição detalhada do Cão de Guarda. 4 novos testes (116 no total): notifica por tarefa esquecida (verifica título/corpo com nome da propriedade/link); ignora concluídas/canceladas/por_atribuir/manutencao; sem tarefas → não notifica; ignora staff inativo. |

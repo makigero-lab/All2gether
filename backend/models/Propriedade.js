@@ -64,6 +64,18 @@ const propriedadeSchema = new mongoose.Schema(
       default: null,
       min: 0,
     },
+    // Prompt 92 (Fase 1.5) — Funcionário preferencial desta propriedade.
+    // Quando definido, o load balancer do webhook deve dar prioridade a este
+    // staff (desde que esteja disponível: ativo, sem ausência/folga no dia e
+    // dentro do SLA de capacidade). Preparado para Fase 1.5 — o campo existe
+    // no modelo mas a lógica de preferência no webhook será ativada num
+    // prompt seguinte.
+    funcionario_preferencial_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Utilizador',
+      default: null,
+      index: true,
+    },
   },
   { timestamps: true }
 );

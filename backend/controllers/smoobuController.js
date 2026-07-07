@@ -312,22 +312,28 @@ exports.getPropriedadesSmoobu = async (req, res) => {
  * POST /api/admin/smoobu/sincronizar-propriedades
  *
  * Importa em massa os apartamentos do Smoobu para a coleção Propriedade.
- * Usa upsert com `$setOnInsert`: insere APENAS as propriedades que ainda
- * não existem (por `smoobu_id`). As propriedades já existentes NÃO são
- * alteradas — preserva edições manuais do Admin (nome, morada, tempo de
- * limpeza, coordenadas, ativo).
  *
- * Isto é útil na configuração inicial: em vez de criar cada propriedade à
- * mão, o Admin sincroniza todas de uma vez e depois edita só as que precisam
- * de ajustes (morada, tempo de limpeza).
+ * Comportamento (Prompt 92 / Fase 1.5):
+ *   - Propriedades NOVAS → são criadas com nome, morada, coordenadas
+ *     (geocoding), capacidade_hospedes e tempo_limpeza_minutos (45 por defeito).
+ *   - Propriedades JÁ EXISTENTES → atualiza SEMPRE a `morada` e a
+ *     `capacidade_hospedes` quando o Smoobu as trouxer no payload (a fonte
+ *     de verdade destes dois campos passa a ser o Smoobu). Refaz o geocoding
+ *     sempre que a morada for atualizada. Os restantes campos (nome,
+ *     tempo_limpeza_minutos, ativo, checklist, funcionario_preferencial_id)
+ *     continuam a ser preservados, mantendo as edições manuais do gestor.
+ *
+ * Isto é útil tanto na configuração inicial como para manter as moradas e
+ * capacidades sincronizadas com o Smoobu ao longo do tempo.
  *
  * Requer: variável de ambiente SMOOBU_API_KEY.
  *
  * Resposta 200:
  *   {
  *     totalRecebidas: number,
- *     criadas: number,       // novas (inseridas)
- *     existentes: number,    // já existiam (não mexidas)
+ *     criadas: number,        // novas (inseridas)
+ *     atualizadas: number,    // já existiam e foram atualizadas (morada/capacidade)
+ *     existentes: number,     // já existiam e o Smoobu não trouxe morada/capacidade
  *     erros: number,
  *     detalheErros: [{ smoobuId, erro }]
  *   }
@@ -453,12 +459,17 @@ exports.sincronizarPropriedades = async (req, res) => {
         });
         criadas++;
       } else {
-        // JÁ EXISTE: Atualiza APENAS se a morada for 'A definir' ou se
-        // faltar a capacidade_hospedes. Preserva edições manuais do gestor.
+        // Prompt 92 (Fase 1.5) — JÁ EXISTE: atualiza SEMPRE a capacidade_hospedes
+        // e a morada quando o Smoobu as trouxer no payload (deixa de preservar o
+        // valor antigo destes dois campos — a fonte de verdade passa a ser o
+        // Smoobu). Os restantes campos (nome, tempo_limpeza_minutos, ativo,
+        // checklist, funcionario_preferencial_id) continuam a ser preservados,
+        // mantendo as edições manuais do gestor. Refaz o geocoding sempre que a
+        // morada for atualizada.
         let mudou = false;
 
-        // Morada: só preenche se estiver vazia ('A definir') e o Smoobu trouxer uma real.
-        if (existente.morada === 'A definir' && moradaTexto !== 'A definir') {
+        // Morada: atualiza SEMPRE que o Smoobu trouxer uma morada real.
+        if (moradaTexto !== 'A definir') {
           existente.morada = moradaTexto;
           try {
             const coords = await obterCoordenadas(moradaTexto);
@@ -469,8 +480,8 @@ exports.sincronizarPropriedades = async (req, res) => {
           mudou = true;
         }
 
-        // Capacidade: só atualiza se trouxermos um valor e for diferente.
-        if (capacidade && existente.capacidade_hospedes !== capacidade) {
+        // Capacidade: atualiza SEMPRE que o Smoobu trouxer um valor.
+        if (capacidade) {
           existente.capacidade_hospedes = capacidade;
           mudou = true;
         }

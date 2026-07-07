@@ -120,10 +120,78 @@ function extrairDadosReserva(payload) {
     content.reservation_id ??
     null;
 
+  // 4) detalhes_reserva (Prompt 93 / Fase 1.5) — check-in, check-out,
+  //    número de hóspedes (pax) e nome do hóspede. Cobrem-se as variantes
+  //    do webhook do Smoobu (arrival/departure) e da REST API
+  //    (start_date/end_date), bem como os formatos comuns de hóspede.
+  const checkin =
+    data?.arrival ??
+    data?.check_in ??
+    data?.checkIn ??
+    data?.startDate ??
+    content.arrival ??
+    content.check_in ??
+    content.checkIn ??
+    content.startDate ??
+    null;
+
+  const checkout =
+    data?.departure ??
+    data?.check_out ??
+    data?.checkOut ??
+    data?.endDate ??
+    content.departure ??
+    content.check_out ??
+    content.checkOut ??
+    content.endDate ??
+    null;
+
+  // pax — número de hóspedes. Variantes: guests (Smoobu REST),
+  // numPeople, numberOfGuests, pax, adults+children.
+  const paxRaw =
+    data?.guests ??
+    data?.numPeople ??
+    data?.numberOfGuests ??
+    data?.pax ??
+    (data?.adults != null ? Number(data.adults) + Number(data.children ?? 0) : null) ??
+    content.guests ??
+    content.numPeople ??
+    content.numberOfGuests ??
+    content.pax ??
+    null;
+  const pax = paxRaw != null ? Number(paxRaw) : null;
+
+  // nome_hospede — nome do hóspede principal. Variantes: guestName,
+  // firstName + lastName, guest.firstName, name.
+  const nomeHospede =
+    data?.guestName ??
+    data?.guest_name ??
+    data?.guest?.name ??
+    data?.guest?.firstName ??
+    (data?.firstName || data?.lastName
+      ? [data?.firstName, data?.lastName].filter(Boolean).join(' ')
+      : null) ??
+    data?.name ??
+    content.guestName ??
+    content.guest_name ??
+    content.guest?.name ??
+    (content?.firstName || content?.lastName
+      ? [content?.firstName, content?.lastName].filter(Boolean).join(' ')
+      : null) ??
+    null;
+
+  const detalhesReserva = {
+    checkin: checkin != null ? String(checkin) : null,
+    checkout: checkout != null ? String(checkout) : null,
+    pax: Number.isFinite(pax) ? pax : null,
+    nome_hospede: nomeHospede != null ? String(nomeHospede).trim().slice(0, 200) : null,
+  };
+
   return {
     smoobuPropId: smoobuPropId != null ? String(smoobuPropId) : null,
     dataCheckInRaw: dataCheckInRaw != null ? String(dataCheckInRaw) : null,
     reservaId: reservaId != null ? String(reservaId) : null,
+    detalhesReserva,
     // Mantém-se `content` para retrocompatibilidade com quem consome esta função.
     content,
   };
@@ -136,6 +204,37 @@ function extrairDadosReserva(payload) {
 // v1.53.0 — CAPACIDADE_MAXIMA_MINUTOS e calcularTempoViagem foram movidos
 // para backend/utils/scheduler.js (partilhados com tarefaController.js para
 // a reatribuição inteligente). Importados no topo do ficheiro.
+
+/**
+ * Calcula o tempo de limpeza acumulado (minutos) de um utilizador num dado
+ * dia (range), somando tempo_limpeza_minutos das tarefas já atribuídas
+ * (excluindo canceladas e concluídas). Usado pelo Algoritmo VIP (Prompt 93)
+ * para validar o SLA de 8h/dia do funcionário preferencial.
+ *
+ * @param {import('mongoose').Types.ObjectId} empresaId
+ * @param {import('mongoose').Types.ObjectId} utilizadorId
+ * @param {{start: Date, end: Date}} range
+ * @returns {Promise<number>}
+ */
+async function calcularCargaLimpezaDia(empresaId, utilizadorId, range) {
+  const res = await Tarefa.aggregate([
+    {
+      $match: {
+        empresa_id: empresaId,
+        utilizador_id: utilizadorId,
+        data: { $gte: range.start, $lt: range.end },
+        estado: { $nin: ['cancelada', 'concluida'] },
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        total: { $sum: '$tempo_limpeza_minutos' },
+      },
+    },
+  ]);
+  return res.length > 0 ? res[0].total : 0;
+}
 
 /**
  * Determina o utilizador (Staff) a quem atribuir a tarefa, aplicando:
@@ -154,15 +253,26 @@ function extrairDadosReserva(payload) {
  *   carga_total > CAPACIDADE_MAXIMA_MINUTOS (480 min = 8h), o utilizador
  *   é excluído. Se TODOS excederem, devolve null (tarefa por_atribuir).
  *
+ * Prompt 93 (Fase 1.5) — Algoritmo VIP (funcionário preferencial):
+ *   Antes de correr o load balancer geral, verifica se a propriedade tem
+ *   `funcionario_preferencial_id`. Se tiver, e esse funcionário estiver
+ *   ativo + disponível (sem ausência aprovada/folga fixa no dia) + não
+ *   ultrapassar o limite de 8h/dia (CAPACIDADE_MAXIMA_MINUTOS) com a nova
+ *   limpeza, a tarefa é-lhe atribuída OBRIGATORIAMENTE (ignora o cálculo
+ *   de distância/carga dos outros). Só se o preferencial não puder é que o
+ *   sistema faz fallback para o load balancer geral (funcionário mais
+ *   próximo / menos carregado).
+ *
  * Devolve null se não houver ninguém disponível.
  *
  * @param {import('mongoose').Types.ObjectId} empresaId
  * @param {{start: Date, end: Date}} range
  * @param {{ lat: number, lng: number } | null} coordenadasNovaPropriedade
  * @param {number} tempoNovaTarefa - tempo_limpeza_minutos da nova tarefa
+ * @param {import('mongoose').Types.ObjectId|null} [propriedadeId=null] - id da propriedade (para VIP)
  * @returns {Promise<mongoose.Types.ObjectId|null>}
  */
-async function determinarUtilizadorAtribuido(empresaId, range, coordenadasNovaPropriedade, tempoNovaTarefa) {
+async function determinarUtilizadorAtribuido(empresaId, range, coordenadasNovaPropriedade, tempoNovaTarefa, propriedadeId = null) {
   // Passo 3 — Procurar todos os Staff ativos da empresa.
   // v1.45.0: só role 'staff' (gestores não recebem tarefas de limpeza).
   const staff = await Utilizador.find({
@@ -205,6 +315,46 @@ async function determinarUtilizadorAtribuido(empresaId, range, coordenadasNovaPr
   });
 
   if (disponiveis.length === 0) return null;
+
+  // ----------------------------------------------------------------
+  // Prompt 93 (Fase 1.5) — Algoritmo VIP (funcionário preferencial).
+  // ----------------------------------------------------------------
+  // Antes de correr o load balancer geral, verifica se a propriedade tem
+  // um funcionario_preferencial_id. Se tiver, e esse funcionário estiver
+  // disponível + dentro do SLA de 8h/dia com a nova limpeza, atribui-se
+  // obrigatoriamente a ele. Só se o preferencial não puder é que se faz
+  // fallback para o load balancer geral.
+  if (propriedadeId) {
+    const propVIP = await Propriedade.findById(propriedadeId)
+      .select('funcionario_preferencial_id')
+      .lean();
+    const vipId = propVIP?.funcionario_preferencial_id;
+    if (vipId) {
+      const vipIdStr = String(vipId);
+      const vip = disponiveis.find((s) => String(s._id) === vipIdStr);
+      if (vip) {
+        // O preferencial está disponível (passou os filtros de ausência +
+        // folga). Falta validar o SLA de capacidade (8h/dia).
+        const cargaLimpezaVIP = await calcularCargaLimpezaDia(empresaId, vip._id, range);
+        const cargaTotalVIP = cargaLimpezaVIP + Number(tempoNovaTarefa);
+        if (cargaTotalVIP <= CAPACIDADE_MAXIMA_MINUTOS) {
+          console.log(
+            `⭐ Algoritmo VIP: tarefa atribuída ao funcionário preferencial ${vipIdStr} ` +
+              `(carga ${cargaTotalVIP}min ≤ ${CAPACIDADE_MAXIMA_MINUTOS}min).`
+          );
+          return vip._id;
+        }
+        console.log(
+          `⭐ Algoritmo VIP: preferencial ${vipIdStr} excede SLA ` +
+            `(${cargaTotalVIP}min > ${CAPACIDADE_MAXIMA_MINUTOS}min) — fallback para load balancer geral.`
+        );
+      } else {
+        console.log(
+          `⭐ Algoritmo VIP: preferencial ${vipIdStr} indisponível (folga/ausência/inativo) — fallback para load balancer geral.`
+        );
+      }
+    }
+  }
 
   // Passo 5 — Cálculo de Carga + Tempo de Viagem (v1.14.0):
   // carga_total = tempo_limpeza acumulado + tempo_viagem
@@ -329,7 +479,7 @@ const ACOES_CANCELAR = [
  * @returns {Promise<object|null>} a tarefa afetada, ou null se ignorada.
  */
 async function processarReservaSmoobu(payload) {
-  const { smoobuPropId, dataCheckInRaw, reservaId, content } =
+  const { smoobuPropId, dataCheckInRaw, reservaId, detalhesReserva, content } =
     extrairDadosReserva(payload);
 
   const action =
@@ -349,6 +499,7 @@ async function processarReservaSmoobu(payload) {
       reservaId,
       smoobuPropId,
       dataCheckInRaw,
+      detalhesReserva,
       content
     );
     if (atualizada) return atualizada;
@@ -367,7 +518,7 @@ async function processarReservaSmoobu(payload) {
     return null;
   }
 
-  return criarTarefaPorReserva(reservaId, smoobuPropId, dataCheckInRaw, content);
+  return criarTarefaPorReserva(reservaId, smoobuPropId, dataCheckInRaw, detalhesReserva, content);
 }
 
 /* ------------------------------------------------------------------ */
@@ -379,8 +530,11 @@ async function processarReservaSmoobu(payload) {
  * Aplica idempotência (se já existir tarefa com o mesmo smoobu_reserva_id,
  * não duplica). Se a tarefa existente estiver cancelada (reserva foi
  * cancelada e agora re-criada), re-activa-a.
+ *
+ * Prompt 93 (Fase 1.5): guarda os detalhes_reserva (checkin, checkout,
+ * pax, nome_hospede) extraídos do payload do Smoobu.
  */
-async function criarTarefaPorReserva(reservaId, smoobuPropId, dataCheckInRaw, content) {
+async function criarTarefaPorReserva(reservaId, smoobuPropId, dataCheckInRaw, detalhesReserva, content) {
   if (!smoobuPropId || !dataCheckInRaw) {
     throw new Error(
       'Payload do Smoobu inválido: propriedade ou data_check_in em falta.'
@@ -398,11 +552,16 @@ async function criarTarefaPorReserva(reservaId, smoobuPropId, dataCheckInRaw, co
     if (existente) {
       // Se a tarefa foi cancelada (reserva cancelada e agora re-criada),
       // re-activa e mantém a atribuição (ou por_atribuir se não tinha).
+      // Prompt 93: atualiza também os detalhes_reserva (a reserva pode ter
+      // sido re-criada com dados diferentes).
       if (existente.estado === 'cancelada') {
         console.log(
           `♻️  Reserva ${reservaId} re-activada (tarefa ${existente._id} estava cancelada).`
         );
         existente.estado = existente.utilizador_id ? 'atribuida' : 'por_atribuir';
+        if (detalhesReserva) {
+          existente.detalhes_reserva = detalhesReserva;
+        }
         await existente.save();
         return existente;
       }
@@ -439,13 +598,15 @@ async function criarTarefaPorReserva(reservaId, smoobuPropId, dataCheckInRaw, co
     45;
 
   // Load balancer (best-effort: se falhar, cria sem atribuição).
+  // Prompt 93: passa o propriedade._id para o Algoritmo VIP (preferencial).
   let utilizadorAtribuido = null;
   try {
     utilizadorAtribuido = await determinarUtilizadorAtribuido(
       empresaId,
       range,
       propriedade.coordenadas,
-      tempoLimpeza
+      tempoLimpeza,
+      propriedade._id
     );
   } catch (err) {
     console.error(
@@ -495,6 +656,9 @@ async function criarTarefaPorReserva(reservaId, smoobuPropId, dataCheckInRaw, co
     // v1.55.0 (Prompt 77) — Snapshot da checklist da propriedade no momento
     // da criação. Sem isto, as tarefas nasciam sem itens para o staff picar.
     checklist: propriedade.checklist || [],
+    // Prompt 93 (Fase 1.5) — Detalhes da reserva Smoobu (checkin, checkout,
+    // pax, nome_hospede) para auditoria e display.
+    detalhes_reserva: detalhesReserva || undefined,
   });
 
   if (utilizadorAtribuido) {
@@ -575,13 +739,16 @@ async function cancelarTarefaPorReserva(reservaId) {
  * Comportamento:
  *   - Se a tarefa estiver concluída → mantém (trabalho já feito).
  *   - Se a tarefa estiver cancelada → re-activa (a reserva voltou a ativa).
- *   - Atualiza `data`, `propriedade_id`, `tempo_limpeza_minutos`.
+ *   - Atualiza `data`, `propriedade_id`, `tempo_limpeza_minutos`, `detalhes_reserva`.
  *   - Se a `data` mudou, reavalia a atribuição: se o funcionário atual
  *     não estiver disponível no novo dia (folga/ausência/inativo), a
  *     tarefa passa a `por_atribuir` para o Admin reatribuir. Isto evita
  *     shuffle desnecessário (mantém o funcionário se ainda for válido).
+ *
+ * Prompt 93 (Fase 1.5): atualiza também os detalhes_reserva (a reserva
+ * pode ter sido editada com novas datas/hóspedes).
  */
-async function atualizarTarefaPorReserva(reservaId, smoobuPropId, dataCheckInRaw, content) {
+async function atualizarTarefaPorReserva(reservaId, smoobuPropId, dataCheckInRaw, detalhesReserva, content) {
   if (!reservaId) {
     console.log('ℹ️  Update sem reservaId — sem ação.');
     return null;
@@ -641,6 +808,13 @@ async function atualizarTarefaPorReserva(reservaId, smoobuPropId, dataCheckInRaw
   // 3) Re-activar se estava cancelada (a reserva foi re-activada no Smoobu).
   if (tarefa.estado === 'cancelada') {
     tarefa.estado = tarefa.utilizador_id ? 'atribuida' : 'por_atribuir';
+    mudou = true;
+  }
+
+  // 3.b) Prompt 93 (Fase 1.5) — Atualiza os detalhes_reserva (checkin,
+  //      checkout, pax, nome_hospede) com os dados mais recentes do Smoobu.
+  if (detalhesReserva) {
+    tarefa.detalhes_reserva = detalhesReserva;
     mudou = true;
   }
 

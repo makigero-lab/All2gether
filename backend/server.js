@@ -37,6 +37,8 @@ const ausenciaRoutes = require('./routes/ausenciaRoutes');
 const relatorioRoutes = require('./routes/relatorioRoutes');
 const staffRoutes = require('./routes/staffRoutes');
 const { iniciarDailyBriefing } = require('./jobs/dailyBriefing');
+const { iniciarAgendaAmanha } = require('./jobs/agendaAmanha');
+const { iniciarCaoGuarda } = require('./jobs/caoGuarda');
 const { configurarWebPush } = require('./utils/push');
 
 const app = express();
@@ -160,6 +162,15 @@ if (require.main === module) {
       // Inicia o cron job do Daily Briefing (WhatsApp) — só em execução
       // direta, não nos testes. Corre todos os dias às 08:00.
       iniciarDailyBriefing();
+
+      // Prompt 94 — Cron job "Agenda de Amanhã": todos os dias às 19:00
+      // (Europe/Lisbon), envia push a cada staff com trabalho amanhã.
+      iniciarAgendaAmanha();
+
+      // Prompt 96 — Cron job "Cão de Guarda": todos os dias às 18:00
+      // (Europe/Lisbon), envia push por cada tarefa de limpeza de hoje
+      // ainda não concluída (lembra o staff de fechar o dia).
+      iniciarCaoGuarda();
     })
     .catch((err) => {
       console.error('❌ Erro ao ligar ao MongoDB:', err.message);
