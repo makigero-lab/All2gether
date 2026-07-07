@@ -80,13 +80,18 @@ Entidade principal do SaaS (multi-tenant). Cada empresa agrupa Propriedades e Ut
 ### `Propriedade`
 Representa um alojamento sincronizado com o Smoobu.
 
-| Campo                   | Tipo     | Notas                                                        |
-|-------------------------|----------|--------------------------------------------------------------|
-| `smoobu_id`             | String   | Único, indexado. ID do apartment no Smoobu (cruzamento webhook). |
-| `nome`                  | String   | Obrigatório.                                                 |
-| `empresa_id`            | ObjectId | `ref: 'Empresa'`. Obrigatório, indexado.                     |
-| `tempo_limpeza_minutos` | Number   | Default `60`. Usado se o payload do Smoobu não trouxer valor. |
-| `ativo`                 | Boolean  | Default `true`.                                              |
+| Campo                        | Tipo     | Notas                                                              |
+|------------------------------|----------|--------------------------------------------------------------------|
+| `smoobu_id`                  | String   | Único, indexado. ID do apartment no Smoobu (cruzamento webhook).   |
+| `nome`                       | String   | Obrigatório, trim.                                                 |
+| `morada`                     | String   | Obrigatório, trim. Geocoding automático (Nominatim) ao criar/editar. |
+| `coordenadas`                | Object   | `{ lat: Number, lng: Number }`. Preenchidas via geocoding (default null). |
+| `empresa_id`                 | ObjectId | `ref: 'Empresa'`. Obrigatório, indexado.                           |
+| `tempo_limpeza_minutos`      | Number   | Default `45`, `min: 0`. Usado se o payload do Smoobu não trouxer valor. |
+| `ativo`                      | Boolean  | Default `true`. Inativas são ignoradas pelo webhook.               |
+| `checklist`                  | [String] | Default `[]`. Itens de limpeza definidos pelo gestor (v1.34.0).    |
+| `capacidade_hospedes`        | Number   | Default `null`, `min: 0`. Vinda do Smoobu (v1.61.0 / Prompt 84).   |
+| `funcionario_preferencial_id`| ObjectId | `ref: 'Utilizador'`, default `null`, indexado. **Prompt 92 (Fase 1.5)** — staff preferencial da propriedade; a lógica de prioridade no load balancer será ativada num prompt seguinte. |
 
 ### `Utilizador`
 Admin, Manager ou Staff de uma empresa. Credenciais de login (email + password_hash).
@@ -136,9 +141,16 @@ Tarefa de limpeza gerada a partir de uma reserva do Smoobu.
 | `smoobu_reserva_id`     | String   | ID da reserva no Smoobu (auditoria / idempotência). Indexado.      |
 | `utilizador_id`         | ObjectId | `ref: 'Utilizador'`, **default `null`** → tarefa por atribuir.     |
 | `data`                  | Date     | Dia do check-in (meia-noite UTC). Obrigatório, indexado.           |
-| `tempo_limpeza_minutos` | Number   | Obrigatório, default `60`, `min: 0`. Unidade de carga.             |
+| `tempo_limpeza_minutos` | Number   | Obrigatório, default `45`, `min: 0`. Unidade de carga.             |
 | `tipo`                  | String   | `enum: ['limpeza','check_in','check_out','manutencao','outro']`.   |
 | `estado`                | String   | `enum: ['por_atribuir','atribuida','em_curso','concluida','cancelada']`. |
+| `observacoes`           | String   | Observações gerais (gestor/admin). Default `''`.                   |
+| `observacoes_staff`     | String   | Observações do staff ao concluir (v1.34.0). Default `''`.          |
+| `concluida_em`          | Date     | Data de conclusão (relatórios). Default `null`.                    |
+| `hora_conclusao`        | Date     | Timestamp preciso de conclusão (v1.34.0, auditoria). Default `null`. |
+| `avarias`               | [String] | Avarias reportadas pelo staff (v1.38.0). Default `[]`.             |
+| `checklist`             | [String] | Snapshot da checklist da propriedade na criação (v1.55.0 / Prompt 77). Default `[]`. |
+| `detalhes_reserva`      | Object   | **Prompt 92 (Fase 1.5)** — snapshot da reserva Smoobu. Sub-campos: `checkin` (String), `checkout` (String), `pax` (Number), `nome_hospede` (String). Preparado para Fase 1.5; o preenchimento via webhook/sincronização será feito num prompt seguinte. |
 
 > Nota: `empresa_id` é uma referência a `Empresa` (modelo criado na v1.2.0).
 
@@ -610,9 +622,13 @@ Vai buscar a lista de apartamentos ao Smoobu (endpoint oficial `/api/apartments`
 
 #### `POST /api/admin/smoobu/sincronizar-propriedades`
 
-Importa em massa os apartamentos do Smoobu para a coleção `Propriedade`. Usa upsert com `$setOnInsert`: **insere apenas as propriedades que ainda não existem** (por `smoobu_id`). As propriedades já existentes **não são alteradas** — preserva edições manuais do Admin (nome, morada, tempo de limpeza, coordenadas, ativo).
+Importa em massa os apartamentos do Smoobu para a coleção `Propriedade`.
 
-Caso de uso: configuração inicial — em vez de criar cada propriedade à mão, o Admin sincroniza todas de uma vez e depois edita só as que precisam de ajustes (morada, tempo de limpeza).
+**Comportamento (Prompt 92 / Fase 1.5):**
+- **Propriedades novas** → criadas com `nome`, `morada`, `coordenadas` (geocoding via Nominatim), `capacidade_hospedes` e `tempo_limpeza_minutos` (45 min por defeito).
+- **Propriedades já existentes** → atualiza **SEMPRE** a `morada` e a `capacidade_hospedes` quando o Smoobu as trouxer no payload (a fonte de verdade destes dois campos passa a ser o Smoobu). Refaz o geocoding sempre que a morada for atualizada. Os restantes campos (`nome`, `tempo_limpeza_minutos`, `ativo`, `checklist`, `funcionario_preferencial_id`) continuam a ser preservados, mantendo as edições manuais do gestor.
+
+Caso de uso: configuração inicial **e** manutenção contínua — mantém as moradas e capacidades sincronizadas com o Smoobu ao longo do tempo.
 
 **Requer:** `SMOOBU_API_KEY`. O `empresa_id` vem do JWT.
 
@@ -621,7 +637,8 @@ Caso de uso: configuração inicial — em vez de criar cada propriedade à mão
 {
   "totalRecebidas": 20,
   "criadas": 15,
-  "existentes": 5,
+  "atualizadas": 3,
+  "existentes": 2,
   "erros": 0,
   "detalheErros": []
 }
@@ -630,6 +647,8 @@ Caso de uso: configuração inicial — em vez de criar cada propriedade à mão
 **Erros:** `400` (API key em falta), `502` (erro no fetch ao Smoobu).
 
 > **Nota sobre o `atualizarPropriedade`:** o endpoint `PUT /api/admin/propriedades/:id` já existe desde a v1.19.1 — permite editar `nome`, `smoobu_id`, `morada`, `tempo_limpeza_minutos` (com re-geocoding automático se a morada mudar). Não foi duplicado nesta versão.
+
+> **Diferença para o `importarPropriedades` (POST /api/gestor/smoobu/propriedades):** este é multi-tenant por `empresa_id` (só cria/atualiza propriedades da empresa do gestor) e mantém o comportamento conservador de **só preencher** a morada quando está `'A definir'` (não sobrescreve moradas reais). O `sincronizarPropriedades` (este endpoint) é mais agressivo: sobrescreve sempre morada + capacidade quando o Smoobu as traz.
 
 ---
 
@@ -770,3 +789,4 @@ As ações diretas do admin (falta súbita, baixa prolongada, registo manual) cr
 | v1.22.0    | 1.22.0 | **Sincronizar propriedades do Smoobu (upsert em massa):** novo endpoint `POST /api/admin/smoobu/sincronizar-propriedades` (`smoobuController` → `sincronizarPropriedades`) que faz `fetch https://login.smoobu.com/api/apartments` e faz upsert de cada apartamento com `$setOnInsert` — **insere só as que não existem**, não altera as existentes (preserva edições manuais do Admin: nome, morada, tempo, coordenadas, ativo). `empresa_id` vem do JWT. Devolve contadores: `totalRecebidas`, `criadas`, `existentes`, `erros`, `detalheErros`. Caso de uso: configuração inicial (importar todas as propriedades de uma vez). O endpoint `PUT /api/admin/propriedades/:id` (`atualizarPropriedade`) **já existia** desde a v1.19.1 (nome, smoobu_id, morada, tempo + re-geocoding) — não foi duplicado. 5 novos testes (61 no total): sem token 401, sem API key 400, cria propriedades novas, idempotente (2x não duplica), preserva edições manuais (propriedade com nome/tempo/ativo editados não é sobreposta). |
 | v1.23.0    | 1.23.0 | **Calendário Visual Avançado — endpoint unificado:** novo endpoint `GET /api/admin/calendario/dados` (`adminController` → `getDadosCalendario`) que devolve tarefas da empresa num intervalo de datas com filtros opcionais (`propriedadeId`, `utilizadorId`, `estado`) + populate de propriedade (`nome`, `morada`, `coordenadas`) e utilizador (`nome`). Diferença para `getTarefas`: não exclui canceladas por defeito (calendário pode mostrá-las a tracejado), aceita `utilizadorId=null` para filtrar tarefas por atribuir, e o populate inclui `morada`+`coordenadas` (para tooltips e futuro mapa de rotas). 8 novos testes (69 no total): sem token 401, sem filtros (inclui canceladas), populate (nome+morada+utilizador), filtro por propriedade, filtro por utilizador, filtro utilizadorId=null (por atribuir), filtro por estado=concluida, combina filtros. Fix de teste existente: o teste do webhook assumia que só havia 1 staff (quebrado pelo `beforeAll` do calendário que cria 2 staff extra) — corrigido para verificar apenas que a tarefa foi atribuída a algum staff ativo (não null), que é o comportamento correto do load balancer. |
 | v1.24.0    | 1.24.0 | **Fluxo de aprovação de ausências:** (1) Modelo `Ausencia` — novo campo `estado` (`pendente`\|`aprovada`\|`rejeitada`, default `pendente`); enum do `tipo` alargado para `ferias`\|`doenca`\|`outro` (as "folgas" fixas semanais continuam em `dias_folga` do Utilizador). (2) **Staff routes** — novo `controllers/staffController.js` + `routes/staffRoutes.js` montado em `/api/staff`: `GET /ausencias` (histórico próprio) + `POST /ausencias` (cria pedido sempre `pendente`; staff não pode auto-aprovar). (3) **Aprovação** — `PATCH /api/admin/ausencias/:id/estado` (`ausenciaController` → `aprovarRejeitarAusencia`): aprovar → redistribui tarefas do período via load balancer (helper `redistribuirTarefasPeriodo` extraído e reutilizável); rejeitar → só atualiza estado. (4) **Webhook** — `determinarUtilizadorAtribuido` e `atualizarTarefaPorReserva` agora só consideram ausências `aprovada` (pendentes/rejeitadas não bloqueiam atribuição). (5) Ações diretas do admin (falta súbita, baixa prolongada, registo manual) criam ausências com `estado: 'aprovada'`. 7 novos testes (76 no total): staff cria pedido (pendente), staff vê suas ausências, staff sem token 401, admin aprova (redistribui — verifica utilizador_id mudou), admin rejeita (não mexe em tarefas), estado inválido 400, ausência inexistente 404. |
+| Prompt 92  | —      | **Upgrade de modelos + force-update do Smoobu (Fase 1.5):** (1) Modelo `Propriedade` — novo campo `funcionario_preferencial_id` (ObjectId `ref: 'Utilizador'`, default `null`, indexado) para suportar staff preferencial por propriedade (lógica de prioridade no load balancer será ativada num prompt seguinte). (2) Modelo `Tarefa` — novo objeto `detalhes_reserva` com sub-campos `checkin` (String), `checkout` (String), `pax` (Number), `nome_hospede` (String) — snapshot da reserva Smoobu (preenchimento via webhook/sincronização num prompt seguinte). (3) `sincronizarPropriedades` (`smoobuController`) — deixa de preservar a morada/capacidade antigas: para propriedades já existentes, atualiza **SEMPRE** a `morada` e a `capacidade_hospedes` quando o Smoobu as trouxer no payload, refazendo o geocoding da morada nova e guardando com `await existente.save()`. Os restantes campos (`nome`, `tempo_limpeza_minutos`, `ativo`, `checklist`, `funcionario_preferencial_id`) continuam preservados. 1 novo teste (104 no total): força update de morada + capacidade em propriedade existente; o teste "preserva edições manuais" foi renomeado/refinado para "preserva nome/tempo/ativo quando o Smoobu não traz morada/capacidade no payload". |

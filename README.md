@@ -110,7 +110,7 @@ A API arranca na porta definida em `PORT` (por defeito **5000**).
 | `POST` | `/api/gestor/webhooks/:id/reprocessar` | Reproccessa webhook que falhou (reutiliza payload guardado, idempotente). **Auth:** JWT. |
 | `POST` | `/api/gestor/smoobu/sincronizar` | Sincroniza reservas futuras do Smoobu via REST API (pull). Idempotente. Requer `SMOOBU_API_KEY`. **Auth:** JWT. |
 | `GET`  | `/api/gestor/smoobu/propriedades` | Lista apartamentos do Smoobu (para dropdown no fluxo de criação). Requer `SMOOBU_API_KEY`. **Auth:** JWT. |
-| `POST` | `/api/gestor/smoobu/sincronizar-propriedades` | Importa apartamentos do Smoobu em massa (upsert `$setOnInsert` — não altera existentes). Requer `SMOOBU_API_KEY`. **Auth:** JWT. |
+| `POST` | `/api/gestor/smoobu/sincronizar-propriedades` | Importa apartamentos do Smoobu em massa. Cria os novos e **atualiza sempre** a morada + capacidade_hospedes dos já existentes (com re-geocoding) quando o Smoobu as traz (Prompt 92). Requer `SMOOBU_API_KEY`. **Auth:** JWT. |
 | `GET`  | `/api/gestor/setup` | Bootstrap do "Cliente Zero" (Empresa + Admin + Gestor + Staff + Propriedade de teste). Idempotente. **PÚBLICO.** |
 | `GET`  | `/api/admin/empresas` | Lista todas as empresas (cross-tenant) com gestor principal. **Auth:** JWT + `isAdmin`. |
 | `POST` | `/api/admin/empresas/:id/impersonar` | Gera token JWT do gestor de uma empresa (impersonation). **Auth:** JWT + `isAdmin`. |

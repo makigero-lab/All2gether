@@ -1252,7 +1252,7 @@ describe('POST /api/gestor/smoobu/sincronizar-propriedades', () => {
     expect(count).toBe(1);
   });
 
-  it('preserva edições manuais — não altera propriedade existente', async () => {
+  it('preserva nome/tempo/ativo quando o Smoobu não traz morada/capacidade no payload', async () => {
     process.env.SMOOBU_API_KEY = 'test-key-123';
 
     // Cria uma propriedade com nome editado (simula edição manual do Admin).
@@ -1265,6 +1265,8 @@ describe('POST /api/gestor/smoobu/sincronizar-propriedades', () => {
       ativo: false, // editado
     });
 
+    // Smoobu devolve o apartamento SEM location e SEM rooms (não traz
+    // morada nem capacidade) → nada a atualizar.
     const mockFetch = jest.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -1280,11 +1282,62 @@ describe('POST /api/gestor/smoobu/sincronizar-propriedades', () => {
     expect(res.status).toBe(200);
     expect(res.body.existentes).toBe(1);
     expect(res.body.criadas).toBe(0);
+    expect(res.body.atualizadas).toBe(0);
 
     // A propriedade mantém os valores editados (não foi sobreposta).
     const p = await Propriedade.findOne({ smoobu_id: 'sync-1' });
     expect(p.nome).toBe('Nome Editado pelo Admin');
     expect(p.tempo_limpeza_minutos).toBe(120);
+    expect(p.ativo).toBe(false);
+  });
+
+  it('Prompt 92 — força update de morada + capacidade em propriedade existente', async () => {
+    process.env.SMOOBU_API_KEY = 'test-key-123';
+
+    // Propriedade já existente com morada e capacidade antigas + edits manuais.
+    await Propriedade.create({
+      smoobu_id: 'sync-1',
+      nome: 'Casa Mantida',
+      morada: 'Rua Antiga',
+      capacidade_hospedes: 2,
+      empresa_id: new mongoose.Types.ObjectId(empresaId),
+      tempo_limpeza_minutos: 90,
+      ativo: false,
+    });
+
+    // Smoobu devolve a mesma propriedade com morada NOVA e capacidade NOVA.
+    const mockFetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        apartments: [
+          {
+            id: 'sync-1',
+            name: 'Nome Ignorado pelo Smoobu',
+            location: { street: 'Rua Nova 10', zip: '1000-001', city: 'Lisboa' },
+            rooms: { maxOccupancy: 5 },
+          },
+        ],
+      }),
+      text: async () => '',
+    });
+    mockFetch.__isMock = true;
+    global.fetch = mockFetch;
+
+    const res = await authPost('/api/gestor/smoobu/sincronizar-propriedades', {});
+    expect(res.status).toBe(200);
+    expect(res.body.atualizadas).toBe(1);
+    expect(res.body.existentes).toBe(0);
+    expect(res.body.criadas).toBe(0);
+
+    // A morada e a capacidade foram sobrescritas pelo Smoobu (fonte de verdade).
+    const p = await Propriedade.findOne({ smoobu_id: 'sync-1' });
+    expect(p.morada).toBe('Rua Nova 10, 1000-001, Lisboa');
+    expect(p.capacidade_hospedes).toBe(5);
+
+    // Mas nome, tempo e ativo continuam preservados (edições manuais).
+    expect(p.nome).toBe('Casa Mantida');
+    expect(p.tempo_limpeza_minutos).toBe(90);
     expect(p.ativo).toBe(false);
   });
 

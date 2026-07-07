@@ -88,6 +88,22 @@ const tarefaSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
+    // Prompt 92 (Fase 1.5) — Detalhes da reserva Smoobu associada à tarefa.
+    // Snapshot dos dados da reserva no momento da criação/atualização da
+    // tarefa, para auditoria e display (cartão da tarefa, detalhe do staff,
+    // relatórios). Preparado para Fase 1.5 — o campo existe no modelo mas o
+    // preenchimento a partir do payload do webhook/sincronização será feito
+    // num prompt seguinte.
+    detalhes_reserva: {
+      // Data/hora de check-in (ISO string ou YYYY-MM-DD conforme o Smoobu).
+      checkin: { type: String, default: null },
+      // Data/hora de check-out (ISO string ou YYYY-MM-DD conforme o Smoobu).
+      checkout: { type: String, default: null },
+      // Número de hóspedes (pax) da reserva.
+      pax: { type: Number, default: null, min: 0 },
+      // Nome do hóspede principal da reserva.
+      nome_hospede: { type: String, default: null, trim: true },
+    },
   },
   { timestamps: true }
 );
