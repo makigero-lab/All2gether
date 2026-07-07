@@ -784,6 +784,178 @@ describe('POST /webhooks/smoobu (load balancer)', () => {
     const count = await Tarefa.countDocuments({ smoobu_reserva_id: '4444' });
     expect(count).toBe(1);
   });
+
+  // Prompt 93 (Fase 1.5) — Detalhes da reserva + Algoritmo VIP.
+
+  it('Prompt 93 — guarda detalhes_reserva (checkin, checkout, pax, nome_hospede) extraídos do payload', async () => {
+    const amanha = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+    const depois = new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
+
+    await request(app)
+      .post('/webhooks/smoobu')
+      .send({
+        action: 'newReservation',
+        data: {
+          id: 5500,
+          arrival: amanha,
+          departure: depois,
+          apartment: { id: 200, name: 'Apartamento Teste' },
+          guests: 4,
+          guestName: 'Maria Silva',
+        },
+      });
+    await esperar(400);
+
+    const tarefa = await Tarefa.findOne({ smoobu_reserva_id: '5500' });
+    expect(tarefa).not.toBeNull();
+    expect(tarefa.detalhes_reserva).toBeDefined();
+    expect(tarefa.detalhes_reserva.checkin).toBe(amanha);
+    expect(tarefa.detalhes_reserva.checkout).toBe(depois);
+    expect(tarefa.detalhes_reserva.pax).toBe(4);
+    expect(tarefa.detalhes_reserva.nome_hospede).toBe('Maria Silva');
+  });
+
+  it('Prompt 93 — Algoritmo VIP: atribui ao funcionário preferencial quando disponível', async () => {
+    // Cria um segundo staff e define-o como preferencial da propriedade 200.
+    const hash = await bcrypt.hash(PASSWORD, 10);
+    const preferencial = await Utilizador.create({
+      nome: 'Staff Preferencial',
+      email: 'staff.vip@teste.pt',
+      password_hash: hash,
+      empresa_id: empresaId,
+      role: 'staff',
+      ativo: true,
+      dias_folga: [],
+    });
+    await Propriedade.updateOne(
+      { smoobu_id: '200' },
+      { $set: { funcionario_preferencial_id: preferencial._id } }
+    );
+
+    const amanha = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+    await request(app)
+      .post('/webhooks/smoobu')
+      .send({
+        action: 'newReservation',
+        data: { id: 5501, arrival: amanha, apartment: { id: 200, name: 'X' } },
+      });
+    await esperar(400);
+
+    const tarefa = await Tarefa.findOne({ smoobu_reserva_id: '5501' });
+    expect(tarefa).not.toBeNull();
+    expect(tarefa.utilizador_id).not.toBeNull();
+    // Tem de ser atribuída AO preferencial (ignora o load balancer geral).
+    expect(String(tarefa.utilizador_id)).toBe(String(preferencial._id));
+  });
+
+  it('Prompt 93 — Algoritmo VIP: fallback para load balancer se o preferencial exceder o SLA de 8h', async () => {
+    // Staff preferencial já com 7h30 (450 min) de carga no dia → com a nova
+    // tarefa (60 min) ficaria com 510 min > 480 min (SLA). Tem de fazer fallback.
+    const hash = await bcrypt.hash(PASSWORD, 10);
+    const preferencial = await Utilizador.create({
+      nome: 'Staff VIP Sobrecarga',
+      email: 'staff.vipfull@teste.pt',
+      password_hash: hash,
+      empresa_id: empresaId,
+      role: 'staff',
+      ativo: true,
+      dias_folga: [],
+    });
+    const prop = await Propriedade.findOne({ smoobu_id: '200' });
+    await Propriedade.updateOne(
+      { smoobu_id: '200' },
+      { $set: { funcionario_preferencial_id: preferencial._id } }
+    );
+
+    const amanha = new Date(Date.now() + 86400000);
+    const inicioDia = new Date(
+      Date.UTC(amanha.getUTCFullYear(), amanha.getUTCMonth(), amanha.getUTCDate())
+    );
+    // Cria tarefas que somam 450 min (7h30) ao preferencial nesse dia.
+    await Tarefa.create({
+      empresa_id: empresaId,
+      propriedade_id: prop._id,
+      smoobu_reserva_id: 'pre-carga-1',
+      utilizador_id: preferencial._id,
+      data: inicioDia,
+      tempo_limpeza_minutos: 450,
+      tipo: 'limpeza',
+      estado: 'atribuida',
+    });
+
+    // Garante que há pelo menos outro staff disponível para o fallback.
+    const outro = await Utilizador.create({
+      nome: 'Staff Fallback',
+      email: 'staff.fallback@teste.pt',
+      password_hash: hash,
+      empresa_id: empresaId,
+      role: 'staff',
+      ativo: true,
+      dias_folga: [],
+    });
+
+    const diaStr = inicioDia.toISOString().slice(0, 10);
+    await request(app)
+      .post('/webhooks/smoobu')
+      .send({
+        action: 'newReservation',
+        data: { id: 5502, arrival: diaStr, apartment: { id: 200, name: 'X' } },
+      });
+    await esperar(400);
+
+    const tarefa = await Tarefa.findOne({ smoobu_reserva_id: '5502' });
+    expect(tarefa).not.toBeNull();
+    expect(tarefa.utilizador_id).not.toBeNull();
+    // NÃO pode ser o preferencial (excedia o SLA) → tem de ser outro staff
+    // (o load balancer geral escolhe o com menor carga; pode ser o do
+    // beforeEach ou o "outro" criado aqui — o importante é não ser o VIP).
+    expect(String(tarefa.utilizador_id)).not.toBe(String(preferencial._id));
+  });
+
+  it('Prompt 93 — Algoritmo VIP: fallback se o preferencial tiver folga nesse dia', async () => {
+    const amanha = new Date(Date.now() + 86400000);
+    const diaSemana = amanha.getDay();
+
+    const hash = await bcrypt.hash(PASSWORD, 10);
+    const preferencial = await Utilizador.create({
+      nome: 'Staff VIP Folga',
+      email: 'staff.vipfolga@teste.pt',
+      password_hash: hash,
+      empresa_id: empresaId,
+      role: 'staff',
+      ativo: true,
+      dias_folga: [diaSemana], // tem folga fixa no dia do check-in
+    });
+    const outro = await Utilizador.create({
+      nome: 'Staff Sem Folga',
+      email: 'staff.semfolga@teste.pt',
+      password_hash: hash,
+      empresa_id: empresaId,
+      role: 'staff',
+      ativo: true,
+      dias_folga: [],
+    });
+    await Propriedade.updateOne(
+      { smoobu_id: '200' },
+      { $set: { funcionario_preferencial_id: preferencial._id } }
+    );
+
+    const diaStr = amanha.toISOString().slice(0, 10);
+    await request(app)
+      .post('/webhooks/smoobu')
+      .send({
+        action: 'newReservation',
+        data: { id: 5503, arrival: diaStr, apartment: { id: 200, name: 'X' } },
+      });
+    await esperar(400);
+
+    const tarefa = await Tarefa.findOne({ smoobu_reserva_id: '5503' });
+    expect(tarefa).not.toBeNull();
+    expect(tarefa.utilizador_id).not.toBeNull();
+    // NÃO pode ser o preferencial (tinha folga) → tem de ser outro staff
+    // disponível (load balancer geral).
+    expect(String(tarefa.utilizador_id)).not.toBe(String(preferencial._id));
+  });
 });
 
 /* ------------------------------------------------------------------ */

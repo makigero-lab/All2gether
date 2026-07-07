@@ -761,13 +761,17 @@ exports.autoAtribuirTarefas = async (req, res) => {
         // Coordenadas da propriedade (para cálculo de tempo de viagem).
         const coordenadas = tarefa.propriedade_id?.coordenadas ?? null;
         const tempoNovaTarefa = tarefa.tempo_limpeza_minutos || 45;
+        // Prompt 93 — id da propriedade para o Algoritmo VIP
+        // (funcionário preferencial).
+        const propriedadeId = tarefa.propriedade_id?._id ?? null;
 
         // Invoca o load balancer partilhado.
         const utilizadorAtribuido = await determinarUtilizadorAtribuido(
           empresaId,
           range,
           coordenadas,
-          tempoNovaTarefa
+          tempoNovaTarefa,
+          propriedadeId
         );
 
         if (utilizadorAtribuido) {

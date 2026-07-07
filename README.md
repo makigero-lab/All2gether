@@ -69,7 +69,7 @@ A API arranca na porta definida em `PORT` (por defeito **5000**).
 |--------|------|-----------|
 | `GET`  | `/`  | Healthcheck. Devolve `{ "status": "API do Alojamento Local online e ligada à BD!" }` |
 | `GET`  | `/api/health` | Estado da API + BD (MongoDB) + uptime. Devolve `503` se a BD estiver em baixo. |
-| `POST` | `/webhooks/smoobu` | Webhook do Smoobu (nova reserva). Cria a Tarefa de limpeza aplicando filtro de ausências + folgas fixas + load balancing (Haversine + SLA 420 min). Responde `200` imediato e processa de forma assíncrona. Propriedades inativas são ignoradas. |
+| `POST` | `/webhooks/smoobu` | Webhook do Smoobu (nova reserva). Cria a Tarefa de limpeza aplicando filtro de ausências + folgas fixas + **Algoritmo VIP (funcionário preferencial)** + load balancing (Haversine + SLA 8h/dia). Guarda os `detalhes_reserva` (checkin, checkout, pax, nome_hospede). Responde `200` imediato e processa de forma assíncrona. Propriedades inativas são ignoradas. |
 | `POST` | `/api/auth/login` | **Login** (público, com rate limiting). Body: `{ email, password }`. Devolve `{ token, utilizador }`. |
 | `GET`  | `/api/auth/me` | Dados do utilizador autenticado. **Auth:** JWT. |
 | `GET`  | `/api/auth/me/calendario` | Calendário pessoal (tarefas + ausências). **Auth:** JWT. |
