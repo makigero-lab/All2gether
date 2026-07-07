@@ -194,6 +194,18 @@ exports.registarAusencia = async (req, res) => {
       notas: notas ? String(notas).trim() : '',
     });
 
+    // Prompt 97 — Desatribui as tarefas do utilizador no período (SEM load
+    // balancer): passam a utilizador_id = null + estado = 'por_atribuir'.
+    // O recálculo fica a cargo do Gestor (manual) ou do Fail-Safe noturno.
+    const desatribuicao = await desatribuirTarefasPeriodo(utilizador_id, inicio, fim);
+    if (desatribuicao.desatribuidas > 0) {
+      console.log(
+        `📤 [registarAusencia] ${desatribuicao.desatribuidas} tarefa(s) desatribuída(s) ` +
+          `(utilizador ${utilizador_id}, período ${inicio.toISOString().slice(0, 10)} ` +
+          `a ${fim.toISOString().slice(0, 10)}).`
+      );
+    }
+
     // Resposta com utilizador populado (para o frontend não precisar de refetch).
     const resp = await Ausencia.findById(nova._id)
       .populate({ path: 'utilizador_id', select: 'nome email role' })
@@ -207,6 +219,7 @@ exports.registarAusencia = async (req, res) => {
           ? { _id: String(u._id), nome: u.nome, email: u.email, role: u.role }
           : null,
       },
+      desatribuicao,
     });
   } catch (err) {
     console.error('❌ registarAusencia:', err.message);
@@ -271,18 +284,18 @@ exports.eliminarAusencia = async (req, res) => {
  *
  * Body: { estado: 'aprovada' | 'rejeitada' }
  *
- * Lógica crítica:
- *   - Se 'aprovada': redistribui automaticamente as tarefas futuras do
- *     utilizador no período [data_inicio, data_fim] usando o load balancer
- *     (mesma lógica do registarBaixaProlongada). As tarefas reatribuídas
- *     ficam com outro staff; as que não têm staff disponível ficam
- *     'por_atribuir'.
+ * Lógica (Prompt 97 — "Desligar a Histeria Automática"):
+ *   - Se 'aprovada': NÃO chama o load balancer. Apenas desatribui as tarefas
+ *     futuras do utilizador no período [data_inicio, data_fim]: passam a
+ *     utilizador_id = null + estado = 'por_atribuir'. O recálculo/atribuição
+ *     fica a cargo do Gestor (manual) ou do Fail-Safe noturno. Isto evita
+ *     disparos automáticos e spam de notificações.
  *   - Se 'rejeitada': apenas atualiza o estado (não mexe nas tarefas).
  *
  * Resposta 200:
  *   {
  *     mensagem, ausencia,
- *     redistribuicao: { total, reatribuidas, orfas } | null
+ *     redistribuicao: { total, desatribuidas } | null
  *   }
  */
 exports.aprovarRejeitarAusencia = async (req, res) => {
@@ -324,11 +337,10 @@ exports.aprovarRejeitarAusencia = async (req, res) => {
 
     let redistribuicao = null;
 
-    // Se aprovada → redistribui tarefas do período.
+    // Se aprovada → desatribui tarefas do período (SEM load balancer).
     if (novoEstado === 'aprovada') {
-      redistribuicao = await redistribuirTarefasPeriodo(
+      redistribuicao = await desatribuirTarefasPeriodo(
         ausencia.utilizador_id,
-        empresaId,
         ausencia.data_inicio,
         ausencia.data_fim
       );
@@ -344,9 +356,7 @@ exports.aprovarRejeitarAusencia = async (req, res) => {
       recurso: 'ausencia',
       recurso_id: ausencia._id,
       descricao: `Ausência de "${utilizador?.nome ?? '?'}" ${novoEstado}${
-        redistribuicao
-          ? `: ${redistribuicao.reatribuidas} reatribuídas, ${redistribuicao.orfas} órfãs`
-          : ''
+        redistribuicao ? `: ${redistribuicao.desatribuidas} tarefa(s) desatribuída(s)` : ''
       }`,
       detalhes: {
         utilizador_id: String(ausencia.utilizador_id),
@@ -380,7 +390,7 @@ exports.aprovarRejeitarAusencia = async (req, res) => {
     return res.status(200).json({
       mensagem:
         novoEstado === 'aprovada'
-          ? `Ausência aprovada. ${redistribuicao.reatribuidas} tarefa(s) reatribuída(s), ${redistribuicao.orfas} órfã(s).`
+          ? `Ausência aprovada. ${redistribuicao.desatribuidas} tarefa(s) desatribuída(s) (por atribuir).`
           : 'Ausência rejeitada.',
       ausencia,
       redistribuicao,
@@ -392,90 +402,48 @@ exports.aprovarRejeitarAusencia = async (req, res) => {
 };
 
 /* ------------------------------------------------------------------ */
-/* Helper: redistribuir tarefas de um utilizador num período          */
-/* (partilhado com registarBaixaProlongada — mesma lógica)            */
+/* Helper: desatribuir tarefas de um utilizador num período           */
+/* (Prompt 97 — substitui o antigo redistribuirTarefasPeriodo)        */
 /* ------------------------------------------------------------------ */
 
 /**
- * Redistribui as tarefas futuras de um utilizador num período [inicio, fim]
- * usando o load balancer (determinarUtilizadorAtribuido do webhookController).
+ * Desatribui as tarefas atribuídas de um utilizador num período
+ * [inicio, fim]: passa utilizador_id = null + estado = 'por_atribuir'.
+ *
+ * Prompt 97 — NÃO chama o load balancer (evita disparos automáticos e spam
+ * de notificações). O recálculo/atribuição fica a cargo do Gestor (manual,
+ * via "Auto-Atribuir Pendentes") ou do Fail-Safe noturno.
  *
  * @param {ObjectId} utilizadorId
- * @param {ObjectId} empresaId
  * @param {Date} inicio
  * @param {Date} fim
- * @returns {Promise<{ total, reatribuidas, orfas, detalhes }>}
+ * @returns {Promise<{ total, desatribuidas }>}
  */
-async function redistribuirTarefasPeriodo(utilizadorId, empresaId, inicio, fim) {
+async function desatribuirTarefasPeriodo(utilizadorId, inicio, fim) {
   // fim do dia = meia-noite do dia seguinte (para query <).
   const fimDia = new Date(fim.getTime() + 24 * 60 * 60 * 1000);
 
-  // Procura tarefas atribuídas no período.
+  // Procura tarefas atribuídas no período (não concluídas nem canceladas).
   const tarefas = await Tarefa.find({
     utilizador_id: utilizadorId,
     data: { $gte: inicio, $lt: fimDia },
     estado: 'atribuida',
-  }).populate({ path: 'propriedade_id', select: 'coordenadas nome' });
+  });
 
   if (tarefas.length === 0) {
-    return { total: 0, reatribuidas: 0, orfas: 0, detalhes: [] };
+    return { total: 0, desatribuidas: 0 };
   }
 
-  const { determinarUtilizadorAtribuido } = require('../controllers/webhookController');
-
-  let reatribuidas = 0;
-  let orfas = 0;
-  const detalhes = [];
-
+  let desatribuidas = 0;
   for (const tarefa of tarefas) {
-    const td = new Date(tarefa.data);
-    const tInicio = new Date(
-      Date.UTC(td.getUTCFullYear(), td.getUTCMonth(), td.getUTCDate())
-    );
-    const tFim = new Date(tInicio.getTime() + 24 * 60 * 60 * 1000);
-    const range = { start: tInicio, end: tFim };
-
-    const coordNovaProp = tarefa.propriedade_id?.coordenadas ?? null;
-    const tempoNovaTarefa = tarefa.tempo_limpeza_minutos || 45;
-
-    let novoUtilizador = null;
-    try {
-      novoUtilizador = await determinarUtilizadorAtribuido(
-        empresaId,
-        range,
-        coordNovaProp,
-        tempoNovaTarefa
-      );
-    } catch (err) {
-      console.error('⚠️  Erro ao reatribuir tarefa', tarefa._id, ':', err.message);
-    }
-
-    if (novoUtilizador) {
-      tarefa.utilizador_id = novoUtilizador;
-      await tarefa.save();
-      reatribuidas++;
-      detalhes.push({
-        tarefa_id: String(tarefa._id),
-        propriedade: tarefa.propriedade_id?.nome ?? '?',
-        novo_utilizador_id: String(novoUtilizador),
-        reatribuida: true,
-      });
-    } else {
-      tarefa.utilizador_id = null;
-      tarefa.estado = 'por_atribuir';
-      await tarefa.save();
-      orfas++;
-      detalhes.push({
-        tarefa_id: String(tarefa._id),
-        propriedade: tarefa.propriedade_id?.nome ?? '?',
-        novo_utilizador_id: null,
-        reatribuida: false,
-      });
-    }
+    tarefa.utilizador_id = null;
+    tarefa.estado = 'por_atribuir';
+    await tarefa.save();
+    desatribuidas++;
   }
 
-  return { total: tarefas.length, reatribuidas, orfas, detalhes };
+  return { total: tarefas.length, desatribuidas };
 }
 
-// Exporta o helper para reutilização (ex: registarBaixaProlongada poderia usá-lo).
-exports.redistribuirTarefasPeriodo = redistribuirTarefasPeriodo;
+// Exporta o helper para reutilização (registarBaixaProlongada, falta súbita).
+exports.desatribuirTarefasPeriodo = desatribuirTarefasPeriodo;

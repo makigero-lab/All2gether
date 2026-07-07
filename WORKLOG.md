@@ -167,6 +167,37 @@ Stage Summary:
 - Horário do dia completo: 08h Daily Briefing → 18h Cão de Guarda → 19h Agenda de Amanhã.
 - 116 testes a passar (+4). Documentação atualizada. Próximo passo: commit + push para a branch `dev`.
 
+---
+
+Task ID: A6 (Prompt 97)
+Agent: Z.ai Code
+Task: Desligar a reatribuição automática — ausências e desativação de propriedades passam a apenas desatribuir (sem load balancer).
+
+Work Log:
+- Lido o worklog (Tasks A0–A5) e os 4 sítios que reatribuíam via load balancer: `ausenciaController.aprovarRejeitarAusencia` (+ helper `redistribuirTarefasPeriodo`), `gestorController.reportarFaltaSubita`, `gestorController.registarBaixaProlongada`. Confirmado que `gestorController.alternarEstadoPropriedade` apagava as tarefas futuras (v1.35.0/Prompt 73). Confirmado que `staffController` cria ausências como 'pendente'/'pendente_emergencia' (não disparam reatribuição).
+- **`ausenciaController.js`:**
+  - `registarAusencia` (POST): passou a chamar o novo helper `desatribuirTarefasPeriodo` após criar a ausência aprovada (resposta inclui `desatribuicao: { total, desatribuidas }`).
+  - `aprovarRejeitarAusencia` (PATCH): aprovar deixa de chamar o load balancer — usa `desatribuirTarefasPeriodo` (resposta `redistribuicao = { total, desatribuidas }`).
+  - Novo helper `desatribuirTarefasPeriodo(utilizadorId, inicio, fim)`: procura tarefas `atribuida` no período e passa a `utilizador_id = null + estado = 'por_atribuir'`. Devolve `{ total, desatribuidas }`. **NÃO chama o load balancer.** Substitui o antigo `redistribuirTarefasPeriodo` (removido).
+- **`gestorController.js`:**
+  - `reportarFaltaSubita`: deixou de reatribuir via `determinarUtilizadorAtribuido`; agora desatribui cada tarefa de hoje do staff (`utilizador_id = null + estado = 'por_atribuir'`). Resposta `desatribuidas` (em vez de `reatribuidas/orfas`).
+  - `registarBaixaProlongada`: mesma mudança — desatribui as tarefas do período em vez de reatribuir. Resposta `desatribuidas`.
+  - `alternarEstadoPropriedade`: ao DESATIVAR, deixou de APAGAR tarefas futuras e passou a DESATRIBUIR (`updateMany` com `utilizador_id: null, estado: 'por_atribuir'`). Resposta `tarefasDesatribuidas` (em vez de `tarefasApagadas`).
+- **Frontend `gestor/propriedades/page.tsx`:** `handleToggleAtivo` atualizado para ler `tarefasDesatribuidas` (em vez de `tarefasApagadas`) e mostrar feedback "desatribuída(s) (por atribuir)".
+- **Testes:**
+  - Atualizado o teste "admin aprova ausência" (secção 12) — agora verifica `redistribuicao.desatribuidas` + `utilizador_id === null` + `estado === 'por_atribuir'`.
+  - Adicionados 3 novos testes (secção 19 "Prompt 97"): (1) desativar propriedade desatribui (não apaga — a tarefa continua a existir, `por_atribuir`); (2) falta súbita desatribui (não reatribui ao outro staff disponível); (3) baixa prolongada desatribui (não reatribui ao outro staff).
+- **Validação:** `npm test` backend → **119/119 ✓** (15.2s). Frontend: `npm run lint` ✓ · `npx tsc --noEmit` ✓ · `npm run build` ✓.
+- **Documentação atualizada:** `docs/BACKEND.md` (entrada "Prompt 97" no histórico).
+
+Stage Summary:
+- **Fim da reatribuição automática:** ausências (criar ou aprovar), falta súbita e baixa prolongada deixam de chamar o load balancer. As tarefas afetadas passam apenas a `utilizador_id = null` + `estado = 'por_atribuir'` — o recálculo fica a cargo do Gestor (manual, via "Auto-Atribuir Pendentes" do Prompt 86) ou do Fail-Safe noturno (futuro).
+- **Desativação de propriedades:** deixou de apagar tarefas futuras (v1.35.0/Prompt 73) — agora desatribui (mantém as tarefas no calendário como `por_atribuir`, prontas para reatribuição manual).
+- Isto evita disparos automáticos e spam de notificações push quando há mudanças de última hora (falta súbita, férias aprovadas, propriedade suspensa).
+- O load balancer (`determinarUtilizadorAtribuido` + Algoritmo VIP) mantém-se ativo **apenas** no webhook (criação de tarefa por nova reserva) e na auto-atribuição manual em lote (`tarefaController.autoAtribuirTarefas`).
+- 119 testes a passar (+3). Lint + tsc + build ✓. Documentação atualizada. Próximo passo: commit + push para a branch `dev`.
+
+
 
 
 

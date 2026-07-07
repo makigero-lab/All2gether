@@ -1629,7 +1629,7 @@ describe('Fluxo de aprovação de ausências', () => {
     expect(res.status).toBe(403);
   });
 
-  it('admin aprova ausência → 200 + redistribui tarefas do período', async () => {
+  it('admin aprova ausência → 200 + desatribui tarefas do período (Prompt 97)', async () => {
     // Busca a ausência pendente criada pelo staff.
     const Ausencia = require('../models/Ausencia');
     const pendente = await Ausencia.findOne({
@@ -1648,12 +1648,14 @@ describe('Fluxo de aprovação de ausências', () => {
     });
     expect(res.status).toBe(200);
     expect(res.body.ausencia.estado).toBe('aprovada');
+    // Prompt 97 — agora desatribui (não redistribui via load balancer).
     expect(res.body.redistribuicao).toBeTruthy();
-    expect(res.body.redistribuicao.total).toBeGreaterThanOrEqual(1);
+    expect(res.body.redistribuicao.desatribuidas).toBeGreaterThanOrEqual(1);
 
-    // A tarefa foi reatribuída (utilizador_id mudou ou ficou por_atribuir).
+    // A tarefa foi DESATRIBUÍDA: utilizador_id = null + estado 'por_atribuir'.
     const depois = await Tarefa.findById(tarefaAtribuida._id);
-    expect(String(depois.utilizador_id)).not.toBe(staffId);
+    expect(depois.utilizador_id).toBeNull();
+    expect(depois.estado).toBe('por_atribuir');
   });
 
   it('admin rejeita ausência → 200 + só atualiza estado (não mexe em tarefas)', async () => {
@@ -2616,5 +2618,191 @@ describe('Cron Job: Cão de Guarda (Prompt 96)', () => {
     expect(resultado.encontradas).toBe(1);
     expect(resultado.notificadas).toBe(0);
     expect(notificarSpy).not.toHaveBeenCalled();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* 19. Desligar a Histeria Automática (Prompt 97)                      */
+/* ------------------------------------------------------------------ */
+
+describe('Prompt 97 — Desligar a Histeria Automática', () => {
+  beforeEach(async () => {
+    await Tarefa.deleteMany({});
+  });
+
+  it('desativar propriedade → desatribui tarefas futuras (não apaga)', async () => {
+    // Cria uma propriedade ativa.
+    const prop = await Propriedade.create({
+      smoobu_id: 'p97-desativar',
+      nome: 'Casa P97',
+      morada: 'Rua P97',
+      empresa_id: empresaId,
+      ativo: true,
+    });
+
+    // Cria um staff e uma tarefa atribuída para hoje.
+    const hash = await bcrypt.hash(PASSWORD, 10);
+    const staff = await Utilizador.create({
+      nome: 'Staff P97',
+      email: 'staff.p97@teste.pt',
+      password_hash: hash,
+      empresa_id: empresaId,
+      role: 'staff',
+      ativo: true,
+    });
+
+    const agora = new Date();
+    const hoje = new Date(
+      Date.UTC(agora.getUTCFullYear(), agora.getUTCMonth(), agora.getUTCDate())
+    );
+
+    const tarefa = await Tarefa.create({
+      empresa_id: empresaId,
+      propriedade_id: prop._id,
+      utilizador_id: staff._id,
+      data: hoje,
+      tempo_limpeza_minutos: 45,
+      tipo: 'limpeza',
+      estado: 'atribuida',
+    });
+
+    // Desativa a propriedade.
+    const res = await authPatch(`/api/gestor/propriedades/${prop._id}/estado`, {
+      ativo: false,
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.ativo).toBe(false);
+    // Prompt 97 — devolve tarefasDesatribuidas (não tarefasApagadas).
+    expect(typeof res.body.tarefasDesatribuidas).toBe('number');
+    expect(res.body.tarefasDesatribuidas).toBeGreaterThanOrEqual(1);
+
+    // A tarefa NÃO foi apagada — foi desatribuída (por_atribuir).
+    const depois = await Tarefa.findById(tarefa._id);
+    expect(depois).not.toBeNull();
+    expect(depois.utilizador_id).toBeNull();
+    expect(depois.estado).toBe('por_atribuir');
+  });
+
+  it('falta súbita → desatribui tarefas de hoje (não reatribui via load balancer)', async () => {
+    // Cria um staff e uma tarefa atribuída para hoje.
+    const hash = await bcrypt.hash(PASSWORD, 10);
+    const staff = await Utilizador.create({
+      nome: 'Staff Falta P97',
+      email: 'staff.falta.p97@teste.pt',
+      password_hash: hash,
+      empresa_id: empresaId,
+      role: 'staff',
+      ativo: true,
+    });
+    const outro = await Utilizador.create({
+      nome: 'Staff Outro P97',
+      email: 'staff.outro.p97@teste.pt',
+      password_hash: hash,
+      empresa_id: empresaId,
+      role: 'staff',
+      ativo: true,
+    });
+
+    const prop = await Propriedade.create({
+      smoobu_id: 'p97-falta',
+      nome: 'Casa Falta P97',
+      morada: 'Rua Falta',
+      empresa_id: empresaId,
+      ativo: true,
+    });
+
+    const agora = new Date();
+    const hoje = new Date(
+      Date.UTC(agora.getUTCFullYear(), agora.getUTCMonth(), agora.getUTCDate())
+    );
+
+    const tarefa = await Tarefa.create({
+      empresa_id: empresaId,
+      propriedade_id: prop._id,
+      utilizador_id: staff._id,
+      data: hoje,
+      tempo_limpeza_minutos: 45,
+      tipo: 'limpeza',
+      estado: 'atribuida',
+    });
+
+    // Reporta falta súbita do staff.
+    const res = await authPost(
+      `/api/gestor/equipa/${staff._id}/falta-subita`,
+      {}
+    );
+    expect(res.status).toBe(200);
+    // Prompt 97 — devolve desatribuidas (não reatribuidas/orfas).
+    expect(res.body.desatribuidas).toBeGreaterThanOrEqual(1);
+
+    // A tarefa foi DESATRIBUÍDA (não reatribuída ao outro staff).
+    const depois = await Tarefa.findById(tarefa._id);
+    expect(depois.utilizador_id).toBeNull();
+    expect(depois.estado).toBe('por_atribuir');
+    // Garante que NÃO foi atribuída ao outro staff (sem load balancer).
+    expect(String(depois.utilizador_id ?? '')).not.toBe(String(outro._id));
+  });
+
+  it('baixa prolongada → desatribui tarefas do período (não reatribui)', async () => {
+    const hash = await bcrypt.hash(PASSWORD, 10);
+    const staff = await Utilizador.create({
+      nome: 'Staff Baixa P97',
+      email: 'staff.baixa.p97@teste.pt',
+      password_hash: hash,
+      empresa_id: empresaId,
+      role: 'staff',
+      ativo: true,
+    });
+    const outro = await Utilizador.create({
+      nome: 'Staff Outro Baixa',
+      email: 'staff.outro.baixa.p97@teste.pt',
+      password_hash: hash,
+      empresa_id: empresaId,
+      role: 'staff',
+      ativo: true,
+    });
+
+    const prop = await Propriedade.create({
+      smoobu_id: 'p97-baixa',
+      nome: 'Casa Baixa P97',
+      morada: 'Rua Baixa',
+      empresa_id: empresaId,
+      ativo: true,
+    });
+
+    // Tarefa atribuída ao staff para daqui a 5 dias.
+    const daqui5 = new Date(Date.now() + 5 * 86400000);
+    const inicio5 = new Date(
+      Date.UTC(daqui5.getUTCFullYear(), daqui5.getUTCMonth(), daqui5.getUTCDate())
+    );
+
+    const tarefa = await Tarefa.create({
+      empresa_id: empresaId,
+      propriedade_id: prop._id,
+      utilizador_id: staff._id,
+      data: inicio5,
+      tempo_limpeza_minutos: 45,
+      tipo: 'limpeza',
+      estado: 'atribuida',
+    });
+
+    const inicioStr = new Date(Date.now() + 4 * 86400000)
+      .toISOString()
+      .slice(0, 10);
+    const fimStr = new Date(Date.now() + 6 * 86400000).toISOString().slice(0, 10);
+
+    const res = await authPost(`/api/gestor/equipa/${staff._id}/baixa`, {
+      data_inicio: inicioStr,
+      data_fim: fimStr,
+      tipo: 'ferias',
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.desatribuidas).toBeGreaterThanOrEqual(1);
+
+    // A tarefa foi desatribuída (não reatribuída ao outro staff).
+    const depois = await Tarefa.findById(tarefa._id);
+    expect(depois.utilizador_id).toBeNull();
+    expect(depois.estado).toBe('por_atribuir');
+    expect(String(depois.utilizador_id ?? '')).not.toBe(String(outro._id));
   });
 });
