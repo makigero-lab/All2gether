@@ -141,6 +141,33 @@ Stage Summary:
 - **Card de Detalhes da Reserva** visível para gestor (no novo modal de detalhe de tarefa, aberto via botão Eye na tabela de tarefas) e para staff (no topo do ecrã de detalhe da tarefa no mobile). Mostra check-in, check-out, hóspedes (pax) e nome do hóspede quando existirem.
 - Lint + tsc + build ✓. 112 testes backend ✓. Documentação atualizada. Próximo passo: commit + push para a branch `dev`.
 
+---
+
+Task ID: A5 (Prompt 96)
+Agent: Z.ai Code
+Task: Cron job "Cão de Guarda" — às 18:00 lembra o staff das tarefas de limpeza de hoje ainda não concluídas.
+
+Work Log:
+- Lido o worklog (Tasks A0–A4) e `backend/jobs/agendaAmanha.js` (padrão de cron job com require lazy + timezone Europe/Lisbon).
+- **Criado `backend/jobs/caoGuarda.js`:**
+  - `executarCaoGuarda()` — calcula o intervalo do dia ATUAL (meia-noite UTC) → procura `Tarefa` com `tipo: 'limpeza'`, `utilizador_id ≠ null`, `estado ∈ { atribuida, em_curso }` (atribuídas mas não concluídas) → populate de `propriedade_id` (nome) + `utilizador_id` (ativo, eliminado_em) → para cada tarefa esquecida chama `notificarUtilizador(staffId, '⚠️ Tarefa Incompleta', 'Ainda não marcaste a limpeza da [nome da propriedade] como concluída. Por favor, atualiza a app!', '/staff')` (fire-and-forget). Ignora staff inativo/eliminado. Devolve `{ encontradas, notificadas }`.
+  - `iniciarCaoGuarda()` — `cron.schedule('0 18 * * *', ..., { timezone: 'Europe/Lisbon' })`.
+  - `notificarUtilizador` via require lazy (permite `jest.spyOn` nos testes, mesmo padrão do `agendaAmanha`).
+  - **Nota sobre estados:** o modelo `Tarefa` tem `['por_atribuir','atribuida','em_curso','concluida','cancelada']` — não existe `'pendente'`. O prompt pede 'pendente' ou 'em_curso'; `'atribuida'` é o equivalente (atribuída mas ainda não iniciada). Comentário explicativo no ficheiro.
+  - **Uma push por tarefa:** ao contrário do `Agenda de Amanhã` (agrupa por staff), o Cão de Guarda envia uma push POR TAREFA esquecida (a mensagem inclui o nome da propriedade, pelo que cada push é específica). Documentado.
+- **`backend/server.js`:** importado `iniciarCaoGuarda` e chamado no arranque (dentro de `if (require.main === module)`, logo após `iniciarAgendaAmanha()`).
+- **Testes (4 novos, secção 18 do `integration.test.js`):** spy em `notificarUtilizador`. (1) notifica por cada tarefa esquecida (staff1 com 1 atribuída + 1 em_curso → 2 pushes; staff2 com 1 → 1 push; total 3; verifica título/corpo com nome da propriedade/link); (2) ignora concluídas, canceladas, por_atribuir (sem utilizador) e manutencao (não é limpeza) — só 1 conta; (3) sem tarefas → não notifica; (4) ignora staff inativo mesmo com tarefa de limpeza atribuída (encontrada=1, notificadas=0).
+- **Validação:** `npm test` no backend → **116/116 ✓** (15.6s), incluindo os 4 novos testes.
+- **Documentação atualizada:** `docs/BACKEND.md` (secção 3.3 atualizada: tabela dos 3 jobs + nova subsecção "Cão de Guarda" com nota sobre estados + nota "uma push por tarefa"; entrada "Prompt 96" no histórico).
+
+Stage Summary:
+- Novo cron job "Cão de Guarda" ativo: todos os dias às **18:00 (Europe/Lisbon)**, cada tarefa de limpeza de HOJE ainda não concluída (estado `atribuida` ou `em_curso`) gera uma push `⚠️ Tarefa Incompleta — Ainda não marcaste a limpeza da [propriedade] como concluída. Por favor, atualiza a app!` à funcionária responsável.
+- Filtro: `tipo: 'limpeza'` + `utilizador_id ≠ null` + `estado ∈ { atribuida, em_curso }` + data no dia atual. Ignora concluídas, canceladas, por_atribuir, outros tipos e staff inativo/eliminado.
+- Uma push POR TAREFA (não agrupado por staff) — cada push menciona a propriedade específica.
+- Horário do dia completo: 08h Daily Briefing → 18h Cão de Guarda → 19h Agenda de Amanhã.
+- 116 testes a passar (+4). Documentação atualizada. Próximo passo: commit + push para a branch `dev`.
+
+
 
 
 

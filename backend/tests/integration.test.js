@@ -2372,3 +2372,249 @@ describe('Cron Job: Agenda de Amanhã (Prompt 94)', () => {
     expect(notificarSpy).not.toHaveBeenCalled();
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* 18. Cron Job — Cão de Guarda (Prompt 96)                            */
+/* ------------------------------------------------------------------ */
+
+describe('Cron Job: Cão de Guarda (Prompt 96)', () => {
+  const { executarCaoGuarda } = require('../jobs/caoGuarda');
+  let notificarSpy;
+
+  beforeEach(async () => {
+    // Limpa tarefas e utilizadores de testes anteriores deste describe.
+    await Tarefa.deleteMany({});
+    await Utilizador.deleteMany({
+      email: {
+        $in: ['staff.cg1@teste.pt', 'staff.cg2@teste.pt', 'staff.cg-inativo@teste.pt'],
+      },
+    });
+
+    // Espia notificarUtilizador para validar as chamadas sem depender do
+    // Web Push estar configurado (o módulo original faz skip silencioso).
+    const notificarMod = require('../utils/notificar');
+    notificarSpy = jest.spyOn(notificarMod, 'notificarUtilizador').mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    notificarSpy.mockRestore();
+  });
+
+  it('notifica por cada tarefa de limpeza de hoje não concluída (atribuida/em_curso)', async () => {
+    const hash = await bcrypt.hash(PASSWORD, 10);
+    const staff1 = await Utilizador.create({
+      nome: 'Staff CG1',
+      email: 'staff.cg1@teste.pt',
+      password_hash: hash,
+      empresa_id: empresaId,
+      role: 'staff',
+      ativo: true,
+    });
+    const staff2 = await Utilizador.create({
+      nome: 'Staff CG2',
+      email: 'staff.cg2@teste.pt',
+      password_hash: hash,
+      empresa_id: empresaId,
+      role: 'staff',
+      ativo: true,
+    });
+
+    // Hoje (meia-noite UTC).
+    const agora = new Date();
+    const hoje = new Date(
+      Date.UTC(agora.getUTCFullYear(), agora.getUTCMonth(), agora.getUTCDate())
+    );
+
+    const prop1 = await Propriedade.create({
+      smoobu_id: 'cg-100',
+      nome: 'Casa CG1',
+      morada: 'Rua CG1',
+      empresa_id: empresaId,
+      ativo: true,
+    });
+    const prop2 = await Propriedade.create({
+      smoobu_id: 'cg-101',
+      nome: 'Casa CG2',
+      morada: 'Rua CG2',
+      empresa_id: empresaId,
+      ativo: true,
+    });
+
+    // staff1 tem 1 tarefa atribuída + 1 em_curso (2 notificações).
+    await Tarefa.create({
+      empresa_id: empresaId,
+      propriedade_id: prop1._id,
+      utilizador_id: staff1._id,
+      data: hoje,
+      tempo_limpeza_minutos: 45,
+      tipo: 'limpeza',
+      estado: 'atribuida',
+    });
+    await Tarefa.create({
+      empresa_id: empresaId,
+      propriedade_id: prop2._id,
+      utilizador_id: staff1._id,
+      data: hoje,
+      tempo_limpeza_minutos: 45,
+      tipo: 'limpeza',
+      estado: 'em_curso',
+    });
+    // staff2 tem 1 tarefa atribuída (1 notificação).
+    await Tarefa.create({
+      empresa_id: empresaId,
+      propriedade_id: prop1._id,
+      utilizador_id: staff2._id,
+      data: hoje,
+      tempo_limpeza_minutos: 45,
+      tipo: 'limpeza',
+      estado: 'atribuida',
+    });
+
+    const resultado = await executarCaoGuarda();
+
+    // 3 notificações (1 por tarefa esquecida — não agrupado por staff).
+    expect(resultado.encontradas).toBe(3);
+    expect(resultado.notificadas).toBe(3);
+    expect(notificarSpy).toHaveBeenCalledTimes(3);
+
+    // Verifica título + link + corpo (com nome da propriedade).
+    for (const call of notificarSpy.mock.calls) {
+      expect(call[1]).toBe('⚠️ Tarefa Incompleta');
+      expect(call[3]).toBe('/staff');
+      expect(call[2]).toMatch(/como concluída\. Por favor, atualiza a app!/);
+    }
+    // Pelo menos uma notificação mentiona "Casa CG1".
+    const corpos = notificarSpy.mock.calls.map((c) => c[2]);
+    expect(corpos.some((c) => c.includes('Casa CG1'))).toBe(true);
+    expect(corpos.some((c) => c.includes('Casa CG2'))).toBe(true);
+  });
+
+  it('ignora tarefas concluídas, canceladas, por_atribuir e de outros tipos', async () => {
+    const hash = await bcrypt.hash(PASSWORD, 10);
+    const staff = await Utilizador.create({
+      nome: 'Staff CG1',
+      email: 'staff.cg1@teste.pt',
+      password_hash: hash,
+      empresa_id: empresaId,
+      role: 'staff',
+      ativo: true,
+    });
+
+    const agora = new Date();
+    const hoje = new Date(
+      Date.UTC(agora.getUTCFullYear(), agora.getUTCMonth(), agora.getUTCDate())
+    );
+
+    const prop = await Propriedade.create({
+      smoobu_id: 'cg-200',
+      nome: 'Casa CG Ignorar',
+      morada: 'Rua CG',
+      empresa_id: empresaId,
+      ativo: true,
+    });
+
+    // Concluída → não notifica.
+    await Tarefa.create({
+      empresa_id: empresaId,
+      propriedade_id: prop._id,
+      utilizador_id: staff._id,
+      data: hoje,
+      tempo_limpeza_minutos: 45,
+      tipo: 'limpeza',
+      estado: 'concluida',
+    });
+    // Cancelada → não notifica.
+    await Tarefa.create({
+      empresa_id: empresaId,
+      propriedade_id: prop._id,
+      utilizador_id: staff._id,
+      data: hoje,
+      tempo_limpeza_minutos: 45,
+      tipo: 'limpeza',
+      estado: 'cancelada',
+    });
+    // Por atribuir (sem utilizador) → não notifica.
+    await Tarefa.create({
+      empresa_id: empresaId,
+      propriedade_id: prop._id,
+      utilizador_id: null,
+      data: hoje,
+      tempo_limpeza_minutos: 45,
+      tipo: 'limpeza',
+      estado: 'por_atribuir',
+    });
+    // Manutenção (não é limpeza) → não notifica.
+    await Tarefa.create({
+      empresa_id: empresaId,
+      propriedade_id: prop._id,
+      utilizador_id: staff._id,
+      data: hoje,
+      tempo_limpeza_minutos: 45,
+      tipo: 'manutencao',
+      estado: 'atribuida',
+    });
+    // A única que conta: limpeza + atribuída.
+    await Tarefa.create({
+      empresa_id: empresaId,
+      propriedade_id: prop._id,
+      utilizador_id: staff._id,
+      data: hoje,
+      tempo_limpeza_minutos: 45,
+      tipo: 'limpeza',
+      estado: 'atribuida',
+    });
+
+    const resultado = await executarCaoGuarda();
+    expect(resultado.encontradas).toBe(1);
+    expect(resultado.notificadas).toBe(1);
+    expect(notificarSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('sem tarefas de limpeza incompletas hoje → não notifica ninguém', async () => {
+    const resultado = await executarCaoGuarda();
+    expect(resultado.encontradas).toBe(0);
+    expect(resultado.notificadas).toBe(0);
+    expect(notificarSpy).not.toHaveBeenCalled();
+  });
+
+  it('ignora staff inativo/eliminado mesmo com tarefa de limpeza incompleta', async () => {
+    const hash = await bcrypt.hash(PASSWORD, 10);
+    const staffInativo = await Utilizador.create({
+      nome: 'Staff CG Inativo',
+      email: 'staff.cg-inativo@teste.pt',
+      password_hash: hash,
+      empresa_id: empresaId,
+      role: 'staff',
+      ativo: false, // inativo
+    });
+
+    const agora = new Date();
+    const hoje = new Date(
+      Date.UTC(agora.getUTCFullYear(), agora.getUTCMonth(), agora.getUTCDate())
+    );
+
+    const prop = await Propriedade.create({
+      smoobu_id: 'cg-300',
+      nome: 'Casa CG Inativo',
+      morada: 'Rua CG',
+      empresa_id: empresaId,
+      ativo: true,
+    });
+
+    await Tarefa.create({
+      empresa_id: empresaId,
+      propriedade_id: prop._id,
+      utilizador_id: staffInativo._id,
+      data: hoje,
+      tempo_limpeza_minutos: 45,
+      tipo: 'limpeza',
+      estado: 'atribuida',
+    });
+
+    const resultado = await executarCaoGuarda();
+    // A tarefa foi encontrada, mas o staff inativo não é notificado.
+    expect(resultado.encontradas).toBe(1);
+    expect(resultado.notificadas).toBe(0);
+    expect(notificarSpy).not.toHaveBeenCalled();
+  });
+});
