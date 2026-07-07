@@ -197,6 +197,35 @@ Stage Summary:
 - O load balancer (`determinarUtilizadorAtribuido` + Algoritmo VIP) mantém-se ativo **apenas** no webhook (criação de tarefa por nova reserva) e na auto-atribuição manual em lote (`tarefaController.autoAtribuirTarefas`).
 - 119 testes a passar (+3). Lint + tsc + build ✓. Documentação atualizada. Próximo passo: commit + push para a branch `dev`.
 
+---
+
+Task ID: A7 (Prompt 98)
+Agent: Z.ai Code
+Task: Rede de Segurança das 18h — auto-atribuição de emergência das tarefas órfãs de amanhã no cron job do Cão de Guarda (antes dos alertas).
+
+Work Log:
+- Lido o worklog (Tasks A0–A6), o `backend/jobs/caoGuarda.js` (Prompt 96 — alertas de tarefas incompletas) e o `backend/controllers/tarefaController.autoAtribuirTarefas` (padrão de uso do load balancer + scheduler + notificação para reatribuir órfãs).
+- **Refactorização do `backend/jobs/caoGuarda.js` em duas fases:**
+  - **FASE A — `autoAtribuicaoEmergencia()` (nova, Prompt 98):** calcula o intervalo do dia SEGUINTE (meia-noite UTC) → procura `Tarefa` com `estado: 'por_atribuir'` + `utilizador_id: null` (órfãs) → populate de `propriedade_id` (nome + coordenadas) → para cada tarefa, invoca `determinarUtilizadorAtribuido` (load balancer: Algoritmo VIP + Haversine + SLA 8h) passando `empresa_id`, `range`, `coordenadas`, `tempoNovaTarefa`, `propriedadeId` → se encontrar staff: recalcula hora via `calcularInicioTarefaUtilizador` (scheduler sequencial, best-effort), `Tarefa.updateOne` com `utilizador_id + estado 'atribuida' + nova data`, e envia push `🧹 Nova Limpeza Atribuída` (fire-and-forget) → se não houver staff: mantém `por_atribuir` (órfã). Devolve `{ encontradas, atribuidas, orfas }`.
+  - **FASE B — `alertasTarefasIncompletas()` (Prompt 96, extraída para função própria):** inalterada — push `⚠️ Tarefa Incompleta` por cada tarefa de limpeza de hoje não concluída. Devolve `{ encontradas, notificadas }`.
+  - **`executarCaoGuarda()`** agora corre **Fase A antes da Fase B** (o prompt é explícito: a auto-atribuição corre ANTES dos alertas) e devolve `{ failSafe, alertas }`.
+  - `determinarUtilizadorAtribuido` e `notificarUtilizador` carregados via `require` lazy dentro das funções (permite `jest.spyOn` nos testes, mesmo padrão do `agendaAmanha`).
+  - `module.exports` agora inclui `autoAtribuicaoEmergencia` e `alertasTarefasIncompletas` para testes isolados.
+- **Testes:**
+  - 4 testes existentes do Prompt 96 atualizados para `resultado.alertas.*` (a estrutura de retorno mudou de `{ encontradas, notificadas }` para `{ failSafe, alertas }`).
+  - 4 novos testes (secção 20 "Prompt 98"): (1) atribui órfãs de amanhã via load balancer (verifica `atribuidas`, `estado 'atribuida'`, push `🧹 Nova Limpeza Atribuída` com nome da propriedade); (2) sem órfãs → não faz nada; (3) sem staff disponível (desativa todos os staff da empresa) → tarefa mantém-se `por_atribuir` (órfã); (4) não mexe em tarefas de hoje nem em já atribuídas de amanhã.
+  - **Problema encontrado e resolvido:** o teste "sem staff disponível" falhava inicialmente porque staff de testes anteriores (e.g. `staff.webhook@teste.pt`) ficavam na `empresaId`. Solução: `Utilizador.updateMany({ empresa_id: empresaId, role: 'staff' }, { $set: { ativo: false } })` no início do teste para garantir que não há staff ativo.
+- **Validação:** `npm test` backend → **123/123 ✓** (15.6s), incluindo os 4 novos testes e os 4 atualizados.
+- **Documentação atualizada:** `docs/BACKEND.md` (secção 3.3 — Cão de Guarda agora descreve as 2 fases em detalhe com nota sobre o objetivo do Fail-Safe e a complementaridade com o Prompt 97; linha da tabela atualizada; entrada "Prompt 98" no histórico).
+
+Stage Summary:
+- **Fail-Safe ativo às 18:00:** o cron job do Cão de Guarda agora começa por **auto-atribuir** as tarefas órfãs de amanhã (`por_atribuir`) via load balancer (Algoritmo VIP + Haversine + SLA 8h + scheduler sequencial + push de notificação), e só **depois** envia os alertas de tarefas de hoje incompletas (Prompt 96).
+- **Objetivo cumprido:** quando o relógio das 19:00 (Agenda de Amanhã, Prompt 94) correr uma hora depois, as escalas do dia seguinte já estão 100% preenchidas — os funcionários recebem a notificação com as atribuições completas.
+- **Complementa o Prompt 97:** as tarefas desatribuídas por ausências (criar/aprovar), falta súbita, baixa prolongada e desativação de propriedades (que deixaram de ser reatribuídas automaticamente) são agora reatribuídas aqui de forma **centralizada e controlada**, uma única vez por dia, evitando disparos automáticos e spam de notificações durante o dia.
+- O load balancer mantém-se ativo em 3 sítios: webhook (nova reserva), auto-atribuição manual em lote (gestor) e **Fail-Safe noturno (novo)**.
+- 123 testes a passar (+4). Documentação atualizada. Próximo passo: commit + push para a branch `dev`.
+
+
 
 
 
