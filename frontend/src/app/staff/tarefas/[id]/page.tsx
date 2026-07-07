@@ -62,6 +62,8 @@ export default function DetalheTarefaPage({
     estado: tarefa.estado,
     tipo: tarefa.tipo,
     endereco: tarefa.propriedade_id?.morada,
+    // Prompt 95 — detalhes da reserva Smoobu (para card de destaque).
+    detalhes_reserva: tarefa.detalhes_reserva ?? null,
   };
 
   // Usa a checklist real da propriedade (vinda do populate do backend).

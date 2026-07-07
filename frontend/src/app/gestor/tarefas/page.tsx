@@ -15,6 +15,7 @@ import {
   Filter,
   Trash2,
   Sparkles,
+  Eye,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -46,6 +47,7 @@ import {
   type Role,
 } from "@/lib/api";
 import { PaginationBar } from "@/components/admin/pagination-bar";
+import { DetalheTarefaModal } from "@/components/gestor/detalhe-tarefa-modal";
 
 interface TarefaAdmin {
   _id: string;
@@ -58,6 +60,14 @@ interface TarefaAdmin {
   avarias?: string[];
   // v1.68.0 (Prompt 91) — Observações (descrição da avaria em manutenções).
   observacoes?: string;
+  // Prompt 95 (Fase 1.5) — Observações do staff + detalhes da reserva.
+  observacoes_staff?: string;
+  detalhes_reserva?: {
+    checkin?: string | null;
+    checkout?: string | null;
+    pax?: number | null;
+    nome_hospede?: string | null;
+  } | null;
 }
 
 const ESTADO_LABEL: Record<string, string> = {
@@ -179,6 +189,9 @@ export default function AdminTarefasPage() {
   const [atribuindo, setAtribuindo] = useState<TarefaAdmin | null>(null);
   const [atribuirUserId, setAtribuirUserId] = useState("");
   const [atribuirSubmitting, setAtribuirSubmitting] = useState(false);
+
+  // Prompt 95 — Modal de detalhe da tarefa (card de detalhes_reserva).
+  const [detalheTarefa, setDetalheTarefa] = useState<TarefaAdmin | null>(null);
 
   // v1.59.0 (Prompt 81) — Staff indisponíveis (férias/doença) no dia da tarefa.
   const [indisponiveis, setIndisponiveis] = useState<Array<{
@@ -739,6 +752,17 @@ export default function AdminTarefasPage() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1">
+                          {/* Prompt 95 — Ver detalhe da tarefa (card de detalhes_reserva) */}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => setDetalheTarefa(t)}
+                            aria-label="Ver detalhe"
+                            title="Ver detalhe"
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
                           {(t.estado === "por_atribuir" || t.estado === "atribuida") && (
                             <Button
                               variant="ghost"
@@ -936,6 +960,13 @@ export default function AdminTarefasPage() {
           </Button>
         </DialogFooter>
       </Dialog>
+
+      {/* Prompt 95 — Modal de detalhe da tarefa (card de detalhes_reserva) */}
+      <DetalheTarefaModal
+        tarefa={detalheTarefa}
+        open={detalheTarefa !== null}
+        onOpenChange={(o) => !o && setDetalheTarefa(null)}
+      />
     </div>
   );
 }

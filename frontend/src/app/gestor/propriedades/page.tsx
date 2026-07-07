@@ -27,6 +27,7 @@ import {
   adminPatch,
   adminPut,
   type PropriedadeDTO,
+  type UtilizadorDTO,
 } from "@/lib/api";
 
 /**
@@ -257,9 +258,31 @@ export default function PropriedadesPage() {
     morada: "",
     tempo_limpeza_minutos: "45",
     checklist: "",
+    funcionario_preferencial_id: "",
   });
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editErro, setEditErro] = useState<string | null>(null);
+
+  // Prompt 95 — Lista de staff da empresa (para o select de funcionário
+  // preferencial no modal de edição). Carregada uma vez ao montar.
+  const [staffList, setStaffList] = useState<UtilizadorDTO[]>([]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const data = await adminGet<{ utilizadores: UtilizadorDTO[] }>(
+          "/api/gestor/equipa"
+        );
+        // Só interessa staff ativo (o backend valida isto ao gravar).
+        setStaffList(
+          (data.utilizadores ?? []).filter(
+            (u) => u.role === "staff" && u.ativo
+          )
+        );
+      } catch {
+        // Silencioso — o select aparece vazio mas não bloqueia a edição.
+      }
+    })();
+  }, []);
 
   /** Abre o modal de edição com os dados atuais da propriedade. */
   function abrirEdicao(p: PropriedadeDTO) {
@@ -270,6 +293,7 @@ export default function PropriedadesPage() {
       morada: p.morada ?? "",
       tempo_limpeza_minutos: String(p.tempo_limpeza_minutos ?? 45),
       checklist: (p.checklist ?? []).join("\n"),
+      funcionario_preferencial_id: p.funcionario_preferencial_id ?? "",
     });
     setEditErro(null);
   }
@@ -303,6 +327,10 @@ export default function PropriedadesPage() {
             .split("\n")
             .map((s) => s.trim())
             .filter((s) => s.length > 0),
+          // Prompt 95 — Funcionário preferencial (Algoritmo VIP). String vazia
+          // → null no backend (remove o preferencial).
+          funcionario_preferencial_id:
+            editForm.funcionario_preferencial_id.trim() || null,
         }
       );
       // Atualiza a linha na tabela.
@@ -764,6 +792,39 @@ export default function PropriedadesPage() {
               />
               <p className="text-xs text-muted-foreground">
                 O staff verá estes itens ao concluir a tarefa de limpeza desta propriedade.
+              </p>
+            </div>
+
+            {/* Prompt 95 — Funcionário Preferencial (Algoritmo VIP) */}
+            <div className="space-y-1.5">
+              <label
+                htmlFor="edit-preferencial"
+                className="text-sm font-medium"
+              >
+                Funcionário Preferencial
+              </label>
+              <select
+                id="edit-preferencial"
+                value={editForm.funcionario_preferencial_id}
+                onChange={(e) =>
+                  setEditForm((f) => ({
+                    ...f,
+                    funcionario_preferencial_id: e.target.value,
+                  }))
+                }
+                className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="">Nenhum (usar load balancer geral)</option>
+                {staffList.map((s) => (
+                  <option key={s._id} value={s._id}>
+                    {s.nome}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-muted-foreground">
+                Quando definido, o motor de atribuição dá prioridade a este
+                funcionário para limpezas desta propriedade (se estiver
+                disponível e dentro do limite de 8h/dia).
               </p>
             </div>
 

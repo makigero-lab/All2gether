@@ -130,6 +130,16 @@ export interface TarefaMock {
   checklist?: string[];
   // v1.56.0 (Prompt 78) — data ISO real da tarefa (para extrair hora de início).
   data?: string;
+  // Prompt 95 (Fase 1.5) — Detalhes da reserva Smoobu (para card de destaque).
+  detalhes_reserva?: DetalhesReservaDTO | null;
+}
+
+/** Prompt 95 — Detalhes da reserva Smoobu associada a uma tarefa. */
+export interface DetalhesReservaDTO {
+  checkin?: string | null;
+  checkout?: string | null;
+  pax?: number | null;
+  nome_hospede?: string | null;
 }
 
 export interface PropriedadeDTO {
@@ -144,6 +154,8 @@ export interface PropriedadeDTO {
   checklist?: string[];
   // v1.61.0 (Prompt 84) — Capacidade máxima de hóspedes (do Smoobu).
   capacidade_hospedes?: number | null;
+  // Prompt 92 (Fase 1.5) — Funcionário preferencial (Algoritmo VIP).
+  funcionario_preferencial_id?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }

@@ -1,28 +1,354 @@
 "use client";
 
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { Loader2 } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import {
+  CalendarOff,
+  Loader2,
+  AlertCircle,
+  RefreshCw,
+  Trash2,
+  Plane,
+  Stethoscope,
+  CalendarX,
+  CircleDot,
+} from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Dialog,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogClose,
+  DialogContent,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  adminGet,
+  adminDelete,
+  type AusenciaDTO,
+} from "@/lib/api";
 
 /**
- * /gestor/ausencias — Redirect para a aba "Aprovações de Férias" da página
- * de Equipa (v1.68.0 — Prompt 91).
+ * /gestor/ausencias — Ecrã de Férias/Ausências (Prompt 95 / Fase 1.5).
  *
- * As ausências/férias são geridas na aba "Aprovações de Férias" de
- * /gestor/equipa. Esta página existe para que o menu lateral possa apontar
- * para /gestor/ausencias (URL intuitiva) e o utilizador é redirecionado
- * automaticamente para o sítio certo com a tab correta pré-selecionada.
+ * Tabela definitiva com TODAS as ausências da empresa (sem filtros de
+ * estado), com coluna de Ações (Eliminar via DELETE /api/gestor/ausencias/:id).
+ *
+ * Substitui o redirect anterior (v1.68.0) para a aba de aprovações da equipa.
+ * O Centro de Aprovações de RH (pedidos pendentes) mantém-se em
+ * /gestor/equipa?tab=aprovacoes; esta página é a visão geral de todas as
+ * ausências (aprovadas, pendentes, rejeitadas, emergência).
  */
-export default function AusenciasRedirectPage() {
-  const router = useRouter();
+
+// Alargamento local do TipoAusencia (o backend usa mais valores que o tipo
+// estrito do api.ts: ferias, doenca, folga, outro).
+type TipoAusenciaAmp = "ferias" | "doenca" | "folga" | "outro";
+
+interface AusenciaAmp extends Omit<AusenciaDTO, "tipo"> {
+  tipo: TipoAusenciaAmp;
+  estado?: string;
+  notas?: string;
+}
+
+const TIPO_LABEL: Record<TipoAusenciaAmp, string> = {
+  ferias: "Férias",
+  doenca: "Doença",
+  folga: "Folga",
+  outro: "Outro",
+};
+
+const TIPO_ICON: Record<TipoAusenciaAmp, React.ComponentType<{ className?: string }>> = {
+  ferias: Plane,
+  doenca: Stethoscope,
+  folga: CalendarX,
+  outro: CircleDot,
+};
+
+const ESTADO_LABEL: Record<string, string> = {
+  pendente: "Pendente",
+  pendente_emergencia: "Emergência",
+  aprovada: "Aprovada",
+  rejeitada: "Rejeitada",
+};
+
+const ESTADO_VARIANT: Record<
+  string,
+  "default" | "secondary" | "success" | "warning" | "destructive" | "outline"
+> = {
+  pendente: "warning",
+  pendente_emergencia: "destructive",
+  aprovada: "success",
+  rejeitada: "secondary",
+};
+
+function formatarData(iso: string): string {
+  try {
+    return new Date(iso).toLocaleDateString("pt-PT", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    });
+  } catch {
+    return iso;
+  }
+}
+
+function formatarPeriodo(inicio: string, fim: string): string {
+  const i = formatarData(inicio);
+  const f = formatarData(fim);
+  return i === f ? i : `${i} → ${f}`;
+}
+
+export default function AusenciasPage() {
+  const [ausencias, setAusencias] = useState<AusenciaAmp[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [erro, setErro] = useState<string | null>(null);
+
+  // Modal de confirmação de eliminação.
+  const [aEliminar, setAEliminar] = useState<AusenciaAmp | null>(null);
+  const [eliminando, setEliminando] = useState(false);
+
+  const carregar = useCallback(async () => {
+    setLoading(true);
+    setErro(null);
+    try {
+      // Sem filtros → devolve TODAS as ausências da empresa.
+      const data = await adminGet<{ ausencias: AusenciaAmp[] }>(
+        "/api/gestor/ausencias"
+      );
+      setAusencias(data.ausencias ?? []);
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Erro ao carregar ausências.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    router.replace("/gestor/equipa?tab=aprovacoes");
-  }, [router]);
+    carregar();
+  }, [carregar]);
+
+  async function handleEliminar() {
+    if (!aEliminar) return;
+    setEliminando(true);
+    try {
+      // Otimismo: remove da UI imediatamente.
+      setAusencias((prev) => prev.filter((a) => a._id !== aEliminar._id));
+      await adminDelete(`/api/gestor/ausencias/${aEliminar._id}`);
+      setAEliminar(null);
+    } catch (e) {
+      // Reverte em caso de erro.
+      await carregar();
+      setErro(e instanceof Error ? e.message : "Erro ao eliminar ausência.");
+    } finally {
+      setEliminando(false);
+    }
+  }
 
   return (
-    <div className="flex min-h-[60vh] items-center justify-center">
-      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+    <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
+      {/* Cabeçalho */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+            <CalendarOff className="h-6 w-6 text-primary" />
+            Ausências / Férias
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            Todas as ausências da empresa (férias, doença, folgas, emergências).
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={carregar}
+          disabled={loading}
+          aria-label="Atualizar"
+        >
+          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+        </Button>
+      </div>
+
+      {erro && (
+        <Card className="border-destructive/50">
+          <CardContent className="flex items-center gap-2 p-4 text-sm text-destructive">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            {erro}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Tabela de ausências */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">
+            Ausências Registadas ({ausencias.length})
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0">
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : ausencias.length === 0 ? (
+            <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
+              <CalendarOff className="h-8 w-8 text-muted-foreground/50" />
+              <p className="text-sm text-muted-foreground">
+                Sem ausências registadas.
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
+                    <th className="px-4 py-3 font-medium">Funcionário</th>
+                    <th className="px-4 py-3 font-medium">Tipo</th>
+                    <th className="px-4 py-3 font-medium">Período</th>
+                    <th className="px-4 py-3 font-medium">Estado</th>
+                    <th className="px-4 py-3 font-medium">Notas</th>
+                    <th className="px-4 py-3 text-right font-medium">Ações</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {ausencias.map((a) => {
+                    const TipoIcon = TIPO_ICON[a.tipo] ?? CircleDot;
+                    return (
+                      <tr key={a._id} className="hover:bg-muted/30">
+                        <td className="px-4 py-3 font-medium">
+                          {a.utilizador?.nome ?? "—"}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="flex items-center gap-1.5">
+                            <TipoIcon className="h-4 w-4 text-muted-foreground" />
+                            {TIPO_LABEL[a.tipo] ?? a.tipo}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {formatarPeriodo(a.data_inicio, a.data_fim)}
+                        </td>
+                        <td className="px-4 py-3">
+                          <Badge
+                            variant={
+                              ESTADO_VARIANT[a.estado ?? ""] ?? "secondary"
+                            }
+                          >
+                            {ESTADO_LABEL[a.estado ?? ""] ?? a.estado ?? "—"}
+                          </Badge>
+                        </td>
+                        <td className="px-4 py-3 max-w-xs">
+                          {a.notas ? (
+                            <span
+                              className="line-clamp-2 text-muted-foreground"
+                              title={a.notas}
+                            >
+                              {a.notas}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground/50">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center justify-end">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-destructive hover:text-destructive"
+                              onClick={() => setAEliminar(a)}
+                              aria-label="Eliminar ausência"
+                              title="Eliminar"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Modal de confirmação de eliminação */}
+      <Dialog
+        open={aEliminar !== null}
+        onOpenChange={(o) => !o && setAEliminar(null)}
+      >
+        <DialogHeader>
+          <div>
+            <DialogTitle className="flex items-center gap-2">
+              <Trash2 className="h-5 w-5 text-destructive" />
+              Eliminar Ausência
+            </DialogTitle>
+            <DialogDescription>
+              Tens a certeza que queres eliminar esta ausência? Esta ação é
+              permanente.
+            </DialogDescription>
+          </div>
+          <DialogClose onClick={() => setAEliminar(null)} />
+        </DialogHeader>
+        <DialogContent className="space-y-3">
+          {aEliminar && (
+            <div className="rounded-md bg-muted/50 p-3 text-sm">
+              <p>
+                <strong>Funcionário:</strong>{" "}
+                {aEliminar.utilizador?.nome ?? "—"}
+              </p>
+              <p>
+                <strong>Tipo:</strong> {TIPO_LABEL[aEliminar.tipo] ?? aEliminar.tipo}
+              </p>
+              <p>
+                <strong>Período:</strong>{" "}
+                {formatarPeriodo(aEliminar.data_inicio, aEliminar.data_fim)}
+              </p>
+              {aEliminar.notas && (
+                <p>
+                  <strong>Notas:</strong> {aEliminar.notas}
+                </p>
+              )}
+            </div>
+          )}
+        </DialogContent>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setAEliminar(null)}
+            disabled={eliminando}
+          >
+            Cancelar
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            onClick={handleEliminar}
+            disabled={eliminando}
+          >
+            {eliminando ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                A eliminar…
+              </>
+            ) : (
+              <>
+                <Trash2 className="mr-2 h-4 w-4" />
+                Eliminar
+              </>
+            )}
+          </Button>
+        </DialogFooter>
+      </Dialog>
     </div>
   );
 }

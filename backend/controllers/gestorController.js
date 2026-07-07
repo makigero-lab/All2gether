@@ -720,17 +720,19 @@ exports.atualizarPropriedade = async (req, res) => {
       });
     }
 
-    const { nome, smoobu_id, morada, tempo_limpeza_minutos } = req.body || {};
+    const { nome, smoobu_id, morada, tempo_limpeza_minutos, funcionario_preferencial_id } = req.body || {};
 
     // Tem de haver pelo menos um campo para atualizar.
     if (
       nome === undefined &&
       smoobu_id === undefined &&
       morada === undefined &&
-      tempo_limpeza_minutos === undefined
+      tempo_limpeza_minutos === undefined &&
+      funcionario_preferencial_id === undefined &&
+      req.body?.checklist === undefined
     ) {
       return res.status(400).json({
-        erro: 'Nenhum campo para atualizar. Envie nome, smoobu_id, morada ou tempo_limpeza_minutos.',
+        erro: 'Nenhum campo para atualizar. Envie nome, smoobu_id, morada, tempo_limpeza_minutos, checklist ou funcionario_preferencial_id.',
       });
     }
 
@@ -801,6 +803,33 @@ exports.atualizarPropriedade = async (req, res) => {
       propriedade.checklist = Array.isArray(req.body.checklist)
         ? req.body.checklist.filter((s) => typeof s === 'string' && s.trim())
         : [];
+    }
+
+    // Prompt 95 (Fase 1.5) — Funcionário preferencial (Algoritmo VIP).
+    // Aceita null/empty para remover; caso contrário valida que é um staff
+    // ativo da mesma empresa.
+    if (funcionario_preferencial_id !== undefined) {
+      const valor = funcionario_preferencial_id === null || funcionario_preferencial_id === ''
+        ? null
+        : String(funcionario_preferencial_id).trim();
+      if (valor !== null) {
+        if (!mongoose.isValidObjectId(valor)) {
+          return res.status(400).json({ erro: 'funcionario_preferencial_id inválido.' });
+        }
+        const staffPref = await Utilizador.findOne({
+          _id: valor,
+          empresa_id: empresaId,
+          role: 'staff',
+          ativo: true,
+          eliminado_em: null,
+        }).lean();
+        if (!staffPref) {
+          return res.status(400).json({
+            erro: 'Funcionário preferencial não encontrado (não é staff ativo desta empresa).',
+          });
+        }
+      }
+      propriedade.funcionario_preferencial_id = valor;
     }
 
     await propriedade.save();
