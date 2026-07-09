@@ -327,5 +327,38 @@ Stage Summary:
 - O frontend não precisou de alterações — o proxy route substitui o cookie pelo novo token e o redirect para `/gestor` funciona (role 'gestor' passa no middleware).
 - 126 testes backend (+1). Lint + tsc ✓. Documentação atualizada. Próximo passo: commit + push para a branch `dev`.
 
+---
+
+Task ID: A12 (Prompt 101)
+Agent: Z.ai Code
+Task: Controlo de utilizadores no painel de Admin — admin gere utilizadores de qualquer empresa (lista, toggle estado, criar gestor).
+
+Work Log:
+- Lido o worklog (Tasks A0–A11), `backend/controllers/superAdminController.js`, `backend/routes/adminRoutes.js`, `frontend/src/app/admin/page.tsx`, o proxy route das empresas e o `criarMembroEquipa`/`alternarEstadoMembro` do gestorController (para reutilizar padrões).
+- **Backend — `superAdminController.js` (3 novos endpoints):**
+  - `listarUtilizadoresEmpresa` (GET `/api/admin/empresas/:empresaId/utilizadores`): lista todos os utilizadores (`eliminado_em: null`) da empresa, sem `password_hash`, ordenados por role + nome.
+  - `criarUtilizadorEmpresa` (POST): cria gestor/staff nessa empresa; `empresa_id` vem do URL (garante associação correta); rejeita role 'admin' (403, verificado antes da validação genérica para devolver 403 específico), valida email único global (409), password ≥ 6 caracteres; default role 'gestor' (caso de uso: empresa sem gestor). Auditoria registada com `empresa_id` da empresa alvo. Hash bcrypt.
+  - `alternarEstadoUtilizadorEmpresa` (PATCH `.../utilizadores/:utilizadorId/estado`): alterna ativo/inativo (ou `{ ativo: boolean }` explícito); rejeita modificar admins (403); valida que o utilizador pertence à empresa do URL (404 caso contrário). Auditoria.
+  - Helper `carregarEmpresa(empresaId)` partilhado pelos 3 endpoints.
+  - Imports adicionados: `bcrypt`, `registarAuditoria`.
+- **Backend — `adminRoutes.js`:** registadas as 3 novas rotas (todas protegidas por `auth + isAdmin` já aplicado via `router.use`).
+- **Backend — testes (5 novos, secção 14 "Super Admin"):** (1) GET lista utilizadores (401 sem token + 200 admin + sem password_hash); (2) POST cria gestor (201 + associação correta + sem password_hash); (3) POST rejeita role admin (403) + email duplicado (409); (4) PATCH toggle alterna 3x (true→false→true→false); (5) PATCH com empresa errada (404). `npm test` → **131/131 ✓**.
+- **Frontend — proxy routes (2 novos):**
+  - `api/admin/empresas/[empresaId]/utilizadores/route.ts` (GET + POST) — injeta token do cookie, encaminha para o backend.
+  - `api/admin/empresas/[empresaId]/utilizadores/[utilizadorId]/estado/route.ts` (PATCH).
+- **Frontend — `admin/page.tsx`:**
+  - Botão **"Gerir Utilizadores"** (ícone Users) na coluna de Ações de cada empresa.
+  - **Modal** (Dialog) que lista utilizadores via GET: tabela com Nome, Email, Role (Badge), Estado (Badge) + botão **Ativar/Desativar** (ícone Power, com loading + disabled para admins).
+  - Botão **"Criar Novo Gestor"** no fundo → mini-formulário (Nome, Email, Password) → POST com `role: 'gestor'`. Validações client-side (obrigatórios, password ≥ 6). Toast de sucesso.
+  - Tipo `UtilizadorEmpresaDTO`. Imports: `Users`, `Power`, `UserPlus` (lucide), `Dialog`, `Input`.
+  - Após toggle/criar, recarrega a lista de empresas (o gestor pode ter mudado).
+- **Validação:** backend 131/131 ✓. Frontend: `npm run lint` ✓ · `npx tsc --noEmit` ✓ · `npm run build` ✓.
+- **Documentação atualizada:** `README.md` (3 novos endpoints na tabela), `docs/BACKEND.md` (entrada "Prompt 101" no histórico), `docs/FRONTEND.md` (entrada "Prompt 101").
+
+Stage Summary:
+- **Painel de Admin supremo:** o Super Admin consegue agora gerir os utilizadores de qualquer empresa diretamente do `/admin`, sem precisar de impersonar. Botão "Gerir Utilizadores" por empresa → modal com lista completa + toggle ativo/inativo + criar gestor.
+- **3 novos endpoints backend** (todos `auth + isAdmin`): listar, criar (gestor/staff), toggle estado. `empresa_id` sempre do URL (associação correta). Auditoria registada na empresa alvo.
+- **Caso de uso principal resolvido:** empresa que ficou com 0 gestores → o admin abre o modal, carrega em "Criar Novo Gestor", preenche nome/email/password, e o gestor fica criado nessa empresa (depois pode impersonar ou a empresa passa a ter gestor para o Fail-Safe noturno).
+- 131 testes backend (+5). Lint + tsc + build ✓. Documentação atualizada. Próximo passo: commit + push para a branch `dev`.
 
 

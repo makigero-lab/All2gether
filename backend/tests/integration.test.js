@@ -2019,6 +2019,160 @@ describe('Super Admin (rotas exclusivas /api/admin)', () => {
       .set('Authorization', `Bearer ${res.body.token}`);
     expect(dashRes.status).toBe(200);
   });
+
+  /* -------------------------------------------------------------- */
+  /* Prompt 101 — Gestão de utilizadores de empresas terceiras      */
+  /* -------------------------------------------------------------- */
+
+  it('Prompt 101 — GET /api/admin/empresas/:empresaId/utilizadores → lista utilizadores (só admin)', async () => {
+    // Cria uma empresa + 2 utilizadores (1 gestor + 1 staff).
+    const emp = await Empresa.create({ nome: 'Emp P101', plano_ativo: true });
+    const hash = await bcrypt.hash(PASSWORD, 10);
+    await Utilizador.create([
+      {
+        nome: 'Gestor P101',
+        email: 'gestor.p101@teste.pt',
+        password_hash: hash,
+        empresa_id: emp._id,
+        role: 'gestor',
+        ativo: true,
+      },
+      {
+        nome: 'Staff P101',
+        email: 'staff.p101@teste.pt',
+        password_hash: hash,
+        empresa_id: emp._id,
+        role: 'staff',
+        ativo: true,
+      },
+    ]);
+
+    // Sem token → 401.
+    const resSemToken = await request(app).get(`/api/admin/empresas/${emp._id}/utilizadores`);
+    expect(resSemToken.status).toBe(401);
+
+    // Admin → 200 + lista.
+    const res = await authGet(`/api/admin/empresas/${emp._id}/utilizadores`);
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.utilizadores)).toBe(true);
+    expect(res.body.utilizadores.length).toBe(2);
+    // Não devolve password_hash.
+    expect(res.body.utilizadores.every((u) => !u.password_hash)).toBe(true);
+    // Contém os 2 utilizadores.
+    const roles = res.body.utilizadores.map((u) => u.role);
+    expect(roles).toContain('gestor');
+    expect(roles).toContain('staff');
+  });
+
+  it('Prompt 101 — POST /api/admin/empresas/:empresaId/utilizadores → cria gestor (empresa sem gestor)', async () => {
+    const emp = await Empresa.create({ nome: 'Emp Sem Gestor P101', plano_ativo: true });
+
+    const res = await authPost(`/api/admin/empresas/${emp._id}/utilizadores`, {
+      nome: 'Novo Gestor P101',
+      email: 'novo.gestor.p101@teste.pt',
+      password: 'senha123',
+      role: 'gestor',
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.utilizador.nome).toBe('Novo Gestor P101');
+    expect(res.body.utilizador.role).toBe('gestor');
+    expect(String(res.body.utilizador.empresa_id)).toBe(String(emp._id));
+    expect(res.body.utilizador.ativo).toBe(true);
+    expect(res.body.utilizador.password_hash).toBeUndefined();
+
+    // Confirma que ficou na BD associado à empresa certa.
+    const naBd = await Utilizador.findById(res.body.utilizador._id).lean();
+    expect(String(naBd.empresa_id)).toBe(String(emp._id));
+    expect(naBd.role).toBe('gestor');
+  });
+
+  it('Prompt 101 — POST criação rejeita role admin (403) e email duplicado (409)', async () => {
+    const emp = await Empresa.create({ nome: 'Emp Valida P101', plano_ativo: true });
+
+    // role admin → 403.
+    const resAdmin = await authPost(`/api/admin/empresas/${emp._id}/utilizadores`, {
+      nome: 'X',
+      email: 'x.p101@teste.pt',
+      password: 'senha123',
+      role: 'admin',
+    });
+    expect(resAdmin.status).toBe(403);
+
+    // Cria um gestor.
+    await authPost(`/api/admin/empresas/${emp._id}/utilizadores`, {
+      nome: 'Gestor Dup',
+      email: 'dup.p101@teste.pt',
+      password: 'senha123',
+      role: 'gestor',
+    });
+
+    // Mesmo email → 409.
+    const resDup = await authPost(`/api/admin/empresas/${emp._id}/utilizadores`, {
+      nome: 'Outro',
+      email: 'dup.p101@teste.pt',
+      password: 'senha123',
+      role: 'gestor',
+    });
+    expect(resDup.status).toBe(409);
+  });
+
+  it('Prompt 101 — PATCH .../utilizadores/:id/estado → alterna ativo/inativo', async () => {
+    const emp = await Empresa.create({ nome: 'Emp Toggle P101', plano_ativo: true });
+    const hash = await bcrypt.hash(PASSWORD, 10);
+    const user = await Utilizador.create({
+      nome: 'Staff Toggle P101',
+      email: 'toggle.p101@teste.pt',
+      password_hash: hash,
+      empresa_id: emp._id,
+      role: 'staff',
+      ativo: true,
+    });
+
+    // Alterna (sem body) → fica inativo.
+    const res1 = await authPatch(
+      `/api/admin/empresas/${emp._id}/utilizadores/${user._id}/estado`,
+      {}
+    );
+    expect(res1.status).toBe(200);
+    expect(res1.body.ativo).toBe(false);
+
+    // Alterna novamente → fica ativo.
+    const res2 = await authPatch(
+      `/api/admin/empresas/${emp._id}/utilizadores/${user._id}/estado`,
+      {}
+    );
+    expect(res2.status).toBe(200);
+    expect(res2.body.ativo).toBe(true);
+
+    // Body explícito { ativo: false } → fica inativo.
+    const res3 = await authPatch(
+      `/api/admin/empresas/${emp._id}/utilizadores/${user._id}/estado`,
+      { ativo: false }
+    );
+    expect(res3.body.ativo).toBe(false);
+  });
+
+  it('Prompt 101 — PATCH não permite modificar estado de admin (403) nem empresa errada (404)', async () => {
+    const emp = await Empresa.create({ nome: 'Emp Seg P101', plano_ativo: true });
+    const hash = await bcrypt.hash(PASSWORD, 10);
+    // Utilizador de outra empresa (não pertence a emp).
+    const outraEmp = await Empresa.create({ nome: 'Outra Emp P101', plano_ativo: true });
+    const userOutra = await Utilizador.create({
+      nome: 'Staff Outra P101',
+      email: 'outra.p101@teste.pt',
+      password_hash: hash,
+      empresa_id: outraEmp._id,
+      role: 'staff',
+      ativo: true,
+    });
+
+    // Tentar toggle com empresaId errado → 404.
+    const resErrada = await authPatch(
+      `/api/admin/empresas/${emp._id}/utilizadores/${userOutra._id}/estado`,
+      {}
+    );
+    expect(resErrada.status).toBe(404);
+  });
 });
 
 /* ------------------------------------------------------------------ */

@@ -7,16 +7,24 @@
  *   - listarEmpresas: lista todas as empresas com o gestor principal de cada uma.
  *   - impersonarGestor: gera um token JWT do gestor de uma empresa, permitindo
  *     ao Super Admin "entrar" como esse gestor para suporte/debug.
+ *   - listarUtilizadoresEmpresa (Prompt 101): lista todos os utilizadores
+ *     (gestores + staff) de uma empresa terceira.
+ *   - criarUtilizadorEmpresa (Prompt 101): cria um gestor/staff numa empresa
+ *     terceira (para empresas que ficaram sem gestor).
+ *   - alternarEstadoUtilizadorEmpresa (Prompt 101): ativa/desativa um
+ *     utilizador de uma empresa terceira.
  *
  * Segurança: todas as rotas usam auth + isAdmin (só role 'admin' passa).
  */
 
 const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 
 const Empresa = require('../models/Empresa');
 const Utilizador = require('../models/Utilizador');
 const { JWT_SECRET } = require('../middleware/auth');
+const { registarAuditoria } = require('../utils/auditoria');
 
 const TOKEN_EXPIRACAO = process.env.JWT_EXPIRACAO || '7d';
 
@@ -174,6 +182,244 @@ exports.impersonarGestor = async (req, res) => {
     });
   } catch (err) {
     console.error('❌ impersonarGestor:', err.message);
+    return res.status(500).json({ erro: 'Erro interno do servidor.' });
+  }
+};
+
+/* ------------------------------------------------------------------ */
+/* Prompt 101 — Gestão de utilizadores de empresas terceiras           */
+/* (Super Admin pode gerir qualquer empresa)                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Valida que a empresa existe e devolve-a (lean). Usado pelos 3 endpoints
+ * abaixo para evitar repetição.
+ */
+async function carregarEmpresa(empresaId) {
+  if (!mongoose.isValidObjectId(empresaId)) return null;
+  return Empresa.findById(empresaId).lean();
+}
+
+/**
+ * GET /api/admin/empresas/:empresaId/utilizadores
+ *
+ * Lista TODOS os utilizadores (gestores + staff) de uma empresa terceira.
+ * O Super Admin usa isto no modal "Gerir Utilizadores" do painel /admin.
+ *
+ * Resposta 200: { utilizadores: [{ _id, nome, email, role, ativo, createdAt }] }
+ */
+exports.listarUtilizadoresEmpresa = async (req, res) => {
+  try {
+    const { empresaId } = req.params;
+    const empresa = await carregarEmpresa(empresaId);
+    if (!empresa) {
+      return res.status(404).json({ erro: 'Empresa não encontrada.' });
+    }
+
+    const utilizadores = await Utilizador.find({
+      empresa_id: empresaId,
+      eliminado_em: null,
+    })
+      .select('-password_hash')
+      .sort({ role: 1, nome: 1 })
+      .lean();
+
+    return res.status(200).json({ utilizadores });
+  } catch (err) {
+    console.error('❌ listarUtilizadoresEmpresa:', err.message);
+    return res.status(500).json({ erro: 'Erro interno do servidor.' });
+  }
+};
+
+/**
+ * POST /api/admin/empresas/:empresaId/utilizadores
+ *
+ * Cria um utilizador (gestor ou staff) numa empresa terceira. Caso de uso
+ * principal: empresa que ficou com 0 gestores — o admin cria um novo gestor
+ * diretamente.
+ *
+ * Body: { nome, email, password, role?, telefone?, dias_folga? }
+ *
+ * Regras de segurança:
+ *   - Não é possível criar role 'admin' (só via setup/bootstrap).
+ *   - Email único global.
+ *   - empresa_id vem do URL (não do body), garantindo associação correta.
+ *
+ * Resposta 201: { utilizador }
+ */
+exports.criarUtilizadorEmpresa = async (req, res) => {
+  try {
+    const { empresaId } = req.params;
+    const empresa = await carregarEmpresa(empresaId);
+    if (!empresa) {
+      return res.status(404).json({ erro: 'Empresa não encontrada.' });
+    }
+
+    const { nome, email, password, role, telefone, dias_folga } = req.body || {};
+
+    // Validações de presença.
+    if (!nome || !email || !password) {
+      return res.status(400).json({
+        erro: 'Campos obrigatórios em falta: nome, email e password.',
+      });
+    }
+
+    // Validação da password (mínimo 6 caracteres).
+    if (String(password).length < 6) {
+      return res.status(400).json({
+        erro: 'A password deve ter pelo menos 6 caracteres.',
+      });
+    }
+
+    // Validação do role (default 'gestor' — caso de uso principal).
+    const roleFinal = role || 'gestor';
+
+    // SEGURANÇA: Não é possível criar utilizadores com role 'admin'.
+    // (Verificado antes da validação genérica de role para devolver 403
+    // específico em vez de 400.)
+    if (roleFinal === 'admin') {
+      return res.status(403).json({
+        erro: 'Não é possível criar utilizadores com role "admin".',
+      });
+    }
+
+    if (!['gestor', 'staff'].includes(roleFinal)) {
+      return res.status(400).json({
+        erro: 'Role inválido. Valores permitidos: gestor, staff.',
+      });
+    }
+
+    // Validação de unicidade do email (único global).
+    const emailNormalizado = String(email).toLowerCase().trim();
+    const existente = await Utilizador.findOne({ email: emailNormalizado });
+    if (existente) {
+      return res.status(409).json({
+        erro: `Já existe um utilizador com o email "${emailNormalizado}".`,
+      });
+    }
+
+    // Valida dias_folga se vier (array de inteiros 0-6).
+    let diasFolgaFinal = [];
+    if (dias_folga !== undefined && dias_folga !== null) {
+      if (!Array.isArray(dias_folga)) {
+        return res.status(400).json({ erro: 'dias_folga deve ser um array de inteiros (0-6).' });
+      }
+      diasFolgaFinal = dias_folga.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6);
+    }
+
+    // Hash da password com bcrypt.
+    const password_hash = await bcrypt.hash(String(password), 10);
+
+    const novo = await Utilizador.create({
+      nome: String(nome).trim(),
+      email: emailNormalizado,
+      password_hash,
+      empresa_id: empresaId, // association correta via URL
+      role: roleFinal,
+      dias_folga: diasFolgaFinal,
+      telefone: telefone ? String(telefone).trim() : '',
+      ativo: true,
+    });
+
+    // Resposta sem password_hash.
+    const utilizador = novo.toObject();
+    delete utilizador.password_hash;
+
+    // Auditoria (empresa_id da empresa alvo, não a do admin).
+    registarAuditoria({
+      utilizador_id: req.user.id,
+      utilizador_nome: req.user.nome || 'Super Admin',
+      empresa_id: empresaId,
+      acao: 'criar_utilizador_empresa',
+      recurso: 'utilizador',
+      recurso_id: utilizador._id,
+      descricao: `Super Admin criou "${utilizador.nome}" (${roleFinal}) na empresa "${empresa.nome}"`,
+      detalhes: { email: utilizador.email, role: utilizador.role, empresa: empresa.nome },
+    });
+
+    return res.status(201).json({ utilizador });
+  } catch (err) {
+    console.error('❌ criarUtilizadorEmpresa:', err.message);
+    if (err.code === 11000) {
+      return res.status(409).json({
+        erro: 'Já existe um utilizador com este email.',
+      });
+    }
+    if (err.name === 'ValidationError') {
+      return res.status(400).json({ erro: err.message });
+    }
+    return res.status(500).json({ erro: 'Erro interno do servidor.' });
+  }
+};
+
+/**
+ * PATCH /api/admin/empresas/:empresaId/utilizadores/:utilizadorId/estado
+ *
+ * Alterna o estado ativo/inativo de um utilizador de uma empresa terceira.
+ * O Super Admin usa isto no modal "Gerir Utilizadores".
+ *
+ * Body (opcional): { ativo: boolean } — se não vier, alterna.
+ *
+ * Regras de segurança:
+ *   - Não é possível modificar o estado de um admin (403).
+ *   - O utilizador tem de pertencer à empresaId do URL.
+ *
+ * Resposta 200: { utilizador, ativo }
+ */
+exports.alternarEstadoUtilizadorEmpresa = async (req, res) => {
+  try {
+    const { empresaId, utilizadorId } = req.params;
+    const empresa = await carregarEmpresa(empresaId);
+    if (!empresa) {
+      return res.status(404).json({ erro: 'Empresa não encontrada.' });
+    }
+
+    if (!mongoose.isValidObjectId(utilizadorId)) {
+      return res.status(400).json({ erro: 'ID de utilizador inválido.' });
+    }
+
+    const utilizador = await Utilizador.findOne({
+      _id: utilizadorId,
+      empresa_id: empresaId,
+    });
+    if (!utilizador) {
+      return res.status(404).json({
+        erro: 'Utilizador não encontrado (ou não pertence a esta empresa).',
+      });
+    }
+
+    // SEGURANÇA: Não é possível desativar/ativar um administrador.
+    if (utilizador.role === 'admin') {
+      return res.status(403).json({
+        erro: 'Não é possível modificar o estado de um administrador.',
+      });
+    }
+
+    // Se vier `ativo` no body, usa-o; senão alterna.
+    const novoEstado =
+      typeof req.body?.ativo === 'boolean' ? req.body.ativo : !utilizador.ativo;
+
+    utilizador.ativo = novoEstado;
+    await utilizador.save();
+
+    const resp = utilizador.toObject();
+    delete resp.password_hash;
+
+    // Auditoria.
+    registarAuditoria({
+      utilizador_id: req.user.id,
+      utilizador_nome: req.user.nome || 'Super Admin',
+      empresa_id: empresaId,
+      acao: 'alternar_estado_utilizador_empresa',
+      recurso: 'utilizador',
+      recurso_id: utilizador._id,
+      descricao: `Super Admin ${novoEstado ? 'ativou' : 'desativou'} "${utilizador.nome}" na empresa "${empresa.nome}"`,
+      detalhes: { email: utilizador.email, ativo: novoEstado },
+    });
+
+    return res.status(200).json({ utilizador: resp, ativo: novoEstado });
+  } catch (err) {
+    console.error('❌ alternarEstadoUtilizadorEmpresa:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
   }
 };
