@@ -3291,3 +3291,127 @@ describe('Cão de Guarda / Fail-Safe: Auto-Atribuição de Emergência (Prompt 9
     expect(amanhaDepois.estado).toBe('atribuida');
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* 21. Correções — Calendário não mostra eliminados + importar atualiza */
+/* ------------------------------------------------------------------ */
+
+describe('Correções: Calendário + Importar Propriedades', () => {
+  beforeEach(async () => {
+    await Tarefa.deleteMany({});
+    await Utilizador.deleteMany({
+      email: { $in: ['staff.elim@teste.pt', 'staff.ativo@teste.pt'] },
+    });
+  });
+
+  it('calendário NÃO mostra ausências de utilizadores eliminados', async () => {
+    const Ausencia = require('../models/Ausencia');
+    const hash = await bcrypt.hash(PASSWORD, 10);
+
+    // Staff eliminado (soft delete).
+    const staffEliminado = await Utilizador.create({
+      nome: 'Staff Eliminado',
+      email: 'staff.elim@teste.pt',
+      password_hash: hash,
+      empresa_id: empresaId,
+      role: 'staff',
+      ativo: true,
+      eliminado_em: new Date(),
+    });
+
+    // Staff ativo.
+    const staffAtivo = await Utilizador.create({
+      nome: 'Staff Ativo',
+      email: 'staff.ativo@teste.pt',
+      password_hash: hash,
+      empresa_id: empresaId,
+      role: 'staff',
+      ativo: true,
+    });
+
+    const amanha = new Date();
+    amanha.setDate(amanha.getDate() + 1);
+    const amanhaStr = amanha.toISOString().slice(0, 10);
+
+    // Ausência do eliminado.
+    await Ausencia.create({
+      utilizador_id: staffEliminado._id,
+      empresa_id: empresaId,
+      data_inicio: amanha,
+      data_fim: amanha,
+      tipo: 'ferias',
+      estado: 'aprovada',
+    });
+
+    // Ausência do ativo.
+    await Ausencia.create({
+      utilizador_id: staffAtivo._id,
+      empresa_id: empresaId,
+      data_inicio: amanha,
+      data_fim: amanha,
+      tipo: 'ferias',
+      estado: 'aprovada',
+    });
+
+    const res = await authGet(
+      `/api/gestor/calendario/dados?inicio=${amanhaStr}&fim=${amanhaStr}`
+    );
+    expect(res.status).toBe(200);
+
+    // Procura eventos de ausência.
+    const ausenciasNoCalendario = res.body.tarefas.filter((t) => t.tipo === 'ausencia');
+    // Só deve haver 1 (a do staff ativo), não a do eliminado.
+    expect(ausenciasNoCalendario.length).toBe(1);
+    expect(String(ausenciasNoCalendario[0].utilizador_id._id)).toBe(String(staffAtivo._id));
+  });
+
+  it('importarPropriedades atualiza SEMPRE morada + capacidade de existentes (não só "A definir")', async () => {
+    const Propriedade = require('../models/Propriedade');
+    process.env.SMOOBU_API_KEY = 'test-key-123';
+
+    // Cria uma propriedade já existente com morada antiga.
+    const propExistente = await Propriedade.create({
+      smoobu_id: 'imp-update-1',
+      nome: 'Casa Antiga',
+      morada: 'Rua Antiga 123',
+      empresa_id: empresaId,
+      ativo: true,
+      capacidade_hospedes: 2,
+    });
+
+    // Smoobu devolve a MESMA propriedade com morada NOVA + capacidade NOVA.
+    const mockFetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        apartments: [
+          {
+            id: 'imp-update-1',
+            name: 'Casa Antiga',
+            location: { street: 'Rua Nova 456', zip: '2000-001', city: 'Lisboa' },
+            rooms: { maxOccupancy: 6 },
+          },
+        ],
+      }),
+      text: async () => '',
+    });
+    mockFetch.__isMock = true;
+    global.fetch = mockFetch;
+
+    const res = await authPost('/api/gestor/smoobu/propriedades', {});
+    expect(res.status).toBe(200);
+    // Tem de ter atualizado (não "já existia").
+    expect(res.body.atualizadas).toBe(1);
+    expect(res.body.existentes).toBe(0);
+
+    // Confirma que a morada e capacidade foram sobrescritas.
+    const depois = await Propriedade.findById(propExistente._id).lean();
+    expect(depois.morada).toBe('Rua Nova 456, 2000-001, Lisboa');
+    expect(depois.capacidade_hospedes).toBe(6);
+
+    delete process.env.SMOOBU_API_KEY;
+    if (global.fetch && global.fetch.__isMock) {
+      delete global.fetch.__isMock;
+    }
+  });
+});

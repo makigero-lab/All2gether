@@ -361,4 +361,23 @@ Stage Summary:
 - **Caso de uso principal resolvido:** empresa que ficou com 0 gestores → o admin abre o modal, carrega em "Criar Novo Gestor", preenche nome/email/password, e o gestor fica criado nessa empresa (depois pode impersonar ou a empresa passa a ter gestor para o Fail-Safe noturno).
 - 131 testes backend (+5). Lint + tsc + build ✓. Documentação atualizada. Próximo passo: commit + push para a branch `dev`.
 
+---
+
+Task ID: A13 (Correções — calendário eliminados + importar atualiza)
+Agent: Z.ai Code
+Task: Corrigir 2 bugs reportados: calendário mostra férias de utilizadores eliminados; importarPropriedades não atualiza propriedades existentes.
+
+Work Log:
+- Re-clonado o repositório (estava removido) na branch `dev` (commit 4f7bbd4, Prompt 101).
+- **Bug 1 — Calendário mostra ausências de eliminados:** Em `gestorController.getDadosCalendario`, o `Ausencia.find()` (linha 545) fazia `.populate('utilizador_id', 'nome')` sem filtrar `eliminado_em`. As ausências aprovadas de staff eliminado (soft delete) continuavam visíveis no calendário como férias. **Correção:** o `populate` passou a incluir `eliminado_em` no select e as ausências cujo utilizador tem `eliminado_em` != null são filtradas antes de converter em eventos (`ausenciasFiltradas = ausenciasAprovadas.filter(a => a.utilizador_id && !a.utilizador_id.eliminado_em)`). O `.map()` agora usa `ausenciasFiltradas` em vez de `ausenciasAprovadas`.
+- **Bug 2 — importarPropriedades não atualiza:** O `importarPropriedades` (`smoobuController`, POST /api/gestor/smoobu/propriedades) ainda tinha o comportamento conservador do Prompt 90 — só preenchia a morada se estivesse `'A definir'` (linha 630: `existente.morada === 'A definir'`). O `sincronizarPropriedades` foi alterado no Prompt 92 para SEMPRE atualizar, mas o `importarPropriedades` não foi alinhado. Resultado: "36 recebidas, 0 criadas, 0 atualizadas, 36 já existiam". **Correção:** alinhado com `sincronizarPropriedades` — para propriedades existentes, atualiza SEMPRE a morada (quando o Smoobu traz uma morada real, i.e. `moradaTexto !== 'A definir'`) e a capacidade_hospedes (quando o Smoobu traz um valor), com re-geocoding da morada nova. Os restantes campos (nome, tempo, ativo, checklist, funcionario_preferencial_id) continuam preservados.
+- **Testes (2 novos, secção 21):** (1) calendário não mostra ausência de eliminado (cria staff eliminado + staff ativo, ambos com ausência aprovada amanhã → só a do ativo aparece); (2) importarPropriedades atualiza morada + capacidade de propriedade existente (cria prop com morada antiga + capacidade 2, Smoobu devolve morada nova + capacidade 6 → `atualizadas: 1`, morada e capacidade sobrescritas na BD).
+- **Validação:** `npm test` → **133/133 ✓** (+2 novos).
+- **Documentação atualizada:** `docs/BACKEND.md` (entrada "Correção" no histórico).
+
+Stage Summary:
+- **Calendário:** ausências de utilizadores eliminados (soft delete) já não aparecem no calendário. O `populate` inclui `eliminado_em` e as ausências são filtradas.
+- **Importar Propriedades:** o botão "Importar do Smoobu" agora atualiza SEMPRE a morada + capacidade das propriedades existentes (alinhado com o "Sincronizar Smoobu" do Prompt 92). O resultado agora mostra "36 atualizadas" em vez de "0 atualizadas, 36 já existiam".
+- 133 testes backend (+2). Documentação atualizada. Próximo passo: commit + push para a branch `dev`.
+
 
