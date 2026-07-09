@@ -298,6 +298,67 @@ Stage Summary:
 - O cliente pode agora descarregar o Excel mensal e responder a perguntas como "Quantas casas a Maria limpou?" ou "A que horas aconteceram as limpezas de checkout?".
 - 125 testes backend (+2). Lint + tsc + build ✓. Documentação atualizada. Próximo passo: commit + push para a branch `dev`.
 
+---
 
+Task ID: A11 (Ajuste — override admin na impersonação)
+Agent: Z.ai Code
+Task: Corrigir erro "Não foi encontrado um gestor ativo para a empresa X" ao impersonar empresa sem gestor — admin deve ter override total.
+
+Work Log:
+- Lido o worklog (Tasks A0–A10) e `backend/controllers/superAdminController.impersonarGestor` (linha 109 devolvia 404 quando a empresa não tinha gestor ativo).
+- Verificado o middleware `isGestor` (`backend/middleware/requireRole.js`): permite `admin` e `gestor`. Ou seja, um token com `role: 'gestor'` passa em todos os endpoints do painel `/gestor/*`.
+- Verificado o middleware do frontend (`frontend/src/middleware.ts`): redireciona `admin` para `/admin` se tentar aceder a `/gestor` (linha 89-91). Por isso, o token de override **não pode** ter `role: 'admin'` — tem de ter `role: 'gestor'` (o admin impersona um gestor) para o frontend deixar entrar no `/gestor`.
+- Verificado `obterEmpresaId` (`backend/controllers/gestorController.js`): lê `req.user.empresa_id` do token (não da BD). Os endpoints do gestor usam este `empresa_id` para filtrar os dados.
+- **Correção em `superAdminController.impersonarGestor`:** quando a empresa não tem gestor ativo, em vez de devolver 404, o sistema gera um token JWT com:
+  - `id`: o id real do admin (req.user.id) — para auditoria (`registarAuditoria` usa `req.user.id`).
+  - `nome`/`email`: do admin (carregado via `Utilizador.findById(req.user.id)`).
+  - `role`: `'gestor'` (o admin impersona um gestor; o frontend middleware e o `isGestor` do backend deixam passar).
+  - `empresa_id`: o id da empresa alvo (override).
+  - Log informativo: `ℹ️ [impersonarGestor] Empresa "X" sem gestor ativo — admin "email" a aceder em modo override`.
+  - JSDoc atualizado a documentar o override.
+- **Teste novo (secção 14 "Super Admin"):** cria uma empresa sem gestor (só staff) → admin faz POST /api/admin/empresas/:id/impersonar → 200 (não 404) + token + `utilizador.role === 'gestor'` + `utilizador.empresa_id === empSemGestor._id` + `utilizador.id === adminId` (o próprio admin). Verifica ainda que o token dá acesso ao `/api/gestor/dashboard` da empresa alvo (200).
+- **Nota sobre `/api/auth/me`:** o endpoint `me` lê o utilizador da BD pelo `id` do token (o admin) e devolve o `empresa_id` REAL do admin, não o override. Isto é esperado — o override só afeta `req.user.empresa_id` (lido do token) nos endpoints do painel gestor. O teste documenta isto num comentário.
+- **Validação:** `npm test` backend → **126/126 ✓** (+1 novo). Frontend: `npm run lint` ✓ · `npx tsc --noEmit` ✓ (sem alterações de código no frontend — o proxy route e o redirect para `/gestor` já funcionam com o token de role 'gestor').
+- **Documentação atualizada:** `docs/BACKEND.md` (entrada "Ajuste" no histórico).
+
+Stage Summary:
+- **Erro corrigido:** ao impersonar uma empresa sem gestor ativo, o admin deixou de receber "Não foi encontrado um gestor ativo para a empresa X" (404). Agora recebe 200 + um token de override (role 'gestor' + empresa_id da empresa alvo) que lhe dá acesso ao painel `/gestor/*` (dashboard, propriedades, tarefas) dessa empresa.
+- **Override total do admin:** o admin consegue aceder aos dados de qualquer empresa baseando-se apenas no `empresa_id`, ignorando a necessidade de existir um gestor ativo. O id real do admin fica no token para auditoria.
+- O frontend não precisou de alterações — o proxy route substitui o cookie pelo novo token e o redirect para `/gestor` funciona (role 'gestor' passa no middleware).
+- 126 testes backend (+1). Lint + tsc ✓. Documentação atualizada. Próximo passo: commit + push para a branch `dev`.
+
+---
+
+Task ID: A12 (Prompt 101)
+Agent: Z.ai Code
+Task: Controlo de utilizadores no painel de Admin — admin gere utilizadores de qualquer empresa (lista, toggle estado, criar gestor).
+
+Work Log:
+- Lido o worklog (Tasks A0–A11), `backend/controllers/superAdminController.js`, `backend/routes/adminRoutes.js`, `frontend/src/app/admin/page.tsx`, o proxy route das empresas e o `criarMembroEquipa`/`alternarEstadoMembro` do gestorController (para reutilizar padrões).
+- **Backend — `superAdminController.js` (3 novos endpoints):**
+  - `listarUtilizadoresEmpresa` (GET `/api/admin/empresas/:empresaId/utilizadores`): lista todos os utilizadores (`eliminado_em: null`) da empresa, sem `password_hash`, ordenados por role + nome.
+  - `criarUtilizadorEmpresa` (POST): cria gestor/staff nessa empresa; `empresa_id` vem do URL (garante associação correta); rejeita role 'admin' (403, verificado antes da validação genérica para devolver 403 específico), valida email único global (409), password ≥ 6 caracteres; default role 'gestor' (caso de uso: empresa sem gestor). Auditoria registada com `empresa_id` da empresa alvo. Hash bcrypt.
+  - `alternarEstadoUtilizadorEmpresa` (PATCH `.../utilizadores/:utilizadorId/estado`): alterna ativo/inativo (ou `{ ativo: boolean }` explícito); rejeita modificar admins (403); valida que o utilizador pertence à empresa do URL (404 caso contrário). Auditoria.
+  - Helper `carregarEmpresa(empresaId)` partilhado pelos 3 endpoints.
+  - Imports adicionados: `bcrypt`, `registarAuditoria`.
+- **Backend — `adminRoutes.js`:** registadas as 3 novas rotas (todas protegidas por `auth + isAdmin` já aplicado via `router.use`).
+- **Backend — testes (5 novos, secção 14 "Super Admin"):** (1) GET lista utilizadores (401 sem token + 200 admin + sem password_hash); (2) POST cria gestor (201 + associação correta + sem password_hash); (3) POST rejeita role admin (403) + email duplicado (409); (4) PATCH toggle alterna 3x (true→false→true→false); (5) PATCH com empresa errada (404). `npm test` → **131/131 ✓**.
+- **Frontend — proxy routes (2 novos):**
+  - `api/admin/empresas/[empresaId]/utilizadores/route.ts` (GET + POST) — injeta token do cookie, encaminha para o backend.
+  - `api/admin/empresas/[empresaId]/utilizadores/[utilizadorId]/estado/route.ts` (PATCH).
+- **Frontend — `admin/page.tsx`:**
+  - Botão **"Gerir Utilizadores"** (ícone Users) na coluna de Ações de cada empresa.
+  - **Modal** (Dialog) que lista utilizadores via GET: tabela com Nome, Email, Role (Badge), Estado (Badge) + botão **Ativar/Desativar** (ícone Power, com loading + disabled para admins).
+  - Botão **"Criar Novo Gestor"** no fundo → mini-formulário (Nome, Email, Password) → POST com `role: 'gestor'`. Validações client-side (obrigatórios, password ≥ 6). Toast de sucesso.
+  - Tipo `UtilizadorEmpresaDTO`. Imports: `Users`, `Power`, `UserPlus` (lucide), `Dialog`, `Input`.
+  - Após toggle/criar, recarrega a lista de empresas (o gestor pode ter mudado).
+- **Validação:** backend 131/131 ✓. Frontend: `npm run lint` ✓ · `npx tsc --noEmit` ✓ · `npm run build` ✓.
+- **Documentação atualizada:** `README.md` (3 novos endpoints na tabela), `docs/BACKEND.md` (entrada "Prompt 101" no histórico), `docs/FRONTEND.md` (entrada "Prompt 101").
+
+Stage Summary:
+- **Painel de Admin supremo:** o Super Admin consegue agora gerir os utilizadores de qualquer empresa diretamente do `/admin`, sem precisar de impersonar. Botão "Gerir Utilizadores" por empresa → modal com lista completa + toggle ativo/inativo + criar gestor.
+- **3 novos endpoints backend** (todos `auth + isAdmin`): listar, criar (gestor/staff), toggle estado. `empresa_id` sempre do URL (associação correta). Auditoria registada na empresa alvo.
+- **Caso de uso principal resolvido:** empresa que ficou com 0 gestores → o admin abre o modal, carrega em "Criar Novo Gestor", preenche nome/email/password, e o gestor fica criado nessa empresa (depois pode impersonar ou a empresa passa a ter gestor para o Fail-Safe noturno).
+- 131 testes backend (+5). Lint + tsc + build ✓. Documentação atualizada. Próximo passo: commit + push para a branch `dev`.
 
 

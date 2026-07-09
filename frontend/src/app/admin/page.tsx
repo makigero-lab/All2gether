@@ -10,6 +10,9 @@ import {
   Building2,
   AlertCircle,
   CheckCircle2,
+  Users,
+  Power,
+  UserPlus,
 } from "lucide-react";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -17,7 +20,17 @@ import { pt } from "date-fns/locale";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogClose,
+  DialogContent,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { fazerLogout, lerUtilizador } from "@/lib/auth";
 import type { UtilizadorAuth } from "@/lib/auth";
 
@@ -34,6 +47,16 @@ interface EmpresaDTO {
   gestor: { id: string; nome: string; email: string } | null;
 }
 
+/** Prompt 101 — Utilizador de uma empresa terceira (lista no modal). */
+interface UtilizadorEmpresaDTO {
+  _id: string;
+  nome: string;
+  email: string;
+  role: "admin" | "gestor" | "staff";
+  ativo: boolean;
+  createdAt?: string;
+}
+
 /* ------------------------------------------------------------------ */
 /* Página                                                              */
 /* ------------------------------------------------------------------ */
@@ -46,6 +69,19 @@ export default function SuperAdminPage() {
   const [erro, setErro] = useState<string | null>(null);
   const [impersonando, setImpersonando] = useState<string | null>(null);
   const [toast, setToast] = useState<{ tipo: "sucesso" | "erro"; msg: string } | null>(null);
+
+  // Prompt 101 — Modal "Gerir Utilizadores" de uma empresa.
+  const [empresaModal, setEmpresaModal] = useState<EmpresaDTO | null>(null);
+  const [utilizadoresModal, setUtilizadoresModal] = useState<UtilizadorEmpresaDTO[]>([]);
+  const [modalLoading, setModalLoading] = useState(false);
+  const [modalErro, setModalErro] = useState<string | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+
+  // Prompt 101 — Formulário de criar gestor (dentro do modal).
+  const [mostrarFormGestor, setMostrarFormGestor] = useState(false);
+  const [formGestor, setFormGestor] = useState({ nome: "", email: "", password: "" });
+  const [criandoGestor, setCriandoGestor] = useState(false);
+  const [formGestorErro, setFormGestorErro] = useState<string | null>(null);
 
   const carregar = useCallback(async () => {
     setLoading(true);
@@ -137,6 +173,103 @@ export default function SuperAdminPage() {
       });
     } finally {
       setImpersonando(null);
+    }
+  }
+
+  /** Prompt 101 — Abre o modal "Gerir Utilizadores" de uma empresa. */
+  async function abrirModalUtilizadores(emp: EmpresaDTO) {
+    setEmpresaModal(emp);
+    setUtilizadoresModal([]);
+    setModalErro(null);
+    setMostrarFormGestor(false);
+    setFormGestor({ nome: "", email: "", password: "" });
+    setFormGestorErro(null);
+    setModalLoading(true);
+    try {
+      const res = await fetch(`/api/admin/empresas/${emp._id}/utilizadores`, {
+        credentials: "include",
+        cache: "no-store",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.erro || `Erro ${res.status}`);
+      setUtilizadoresModal(data.utilizadores ?? []);
+    } catch (e) {
+      setModalErro(e instanceof Error ? e.message : "Erro ao carregar utilizadores.");
+    } finally {
+      setModalLoading(false);
+    }
+  }
+
+  /** Prompt 101 — Alterna ativo/inativo de um utilizador da empresa do modal. */
+  async function toggleEstadoUtilizador(u: UtilizadorEmpresaDTO) {
+    if (!empresaModal) return;
+    setTogglingId(u._id);
+    try {
+      const res = await fetch(
+        `/api/admin/empresas/${empresaModal._id}/utilizadores/${u._id}/estado`,
+        {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ativo: !u.ativo }),
+        }
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.erro || `Erro ${res.status}`);
+      // Atualiza a lista localmente.
+      setUtilizadoresModal((prev) =>
+        prev.map((x) => (x._id === u._id ? { ...x, ativo: data.ativo } : x))
+      );
+      // Atualiza também a lista de empresas (o gestor pode ter mudado de estado).
+      await carregar();
+    } catch (e) {
+      setModalErro(e instanceof Error ? e.message : "Erro ao alterar estado.");
+    } finally {
+      setTogglingId(null);
+    }
+  }
+
+  /** Prompt 101 — Cria um novo gestor para a empresa do modal. */
+  async function criarGestor(e: React.FormEvent) {
+    e.preventDefault();
+    if (!empresaModal) return;
+    setFormGestorErro(null);
+    if (!formGestor.nome.trim() || !formGestor.email.trim() || !formGestor.password) {
+      setFormGestorErro("Nome, email e password são obrigatórios.");
+      return;
+    }
+    if (formGestor.password.length < 6) {
+      setFormGestorErro("A password deve ter pelo menos 6 caracteres.");
+      return;
+    }
+    setCriandoGestor(true);
+    try {
+      const res = await fetch(`/api/admin/empresas/${empresaModal._id}/utilizadores`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nome: formGestor.nome.trim(),
+          email: formGestor.email.trim(),
+          password: formGestor.password,
+          role: "gestor",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.erro || `Erro ${res.status}`);
+      // Adiciona à lista local + atualiza empresas (agora tem gestor).
+      setUtilizadoresModal((prev) => [...prev, data.utilizador]);
+      setMostrarFormGestor(false);
+      setFormGestor({ nome: "", email: "", password: "" });
+      setToast({
+        tipo: "sucesso",
+        msg: `Gestor "${data.utilizador.nome}" criado em "${empresaModal.nome}".`,
+      });
+      await carregar();
+    } catch (e) {
+      setFormGestorErro(e instanceof Error ? e.message : "Erro ao criar gestor.");
+    } finally {
+      setCriandoGestor(false);
     }
   }
 
@@ -287,26 +420,38 @@ export default function SuperAdminPage() {
                         </Badge>
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleImpersonar(emp)}
-                          disabled={
-                            impersonando !== null || !emp.gestor
-                          }
-                          title={
-                            !emp.gestor
-                              ? "Esta empresa não tem gestor"
-                              : `Entrar como ${emp.gestor.nome}`
-                          }
-                        >
-                          {impersonando === emp._id ? (
-                            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                          ) : (
-                            <LogIn className="mr-1.5 h-3.5 w-3.5" />
-                          )}
-                          Entrar como Gestor
-                        </Button>
+                        <div className="flex items-center justify-end gap-2">
+                          {/* Prompt 101 — Gerir Utilizadores da empresa */}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => abrirModalUtilizadores(emp)}
+                            title={`Gerir utilizadores de ${emp.nome}`}
+                          >
+                            <Users className="mr-1.5 h-3.5 w-3.5" />
+                            Gerir Utilizadores
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleImpersonar(emp)}
+                            disabled={
+                              impersonando !== null || !emp.gestor
+                            }
+                            title={
+                              !emp.gestor
+                                ? "Esta empresa não tem gestor"
+                                : `Entrar como ${emp.gestor.nome}`
+                            }
+                          >
+                            {impersonando === emp._id ? (
+                              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <LogIn className="mr-1.5 h-3.5 w-3.5" />
+                            )}
+                            Entrar como Gestor
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -323,6 +468,189 @@ export default function SuperAdminPage() {
         Para voltar a ser Super Admin, clica em &ldquo;Terminar Sessão&rdquo; e faz login
         novamente com as tuas credenciais de dono.
       </p>
+
+      {/* Prompt 101 — Modal "Gerir Utilizadores" */}
+      <Dialog
+        open={empresaModal !== null}
+        onOpenChange={(o) => !o && setEmpresaModal(null)}
+      >
+        <DialogHeader>
+          <div>
+            <DialogTitle className="flex items-center gap-2">
+              <Users className="h-5 w-5 text-primary" />
+              Gerir Utilizadores — {empresaModal?.nome}
+            </DialogTitle>
+            <DialogDescription>
+              Lista de gestores e staff desta empresa. Podes ativar/desativar
+              utilizadores ou criar um novo gestor.
+            </DialogDescription>
+          </div>
+          <DialogClose onClick={() => setEmpresaModal(null)} />
+        </DialogHeader>
+        <DialogContent className="space-y-4">
+          {/* Erro do modal */}
+          {modalErro && (
+            <div className="flex items-center gap-2 rounded-md border border-destructive/50 bg-destructive/5 p-3 text-sm text-destructive">
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              {modalErro}
+            </div>
+          )}
+
+          {/* Lista de utilizadores */}
+          {modalLoading ? (
+            <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              A carregar utilizadores…
+            </div>
+          ) : utilizadoresModal.length === 0 ? (
+            <div className="flex flex-col items-center gap-2 py-10 text-center text-muted-foreground">
+              <Users className="h-8 w-8 opacity-40" />
+              <p className="text-sm">Sem utilizadores nesta empresa.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-md border">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                    <th className="px-3 py-2 font-medium">Nome</th>
+                    <th className="px-3 py-2 font-medium">Email</th>
+                    <th className="px-3 py-2 font-medium">Role</th>
+                    <th className="px-3 py-2 font-medium">Estado</th>
+                    <th className="px-3 py-2 text-right font-medium">Ação</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {utilizadoresModal.map((u) => (
+                    <tr key={u._id} className="hover:bg-muted/30">
+                      <td className="px-3 py-2 font-medium">{u.nome}</td>
+                      <td className="px-3 py-2 text-muted-foreground">{u.email}</td>
+                      <td className="px-3 py-2">
+                        <Badge
+                          variant={u.role === "gestor" ? "default" : "secondary"}
+                        >
+                          {u.role === "gestor" ? "Gestor" : u.role === "staff" ? "Staff" : u.role}
+                        </Badge>
+                      </td>
+                      <td className="px-3 py-2">
+                        <Badge variant={u.ativo ? "success" : "outline"}>
+                          {u.ativo ? "Ativo" : "Inativo"}
+                        </Badge>
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 gap-1.5"
+                          onClick={() => toggleEstadoUtilizador(u)}
+                          disabled={togglingId === u._id || u.role === "admin"}
+                          title={
+                            u.role === "admin"
+                              ? "Não é possível modificar um administrador"
+                              : u.ativo
+                              ? "Desativar"
+                              : "Ativar"
+                          }
+                        >
+                          {togglingId === u._id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Power className="h-3.5 w-3.5" />
+                          )}
+                          {u.ativo ? "Desativar" : "Ativar"}
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Formulário de criar gestor (toggle) */}
+          {mostrarFormGestor ? (
+            <form onSubmit={criarGestor} className="space-y-3 rounded-md border bg-muted/20 p-4">
+              <h4 className="text-sm font-semibold">Criar Novo Gestor</h4>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5 sm:col-span-2">
+                  <label className="text-xs font-medium text-muted-foreground">Nome</label>
+                  <Input
+                    value={formGestor.nome}
+                    onChange={(e) => setFormGestor((f) => ({ ...f, nome: e.target.value }))}
+                    required
+                    placeholder="Nome do gestor"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">Email</label>
+                  <Input
+                    type="email"
+                    value={formGestor.email}
+                    onChange={(e) => setFormGestor((f) => ({ ...f, email: e.target.value }))}
+                    required
+                    placeholder="email@exemplo.pt"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">Password</label>
+                  <Input
+                    type="password"
+                    value={formGestor.password}
+                    onChange={(e) => setFormGestor((f) => ({ ...f, password: e.target.value }))}
+                    required
+                    placeholder="Mín. 6 caracteres"
+                    minLength={6}
+                  />
+                </div>
+              </div>
+              {formGestorErro && (
+                <p className="text-sm text-destructive">{formGestorErro}</p>
+              )}
+              <div className="flex items-center justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setMostrarFormGestor(false);
+                    setFormGestorErro(null);
+                  }}
+                  disabled={criandoGestor}
+                >
+                  Cancelar
+                </Button>
+                <Button type="submit" size="sm" disabled={criandoGestor}>
+                  {criandoGestor ? (
+                    <>
+                      <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                      A criar…
+                    </>
+                  ) : (
+                    <>
+                      <UserPlus className="mr-1.5 h-3.5 w-3.5" />
+                      Criar Gestor
+                    </>
+                  )}
+                </Button>
+              </div>
+            </form>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full gap-2"
+              onClick={() => setMostrarFormGestor(true)}
+            >
+              <UserPlus className="h-4 w-4" />
+              Criar Novo Gestor
+            </Button>
+          )}
+        </DialogContent>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setEmpresaModal(null)}>
+            Fechar
+          </Button>
+        </DialogFooter>
+      </Dialog>
     </div>
   );
 }
