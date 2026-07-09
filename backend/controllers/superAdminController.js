@@ -72,15 +72,26 @@ exports.listarEmpresas = async (req, res) => {
  * dessa empresa (role 'gestor') e gera um NOVO token JWT com os dados
  * desse gestor — exatamente igual à função de Login normal.
  *
+ * Prompt 100 (correção) — Override do admin quando não há gestor ativo:
+ *   Se a empresa não tiver um gestor ativo (role 'gestor', ativo, não
+ *   eliminado), o Super Admin (role 'admin') que faz o pedido tem
+ *   OVERRIDE TOTAL: o sistema NÃO bloqueia. Em vez disso, gera um token
+ *   com o próprio admin (id/nome/email do req.user) mas com o empresa_id
+ *   da empresa alvo e role 'admin'. Como o middleware isGestor permite
+ *   'admin' e 'gestor', o admin consegue aceder a todos os endpoints do
+ *   painel /gestor/* (dashboard, propriedades, tarefas, etc.) baseando-se
+ *   apenas no empresa_id, ignorando a necessidade de existir um gestor.
+ *
  * O frontend pode usar este token para entrar no painel do gestor.
  *
- * Resposta 200: { token, utilizador, impersonado: true }
- *   - token: JWT do gestor (mesmo formato do login normal)
+ * Resposta 200: { token, utilizador, empresa, impersonado: true }
+ *   - token: JWT (do gestor se existir, ou do admin com empresa_id override)
  *   - utilizador: { id, nome, email, role, empresa_id }
+ *   - empresa: { id, nome }
  *   - impersonado: true (para o frontend saber que é uma sessão de impersonation)
  *
  * Erros:
- *   404 — empresa não encontrada ou sem gestor
+ *   404 — empresa não encontrada
  *   500 — erro interno
  */
 exports.impersonarGestor = async (req, res) => {
@@ -104,18 +115,49 @@ exports.impersonarGestor = async (req, res) => {
       ativo: true,
     }).lean();
 
-    if (!gestor) {
-      return res.status(404).json({
-        erro: `Não foi encontrado um gestor ativo para a empresa "${empresa.nome}".`,
-      });
-    }
-
-    // Gera um NOVO token JWT com os dados do gestor (igual ao login normal).
-    const token = jwt.sign(
-      {
+    // Prompt 100 — Override do admin: se não há gestor ativo, o Super Admin
+    // que faz o pedido (req.user, role 'admin') gera um token com o seu
+    // próprio id/nome/email mas com o empresa_id da empresa alvo e role
+    // 'gestor' (o admin está a IMPERSONAR um gestor dessa empresa). Como o
+    // middleware isGestor permite 'gestor', o token funciona no painel
+    // /gestor. O id real do admin fica no token para auditoria.
+    let tokenUser;
+    if (gestor) {
+      tokenUser = {
         id: String(gestor._id),
+        nome: gestor.nome,
+        email: gestor.email,
         role: gestor.role,
         empresa_id: String(gestor.empresa_id),
+      };
+    } else {
+      // Carrega o admin (req.user) para ter nome/email reais.
+      const admin = await Utilizador.findById(req.user.id).select('nome email').lean();
+      if (!admin) {
+        return res.status(404).json({ erro: 'Conta de admin não encontrada.' });
+      }
+      tokenUser = {
+        id: String(admin._id),
+        nome: admin.nome,
+        email: admin.email,
+        // Role 'gestor' para o frontend middleware deixar entrar no /gestor
+        // e para o isGestor do backend autorizar. O id real do admin fica
+        // no token para auditoria (registarAuditoria usa req.user.id).
+        role: 'gestor',
+        empresa_id: String(empresa._id),
+      };
+      console.log(
+        `ℹ️  [impersonarGestor] Empresa "${empresa.nome}" sem gestor ativo — ` +
+          `admin "${admin.email}" a aceder em modo override (empresa_id=${empresa._id}).`
+      );
+    }
+
+    // Gera um NOVO token JWT (igual ao login normal).
+    const token = jwt.sign(
+      {
+        id: tokenUser.id,
+        role: tokenUser.role,
+        empresa_id: tokenUser.empresa_id,
       },
       JWT_SECRET,
       { expiresIn: TOKEN_EXPIRACAO }
@@ -123,13 +165,7 @@ exports.impersonarGestor = async (req, res) => {
 
     return res.status(200).json({
       token,
-      utilizador: {
-        id: String(gestor._id),
-        nome: gestor.nome,
-        email: gestor.email,
-        role: gestor.role,
-        empresa_id: String(gestor.empresa_id),
-      },
+      utilizador: tokenUser,
       empresa: {
         id: String(empresa._id),
         nome: empresa.nome,

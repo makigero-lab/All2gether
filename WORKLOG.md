@@ -298,6 +298,34 @@ Stage Summary:
 - O cliente pode agora descarregar o Excel mensal e responder a perguntas como "Quantas casas a Maria limpou?" ou "A que horas aconteceram as limpezas de checkout?".
 - 125 testes backend (+2). Lint + tsc + build ✓. Documentação atualizada. Próximo passo: commit + push para a branch `dev`.
 
+---
+
+Task ID: A11 (Ajuste — override admin na impersonação)
+Agent: Z.ai Code
+Task: Corrigir erro "Não foi encontrado um gestor ativo para a empresa X" ao impersonar empresa sem gestor — admin deve ter override total.
+
+Work Log:
+- Lido o worklog (Tasks A0–A10) e `backend/controllers/superAdminController.impersonarGestor` (linha 109 devolvia 404 quando a empresa não tinha gestor ativo).
+- Verificado o middleware `isGestor` (`backend/middleware/requireRole.js`): permite `admin` e `gestor`. Ou seja, um token com `role: 'gestor'` passa em todos os endpoints do painel `/gestor/*`.
+- Verificado o middleware do frontend (`frontend/src/middleware.ts`): redireciona `admin` para `/admin` se tentar aceder a `/gestor` (linha 89-91). Por isso, o token de override **não pode** ter `role: 'admin'` — tem de ter `role: 'gestor'` (o admin impersona um gestor) para o frontend deixar entrar no `/gestor`.
+- Verificado `obterEmpresaId` (`backend/controllers/gestorController.js`): lê `req.user.empresa_id` do token (não da BD). Os endpoints do gestor usam este `empresa_id` para filtrar os dados.
+- **Correção em `superAdminController.impersonarGestor`:** quando a empresa não tem gestor ativo, em vez de devolver 404, o sistema gera um token JWT com:
+  - `id`: o id real do admin (req.user.id) — para auditoria (`registarAuditoria` usa `req.user.id`).
+  - `nome`/`email`: do admin (carregado via `Utilizador.findById(req.user.id)`).
+  - `role`: `'gestor'` (o admin impersona um gestor; o frontend middleware e o `isGestor` do backend deixam passar).
+  - `empresa_id`: o id da empresa alvo (override).
+  - Log informativo: `ℹ️ [impersonarGestor] Empresa "X" sem gestor ativo — admin "email" a aceder em modo override`.
+  - JSDoc atualizado a documentar o override.
+- **Teste novo (secção 14 "Super Admin"):** cria uma empresa sem gestor (só staff) → admin faz POST /api/admin/empresas/:id/impersonar → 200 (não 404) + token + `utilizador.role === 'gestor'` + `utilizador.empresa_id === empSemGestor._id` + `utilizador.id === adminId` (o próprio admin). Verifica ainda que o token dá acesso ao `/api/gestor/dashboard` da empresa alvo (200).
+- **Nota sobre `/api/auth/me`:** o endpoint `me` lê o utilizador da BD pelo `id` do token (o admin) e devolve o `empresa_id` REAL do admin, não o override. Isto é esperado — o override só afeta `req.user.empresa_id` (lido do token) nos endpoints do painel gestor. O teste documenta isto num comentário.
+- **Validação:** `npm test` backend → **126/126 ✓** (+1 novo). Frontend: `npm run lint` ✓ · `npx tsc --noEmit` ✓ (sem alterações de código no frontend — o proxy route e o redirect para `/gestor` já funcionam com o token de role 'gestor').
+- **Documentação atualizada:** `docs/BACKEND.md` (entrada "Ajuste" no histórico).
+
+Stage Summary:
+- **Erro corrigido:** ao impersonar uma empresa sem gestor ativo, o admin deixou de receber "Não foi encontrado um gestor ativo para a empresa X" (404). Agora recebe 200 + um token de override (role 'gestor' + empresa_id da empresa alvo) que lhe dá acesso ao painel `/gestor/*` (dashboard, propriedades, tarefas) dessa empresa.
+- **Override total do admin:** o admin consegue aceder aos dados de qualquer empresa baseando-se apenas no `empresa_id`, ignorando a necessidade de existir um gestor ativo. O id real do admin fica no token para auditoria.
+- O frontend não precisou de alterações — o proxy route substitui o cookie pelo novo token e o redirect para `/gestor` funciona (role 'gestor' passa no middleware).
+- 126 testes backend (+1). Lint + tsc ✓. Documentação atualizada. Próximo passo: commit + push para a branch `dev`.
 
 
 

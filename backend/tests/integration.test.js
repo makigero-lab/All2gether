@@ -1971,6 +1971,54 @@ describe('Super Admin (rotas exclusivas /api/admin)', () => {
     const res = await authPost(`/api/admin/empresas/${idInexistente}/impersonar`, {});
     expect(res.status).toBe(404);
   });
+
+  it('Prompt 100 — empresa SEM gestor ativo → admin faz override e recebe token (não 404)', async () => {
+    // Cria uma empresa nova sem nenhum gestor (só staff).
+    const empSemGestor = await Empresa.create({
+      nome: 'Empresa Sem Gestor',
+      plano_ativo: true,
+    });
+    const hash = await bcrypt.hash(PASSWORD, 10);
+    await Utilizador.create({
+      nome: 'Staff Sem Gestor',
+      email: 'staff.semgestor@teste.pt',
+      password_hash: hash,
+      empresa_id: empSemGestor._id,
+      role: 'staff',
+      ativo: true,
+    });
+
+    // Admin tenta impersonar esta empresa (não há gestor ativo).
+    const res = await authPost(`/api/admin/empresas/${empSemGestor._id}/impersonar`, {});
+    // Prompt 100 — NÃO devolve 404. Devolve 200 com token de override.
+    expect(res.status).toBe(200);
+    expect(res.body.token).toBeTruthy();
+    expect(res.body.impersonado).toBe(true);
+    expect(res.body.empresa.id).toBe(String(empSemGestor._id));
+    // O utilizador no token é o admin (que fez o pedido), mas com
+    // empresa_id da empresa alvo e role 'gestor' (impersonação).
+    expect(res.body.utilizador.empresa_id).toBe(String(empSemGestor._id));
+    expect(res.body.utilizador.role).toBe('gestor');
+    expect(res.body.utilizador.id).toBe(adminId); // o próprio admin
+
+    // Verifica que o token funciona (autentica).
+    const verifyRes = await request(app)
+      .get('/api/auth/me')
+      .set('Authorization', `Bearer ${res.body.token}`);
+    expect(verifyRes.status).toBe(200);
+    // Nota: /api/auth/me lê o utilizador da BD pelo id do token (o admin),
+    // pelo que devolve o empresa_id REAL do admin, não o override. Isto é
+    // esperado — o override só afeta req.user.empresa_id (lido do token)
+    // nos endpoints do painel gestor.
+
+    // Verifica que consegue aceder a um endpoint do painel gestor com
+    // o empresa_id override (dashboard usa obterEmpresaId → req.user.empresa_id
+    // do token, que é a empresa alvo).
+    const dashRes = await request(app)
+      .get('/api/gestor/dashboard')
+      .set('Authorization', `Bearer ${res.body.token}`);
+    expect(dashRes.status).toBe(200);
+  });
 });
 
 /* ------------------------------------------------------------------ */
