@@ -861,22 +861,24 @@ export default function CalendarioOperacionalPage() {
                 className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
               >
                 <option value="">— Selecionar staff —</option>
-                {equipa.map((u) => {
-                  const ind = indisponiveis.find((i) => i.utilizador_id === u._id);
-                  const label = ind
-                    ? `${u.nome} — 🌴 Indisponível (${ind.tipo === "ferias" ? "Férias" : ind.tipo === "doenca" ? "Doença" : "Ausência"})`
-                    : u.nome;
-                  return (
-                    <option key={u._id} value={u._id} disabled={!!ind}>
-                      {label}
+                {equipa
+                  // NÃO mostrar os staff indisponíveis no dropdown (férias/
+                  // doença/ausência nesse dia). Antes eram mostrados como
+                  // option disabled; agora são omitidos para a lista só
+                  // conter quem pode realmente receber a tarefa.
+                  .filter(
+                    (u) => !indisponiveis.some((i) => i.utilizador_id === u._id)
+                  )
+                  .map((u) => (
+                    <option key={u._id} value={u._id}>
+                      {u.nome}
                     </option>
-                  );
-                })}
+                  ))}
               </select>
-              {/* v1.59.0 — Aviso visual de staff indisponível */}
+              {/* Aviso visual de staff indisponível (omitidos da lista) */}
               {indisponiveis.length > 0 && (
                 <p className="text-xs text-amber-600 dark:text-amber-400">
-                  ⚠️ {indisponiveis.length} membro(s) da equipa está(ão) de férias/ausência neste dia e não podem receber tarefas.
+                  ⚠️ {indisponiveis.length} membro(s) da equipa está(ão) de férias/ausência neste dia e foram omitidos da lista.
                 </p>
               )}
             </div>

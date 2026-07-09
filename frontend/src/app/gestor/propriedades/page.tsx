@@ -162,16 +162,16 @@ export default function PropriedadesPage() {
     try {
       const res = await adminPatch<{
         ativo: boolean;
-        tarefasApagadas?: number;
+        tarefasDesatribuidas?: number;
       }>(`/api/gestor/propriedades/${p._id}/estado`);
 
-      // Feedback cirúrgico (Prompt 73): se a propriedade foi desativada e
-      // houve tarefas futuras apagadas, informa o gestor.
-      if (!novoEstado && typeof res?.tarefasApagadas === "number") {
-        const n = res.tarefasApagadas;
+      // Feedback (Prompt 97): se a propriedade foi desativada e houve
+      // tarefas futuras desatribuídas (passaram a 'por_atribuir'), informa.
+      if (!novoEstado && typeof res?.tarefasDesatribuidas === "number") {
+        const n = res.tarefasDesatribuidas;
         setSincronizacaoOk(
           n > 0
-            ? `Propriedade desativada. ${n} tarefa(s) futura(s) não concluída(s) foram apagada(s).`
+            ? `Propriedade desativada. ${n} tarefa(s) futura(s) não concluída(s) foram desatribuída(s) (por atribuir).`
             : `Propriedade desativada. Não havia tarefas futuras por executar.`
         );
       }
