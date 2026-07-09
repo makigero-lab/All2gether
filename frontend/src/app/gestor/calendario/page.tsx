@@ -202,23 +202,41 @@ const ESTADO_VARIANT_TAB: Record<
   cancelada: "outline",
 };
 
-/** Formata uma data ISO (ou YYYY-MM-DD) para DD/MM/YYYY. */
+/**
+ * Formata uma data ISO (ou YYYY-MM-DD) para DD/MM/YYYY.
+ * Extrai diretamente os componentes da string para evitar problemas de
+ * timezone (parseISO interpreta YYYY-MM-DD como meia-noite UTC, que em
+ * Portugal UTC+1 aparece como 01:00 do dia anterior ou da mesma data).
+ */
 function formatarDataDMY(iso?: string | null): string {
   if (!iso) return "—";
   try {
-    return format(parseISO(iso.slice(0, 10)), "dd/MM/yyyy");
+    const dataStr = iso.slice(0, 10); // YYYY-MM-DD
+    const [ano, mes, dia] = dataStr.split("-");
+    if (!ano || !mes || !dia) return iso;
+    return `${dia}/${mes}/${ano}`;
   } catch {
     return iso;
   }
 }
 
-/** Formata uma data/hora ISO para DD/MM/YYYY HH:mm (para checkin/checkout da reserva). */
+/**
+ * Formata uma data/hora ISO para DD/MM/YYYY HH:mm (para checkin/checkout).
+ * A parte da data é extraída diretamente da string (sem timezone); a parte
+ * da hora usa parseISO apenas se houver componente de tempo.
+ */
 function formatarDataHoraCurta(iso?: string | null): string {
   if (!iso) return "—";
   try {
-    // Se for só data (YYYY-MM-DD), devolve DD/MM/YYYY.
-    if (iso.length <= 10) return format(parseISO(iso), "dd/MM/yyyy");
-    return format(parseISO(iso), "dd/MM/yyyy HH:mm");
+    const dataStr = iso.slice(0, 10);
+    const [ano, mes, dia] = dataStr.split("-");
+    if (!ano || !mes || !dia) return iso;
+    const dataFmt = `${dia}/${mes}/${ano}`;
+    // Se for só data (YYYY-MM-DD), devolve só a data.
+    if (iso.length <= 10) return dataFmt;
+    // Se tem tempo, extrai HH:mm diretamente (sem conversão de timezone).
+    const tempoParte = iso.slice(11, 16); // HH:mm
+    return `${dataFmt} ${tempoParte}`;
   } catch {
     return iso;
   }

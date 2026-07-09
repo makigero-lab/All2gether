@@ -216,6 +216,20 @@ exports.sincronizarReservas = async (req, res) => {
         },
       };
 
+      // Prompt 102 — Se a reserva estiver cancelada no Smoobu (status =
+      // 'cancelled' ou variante), dispara o gatilho de cancelamento em
+      // vez de criar uma tarefa fantasma.
+      const statusReserva = String(
+        reserva.status ?? reserva.bookingStatus ?? ''
+      ).toLowerCase();
+      if (['cancelled', 'canceled', 'cancelada'].includes(statusReserva)) {
+        const { cancelarTarefaPorReserva } = require('./webhookController');
+        await cancelarTarefaPorReserva(reservaId);
+        // Conta como "existente" (não cria nova, não conta como erro).
+        existentes++;
+        continue;
+      }
+
       const resultado = await _processarReservaSmoobu(payloadWebhook);
 
       if (jaExistia) {

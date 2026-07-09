@@ -181,6 +181,8 @@ function extrairDadosReserva(payload) {
     null;
 
   const detalhesReserva = {
+    // Prompt 102 — ID original da reserva no Smoobu (para cancelamentos).
+    smoobu_reserva_id: reservaId != null ? String(reservaId) : null,
     checkin: checkin != null ? String(checkin) : null,
     checkout: checkout != null ? String(checkout) : null,
     pax: Number.isFinite(pax) ? pax : null,
@@ -691,8 +693,20 @@ async function criarTarefaPorReserva(reservaId, smoobuPropId, dataCheckInRaw, de
 
 /**
  * Cancela a tarefa associada a uma reserva (quando o Smoobu envia
- * `action: cancellation`). Respeita tarefas já concluídas (o trabalho
- * já foi feito — não faz sentido "desconcluir"). Idempotente.
+ * `action: cancellation`).
+ *
+ * Prompt 102 — Gatilho de Cancelamentos:
+ *   Em vez de marcar como 'cancelada' (soft delete), faz HARD DELETE das
+ *   tarefas associadas a esse smoobu_reserva_id cujo estado seja
+ *   'por_atribuir' ou 'atribuida' (não concluídas). Assim as limpezas
+ *   "fantasma" não aparecem no calendário do Gestor nem na agenda do Staff.
+ *
+ *   Tarefas 'concluida' são respeitadas (o trabalho já foi feito) —
+ *   ficam marcadas como 'cancelada' para auditoria, mas não são apagadas.
+ *
+ * Procura por smoobu_reserva_id (campo top-level) E por
+ * detalhes_reserva.smoobu_reserva_id (campo aninhado — tarefas criadas
+ * antes do Prompt 102 podem não ter o campo aninhado).
  */
 async function cancelarTarefaPorReserva(reservaId) {
   if (!reservaId) {
@@ -700,31 +714,50 @@ async function cancelarTarefaPorReserva(reservaId) {
     return null;
   }
 
-  const tarefa = await Tarefa.findOne({ smoobu_reserva_id: reservaId });
-  if (!tarefa) {
+  // Procura todas as tarefas associadas a esta reserva (top-level OU aninhado).
+  const tarefas = await Tarefa.find({
+    $or: [
+      { smoobu_reserva_id: reservaId },
+      { 'detalhes_reserva.smoobu_reserva_id': reservaId },
+    ],
+  });
+
+  if (tarefas.length === 0) {
     console.log(
       `ℹ️  Cancelamento da reserva ${reservaId} sem tarefa associada — sem ação.`
     );
     return null;
   }
 
-  // Já concluída → o trabalho foi feito, não "desconclui".
-  if (tarefa.estado === 'concluida') {
-    console.log(
-      `⚠️  Reserva ${reservaId} cancelada mas tarefa ${tarefa._id} já estava concluída — mantém estado.`
-    );
-    return tarefa;
+  let apagadas = 0;
+  let mantidas = 0;
+
+  for (const tarefa of tarefas) {
+    // Tarefas concluídas → respeitadas (marcadas como cancelada para auditoria).
+    if (tarefa.estado === 'concluida') {
+      if (tarefa.estado !== 'cancelada') {
+        tarefa.estado = 'cancelada';
+        await tarefa.save();
+      }
+      mantidas++;
+      console.log(
+        `⚠️  Reserva ${reservaId} cancelada mas tarefa ${tarefa._id} já estava concluída — marcada como cancelada (mantida para auditoria).`
+      );
+      continue;
+    }
+
+    // Tarefas por_atribuir ou atribuida (não concluídas) → HARD DELETE.
+    // Não aparecem no calendário nem na agenda do staff (limpeza fantasma).
+    await Tarefa.deleteOne({ _id: tarefa._id });
+    apagadas++;
   }
 
-  // Já cancelada → idempotente.
-  if (tarefa.estado === 'cancelada') {
-    return tarefa;
-  }
+  console.log(
+    `🚫 Cancelamento reserva ${reservaId}: ${apagadas} tarefa(s) apagada(s) (hard delete), ` +
+      `${mantidas} mantida(s) (concluída → cancelada).`
+  );
 
-  tarefa.estado = 'cancelada';
-  await tarefa.save();
-  console.log(`🚫 Tarefa ${tarefa._id} cancelada (reserva ${reservaId} cancelada no Smoobu).`);
-  return tarefa;
+  return { apagadas, mantidas, total: tarefas.length };
 }
 
 /* ------------------------------------------------------------------ */

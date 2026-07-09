@@ -95,6 +95,9 @@ const tarefaSchema = new mongoose.Schema(
     // preenchimento a partir do payload do webhook/sincronização será feito
     // num prompt seguinte.
     detalhes_reserva: {
+      // ID original da reserva no Smoobu (Prompt 102) — usado para
+      // encontrar e eliminar tarefas fantasma quando a reserva é cancelada.
+      smoobu_reserva_id: { type: String, default: null },
       // Data/hora de check-in (ISO string ou YYYY-MM-DD conforme o Smoobu).
       checkin: { type: String, default: null },
       // Data/hora de check-out (ISO string ou YYYY-MM-DD conforme o Smoobu).

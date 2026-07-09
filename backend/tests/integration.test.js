@@ -731,7 +731,7 @@ describe('POST /webhooks/smoobu (load balancer)', () => {
     expect(log.status).toBe('processado');
   });
 
-  it('cancellation → cancela a tarefa existente', async () => {
+  it('cancellation → HARD DELETE da tarefa não concluída (Prompt 102)', async () => {
     // 1) Cria a tarefa com newReservation.
     const amanha = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
     await request(app).post('/webhooks/smoobu').send({
@@ -743,19 +743,20 @@ describe('POST /webhooks/smoobu (load balancer)', () => {
     expect(tarefa).not.toBeNull();
     expect(tarefa.estado).not.toBe('cancelada');
 
-    // 2) Envia cancellation → tarefa fica cancelada.
+    // 2) Envia cancellation → tarefa é APAGADA (hard delete, não cancelada).
     await request(app).post('/webhooks/smoobu').send({
       action: 'cancellation',
       data: { id: 1111, arrival: amanha, apartment: { id: 200, name: 'X' } },
     });
     await esperar(400);
-    const cancelada = await Tarefa.findOne({ smoobu_reserva_id: '1111' });
-    expect(cancelada.estado).toBe('cancelada');
+    const depois = await Tarefa.findOne({ smoobu_reserva_id: '1111' });
+    // A tarefa foi APAGADA (não existe mais).
+    expect(depois).toBeNull();
   });
 
-  it('cancellation idempotente → cancelar 2x mantém cancelada', async () => {
+  it('cancellation idempotente → cancelar 2x não dá erro (tarefa já apagada)', async () => {
     const amanha = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
-    // Cria primeiro (o beforeEach limpa as tarefas entre testes).
+    // Cria primeiro.
     await request(app).post('/webhooks/smoobu').send({
       action: 'newReservation',
       data: { id: 1111, arrival: amanha, apartment: { id: 200, name: 'X' } },
@@ -769,7 +770,33 @@ describe('POST /webhooks/smoobu (load balancer)', () => {
       });
       await esperar(300);
     }
+    // A tarefa foi apagada (não existe).
     const tarefa = await Tarefa.findOne({ smoobu_reserva_id: '1111' });
+    expect(tarefa).toBeNull();
+  });
+
+  it('cancellation → tarefa CONCLUÍDA é marcada cancelada (não apagada)', async () => {
+    const amanha = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+    // Cria.
+    await request(app).post('/webhooks/smoobu').send({
+      action: 'newReservation',
+      data: { id: 1111, arrival: amanha, apartment: { id: 200, name: 'X' } },
+    });
+    await esperar(400);
+    // Marca como concluída manualmente.
+    await Tarefa.updateOne(
+      { smoobu_reserva_id: '1111' },
+      { $set: { estado: 'concluida' } }
+    );
+    // Cancela.
+    await request(app).post('/webhooks/smoobu').send({
+      action: 'cancellation',
+      data: { id: 1111, arrival: amanha, apartment: { id: 200, name: 'X' } },
+    });
+    await esperar(400);
+    // A tarefa foi MANTIDA (concluída → cancelada), não apagada.
+    const tarefa = await Tarefa.findOne({ smoobu_reserva_id: '1111' });
+    expect(tarefa).not.toBeNull();
     expect(tarefa.estado).toBe('cancelada');
   });
 
@@ -831,21 +858,22 @@ describe('POST /webhooks/smoobu (load balancer)', () => {
       data: { id: 4444, arrival: amanha, apartment: { id: 200, name: 'X' } },
     });
     await esperar(400);
-    // 2) Cancela.
+    // 2) Cancela → tarefa é APAGADA (hard delete, Prompt 102).
     await request(app).post('/webhooks/smoobu').send({
       action: 'cancellation',
       data: { id: 4444, arrival: amanha, apartment: { id: 200, name: 'X' } },
     });
     await esperar(400);
-    const cancelada = await Tarefa.findOne({ smoobu_reserva_id: '4444' });
-    expect(cancelada.estado).toBe('cancelada');
-    // 3) Re-cria (newReservation com mesmo ID) → re-activa.
+    const apagada = await Tarefa.findOne({ smoobu_reserva_id: '4444' });
+    expect(apagada).toBeNull();
+    // 3) Re-cria (newReservation com mesmo ID) → cria nova tarefa.
     await request(app).post('/webhooks/smoobu').send({
       action: 'newReservation',
       data: { id: 4444, arrival: amanha, apartment: { id: 200, name: 'X' } },
     });
     await esperar(400);
     const reactivada = await Tarefa.findOne({ smoobu_reserva_id: '4444' });
+    expect(reactivada).not.toBeNull();
     expect(reactivada.estado).not.toBe('cancelada');
     // Não criou duplicado.
     const count = await Tarefa.countDocuments({ smoobu_reserva_id: '4444' });
