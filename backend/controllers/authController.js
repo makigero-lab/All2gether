@@ -202,15 +202,15 @@ exports.minhasTarefas = async (req, res) => {
     const hoje = new Date(
       Date.UTC(agora.getUTCFullYear(), agora.getUTCMonth(), agora.getUTCDate())
     );
-    const amanha = new Date(hoje.getTime() + 24 * 60 * 60 * 1000);
 
+    // Tarefas do utilizador a partir de hoje (hoje + futuras, não canceladas).
     const tarefas = await Tarefa.find({
       utilizador_id: req.user.id,
-      data: { $gte: hoje, $lt: amanha },
+      data: { $gte: hoje },
       estado: { $ne: 'cancelada' },
     })
       .populate({ path: 'propriedade_id', select: 'nome morada coordenadas checklist' })
-      .sort({ createdAt: 1 })
+      .sort({ data: 1 })
       .lean();
 
     return res.status(200).json({ tarefas });
