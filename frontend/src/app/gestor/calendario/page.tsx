@@ -186,7 +186,7 @@ function horaFimTarefa(dataISO: string, minutos: number): string {
 const ESTADO_LABEL_TAB: Record<string, string> = {
   por_atribuir: "Por Atribuir",
   atribuida: "Atribuída",
-  em_curso: "Em curso",
+  em_curso: "Em Curso",
   concluida: "Concluída",
   cancelada: "Cancelada",
 };
@@ -230,6 +230,21 @@ function formatarReserva(detalhes?: TarefaCalendario["detalhes_reserva"]): strin
   const checkin = detalhes.checkin ? formatarDataHoraCurta(detalhes.checkin) : "—";
   const checkout = detalhes.checkout ? formatarDataHoraCurta(detalhes.checkout) : "—";
   const pax = detalhes.pax != null ? `${detalhes.pax} pax` : "—";
+  return `In: ${checkin} Out: ${checkout} - ${pax}`;
+}
+
+/**
+ * Prompt 100 — Variante para Excel: devolve string VAZIA quando não há
+ * detalhes_reserva (ex: tarefa de manutenção), para a célula ficar em
+ * branco no Excel. Os sub-campos em falta também ficam vazios (não "—").
+ */
+function formatarReservaExcel(detalhes?: TarefaCalendario["detalhes_reserva"]): string {
+  if (!detalhes) return "";
+  const checkin = detalhes.checkin ? formatarDataHoraCurta(detalhes.checkin) : "";
+  const checkout = detalhes.checkout ? formatarDataHoraCurta(detalhes.checkout) : "";
+  const pax = detalhes.pax != null ? `${detalhes.pax} pax` : "";
+  // Se não houver nenhum campo preenchido, devolve vazio (não "In:  Out:  - ").
+  if (!checkin && !checkout && !pax) return "";
   return `In: ${checkin} Out: ${checkout} - ${pax}`;
 }
 
@@ -626,7 +641,7 @@ export default function CalendarioOperacionalPage() {
       });
   }, [tarefas]);
 
-  /* --- Prompt 99 — Exportar para Excel (xlsx) --- */
+  /* --- Prompt 99/100 — Exportar para Excel (xlsx) --- */
   const exportarExcel = useCallback(async () => {
     setExportando(true);
     try {
@@ -636,12 +651,14 @@ export default function CalendarioOperacionalPage() {
 
       // Constrói as linhas com os dados visíveis na tabela, formatados como
       // texto/data (o Excel interpreta strings DD/MM/YYYY como texto).
+      // Prompt 100: células de Reserva em branco (não "—") quando não há
+      // detalhes_reserva; estados traduzidos para PT (Em Curso, Por Atribuir…).
       const linhas = tarefasTabela.map((t) => ({
         Data: formatarDataDMY(t.data),
-        Propriedade: t.propriedade_id?.nome ?? "—",
-        Reserva: formatarReserva(t.detalhes_reserva),
+        Propriedade: t.propriedade_id?.nome ?? "",
+        Reserva: formatarReservaExcel(t.detalhes_reserva),
         Funcionário: t.utilizador_id?.nome ?? "Por Atribuir",
-        Horário: formatarHorario(t),
+        Horário: formatarHorario(t) === "—" ? "" : formatarHorario(t),
         Estado: ESTADO_LABEL_TAB[t.estado] ?? t.estado,
       }));
 

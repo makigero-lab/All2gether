@@ -525,6 +525,73 @@ describe('GET /api/gestor/calendario/dados', () => {
       )
     ).toBe(true);
   });
+
+  it('Prompt 100 — devolve detalhes_reserva quando a tarefa o tem', async () => {
+    // Cria uma tarefa com detalhes_reserva preenchidos.
+    const amanha = new Date(
+      Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth(), hoje.getUTCDate())
+    );
+    amanha.setUTCDate(amanha.getUTCDate() + 1);
+    const amanhaStr = amanha.toISOString();
+
+    await Tarefa.create({
+      empresa_id: new mongoose.Types.ObjectId(empresaId),
+      propriedade_id: prop1._id,
+      utilizador_id: staff1._id,
+      data: amanhaStr,
+      tempo_limpeza_minutos: 45,
+      tipo: 'limpeza',
+      estado: 'atribuida',
+      detalhes_reserva: {
+        checkin: '2026-01-15',
+        checkout: '2026-01-20',
+        pax: 4,
+        nome_hospede: 'Maria Silva',
+      },
+    });
+
+    const res = await authGet(
+      `/api/gestor/calendario/dados?inicio=${amanhaStr.slice(0, 10)}&fim=${amanhaStr.slice(0, 10)}`
+    );
+    expect(res.status).toBe(200);
+    const t = res.body.tarefas.find((x) => x.detalhes_reserva);
+    expect(t).toBeDefined();
+    expect(t.detalhes_reserva.checkin).toBe('2026-01-15');
+    expect(t.detalhes_reserva.checkout).toBe('2026-01-20');
+    expect(t.detalhes_reserva.pax).toBe(4);
+    expect(t.detalhes_reserva.nome_hospede).toBe('Maria Silva');
+  });
+
+  it('Prompt 100 — tarefa sem detalhes_reserva (ex: manutenção) → campo existe mas vazio', async () => {
+    // Cria uma tarefa de manutenção SEM detalhes_reserva.
+    const amanha = new Date(
+      Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth(), hoje.getUTCDate())
+    );
+    amanha.setUTCDate(amanha.getUTCDate() + 2);
+    const amanhaStr = amanha.toISOString();
+
+    await Tarefa.create({
+      empresa_id: new mongoose.Types.ObjectId(empresaId),
+      propriedade_id: prop1._id,
+      utilizador_id: staff1._id,
+      data: amanhaStr,
+      tempo_limpeza_minutos: 45,
+      tipo: 'manutencao',
+      estado: 'atribuida',
+      // sem detalhes_reserva
+    });
+
+    const res = await authGet(
+      `/api/gestor/calendario/dados?inicio=${amanhaStr.slice(0, 10)}&fim=${amanhaStr.slice(0, 10)}`
+    );
+    expect(res.status).toBe(200);
+    const t = res.body.tarefas.find((x) => x.tipo === 'manutencao');
+    expect(t).toBeDefined();
+    // detalhes_reserva existe (objeto com defaults null) mas sem dados reais.
+    expect(t.detalhes_reserva).toBeDefined();
+    expect(t.detalhes_reserva.checkin).toBeNull();
+    expect(t.detalhes_reserva.pax).toBeNull();
+  });
 });
 
 /* ------------------------------------------------------------------ */
