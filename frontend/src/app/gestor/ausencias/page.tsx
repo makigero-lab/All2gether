@@ -11,6 +11,8 @@ import {
   Stethoscope,
   CalendarX,
   CircleDot,
+  Check,
+  X,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -33,6 +35,7 @@ import {
 import {
   adminGet,
   adminDelete,
+  adminPatch,
   type AusenciaDTO,
 } from "@/lib/api";
 
@@ -40,12 +43,12 @@ import {
  * /gestor/ausencias — Ecrã de Férias/Ausências (Prompt 95 / Fase 1.5).
  *
  * Tabela definitiva com TODAS as ausências da empresa (sem filtros de
- * estado), com coluna de Ações (Eliminar via DELETE /api/gestor/ausencias/:id).
+ * estado), com coluna de Ações:
+ *   - Aprovar / Rejeitar (para pendentes e pendente_emergencia)
+ *   - Eliminar (DELETE)
  *
- * Substitui o redirect anterior (v1.68.0) para a aba de aprovações da equipa.
- * O Centro de Aprovações de RH (pedidos pendentes) mantém-se em
- * /gestor/equipa?tab=aprovacoes; esta página é a visão geral de todas as
- * ausências (aprovadas, pendentes, rejeitadas, emergência).
+ * Unifica a visão geral + aprovação num só ecrã (a tab "Aprovações de
+ * Férias" da página de Equipa deixou de ser necessária).
  */
 
 // Alargamento local do TipoAusencia (o backend usa mais valores que o tipo
@@ -153,6 +156,21 @@ export default function AusenciasPage() {
     }
   }
 
+  /** Aprovar / Rejeitar ausência pendente (PATCH .../estado). */
+  async function handleMudarEstado(a: AusenciaAmp, novoEstado: "aprovada" | "rejeitada") {
+    // Otimismo: atualiza a UI imediatamente.
+    setAusencias((prev) =>
+      prev.map((x) => (x._id === a._id ? { ...x, estado: novoEstado } : x))
+    );
+    try {
+      await adminPatch(`/api/gestor/ausencias/${a._id}/estado`, { estado: novoEstado });
+    } catch (e) {
+      // Reverte em caso de erro.
+      await carregar();
+      setErro(e instanceof Error ? e.message : `Erro ao ${novoEstado === "aprovada" ? "aprovar" : "rejeitar"} ausência.`);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
       {/* Cabeçalho */}
@@ -257,7 +275,33 @@ export default function AusenciasPage() {
                           )}
                         </td>
                         <td className="px-4 py-3">
-                          <div className="flex items-center justify-end">
+                          <div className="flex items-center justify-end gap-1">
+                            {/* Aprovar / Rejeitar (só para pendentes) */}
+                            {(a.estado === "pendente" || a.estado === "pendente_emergencia") && (
+                              <>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
+                                  onClick={() => handleMudarEstado(a, "aprovada")}
+                                  aria-label="Aprovar"
+                                  title="Aprovar"
+                                >
+                                  <Check className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                  onClick={() => handleMudarEstado(a, "rejeitada")}
+                                  aria-label="Rejeitar"
+                                  title="Rejeitar"
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              </>
+                            )}
+                            {/* Eliminar */}
                             <Button
                               variant="ghost"
                               size="icon"

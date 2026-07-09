@@ -188,39 +188,11 @@ export default function PropriedadesPage() {
   const [sincronizando, setSincronizando] = useState(false);
   const [sincronizacaoOk, setSincronizacaoOk] = useState<string | null>(null);
 
-  /** Importa em massa os apartamentos do Smoobu (upsert — não altera existentes). */
-  async function handleSincronizarPropriedades() {
-    setSincronizando(true);
-    setSincronizacaoOk(null);
-    setErro(null);
-    try {
-      const res = await adminPost<{
-        totalRecebidas: number;
-        criadas: number;
-        existentes: number;
-        erros: number;
-      }>("/api/gestor/smoobu/sincronizar-propriedades", {});
-
-      let msg = `Sincronização concluída! ${res.criadas} propriedade(s) importada(s)`;
-      if (res.existentes > 0) msg += `, ${res.existentes} já existiam`;
-      if (res.erros > 0) msg += `, ${res.erros} com erro`;
-      msg += `.`;
-      setSincronizacaoOk(msg);
-
-      // Atualiza a tabela para mostrar as novas propriedades.
-      await carregar();
-    } catch (e) {
-      setErro(
-        e instanceof Error
-          ? `Sincronização falhou: ${e.message}`
-          : "Erro ao sincronizar propriedades com o Smoobu."
-      );
-    } finally {
-      setSincronizando(false);
-    }
-  }
-
-  /** Importa propriedades do Smoobu (scoped por empresa, morada='A definir'). */
+  /**
+   * Importa/atualiza propriedades do Smoobu (scoped por empresa).
+   * Cria as novas e atualiza SEMPRE a morada + capacidade das existentes
+   * (alinhado com sincronizarPropriedades do Prompt 92).
+   */
   async function handleImportarPropriedades() {
     setSincronizando(true);
     setSincronizacaoOk(null);
