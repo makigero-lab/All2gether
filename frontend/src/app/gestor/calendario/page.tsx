@@ -202,32 +202,68 @@ const ESTADO_VARIANT_TAB: Record<
   cancelada: "outline",
 };
 
-/** Formata uma data ISO (ou YYYY-MM-DD) para DD/MM/YYYY. */
+/**
+ * Formata uma data ISO (ou YYYY-MM-DD) para DD/MM/YYYY.
+ * Extrai diretamente os componentes da string para evitar problemas de
+ * timezone (parseISO interpreta YYYY-MM-DD como meia-noite UTC, que em
+ * Portugal UTC+1 aparece como 01:00 do dia anterior ou da mesma data).
+ */
 function formatarDataDMY(iso?: string | null): string {
   if (!iso) return "—";
   try {
-    return format(parseISO(iso.slice(0, 10)), "dd/MM/yyyy");
+    const dataStr = iso.slice(0, 10); // YYYY-MM-DD
+    const [ano, mes, dia] = dataStr.split("-");
+    if (!ano || !mes || !dia) return iso;
+    return `${dia}/${mes}/${ano}`;
   } catch {
     return iso;
   }
 }
 
-/** Formata uma data/hora ISO para DD/MM/YYYY HH:mm (para checkin/checkout da reserva). */
+/**
+ * Formata uma data/hora ISO para DD/MM/YYYY HH:mm (para checkin/checkout).
+ * A parte da data é extraída diretamente da string (sem timezone); a parte
+ * da hora usa parseISO apenas se houver componente de tempo.
+ */
 function formatarDataHoraCurta(iso?: string | null): string {
   if (!iso) return "—";
   try {
-    // Se for só data (YYYY-MM-DD), devolve DD/MM/YYYY.
-    if (iso.length <= 10) return format(parseISO(iso), "dd/MM/yyyy");
-    return format(parseISO(iso), "dd/MM/yyyy HH:mm");
+    const dataStr = iso.slice(0, 10);
+    const [ano, mes, dia] = dataStr.split("-");
+    if (!ano || !mes || !dia) return iso;
+    const dataFmt = `${dia}/${mes}/${ano}`;
+    // Se for só data (YYYY-MM-DD), devolve só a data.
+    if (iso.length <= 10) return dataFmt;
+    // Se tem tempo, extrai HH:mm diretamente (sem conversão de timezone).
+    const tempoParte = iso.slice(11, 16); // HH:mm
+    return `${dataFmt} ${tempoParte}`;
   } catch {
     return iso;
   }
 }
 
-/** Constrói a string de Reserva: "In: [checkin] Out: [checkout] - [pax] pax". */
-function formatarReserva(detalhes?: TarefaCalendario["detalhes_reserva"]): string {
-  if (!detalhes) return "—";
-  const checkin = detalhes.checkin ? formatarDataHoraCurta(detalhes.checkin) : "—";
+/**
+ * Constrói a string de Reserva: "In: [checkin] Out: [checkout] - [pax] pax".
+ * Se não houver detalhes_reserva, usa a data da tarefa como check-in
+ * (fallback para tarefas criadas antes do Prompt 93).
+ */
+function formatarReserva(
+  detalhes?: TarefaCalendario["detalhes_reserva"],
+  dataTarefa?: string
+): string {
+  if (!detalhes) {
+    // Tarefas antigas sem detalhes_reserva — mostra pelo menos o check-in
+    // (data da tarefa = dia do check-in).
+    if (dataTarefa) {
+      return `In: ${formatarDataDMY(dataTarefa)} Out: — - —`;
+    }
+    return "—";
+  }
+  const checkin = detalhes.checkin
+    ? formatarDataHoraCurta(detalhes.checkin)
+    : dataTarefa
+    ? formatarDataDMY(dataTarefa)
+    : "—";
   const checkout = detalhes.checkout ? formatarDataHoraCurta(detalhes.checkout) : "—";
   const pax = detalhes.pax != null ? `${detalhes.pax} pax` : "—";
   return `In: ${checkin} Out: ${checkout} - ${pax}`;
@@ -649,11 +685,37 @@ export default function CalendarioOperacionalPage() {
       // problemas de SSR do xlsx).
       const XLSX = await import("xlsx");
 
-      // Constrói as linhas com os dados visíveis na tabela, formatados como
-      // texto/data (o Excel interpreta strings DD/MM/YYYY como texto).
+      // Prompt 103 — Busca TODAS as tarefas do período (incluindo canceladas)
+      // para o Excel ter histórico completo. O calendário visual exclui
+      // canceladas, mas o Excel deve incluí-las.
+      if (!periodo) return;
+      const params = new URLSearchParams({
+        inicio: periodo.inicio,
+        fim: periodo.fim,
+        incluir_canceladas: "true",
+      });
+      if (filtros.propriedadeId) params.set("propriedadeId", filtros.propriedadeId);
+      if (filtros.utilizadorId) params.set("utilizadorId", filtros.utilizadorId);
+
+      const res = await adminGet<{ tarefas: TarefaCalendario[] }>(
+        `/api/gestor/calendario/dados?${params.toString()}`
+      );
+      const todasTarefas = (res.tarefas ?? [])
+        .filter((t) => t.tipo !== "ausencia" && t.tipo !== "folga_fixa")
+        .slice()
+        .sort((a, b) => {
+          try {
+            return parseISO(a.data).getTime() - parseISO(b.data).getTime();
+          } catch {
+            return 0;
+          }
+        });
+
+      // Constrói as linhas com os dados, formatados como texto/data.
       // Prompt 100: células de Reserva em branco (não "—") quando não há
       // detalhes_reserva; estados traduzidos para PT (Em Curso, Por Atribuir…).
-      const linhas = tarefasTabela.map((t) => ({
+      // Prompt 103: inclui canceladas com "Cancelada" no Estado.
+      const linhas = todasTarefas.map((t) => ({
         Data: formatarDataDMY(t.data),
         Propriedade: t.propriedade_id?.nome ?? "",
         Reserva: formatarReservaExcel(t.detalhes_reserva),
@@ -683,7 +745,7 @@ export default function CalendarioOperacionalPage() {
     } finally {
       setExportando(false);
     }
-  }, [tarefasTabela]);
+  }, [periodo, filtros]);
 
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
@@ -968,7 +1030,7 @@ export default function CalendarioOperacionalPage() {
                         {t.propriedade_id?.nome ?? "—"}
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">
-                        {formatarReserva(t.detalhes_reserva)}
+                        {formatarReserva(t.detalhes_reserva, t.data)}
                       </td>
                       <td className="px-4 py-3">
                         {t.utilizador_id?.nome ?? (

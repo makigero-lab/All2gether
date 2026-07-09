@@ -434,15 +434,23 @@ describe('GET /api/gestor/calendario/dados', () => {
     expect(res.status).toBe(401);
   });
 
-  it('com token + sem filtros → 200 + todas as tarefas (incluindo canceladas)', async () => {
+  it('com token + sem filtros → 200 + exclui canceladas por defeito (Prompt 103)', async () => {
     const res = await authGet(
       `/api/gestor/calendario/dados?inicio=${dataStr}&fim=${dataStr}`
     );
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.tarefas)).toBe(true);
-    // 4 tarefas criadas (inclui a cancelada — difere do getTarefas).
-    expect(res.body.tarefas.length).toBeGreaterThanOrEqual(4);
-    // Verifica que há cancelada (confirmar que não exclui).
+    // Prompt 103 — canceladas são excluídas por defeito (só aparecem no Excel).
+    const temCancelada = res.body.tarefas.some((t) => t.estado === 'cancelada');
+    expect(temCancelada).toBe(false);
+  });
+
+  it('com incluir_canceladas=true → inclui canceladas (para Excel)', async () => {
+    const res = await authGet(
+      `/api/gestor/calendario/dados?inicio=${dataStr}&fim=${dataStr}&incluir_canceladas=true`
+    );
+    expect(res.status).toBe(200);
+    // Com incluir_canceladas=true, as canceladas aparecem (histórico Excel).
     const temCancelada = res.body.tarefas.some((t) => t.estado === 'cancelada');
     expect(temCancelada).toBe(true);
   });
@@ -731,7 +739,7 @@ describe('POST /webhooks/smoobu (load balancer)', () => {
     expect(log.status).toBe('processado');
   });
 
-  it('cancellation → cancela a tarefa existente', async () => {
+  it('cancellation → SOFT DELETE: estado=cancelada + utilizador_id=null (Prompt 103)', async () => {
     // 1) Cria a tarefa com newReservation.
     const amanha = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
     await request(app).post('/webhooks/smoobu').send({
@@ -743,19 +751,22 @@ describe('POST /webhooks/smoobu (load balancer)', () => {
     expect(tarefa).not.toBeNull();
     expect(tarefa.estado).not.toBe('cancelada');
 
-    // 2) Envia cancellation → tarefa fica cancelada.
+    // 2) Envia cancellation → tarefa fica cancelada (soft delete) + utilizador_id=null.
     await request(app).post('/webhooks/smoobu').send({
       action: 'cancellation',
       data: { id: 1111, arrival: amanha, apartment: { id: 200, name: 'X' } },
     });
     await esperar(400);
-    const cancelada = await Tarefa.findOne({ smoobu_reserva_id: '1111' });
-    expect(cancelada.estado).toBe('cancelada');
+    const depois = await Tarefa.findOne({ smoobu_reserva_id: '1111' });
+    // A tarefa MANTIDA (soft delete), com estado 'cancelada' e utilizador_id null.
+    expect(depois).not.toBeNull();
+    expect(depois.estado).toBe('cancelada');
+    expect(depois.utilizador_id).toBeNull();
   });
 
   it('cancellation idempotente → cancelar 2x mantém cancelada', async () => {
     const amanha = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
-    // Cria primeiro (o beforeEach limpa as tarefas entre testes).
+    // Cria primeiro.
     await request(app).post('/webhooks/smoobu').send({
       action: 'newReservation',
       data: { id: 1111, arrival: amanha, apartment: { id: 200, name: 'X' } },
@@ -769,7 +780,34 @@ describe('POST /webhooks/smoobu (load balancer)', () => {
       });
       await esperar(300);
     }
+    // A tarefa mantém-se cancelada (soft delete).
     const tarefa = await Tarefa.findOne({ smoobu_reserva_id: '1111' });
+    expect(tarefa).not.toBeNull();
+    expect(tarefa.estado).toBe('cancelada');
+  });
+
+  it('cancellation → tarefa CONCLUÍDA também fica cancelada (Prompt 103)', async () => {
+    const amanha = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+    // Cria.
+    await request(app).post('/webhooks/smoobu').send({
+      action: 'newReservation',
+      data: { id: 1111, arrival: amanha, apartment: { id: 200, name: 'X' } },
+    });
+    await esperar(400);
+    // Marca como concluída manualmente.
+    await Tarefa.updateOne(
+      { smoobu_reserva_id: '1111' },
+      { $set: { estado: 'concluida' } }
+    );
+    // Cancela.
+    await request(app).post('/webhooks/smoobu').send({
+      action: 'cancellation',
+      data: { id: 1111, arrival: amanha, apartment: { id: 200, name: 'X' } },
+    });
+    await esperar(400);
+    // A tarefa foi MANTIDA (soft delete) → marcada como cancelada.
+    const tarefa = await Tarefa.findOne({ smoobu_reserva_id: '1111' });
+    expect(tarefa).not.toBeNull();
     expect(tarefa.estado).toBe('cancelada');
   });
 
@@ -831,21 +869,23 @@ describe('POST /webhooks/smoobu (load balancer)', () => {
       data: { id: 4444, arrival: amanha, apartment: { id: 200, name: 'X' } },
     });
     await esperar(400);
-    // 2) Cancela.
+    // 2) Cancela → tarefa fica cancelada (soft delete, Prompt 103).
     await request(app).post('/webhooks/smoobu').send({
       action: 'cancellation',
       data: { id: 4444, arrival: amanha, apartment: { id: 200, name: 'X' } },
     });
     await esperar(400);
     const cancelada = await Tarefa.findOne({ smoobu_reserva_id: '4444' });
+    expect(cancelada).not.toBeNull();
     expect(cancelada.estado).toBe('cancelada');
-    // 3) Re-cria (newReservation com mesmo ID) → re-activa.
+    // 3) Re-cria (newReservation com mesmo ID) → re-activa a tarefa.
     await request(app).post('/webhooks/smoobu').send({
       action: 'newReservation',
       data: { id: 4444, arrival: amanha, apartment: { id: 200, name: 'X' } },
     });
     await esperar(400);
     const reactivada = await Tarefa.findOne({ smoobu_reserva_id: '4444' });
+    expect(reactivada).not.toBeNull();
     expect(reactivada.estado).not.toBe('cancelada');
     // Não criou duplicado.
     const count = await Tarefa.countDocuments({ smoobu_reserva_id: '4444' });
@@ -1179,15 +1219,16 @@ describe('POST /api/gestor/smoobu/sincronizar', () => {
           {
             id: 2001,
             arrival: amanha,
+            departure: amanha,
             apartment: { id: 200, name: 'Apartamento Teste' },
           },
           {
             id: 2002,
             arrival: amanha,
+            departure: amanha,
             apartment: { id: 200, name: 'Apartamento Teste' },
           },
         ],
-        page_count: 1,
         page_count: 1,
       }),
       text: async () => '',
@@ -1530,10 +1571,10 @@ describe('POST /api/gestor/smoobu/sincronizar-propriedades', () => {
     expect(p.ativo).toBe(false);
   });
 
-  it('Prompt 92 — força update de morada + capacidade em propriedade existente', async () => {
+  it('Prompt 104 — sincronizar NÃO sobrescreve morada se já preenchida (só capacidade)', async () => {
     process.env.SMOOBU_API_KEY = 'test-key-123';
 
-    // Propriedade já existente com morada e capacidade antigas + edits manuais.
+    // Propriedade já existente com morada preenchida + edits manuais.
     await Propriedade.create({
       smoobu_id: 'sync-1',
       nome: 'Casa Mantida',
@@ -1569,9 +1610,10 @@ describe('POST /api/gestor/smoobu/sincronizar-propriedades', () => {
     expect(res.body.existentes).toBe(0);
     expect(res.body.criadas).toBe(0);
 
-    // A morada e a capacidade foram sobrescritas pelo Smoobu (fonte de verdade).
+    // Prompt 104 — A morada NÃO foi sobrescrita (edição manual tem prioridade).
     const p = await Propriedade.findOne({ smoobu_id: 'sync-1' });
-    expect(p.morada).toBe('Rua Nova 10, 1000-001, Lisboa');
+    expect(p.morada).toBe('Rua Antiga');
+    // A capacidade foi atualizada.
     expect(p.capacidade_hospedes).toBe(5);
 
     // Mas nome, tempo e ativo continuam preservados (edições manuais).
@@ -3365,30 +3407,30 @@ describe('Correções: Calendário + Importar Propriedades', () => {
     expect(String(ausenciasNoCalendario[0].utilizador_id._id)).toBe(String(staffAtivo._id));
   });
 
-  it('importarPropriedades atualiza SEMPRE morada + capacidade de existentes (não só "A definir")', async () => {
+  it('Prompt 104 — importar NÃO sobrescreve morada se já preenchida (edição manual tem prioridade)', async () => {
     const Propriedade = require('../models/Propriedade');
     process.env.SMOOBU_API_KEY = 'test-key-123';
 
-    // Cria uma propriedade já existente com morada antiga.
+    // Cria uma propriedade já existente com morada preenchida pelo gestor.
     const propExistente = await Propriedade.create({
-      smoobu_id: 'imp-update-1',
-      nome: 'Casa Antiga',
-      morada: 'Rua Antiga 123',
+      smoobu_id: 'imp-nosobrepor',
+      nome: 'Casa com Morada',
+      morada: 'Rua do Gestor 123',
       empresa_id: empresaId,
       ativo: true,
       capacidade_hospedes: 2,
     });
 
-    // Smoobu devolve a MESMA propriedade com morada NOVA + capacidade NOVA.
+    // Smoobu devolve a MESMA propriedade com morada diferente + capacidade nova.
     const mockFetch = jest.fn().mockResolvedValue({
       ok: true,
       status: 200,
       json: async () => ({
         apartments: [
           {
-            id: 'imp-update-1',
-            name: 'Casa Antiga',
-            location: { street: 'Rua Nova 456', zip: '2000-001', city: 'Lisboa' },
+            id: 'imp-nosobrepor',
+            name: 'Casa com Morada',
+            location: { street: 'Rua do Smoobu 456', zip: '2000-001', city: 'Lisboa' },
             rooms: { maxOccupancy: 6 },
           },
         ],
@@ -3400,14 +3442,59 @@ describe('Correções: Calendário + Importar Propriedades', () => {
 
     const res = await authPost('/api/gestor/smoobu/propriedades', {});
     expect(res.status).toBe(200);
-    // Tem de ter atualizado (não "já existia").
+    // Capacidade foi atualizada (atualizadas >= 1).
     expect(res.body.atualizadas).toBe(1);
-    expect(res.body.existentes).toBe(0);
 
-    // Confirma que a morada e capacidade foram sobrescritas.
+    // A morada NÃO foi sobrescrita — mantém a do gestor.
     const depois = await Propriedade.findById(propExistente._id).lean();
-    expect(depois.morada).toBe('Rua Nova 456, 2000-001, Lisboa');
+    expect(depois.morada).toBe('Rua do Gestor 123');
+    // A capacidade foi atualizada.
     expect(depois.capacidade_hospedes).toBe(6);
+
+    delete process.env.SMOOBU_API_KEY;
+    if (global.fetch && global.fetch.__isMock) {
+      delete global.fetch.__isMock;
+    }
+  });
+
+  it('Prompt 104 — importar PREENCHE morada se estiver vazia ("A definir")', async () => {
+    const Propriedade = require('../models/Propriedade');
+    process.env.SMOOBU_API_KEY = 'test-key-123';
+
+    // Cria uma propriedade com morada "A definir" (vazia).
+    const propVazia = await Propriedade.create({
+      smoobu_id: 'imp-preenche',
+      nome: 'Casa Sem Morada',
+      morada: 'A definir',
+      empresa_id: empresaId,
+      ativo: true,
+    });
+
+    const mockFetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        apartments: [
+          {
+            id: 'imp-preenche',
+            name: 'Casa Sem Morada',
+            location: { street: 'Rua do Smoobu 789', zip: '3000-001', city: 'Coimbra' },
+            rooms: { maxOccupancy: 4 },
+          },
+        ],
+      }),
+      text: async () => '',
+    });
+    mockFetch.__isMock = true;
+    global.fetch = mockFetch;
+
+    const res = await authPost('/api/gestor/smoobu/propriedades', {});
+    expect(res.status).toBe(200);
+
+    // A morada foi preenchida pelo Smoobu (estava "A definir").
+    const depois = await Propriedade.findById(propVazia._id).lean();
+    expect(depois.morada).toBe('Rua do Smoobu 789, 3000-001, Coimbra');
+    expect(depois.capacidade_hospedes).toBe(4);
 
     delete process.env.SMOOBU_API_KEY;
     if (global.fetch && global.fetch.__isMock) {

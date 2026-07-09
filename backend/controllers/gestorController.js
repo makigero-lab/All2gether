@@ -336,16 +336,27 @@ exports.getTarefas = async (req, res) => {
     const filtro = { empresa_id: empresaId, estado: { $ne: 'cancelada' } };
 
     // Filtro por intervalo de datas (opcional).
+    // Sempre filtra a partir de hoje (não mostra tarefas passadas).
     const { inicio, fim } = req.query;
+    const agora = new Date();
+    const hojeInicio = new Date(
+      Date.UTC(agora.getUTCFullYear(), agora.getUTCMonth(), agora.getUTCDate())
+    );
+
     if (inicio || fim) {
       const dataFiltro = {};
       if (inicio) {
         const d = new Date(inicio);
         if (!isNaN(d.getTime())) {
-          dataFiltro.$gte = new Date(
+          const inicioReq = new Date(
             Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
           );
+          // Não permite ver datas anteriores a hoje.
+          dataFiltro.$gte = inicioReq < hojeInicio ? hojeInicio : inicioReq;
         }
+      } else {
+        // Se só tem fim, aplica $gte = hoje.
+        dataFiltro.$gte = hojeInicio;
       }
       if (fim) {
         const d = new Date(fim);
@@ -361,12 +372,7 @@ exports.getTarefas = async (req, res) => {
         filtro.data = dataFiltro;
       }
     } else {
-      // v1.67.0 (Prompt 90) — Se não vierem filtros de data, aplica por defeito
-      // data >= hoje (meia-noite UTC) para não devolver tarefas do passado.
-      const agora = new Date();
-      const hojeInicio = new Date(
-        Date.UTC(agora.getUTCFullYear(), agora.getUTCMonth(), agora.getUTCDate())
-      );
+      // Sem filtros de data → data >= hoje (não devolve tarefas do passado).
       filtro.data = { $gte: hojeInicio };
     }
 
@@ -413,7 +419,7 @@ exports.getDadosCalendario = async (req, res) => {
     const { ok, empresaId } = obterEmpresaId(req, res);
     if (!ok) return;
 
-    const { inicio, fim, propriedadeId, utilizadorId, estado } = req.query;
+    const { inicio, fim, propriedadeId, utilizadorId, estado, incluir_canceladas } = req.query;
 
     // Filtro base: empresa do utilizador autenticado.
     const filtro = { empresa_id: empresaId };
@@ -469,6 +475,12 @@ exports.getDadosCalendario = async (req, res) => {
     ];
     if (estado && ESTADOS_VALIDOS.includes(estado)) {
       filtro.estado = estado;
+    } else if (!estado && incluir_canceladas !== 'true') {
+      // Prompt 103 — Se nenhum filtro de estado for especificado E não veio
+      // incluir_canceladas=true, exclui canceladas (não aparecem no calendário
+      // visual nem na agenda do staff). O Excel passa incluir_canceladas=true
+      // para receber também as canceladas (histórico para relatório).
+      filtro.estado = { $ne: 'cancelada' };
     }
 
     const tarefas = await Tarefa.find(filtro)

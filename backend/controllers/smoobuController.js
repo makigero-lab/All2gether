@@ -202,7 +202,8 @@ exports.sincronizarReservas = async (req, res) => {
       }
 
       // Mapeia a reserva do formato REST API para o formato do webhook.
-      // O processador espera: { action, data: { id, arrival, apartment: { id, name } } }
+      // O processador espera: { action, data: { id, arrival, departure,
+      // apartment: { id, name }, guests, guestName, ... } }
       const payloadWebhook = {
         action: 'newReservation',
         data: {
@@ -213,8 +214,29 @@ exports.sincronizarReservas = async (req, res) => {
             id: reserva.apartment?.id ?? reserva.apartment_id ?? reserva.apartmentId,
             name: reserva.apartment?.name ?? reserva.apartment_name,
           },
+          // Campos extras para detalhes_reserva (check-in/out + hóspedes).
+          guests: reserva.guests ?? reserva.numPeople ?? reserva.numberOfGuests ?? undefined,
+          adults: reserva.adults,
+          children: reserva.children,
+          guestName: reserva.guestName ?? reserva.guest_name ?? undefined,
+          firstName: reserva.firstName ?? reserva.first_name ?? undefined,
+          lastName: reserva.lastName ?? reserva.last_name ?? undefined,
         },
       };
+
+      // Prompt 102 — Se a reserva estiver cancelada no Smoobu (status =
+      // 'cancelled' ou variante), dispara o gatilho de cancelamento em
+      // vez de criar uma tarefa fantasma.
+      const statusReserva = String(
+        reserva.status ?? reserva.bookingStatus ?? ''
+      ).toLowerCase();
+      if (['cancelled', 'canceled', 'cancelada'].includes(statusReserva)) {
+        const { cancelarTarefaPorReserva } = require('./webhookController');
+        await cancelarTarefaPorReserva(reservaId);
+        // Conta como "existente" (não cria nova, não conta como erro).
+        existentes++;
+        continue;
+      }
 
       const resultado = await _processarReservaSmoobu(payloadWebhook);
 
@@ -497,17 +519,20 @@ exports.sincronizarPropriedades = async (req, res) => {
         });
         criadas++;
       } else {
-        // Prompt 92 (Fase 1.5) — JÁ EXISTE: atualiza SEMPRE a capacidade_hospedes
-        // e a morada quando o Smoobu as trouxer no payload (deixa de preservar o
-        // valor antigo destes dois campos — a fonte de verdade passa a ser o
-        // Smoobu). Os restantes campos (nome, tempo_limpeza_minutos, ativo,
-        // checklist, funcionario_preferencial_id) continuam a ser preservados,
-        // mantendo as edições manuais do gestor. Refaz o geocoding sempre que a
-        // morada for atualizada.
+        // Prompt 104 — JÁ EXISTE: a morada só é preenchida pelo Smoobu se o
+        // nosso campo estiver vazio/'A definir'. Se o gestor já preencheu a
+        // morada manualmente, NÃO sobrescreve (a edição manual tem prioridade).
+        // A capacidade_hospedes continua a ser atualizada sempre (o Smoobu é
+        // a fonte de verdade para capacidade). Os restantes campos (nome,
+        // tempo_limpeza_minutos, ativo, checklist, funcionario_preferencial_id)
+        // continuam preservados.
         let mudou = false;
 
-        // Morada: atualiza SEMPRE que o Smoobu trouxer uma morada real.
-        if (moradaTexto !== 'A definir') {
+        // Morada: só preenche se o nosso campo estiver vazio/'A definir'.
+        if (
+          moradaTexto !== 'A definir' &&
+          (!existente.morada || existente.morada === 'A definir')
+        ) {
           existente.morada = moradaTexto;
           try {
             const coords = await obterCoordenadas(moradaTexto);
@@ -668,16 +693,17 @@ exports.importarPropriedades = async (req, res) => {
       });
 
       if (existente) {
-        // Alinhado com sincronizarPropriedades (Prompt 92) — atualiza SEMPRE
-        // a morada + capacidade_hospedes quando o Smoobu as trouxer (a fonte
-        // de verdade destes dois campos passa a ser o Smoobu). Refaz o
-        // geocoding sempre que a morada for atualizada. Os restantes campos
-        // (nome, tempo_limpeza_minutos, ativo, checklist,
-        // funcionario_preferencial_id) continuam preservados.
+        // Prompt 104 — A morada só é preenchida pelo Smoobu se o nosso campo
+        // estiver vazio/'A definir'. Se o gestor já preencheu a morada
+        // manualmente, NÃO sobrescreve (a edição manual tem prioridade).
+        // A capacidade_hospedes continua a ser atualizada sempre.
         let mudou = false;
 
-        // Morada: atualiza SEMPRE que o Smoobu trouxer uma morada real.
-        if (moradaTexto !== 'A definir') {
+        // Morada: só preenche se o nosso campo estiver vazio/'A definir'.
+        if (
+          moradaTexto !== 'A definir' &&
+          (!existente.morada || existente.morada === 'A definir')
+        ) {
           existente.morada = moradaTexto;
           try {
             const coords = await obterCoordenadas(moradaTexto);
