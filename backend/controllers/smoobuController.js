@@ -623,11 +623,16 @@ exports.importarPropriedades = async (req, res) => {
       });
 
       if (existente) {
-        // v1.67.0 (Prompt 90) — Update inteligente: em vez de fazer continue,
-        // preenche a morada se estiver 'A definir' e atualiza a capacidade.
+        // Alinhado com sincronizarPropriedades (Prompt 92) — atualiza SEMPRE
+        // a morada + capacidade_hospedes quando o Smoobu as trouxer (a fonte
+        // de verdade destes dois campos passa a ser o Smoobu). Refaz o
+        // geocoding sempre que a morada for atualizada. Os restantes campos
+        // (nome, tempo_limpeza_minutos, ativo, checklist,
+        // funcionario_preferencial_id) continuam preservados.
         let mudou = false;
 
-        if (existente.morada === 'A definir' && moradaTexto !== 'A definir') {
+        // Morada: atualiza SEMPRE que o Smoobu trouxer uma morada real.
+        if (moradaTexto !== 'A definir') {
           existente.morada = moradaTexto;
           try {
             const coords = await obterCoordenadas(moradaTexto);
@@ -638,7 +643,8 @@ exports.importarPropriedades = async (req, res) => {
           mudou = true;
         }
 
-        if (capacidade && existente.capacidade_hospedes !== capacidade) {
+        // Capacidade: atualiza SEMPRE que o Smoobu trouxer um valor.
+        if (capacidade) {
           existente.capacidade_hospedes = capacidade;
           mudou = true;
         }

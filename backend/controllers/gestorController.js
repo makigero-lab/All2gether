@@ -543,14 +543,20 @@ exports.getDadosCalendario = async (req, res) => {
       }
 
       const ausenciasAprovadas = await Ausencia.find(filtroAusencias)
-        .populate({ path: 'utilizador_id', select: 'nome' })
+        .populate({ path: 'utilizador_id', select: 'nome eliminado_em' })
         .select('data_inicio data_fim tipo utilizador_id notas')
         .lean();
+
+      // Filtra ausências cujo utilizador foi eliminado (soft delete) —
+      // não devem aparecer no calendário.
+      const ausenciasFiltradas = ausenciasAprovadas.filter(
+        (a) => a.utilizador_id && !a.utilizador_id.eliminado_em
+      );
 
       // Converte cada ausência num evento virtual tipo 'ausencia'.
       // FullCalendar com allDay espera que `end` seja EXCLUSIVE (o dia
       // seguinte ao último dia de férias) para cobrir o bloco inteiro.
-      const eventosAusencias = ausenciasAprovadas.map((a) => {
+      const eventosAusencias = ausenciasFiltradas.map((a) => {
         const endExclusive = new Date(a.data_fim);
         endExclusive.setDate(endExclusive.getDate() + 1); // +1 dia
 
