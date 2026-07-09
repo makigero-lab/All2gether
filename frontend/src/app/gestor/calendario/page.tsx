@@ -242,10 +242,28 @@ function formatarDataHoraCurta(iso?: string | null): string {
   }
 }
 
-/** Constrói a string de Reserva: "In: [checkin] Out: [checkout] - [pax] pax". */
-function formatarReserva(detalhes?: TarefaCalendario["detalhes_reserva"]): string {
-  if (!detalhes) return "—";
-  const checkin = detalhes.checkin ? formatarDataHoraCurta(detalhes.checkin) : "—";
+/**
+ * Constrói a string de Reserva: "In: [checkin] Out: [checkout] - [pax] pax".
+ * Se não houver detalhes_reserva, usa a data da tarefa como check-in
+ * (fallback para tarefas criadas antes do Prompt 93).
+ */
+function formatarReserva(
+  detalhes?: TarefaCalendario["detalhes_reserva"],
+  dataTarefa?: string
+): string {
+  if (!detalhes) {
+    // Tarefas antigas sem detalhes_reserva — mostra pelo menos o check-in
+    // (data da tarefa = dia do check-in).
+    if (dataTarefa) {
+      return `In: ${formatarDataDMY(dataTarefa)} Out: — - —`;
+    }
+    return "—";
+  }
+  const checkin = detalhes.checkin
+    ? formatarDataHoraCurta(detalhes.checkin)
+    : dataTarefa
+    ? formatarDataDMY(dataTarefa)
+    : "—";
   const checkout = detalhes.checkout ? formatarDataHoraCurta(detalhes.checkout) : "—";
   const pax = detalhes.pax != null ? `${detalhes.pax} pax` : "—";
   return `In: ${checkin} Out: ${checkout} - ${pax}`;
@@ -1012,7 +1030,7 @@ export default function CalendarioOperacionalPage() {
                         {t.propriedade_id?.nome ?? "—"}
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">
-                        {formatarReserva(t.detalhes_reserva)}
+                        {formatarReserva(t.detalhes_reserva, t.data)}
                       </td>
                       <td className="px-4 py-3">
                         {t.utilizador_id?.nome ?? (

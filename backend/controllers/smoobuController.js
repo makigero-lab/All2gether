@@ -202,7 +202,8 @@ exports.sincronizarReservas = async (req, res) => {
       }
 
       // Mapeia a reserva do formato REST API para o formato do webhook.
-      // O processador espera: { action, data: { id, arrival, apartment: { id, name } } }
+      // O processador espera: { action, data: { id, arrival, departure,
+      // apartment: { id, name }, guests, guestName, ... } }
       const payloadWebhook = {
         action: 'newReservation',
         data: {
@@ -213,6 +214,13 @@ exports.sincronizarReservas = async (req, res) => {
             id: reserva.apartment?.id ?? reserva.apartment_id ?? reserva.apartmentId,
             name: reserva.apartment?.name ?? reserva.apartment_name,
           },
+          // Campos extras para detalhes_reserva (check-in/out + hóspedes).
+          guests: reserva.guests ?? reserva.numPeople ?? reserva.numberOfGuests ?? undefined,
+          adults: reserva.adults,
+          children: reserva.children,
+          guestName: reserva.guestName ?? reserva.guest_name ?? undefined,
+          firstName: reserva.firstName ?? reserva.first_name ?? undefined,
+          lastName: reserva.lastName ?? reserva.last_name ?? undefined,
         },
       };
 
