@@ -434,15 +434,23 @@ describe('GET /api/gestor/calendario/dados', () => {
     expect(res.status).toBe(401);
   });
 
-  it('com token + sem filtros → 200 + todas as tarefas (incluindo canceladas)', async () => {
+  it('com token + sem filtros → 200 + exclui canceladas por defeito (Prompt 103)', async () => {
     const res = await authGet(
       `/api/gestor/calendario/dados?inicio=${dataStr}&fim=${dataStr}`
     );
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.tarefas)).toBe(true);
-    // 4 tarefas criadas (inclui a cancelada — difere do getTarefas).
-    expect(res.body.tarefas.length).toBeGreaterThanOrEqual(4);
-    // Verifica que há cancelada (confirmar que não exclui).
+    // Prompt 103 — canceladas são excluídas por defeito (só aparecem no Excel).
+    const temCancelada = res.body.tarefas.some((t) => t.estado === 'cancelada');
+    expect(temCancelada).toBe(false);
+  });
+
+  it('com incluir_canceladas=true → inclui canceladas (para Excel)', async () => {
+    const res = await authGet(
+      `/api/gestor/calendario/dados?inicio=${dataStr}&fim=${dataStr}&incluir_canceladas=true`
+    );
+    expect(res.status).toBe(200);
+    // Com incluir_canceladas=true, as canceladas aparecem (histórico Excel).
     const temCancelada = res.body.tarefas.some((t) => t.estado === 'cancelada');
     expect(temCancelada).toBe(true);
   });
@@ -731,7 +739,7 @@ describe('POST /webhooks/smoobu (load balancer)', () => {
     expect(log.status).toBe('processado');
   });
 
-  it('cancellation → HARD DELETE da tarefa não concluída (Prompt 102)', async () => {
+  it('cancellation → SOFT DELETE: estado=cancelada + utilizador_id=null (Prompt 103)', async () => {
     // 1) Cria a tarefa com newReservation.
     const amanha = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
     await request(app).post('/webhooks/smoobu').send({
@@ -743,18 +751,20 @@ describe('POST /webhooks/smoobu (load balancer)', () => {
     expect(tarefa).not.toBeNull();
     expect(tarefa.estado).not.toBe('cancelada');
 
-    // 2) Envia cancellation → tarefa é APAGADA (hard delete, não cancelada).
+    // 2) Envia cancellation → tarefa fica cancelada (soft delete) + utilizador_id=null.
     await request(app).post('/webhooks/smoobu').send({
       action: 'cancellation',
       data: { id: 1111, arrival: amanha, apartment: { id: 200, name: 'X' } },
     });
     await esperar(400);
     const depois = await Tarefa.findOne({ smoobu_reserva_id: '1111' });
-    // A tarefa foi APAGADA (não existe mais).
-    expect(depois).toBeNull();
+    // A tarefa MANTIDA (soft delete), com estado 'cancelada' e utilizador_id null.
+    expect(depois).not.toBeNull();
+    expect(depois.estado).toBe('cancelada');
+    expect(depois.utilizador_id).toBeNull();
   });
 
-  it('cancellation idempotente → cancelar 2x não dá erro (tarefa já apagada)', async () => {
+  it('cancellation idempotente → cancelar 2x mantém cancelada', async () => {
     const amanha = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
     // Cria primeiro.
     await request(app).post('/webhooks/smoobu').send({
@@ -770,12 +780,13 @@ describe('POST /webhooks/smoobu (load balancer)', () => {
       });
       await esperar(300);
     }
-    // A tarefa foi apagada (não existe).
+    // A tarefa mantém-se cancelada (soft delete).
     const tarefa = await Tarefa.findOne({ smoobu_reserva_id: '1111' });
-    expect(tarefa).toBeNull();
+    expect(tarefa).not.toBeNull();
+    expect(tarefa.estado).toBe('cancelada');
   });
 
-  it('cancellation → tarefa CONCLUÍDA é marcada cancelada (não apagada)', async () => {
+  it('cancellation → tarefa CONCLUÍDA também fica cancelada (Prompt 103)', async () => {
     const amanha = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
     // Cria.
     await request(app).post('/webhooks/smoobu').send({
@@ -794,7 +805,7 @@ describe('POST /webhooks/smoobu (load balancer)', () => {
       data: { id: 1111, arrival: amanha, apartment: { id: 200, name: 'X' } },
     });
     await esperar(400);
-    // A tarefa foi MANTIDA (concluída → cancelada), não apagada.
+    // A tarefa foi MANTIDA (soft delete) → marcada como cancelada.
     const tarefa = await Tarefa.findOne({ smoobu_reserva_id: '1111' });
     expect(tarefa).not.toBeNull();
     expect(tarefa.estado).toBe('cancelada');
@@ -858,15 +869,16 @@ describe('POST /webhooks/smoobu (load balancer)', () => {
       data: { id: 4444, arrival: amanha, apartment: { id: 200, name: 'X' } },
     });
     await esperar(400);
-    // 2) Cancela → tarefa é APAGADA (hard delete, Prompt 102).
+    // 2) Cancela → tarefa fica cancelada (soft delete, Prompt 103).
     await request(app).post('/webhooks/smoobu').send({
       action: 'cancellation',
       data: { id: 4444, arrival: amanha, apartment: { id: 200, name: 'X' } },
     });
     await esperar(400);
-    const apagada = await Tarefa.findOne({ smoobu_reserva_id: '4444' });
-    expect(apagada).toBeNull();
-    // 3) Re-cria (newReservation com mesmo ID) → cria nova tarefa.
+    const cancelada = await Tarefa.findOne({ smoobu_reserva_id: '4444' });
+    expect(cancelada).not.toBeNull();
+    expect(cancelada.estado).toBe('cancelada');
+    // 3) Re-cria (newReservation com mesmo ID) → re-activa a tarefa.
     await request(app).post('/webhooks/smoobu').send({
       action: 'newReservation',
       data: { id: 4444, arrival: amanha, apartment: { id: 200, name: 'X' } },

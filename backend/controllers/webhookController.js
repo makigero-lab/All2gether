@@ -695,18 +695,18 @@ async function criarTarefaPorReserva(reservaId, smoobuPropId, dataCheckInRaw, de
  * Cancela a tarefa associada a uma reserva (quando o Smoobu envia
  * `action: cancellation`).
  *
- * Prompt 102 — Gatilho de Cancelamentos:
- *   Em vez de marcar como 'cancelada' (soft delete), faz HARD DELETE das
- *   tarefas associadas a esse smoobu_reserva_id cujo estado seja
- *   'por_atribuir' ou 'atribuida' (não concluídas). Assim as limpezas
- *   "fantasma" não aparecem no calendário do Gestor nem na agenda do Staff.
+ * Prompt 103 — Soft Delete com Histórico para Excel:
+ *   Em vez de HARD DELETE (Prompt 102), faz SOFT DELETE: atualiza as
+ *   tarefas associadas a esse smoobu_reserva_id para estado = 'cancelada'
+ *   e utilizador_id = null (liberta o funcionário). As tarefas canceladas
+ *   ficam ocultas do calendário e da agenda do staff (filtradas nas
+ *   queries), mas MANTIDAS na BD para aparecerem no relatório Excel.
  *
- *   Tarefas 'concluida' são respeitadas (o trabalho já foi feito) —
- *   ficam marcadas como 'cancelada' para auditoria, mas não são apagadas.
+ *   Tarefas 'concluida' também são marcadas como 'cancelada' (o trabalho
+ *   foi feito, mas a reserva foi cancelada — fica registado).
  *
  * Procura por smoobu_reserva_id (campo top-level) E por
- * detalhes_reserva.smoobu_reserva_id (campo aninhado — tarefas criadas
- * antes do Prompt 102 podem não ter o campo aninhado).
+ * detalhes_reserva.smoobu_reserva_id (campo aninhado).
  */
 async function cancelarTarefaPorReserva(reservaId) {
   if (!reservaId) {
@@ -729,35 +729,24 @@ async function cancelarTarefaPorReserva(reservaId) {
     return null;
   }
 
-  let apagadas = 0;
-  let mantidas = 0;
-
+  let canceladas = 0;
   for (const tarefa of tarefas) {
-    // Tarefas concluídas → respeitadas (marcadas como cancelada para auditoria).
-    if (tarefa.estado === 'concluida') {
-      if (tarefa.estado !== 'cancelada') {
-        tarefa.estado = 'cancelada';
-        await tarefa.save();
-      }
-      mantidas++;
-      console.log(
-        `⚠️  Reserva ${reservaId} cancelada mas tarefa ${tarefa._id} já estava concluída — marcada como cancelada (mantida para auditoria).`
-      );
+    // Já cancelada → idempotente.
+    if (tarefa.estado === 'cancelada') {
       continue;
     }
-
-    // Tarefas por_atribuir ou atribuida (não concluídas) → HARD DELETE.
-    // Não aparecem no calendário nem na agenda do staff (limpeza fantasma).
-    await Tarefa.deleteOne({ _id: tarefa._id });
-    apagadas++;
+    // Soft delete: estado = 'cancelada' + utilizador_id = null (liberta staff).
+    tarefa.estado = 'cancelada';
+    tarefa.utilizador_id = null;
+    await tarefa.save();
+    canceladas++;
   }
 
   console.log(
-    `🚫 Cancelamento reserva ${reservaId}: ${apagadas} tarefa(s) apagada(s) (hard delete), ` +
-      `${mantidas} mantida(s) (concluída → cancelada).`
+    `🚫 Cancelamento reserva ${reservaId}: ${canceladas} tarefa(s) marcada(s) como cancelada (soft delete).`
   );
 
-  return { apagadas, mantidas, total: tarefas.length };
+  return { canceladas, total: tarefas.length };
 }
 
 /* ------------------------------------------------------------------ */

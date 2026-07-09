@@ -667,11 +667,37 @@ export default function CalendarioOperacionalPage() {
       // problemas de SSR do xlsx).
       const XLSX = await import("xlsx");
 
-      // Constrói as linhas com os dados visíveis na tabela, formatados como
-      // texto/data (o Excel interpreta strings DD/MM/YYYY como texto).
+      // Prompt 103 — Busca TODAS as tarefas do período (incluindo canceladas)
+      // para o Excel ter histórico completo. O calendário visual exclui
+      // canceladas, mas o Excel deve incluí-las.
+      if (!periodo) return;
+      const params = new URLSearchParams({
+        inicio: periodo.inicio,
+        fim: periodo.fim,
+        incluir_canceladas: "true",
+      });
+      if (filtros.propriedadeId) params.set("propriedadeId", filtros.propriedadeId);
+      if (filtros.utilizadorId) params.set("utilizadorId", filtros.utilizadorId);
+
+      const res = await adminGet<{ tarefas: TarefaCalendario[] }>(
+        `/api/gestor/calendario/dados?${params.toString()}`
+      );
+      const todasTarefas = (res.tarefas ?? [])
+        .filter((t) => t.tipo !== "ausencia" && t.tipo !== "folga_fixa")
+        .slice()
+        .sort((a, b) => {
+          try {
+            return parseISO(a.data).getTime() - parseISO(b.data).getTime();
+          } catch {
+            return 0;
+          }
+        });
+
+      // Constrói as linhas com os dados, formatados como texto/data.
       // Prompt 100: células de Reserva em branco (não "—") quando não há
       // detalhes_reserva; estados traduzidos para PT (Em Curso, Por Atribuir…).
-      const linhas = tarefasTabela.map((t) => ({
+      // Prompt 103: inclui canceladas com "Cancelada" no Estado.
+      const linhas = todasTarefas.map((t) => ({
         Data: formatarDataDMY(t.data),
         Propriedade: t.propriedade_id?.nome ?? "",
         Reserva: formatarReservaExcel(t.detalhes_reserva),
@@ -701,7 +727,7 @@ export default function CalendarioOperacionalPage() {
     } finally {
       setExportando(false);
     }
-  }, [tarefasTabela]);
+  }, [periodo, filtros]);
 
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">

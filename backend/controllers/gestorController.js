@@ -413,7 +413,7 @@ exports.getDadosCalendario = async (req, res) => {
     const { ok, empresaId } = obterEmpresaId(req, res);
     if (!ok) return;
 
-    const { inicio, fim, propriedadeId, utilizadorId, estado } = req.query;
+    const { inicio, fim, propriedadeId, utilizadorId, estado, incluir_canceladas } = req.query;
 
     // Filtro base: empresa do utilizador autenticado.
     const filtro = { empresa_id: empresaId };
@@ -469,6 +469,12 @@ exports.getDadosCalendario = async (req, res) => {
     ];
     if (estado && ESTADOS_VALIDOS.includes(estado)) {
       filtro.estado = estado;
+    } else if (!estado && incluir_canceladas !== 'true') {
+      // Prompt 103 — Se nenhum filtro de estado for especificado E não veio
+      // incluir_canceladas=true, exclui canceladas (não aparecem no calendário
+      // visual nem na agenda do staff). O Excel passa incluir_canceladas=true
+      // para receber também as canceladas (histórico para relatório).
+      filtro.estado = { $ne: 'cancelada' };
     }
 
     const tarefas = await Tarefa.find(filtro)
