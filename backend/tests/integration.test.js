@@ -1219,15 +1219,16 @@ describe('POST /api/gestor/smoobu/sincronizar', () => {
           {
             id: 2001,
             arrival: amanha,
+            departure: amanha,
             apartment: { id: 200, name: 'Apartamento Teste' },
           },
           {
             id: 2002,
             arrival: amanha,
+            departure: amanha,
             apartment: { id: 200, name: 'Apartamento Teste' },
           },
         ],
-        page_count: 1,
         page_count: 1,
       }),
       text: async () => '',

@@ -498,12 +498,8 @@ const ACOES_CANCELAR = [
  * @returns {Promise<object|null>} a tarefa afetada, ou null se ignorada.
  */
 async function processarReservaSmoobu(payload) {
-  const { smoobuPropId, dataCheckInRaw, dataCheckOutRaw, reservaId, detalhesReserva, content } =
+  let { smoobuPropId, dataCheckInRaw, dataCheckOutRaw, reservaId, detalhesReserva, content } =
     extrairDadosReserva(payload);
-
-  // A tarefa de limpeza é agendada no DIA DO CHECK-OUT (departure).
-  // Se o webhook não trouxer departure, usa arrival (check-in) como fallback.
-  const dataTarefaRaw = dataCheckOutRaw || dataCheckInRaw;
 
   const action =
     (payload && payload.action) ||
@@ -515,6 +511,30 @@ async function processarReservaSmoobu(payload) {
   if (ACOES_CANCELAR.includes(action)) {
     return cancelarTarefaPorReserva(reservaId);
   }
+
+  // A tarefa de limpeza é agendada no DIA DO CHECK-OUT (departure).
+  // O webhook oficial do Smoobu só envia arrival (check-in), não departure.
+  // Se não tivermos departure, fazemos um pedido à REST API do Smoobu para
+  // obter os detalhes completos da reserva (departure, guests, guestName).
+  // Isto demora mais tempo mas garante que a tarefa é criada no dia certo.
+  if (!dataCheckOutRaw && reservaId && (ACOES_CRIAR.includes(action) || ACOES_ATUALIZAR.includes(action))) {
+    const enriched = await enriquecerReservaSmoobu(reservaId);
+    if (enriched) {
+      dataCheckOutRaw = enriched.departure || null;
+      // Atualiza detalhes_reserva com os dados completos da REST API.
+      detalhesReserva = {
+        ...detalhesReserva,
+        checkin: enriched.arrival || detalhesReserva.checkin,
+        checkout: enriched.departure || detalhesReserva.checkout,
+        pax: enriched.pax != null ? enriched.pax : detalhesReserva.pax,
+        nome_hospede: enriched.nome_hospede || detalhesReserva.nome_hospede,
+      };
+    }
+  }
+
+  // Se mesmo após o enriquecimento não houver departure, usa arrival como
+  // último recurso (melhor ter a tarefa no check-in do que não ter tarefa).
+  const dataTarefaRaw = dataCheckOutRaw || dataCheckInRaw;
 
   // 2) Atualização → atualiza a tarefa existente (ou cria se não existir).
   if (ACOES_ATUALIZAR.includes(action)) {
@@ -542,6 +562,66 @@ async function processarReservaSmoobu(payload) {
   }
 
   return criarTarefaPorReserva(reservaId, smoobuPropId, dataTarefaRaw, detalhesReserva, content);
+}
+
+/**
+ * Faz um pedido à REST API do Smoobu para obter os detalhes completos de
+ * uma reserva (departure, guests, guestName). Usado quando o webhook não
+ * traz departure (o webhook oficial só envia arrival).
+ *
+ * Best-effort: se falhar (API key em falta, erro de rede, etc.), devolve
+ * null e o chamador usa arrival como fallback.
+ *
+ * @param {string} reservaId
+ * @returns {Promise<{arrival, departure, pax, nome_hospede} | null>}
+ */
+async function enriquecerReservaSmoobu(reservaId) {
+  const apiKey = process.env.SMOOBU_API_KEY;
+  if (!apiKey || !apiKey.trim()) {
+    console.warn('⚠️  enriquecerReservaSmoobu: SMOOBU_API_KEY não configurada — usando arrival como fallback.');
+    return null;
+  }
+
+  try {
+    const url = `https://login.smoobu.com/api/reservations/${reservaId}`;
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Api-Key': apiKey.trim(),
+        Accept: 'application/json',
+      },
+      signal: AbortSignal.timeout(15000),
+    });
+
+    if (!res.ok) {
+      console.warn(`⚠️  enriquecerReservaSmoobu: Smoobu devolveu ${res.status} para reserva ${reservaId}.`);
+      return null;
+    }
+
+    const body = await res.json();
+    // A resposta pode vir em body.data ou diretamente no body.
+    const r = body?.data ?? body;
+
+    const arrival = r?.arrival ?? r?.start_date ?? r?.startDate ?? null;
+    const departure = r?.departure ?? r?.end_date ?? r?.endDate ?? null;
+    const paxRaw = r?.guests ?? r?.numPeople ?? r?.numberOfGuests ?? null;
+    const pax = paxRaw != null ? Number(paxRaw) : null;
+    const nome_hospede =
+      r?.guestName ?? r?.guest_name ??
+      (r?.firstName || r?.lastName
+        ? [r?.firstName, r?.lastName].filter(Boolean).join(' ')
+        : null) ??
+      null;
+
+    console.log(
+      `✅ enriquecerReservaSmoobu: reserva ${reservaId} — arrival=${arrival}, departure=${departure}, pax=${pax}, hospede=${nome_hospede}`
+    );
+
+    return { arrival, departure, pax, nome_hospede };
+  } catch (err) {
+    console.warn(`⚠️  enriquecerReservaSmoobu: erro ao buscar reserva ${reservaId}:`, err.message);
+    return null;
+  }
 }
 
 /* ------------------------------------------------------------------ */
