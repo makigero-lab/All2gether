@@ -110,6 +110,22 @@ function extrairDadosReserva(payload) {
     content.data_check_in ??
     content.startDate;
 
+  // 2.b) dataCheckOutRaw — primário: data.departure
+  // A tarefa de limpeza deve ser agendada no DIA DO CHECK-OUT (quando o
+  // hóspede sai), não no check-in. Se o webhook trouxer departure, usa-o.
+  // Se não trouxer (webhook oficial só envia arrival), faz fallback para
+  // arrival — a sincronização REST API depois corrige para o check-out real.
+  const dataCheckOutRaw =
+    data?.departure ??
+    data?.check_out ??
+    data?.checkOut ??
+    data?.endDate ??
+    content.departure ??
+    content.check_out ??
+    content.checkOut ??
+    content.endDate ??
+    null;
+
   // 3) reservaId — primário: data.id
   const reservaId =
     data?.id ??
@@ -192,6 +208,7 @@ function extrairDadosReserva(payload) {
   return {
     smoobuPropId: smoobuPropId != null ? String(smoobuPropId) : null,
     dataCheckInRaw: dataCheckInRaw != null ? String(dataCheckInRaw) : null,
+    dataCheckOutRaw: dataCheckOutRaw != null ? String(dataCheckOutRaw) : null,
     reservaId: reservaId != null ? String(reservaId) : null,
     detalhesReserva,
     // Mantém-se `content` para retrocompatibilidade com quem consome esta função.
@@ -481,8 +498,12 @@ const ACOES_CANCELAR = [
  * @returns {Promise<object|null>} a tarefa afetada, ou null se ignorada.
  */
 async function processarReservaSmoobu(payload) {
-  const { smoobuPropId, dataCheckInRaw, reservaId, detalhesReserva, content } =
+  const { smoobuPropId, dataCheckInRaw, dataCheckOutRaw, reservaId, detalhesReserva, content } =
     extrairDadosReserva(payload);
+
+  // A tarefa de limpeza é agendada no DIA DO CHECK-OUT (departure).
+  // Se o webhook não trouxer departure, usa arrival (check-in) como fallback.
+  const dataTarefaRaw = dataCheckOutRaw || dataCheckInRaw;
 
   const action =
     (payload && payload.action) ||
@@ -500,7 +521,7 @@ async function processarReservaSmoobu(payload) {
     const atualizada = await atualizarTarefaPorReserva(
       reservaId,
       smoobuPropId,
-      dataCheckInRaw,
+      dataTarefaRaw,
       detalhesReserva,
       content
     );
@@ -520,7 +541,7 @@ async function processarReservaSmoobu(payload) {
     return null;
   }
 
-  return criarTarefaPorReserva(reservaId, smoobuPropId, dataCheckInRaw, detalhesReserva, content);
+  return criarTarefaPorReserva(reservaId, smoobuPropId, dataTarefaRaw, detalhesReserva, content);
 }
 
 /* ------------------------------------------------------------------ */
@@ -536,16 +557,16 @@ async function processarReservaSmoobu(payload) {
  * Prompt 93 (Fase 1.5): guarda os detalhes_reserva (checkin, checkout,
  * pax, nome_hospede) extraídos do payload do Smoobu.
  */
-async function criarTarefaPorReserva(reservaId, smoobuPropId, dataCheckInRaw, detalhesReserva, content) {
-  if (!smoobuPropId || !dataCheckInRaw) {
+async function criarTarefaPorReserva(reservaId, smoobuPropId, dataTarefaRaw, detalhesReserva, content) {
+  if (!smoobuPropId || !dataTarefaRaw) {
     throw new Error(
-      'Payload do Smoobu inválido: propriedade ou data_check_in em falta.'
+      'Payload do Smoobu inválido: propriedade ou data em falta.'
     );
   }
 
-  const range = getDayRange(dataCheckInRaw);
+  const range = getDayRange(dataTarefaRaw);
   if (!range) {
-    throw new Error(`data_check_in inválida: ${dataCheckInRaw}`);
+    throw new Error(`data inválida: ${dataTarefaRaw}`);
   }
 
   // Idempotência: se já existir tarefa para esta reserva, não duplica.
@@ -770,7 +791,7 @@ async function cancelarTarefaPorReserva(reservaId) {
  * Prompt 93 (Fase 1.5): atualiza também os detalhes_reserva (a reserva
  * pode ter sido editada com novas datas/hóspedes).
  */
-async function atualizarTarefaPorReserva(reservaId, smoobuPropId, dataCheckInRaw, detalhesReserva, content) {
+async function atualizarTarefaPorReserva(reservaId, smoobuPropId, dataTarefaRaw, detalhesReserva, content) {
   if (!reservaId) {
     console.log('ℹ️  Update sem reservaId — sem ação.');
     return null;
@@ -794,9 +815,9 @@ async function atualizarTarefaPorReserva(reservaId, smoobuPropId, dataCheckInRaw
   let mudouData = false;
   let novoRange = null;
 
-  // 1) Atualizar data de check-in.
-  if (dataCheckInRaw) {
-    novoRange = getDayRange(dataCheckInRaw);
+  // 1) Atualizar data da tarefa (check-out ou fallback check-in).
+  if (dataTarefaRaw) {
+    novoRange = getDayRange(dataTarefaRaw);
     if (novoRange && tarefa.data.getTime() !== novoRange.start.getTime()) {
       tarefa.data = novoRange.start;
       mudou = true;
