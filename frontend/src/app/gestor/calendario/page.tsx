@@ -11,6 +11,8 @@ import {
   User,
   X,
   Sparkles,
+  Table,
+  Download,
 } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -49,6 +51,13 @@ interface TarefaCalendario {
   tipo: string;
   estado: string;
   observacoes?: string;
+  // Prompt 99 — Detalhes da reserva (para a coluna Reserva da Vista Tabela).
+  detalhes_reserva?: {
+    checkin?: string | null;
+    checkout?: string | null;
+    pax?: number | null;
+    nome_hospede?: string | null;
+  } | null;
   // v1.57.0 (Prompt 79) — Campos extras para eventos de ausência (FullCalendar allDay multi-dia).
   title?: string;
   start?: string;
@@ -171,6 +180,83 @@ function horaFimTarefa(dataISO: string, minutos: number): string {
 }
 
 /* ------------------------------------------------------------------ */
+/* Helpers da Vista Tabela (Prompt 99)                                 */
+/* ------------------------------------------------------------------ */
+
+const ESTADO_LABEL_TAB: Record<string, string> = {
+  por_atribuir: "Por Atribuir",
+  atribuida: "Atribuída",
+  em_curso: "Em Curso",
+  concluida: "Concluída",
+  cancelada: "Cancelada",
+};
+
+const ESTADO_VARIANT_TAB: Record<
+  string,
+  "default" | "secondary" | "success" | "warning" | "destructive" | "outline"
+> = {
+  por_atribuir: "destructive",
+  atribuida: "default",
+  em_curso: "warning",
+  concluida: "success",
+  cancelada: "outline",
+};
+
+/** Formata uma data ISO (ou YYYY-MM-DD) para DD/MM/YYYY. */
+function formatarDataDMY(iso?: string | null): string {
+  if (!iso) return "—";
+  try {
+    return format(parseISO(iso.slice(0, 10)), "dd/MM/yyyy");
+  } catch {
+    return iso;
+  }
+}
+
+/** Formata uma data/hora ISO para DD/MM/YYYY HH:mm (para checkin/checkout da reserva). */
+function formatarDataHoraCurta(iso?: string | null): string {
+  if (!iso) return "—";
+  try {
+    // Se for só data (YYYY-MM-DD), devolve DD/MM/YYYY.
+    if (iso.length <= 10) return format(parseISO(iso), "dd/MM/yyyy");
+    return format(parseISO(iso), "dd/MM/yyyy HH:mm");
+  } catch {
+    return iso;
+  }
+}
+
+/** Constrói a string de Reserva: "In: [checkin] Out: [checkout] - [pax] pax". */
+function formatarReserva(detalhes?: TarefaCalendario["detalhes_reserva"]): string {
+  if (!detalhes) return "—";
+  const checkin = detalhes.checkin ? formatarDataHoraCurta(detalhes.checkin) : "—";
+  const checkout = detalhes.checkout ? formatarDataHoraCurta(detalhes.checkout) : "—";
+  const pax = detalhes.pax != null ? `${detalhes.pax} pax` : "—";
+  return `In: ${checkin} Out: ${checkout} - ${pax}`;
+}
+
+/**
+ * Prompt 100 — Variante para Excel: devolve string VAZIA quando não há
+ * detalhes_reserva (ex: tarefa de manutenção), para a célula ficar em
+ * branco no Excel. Os sub-campos em falta também ficam vazios (não "—").
+ */
+function formatarReservaExcel(detalhes?: TarefaCalendario["detalhes_reserva"]): string {
+  if (!detalhes) return "";
+  const checkin = detalhes.checkin ? formatarDataHoraCurta(detalhes.checkin) : "";
+  const checkout = detalhes.checkout ? formatarDataHoraCurta(detalhes.checkout) : "";
+  const pax = detalhes.pax != null ? `${detalhes.pax} pax` : "";
+  // Se não houver nenhum campo preenchido, devolve vazio (não "In:  Out:  - ").
+  if (!checkin && !checkout && !pax) return "";
+  return `In: ${checkin} Out: ${checkout} - ${pax}`;
+}
+
+/** Horário da tarefa: "HH:mm - HH:mm" (ou "—" se sem hora). */
+function formatarHorario(t: TarefaCalendario): string {
+  const inicio = horaTarefa(t.data);
+  if (inicio === "—") return "—";
+  const fim = horaFimTarefa(t.data, t.tempo_limpeza_minutos);
+  return `${inicio} - ${fim}`;
+}
+
+/* ------------------------------------------------------------------ */
 /* Página                                                              */
 /* ------------------------------------------------------------------ */
 
@@ -192,6 +278,10 @@ export default function CalendarioOperacionalPage() {
 
   // Período atual do calendário (definido via datesSet do FullCalendar).
   const [periodo, setPeriodo] = useState<PeriodoState | null>(null);
+
+  // Prompt 99 — Toggle de vistas: "calendario" (FullCalendar) | "tabela" (Data Table).
+  const [vista, setVista] = useState<"calendario" | "tabela">("calendario");
+  const [exportando, setExportando] = useState(false);
 
   // Modal de detalhe.
   const [tarefaSelecionada, setTarefaSelecionada] = useState<TarefaCalendario | null>(null);
@@ -535,6 +625,66 @@ export default function CalendarioOperacionalPage() {
     }
   }
 
+  /* --- Prompt 99 — Tarefas para a Vista Tabela --- */
+  // Filtra só tarefas reais (exclui eventos de ausência/folga que só fazem
+  // sentido no calendário). Ordena por data crescente.
+  const tarefasTabela = useMemo<TarefaCalendario[]>(() => {
+    return tarefas
+      .filter((t) => t.tipo !== "ausencia" && t.tipo !== "folga_fixa")
+      .slice()
+      .sort((a, b) => {
+        try {
+          return parseISO(a.data).getTime() - parseISO(b.data).getTime();
+        } catch {
+          return 0;
+        }
+      });
+  }, [tarefas]);
+
+  /* --- Prompt 99/100 — Exportar para Excel (xlsx) --- */
+  const exportarExcel = useCallback(async () => {
+    setExportando(true);
+    try {
+      // Import dinâmico para não carregar a lib no bundle inicial (e evitar
+      // problemas de SSR do xlsx).
+      const XLSX = await import("xlsx");
+
+      // Constrói as linhas com os dados visíveis na tabela, formatados como
+      // texto/data (o Excel interpreta strings DD/MM/YYYY como texto).
+      // Prompt 100: células de Reserva em branco (não "—") quando não há
+      // detalhes_reserva; estados traduzidos para PT (Em Curso, Por Atribuir…).
+      const linhas = tarefasTabela.map((t) => ({
+        Data: formatarDataDMY(t.data),
+        Propriedade: t.propriedade_id?.nome ?? "",
+        Reserva: formatarReservaExcel(t.detalhes_reserva),
+        Funcionário: t.utilizador_id?.nome ?? "Por Atribuir",
+        Horário: formatarHorario(t) === "—" ? "" : formatarHorario(t),
+        Estado: ESTADO_LABEL_TAB[t.estado] ?? t.estado,
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(linhas, {
+        header: ["Data", "Propriedade", "Reserva", "Funcionário", "Horário", "Estado"],
+      });
+      // Larguras de coluna estimadas (em caracteres).
+      ws["!cols"] = [
+        { wch: 12 }, // Data
+        { wch: 28 }, // Propriedade
+        { wch: 48 }, // Reserva
+        { wch: 24 }, // Funcionário
+        { wch: 16 }, // Horário
+        { wch: 14 }, // Estado
+      ];
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Limpezas");
+      XLSX.writeFile(wb, "Relatorio_Limpezas.xlsx");
+    } catch (e) {
+      setErro(e instanceof Error ? `Exportação falhou: ${e.message}` : "Erro ao exportar Excel.");
+    } finally {
+      setExportando(false);
+    }
+  }, [tarefasTabela]);
+
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
       {/* Cabeçalho */}
@@ -564,10 +714,59 @@ export default function CalendarioOperacionalPage() {
             )}
             {autoAtribuindo ? "A atribuir…" : "Auto-Atribuir Pendentes"}
           </Button>
+
+          {/* Prompt 99 — Toggle de vistas (Calendário / Tabela) */}
+          <div className="ml-auto flex items-center gap-1 rounded-md border bg-muted/40 p-1">
+            <button
+              type="button"
+              onClick={() => setVista("calendario")}
+              className={cn(
+                "flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors",
+                vista === "calendario"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+              aria-pressed={vista === "calendario"}
+            >
+              <CalendarRange className="h-3.5 w-3.5" />
+              Vista Calendário
+            </button>
+            <button
+              type="button"
+              onClick={() => setVista("tabela")}
+              className={cn(
+                "flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors",
+                vista === "tabela"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+              aria-pressed={vista === "tabela"}
+            >
+              <Table className="h-3.5 w-3.5" />
+              Vista Tabela
+            </button>
+          </div>
+
+          {/* Prompt 99 — Exportar Excel (só relevante na Vista Tabela) */}
+          <Button
+            variant="outline"
+            onClick={exportarExcel}
+            disabled={exportando || loading || tarefasTabela.length === 0}
+            title="Exporta os dados visíveis na tabela para um ficheiro Excel (.xlsx)"
+            className="gap-2"
+          >
+            {exportando ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="h-4 w-4" />
+            )}
+            {exportando ? "A exportar…" : "Exportar Excel"}
+          </Button>
         </div>
         <p className="text-sm text-muted-foreground">
           Vista mensal, semanal e diária de todas as tarefas de limpeza. Filtra por
           propriedade, staff ou estado. Clica numa tarefa para ver o detalhe e reatribuir.
+          Alterna para a Vista Tabela e exporta para Excel.
         </p>
       </div>
 
@@ -671,59 +870,134 @@ export default function CalendarioOperacionalPage() {
         </div>
       )}
 
-      {/* FullCalendar */}
-      <div className="rounded-lg border bg-card p-2 sm:p-4">
-        {mounted ? (
-          <FullCalendar
-            plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
-            initialView="dayGridMonth"
-            locale={ptLocale}
-            timeZone="local"
-            headerToolbar={{
-              left: "prev,next today",
-              center: "title",
-              right: "dayGridMonth,timeGridWeek,timeGridDay",
-            }}
-            // Ponto 1 — Horário comercial (esconde madrugada/noite)
-            slotMinTime="08:00:00"
-            slotMaxTime="20:00:00"
-            // Ponto 2 — Grelha de tempo: linhas de 15min, label de 1h
-            slotDuration="00:15:00"
-            slotLabelInterval="01:00:00"
-            // Ponto 3 — Indicador de tempo real (linha vermelha)
-            nowIndicator
-            height={700}
-            editable={false}
-            eventStartEditable={false}
-            eventDurationEditable={false}
-            events={eventos}
-            eventClick={handleEventClick}
-            datesSet={handleDatesSet}
-            dayMaxEvents
-            eventDisplay="block"
-            // Ponto 4 — Renderização customizada do bloco
-            eventContent={renderEventContent}
-            // Formato 24h europeu (Prompt 72)
-            eventTimeFormat={{
-              hour: "2-digit",
-              minute: "2-digit",
-              meridiem: false,
-              hour12: false,
-            }}
-            slotLabelFormat={{
-              hour: "2-digit",
-              minute: "2-digit",
-              meridiem: false,
-              hour12: false,
-            }}
-          />
-        ) : (
-          <div className="flex h-[700px] items-center justify-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="h-5 w-5 animate-spin" />
-            A preparar calendário…
+      {/* Prompt 99 — Vista Calendário (FullCalendar) */}
+      {vista === "calendario" && (
+        <div className="rounded-lg border bg-card p-2 sm:p-4">
+          {mounted ? (
+            <FullCalendar
+              plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
+              initialView="dayGridMonth"
+              locale={ptLocale}
+              timeZone="local"
+              headerToolbar={{
+                left: "prev,next today",
+                center: "title",
+                right: "dayGridMonth,timeGridWeek,timeGridDay",
+              }}
+              // Ponto 1 — Horário comercial (esconde madrugada/noite)
+              slotMinTime="08:00:00"
+              slotMaxTime="20:00:00"
+              // Ponto 2 — Grelha de tempo: linhas de 15min, label de 1h
+              slotDuration="00:15:00"
+              slotLabelInterval="01:00:00"
+              // Ponto 3 — Indicador de tempo real (linha vermelha)
+              nowIndicator
+              height={700}
+              editable={false}
+              eventStartEditable={false}
+              eventDurationEditable={false}
+              events={eventos}
+              eventClick={handleEventClick}
+              datesSet={handleDatesSet}
+              dayMaxEvents
+              eventDisplay="block"
+              // Ponto 4 — Renderização customizada do bloco
+              eventContent={renderEventContent}
+              // Formato 24h europeu (Prompt 72)
+              eventTimeFormat={{
+                hour: "2-digit",
+                minute: "2-digit",
+                meridiem: false,
+                hour12: false,
+              }}
+              slotLabelFormat={{
+                hour: "2-digit",
+                minute: "2-digit",
+                meridiem: false,
+                hour12: false,
+              }}
+            />
+          ) : (
+            <div className="flex h-[700px] items-center justify-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              A preparar calendário…
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Prompt 99 — Vista Tabela (Data Table) */}
+      {vista === "tabela" && (
+        <div className="rounded-lg border bg-card">
+          {loading ? (
+            <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              A carregar tarefas…
+            </div>
+          ) : tarefasTabela.length === 0 ? (
+            <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
+              <Table className="h-8 w-8 text-muted-foreground/50" />
+              <p className="text-sm text-muted-foreground">
+                Sem tarefas para o período/filtros selecionados.
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
+                    <th className="px-4 py-3 font-medium">Data</th>
+                    <th className="px-4 py-3 font-medium">Propriedade</th>
+                    <th className="px-4 py-3 font-medium">Reserva</th>
+                    <th className="px-4 py-3 font-medium">Funcionário</th>
+                    <th className="px-4 py-3 font-medium">Horário</th>
+                    <th className="px-4 py-3 font-medium">Estado</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {tarefasTabela.map((t) => (
+                    <tr
+                      key={t._id}
+                      className="cursor-pointer hover:bg-muted/30"
+                      onClick={() => setTarefaSelecionada(t)}
+                    >
+                      <td className="whitespace-nowrap px-4 py-3 font-medium">
+                        {formatarDataDMY(t.data)}
+                      </td>
+                      <td className="px-4 py-3">
+                        {t.propriedade_id?.nome ?? "—"}
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {formatarReserva(t.detalhes_reserva)}
+                      </td>
+                      <td className="px-4 py-3">
+                        {t.utilizador_id?.nome ?? (
+                          <span className="text-amber-600 dark:text-amber-400">Por Atribuir</span>
+                        )}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
+                        {formatarHorario(t)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge variant={ESTADO_VARIANT_TAB[t.estado] ?? "secondary"}>
+                          {ESTADO_LABEL_TAB[t.estado] ?? t.estado}
+                        </Badge>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div className="flex items-center justify-between border-t px-4 py-2.5 text-xs text-muted-foreground">
+            <span>
+              {tarefasTabela.length} tarefa(s) no período selecionado
+              {periodo ? ` (${formatarDataDMY(periodo.inicio)} → ${formatarDataDMY(periodo.fim)})` : ""}.
+            </span>
+            <span>Clica numa linha para ver o detalhe.</span>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Legenda */}
       <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">

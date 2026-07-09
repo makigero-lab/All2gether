@@ -245,7 +245,58 @@ Stage Summary:
 - O aviso amarelo mantém-se, agora a informar quantos foram omitidos.
 - Lint + tsc + build ✓. Documentação atualizada. Próximo passo: commit + push para a branch `dev`.
 
+---
 
+Task ID: A9 (Prompt 99)
+Agent: Z.ai Code
+Task: Ecrã de Relatório no Calendário — Toggle Vista Calendário/Tabela + botão Exportar Excel (xlsx).
+
+Work Log:
+- Lido o worklog (Tasks A0–A8) e a página `frontend/src/app/gestor/calendario/page.tsx` (estrutura, filtros, FullCalendar, modal de detalhe, interface `TarefaCalendario`).
+- Confirmado que `xlsx` não estava instalado → `npm install xlsx` (^0.18.5) no `frontend/`.
+- **Interface `TarefaCalendario`:** alargada com `detalhes_reserva?: { checkin, checkout, pax, nome_hospede } | null` (para a coluna Reserva).
+- **Helpers da Vista Tabela** (junto aos helpers existentes): `ESTADO_LABEL_TAB`, `ESTADO_VARIANT_TAB` (mapeamento para variantes do Badge: por_atribuir=destructive, atribuida=default, em_curso=warning, concluida=success, cancelada=outline), `formatarDataDMY` (DD/MM/YYYY), `formatarDataHoraCurta` (DD/MM/YYYY ou DD/MM/YYYY HH:mm), `formatarReserva` (`In: [checkin] Out: [checkout] - [pax] pax`), `formatarHorario` (`HH:mm - HH:mm`).
+- **Estado:** adicionado `vista: "calendario" | "tabela"` (default "calendario") + `exportando` (loading do botão).
+- **`tarefasTabela`** (useMemo): filtra `tipo !== "ausencia" && tipo !== "folga_fixa"` (só tarefas reais) + ordena por data crescente.
+- **`exportarExcel`** (useCallback): `await import("xlsx")` (import dinâmico para não entrar no bundle inicial) → `json_to_sheet` com colunas Data/Propriedade/Reserva/Funcionário/Horário/Estado → `!cols` com larguras estimadas → `book_new` + `book_append_sheet` ("Limpezas") → `writeFile(wb, "Relatorio_Limpezas.xlsx")`. Todos os campos como texto (datas DD/MM/YYYY). Estado `exportando` para feedback.
+- **Cabeçalho:** adicionado o **Toggle de vistas** (botões "Vista Calendário" / "Vista Tabela" com `aria-pressed`, estilo segmented control) e o botão **Exportar Excel** (ícone Download, desativado se `tarefasTabela.length === 0`).
+- **JSX:** FullCalendar envolvido em `{vista === "calendario" && (...)}`. Adicionada a **Vista Tabela** em `{vista === "tabela" && (...)}`: estados loading/vazio/tabela. A tabela tem 6 colunas (Data, Propriedade, Reserva, Funcionário, Horário, Estado com Badge), linhas clicáveis (abrem o modal de detalhe existente), e um rodapé com a contagem e o período.
+- **Ícones:** importados `Table` e `Download` do lucide-react.
+- **Removido um `</div>` extra** que ficou do wrapper original do FullCalendar após a refactorização.
+- **Validação:** `npm run lint` ✓ No ESLint warnings or errors · `npx tsc --noEmit` ✓ sem erros · `npm run build` ✓ todas as rotas compilaram (`/gestor/calendario` 88.1 kB — o xlsx é importado dinamicamente, não entra no bundle inicial).
+- **Documentação atualizada:** `docs/FRONTEND.md` (entrada "Prompt 99" no histórico).
+
+Stage Summary:
+- **Toggle de vistas** ativo no Calendário Operacional: o gestor alterna entre "Vista Calendário" (FullCalendar, comportamento original) e "Vista Tabela" (Data Table com as 6 colunas pedidas).
+- **Vista Tabela:** Data (DD/MM/YYYY), Propriedade, Reserva (`In: [checkin] Out: [checkout] - [pax] pax` usando `detalhes_reserva`), Funcionário (nome ou "Por Atribuir" a amarelo), Horário (`HH:mm - HH:mm`), Estado (Badge colorido). Linhas clicáveis abrem o modal de detalhe. Respeita os filtros e o período do calendário.
+- **Exportar Excel:** botão que gera `Relatorio_Limpezas.xlsx` com os dados visíveis na tabela, todos formatados como texto (datas DD/MM/YYYY). Usa `xlsx` (^0.18.5) importado dinamicamente.
+- Lint + tsc + build ✓. Documentação atualizada. Próximo passo: commit + push para a branch `dev`.
+
+---
+
+Task ID: A10 (Prompt 100)
+Agent: Z.ai Code
+Task: Garantir os dados para o Excel — endpoint traz detalhes_reserva; células de reserva em branco se não houver; estados traduzidos para PT.
+
+Work Log:
+- Lido o worklog (Tasks A0–A9) e o `backend/controllers/gestorController.getDadosCalendario` (endpoint `GET /api/gestor/calendario/dados`).
+- **Verificação do backend:** o endpoint já faz `.populate('propriedade_id', 'nome morada coordenadas')` + `.populate('utilizador_id', 'nome')` e usa `.lean()` **sem `.select()`**, pelo que **todos os campos do modelo Tarefa são devolvidos** — incluindo `detalhes_reserva` (adicionado no Prompt 92). Não foi preciso alterar o código do endpoint.
+- **Testes backend (2 novos, secção 5 "GET /api/gestor/calendario/dados"):**
+  - (1) Cria tarefa com `detalhes_reserva` preenchido (checkin/checkout/pax/nome_hospede) → verifica que o endpoint devolve os 4 sub-campos.
+  - (2) Cria tarefa de manutenção SEM `detalhes_reserva` → verifica que o campo existe (objeto com defaults null) mas sem dados reais (não quebra o frontend/Excel).
+- **Frontend `gestor/calendario/page.tsx`:**
+  - Novo helper `formatarReservaExcel` (variante do `formatarReserva`): devolve **string vazia** quando não há `detalhes_reserva` (ex: manutenção) — a célula do Excel fica em branco em vez de "—". Sub-campos em falta também vazios; se nenhum preenchido, devolve vazio (não "In:  Out:  - ").
+  - `exportarExcel` atualizada para usar `formatarReservaExcel` + deixar em branco Propriedade/Horário em falta (string vazia em vez de "—"). Funcionário mantém "Por Atribuir" (informativo).
+  - `ESTADO_LABEL_TAB`: `em_curso` passa a "Em Curso" (C maiúsculo, capitalização de título) para corresponder ao pedido do prompt. Restantes estados já estavam traduzidos: Por Atribuir, Atribuída, Concluída, Cancelada.
+- **Validação:** backend `npm test` → **125/125 ✓** (+2 novos). Frontend: `npm run lint` ✓ · `npx tsc --noEmit` ✓ · `npm run build` ✓.
+- **Documentação atualizada:** `docs/BACKEND.md` (entrada "Prompt 100" no histórico — confirmação + testes), `docs/FRONTEND.md` (entrada "Prompt 100" — robustez do Excel + tradução).
+
+Stage Summary:
+- **Backend:** o `GET /api/gestor/calendario/dados` já traz `detalhes_reserva` (e os populates de propriedade/utilizador) — confirmado com 2 novos testes de regressão. Sem alterações de código.
+- **Excel robusto:** tarefas sem `detalhes_reserva` (ex: manutenção) ficam com a célula de Reserva **em branco** no Excel (não "—"), não quebrando a exportação. Propriedade/Horário em falta também ficam em branco.
+- **Estados traduzidos:** no Excel, `em_curso` → "Em Curso", `por_atribuir` → "Por Atribuir", `atribuida` → "Atribuída", `concluida` → "Concluída", `cancelada` → "Cancelada".
+- O cliente pode agora descarregar o Excel mensal e responder a perguntas como "Quantas casas a Maria limpou?" ou "A que horas aconteceram as limpezas de checkout?".
+- 125 testes backend (+2). Lint + tsc + build ✓. Documentação atualizada. Próximo passo: commit + push para a branch `dev`.
 
 
 
