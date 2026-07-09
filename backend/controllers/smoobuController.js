@@ -24,6 +24,48 @@ const Propriedade = require('../models/Propriedade');
 const { obterCoordenadas } = require('../utils/geocoding');
 
 /**
+ * Extrai a morada de um apartamento do Smoobu, cobrindo várias estruturas
+ * possíveis da resposta do endpoint /api/apartments:
+ *   - apt.location.{street, zip, city}  (documentada)
+ *   - apt.address (string)
+ *   - apt.address.{street, zipcode, city}
+ *   - apt.{street, zip, city}
+ *   - apt.city + apt.country
+ * Devolve 'A definir' se não encontrar nada.
+ */
+function extrairMoradaSmoobu(apt) {
+  // 1) apt.location (estrutura documentada do Smoobu)
+  if (apt.location) {
+    const partes = [apt.location.street, apt.location.zip, apt.location.city]
+      .filter(Boolean);
+    if (partes.length > 0) return partes.join(', ');
+  }
+
+  // 2) apt.address como string
+  if (typeof apt.address === 'string' && apt.address.trim()) {
+    return apt.address.trim();
+  }
+
+  // 3) apt.address como objeto
+  if (apt.address && typeof apt.address === 'object') {
+    const partes = [apt.address.street, apt.address.zipcode, apt.address.city]
+      .filter(Boolean);
+    if (partes.length > 0) return partes.join(', ');
+  }
+
+  // 4) Campos achatados no próprio apt
+  const partesChat = [apt.street, apt.zip, apt.zipcode, apt.city].filter(Boolean);
+  if (partesChat.length > 0) return partesChat.join(', ');
+
+  // 5) apt.full_address
+  if (typeof apt.full_address === 'string' && apt.full_address.trim()) {
+    return apt.full_address.trim();
+  }
+
+  return 'A definir';
+}
+
+/**
  * POST /api/admin/smoobu/sincronizar
  *
  * Vai buscar todas as reservas futuras (a partir de hoje) ao Smoobu via REST API
@@ -428,12 +470,8 @@ exports.sincronizarPropriedades = async (req, res) => {
       // Extrair capacidade de hóspedes (Smoobu usa rooms.maxOccupancy ou maxOccupancy).
       const capacidade = apt.rooms?.maxOccupancy || apt.maxOccupancy || null;
 
-      // Constrói morada dinamicamente a partir do location do Smoobu.
-      let moradaTexto = 'A definir';
-      if (apt.location) {
-        const partes = [apt.location.street, apt.location.zip, apt.location.city].filter(Boolean);
-        if (partes.length > 0) moradaTexto = partes.join(', ');
-      }
+      // Constrói morada usando o helper partilhado (cobre várias estruturas).
+      let moradaTexto = extrairMoradaSmoobu(apt);
 
       const existente = await Propriedade.findOne({ smoobu_id: smoobuId });
 
@@ -609,10 +647,17 @@ exports.importarPropriedades = async (req, res) => {
       // Extrai capacidade e morada do Smoobu (usados tanto para criar como
       // para atualizar propriedades existentes).
       const capacidade = apt.rooms?.maxOccupancy || apt.maxOccupancy || null;
-      let moradaTexto = 'A definir';
-      if (apt.location) {
-        const partes = [apt.location.street, apt.location.zip, apt.location.city].filter(Boolean);
-        if (partes.length > 0) moradaTexto = partes.join(', ');
+      let moradaTexto = extrairMoradaSmoobu(apt);
+
+      // Log de debug (uma linha por apartamento) para ajudar a perceber a
+      // estrutura do payload quando as moradas não são preenchidas.
+      if (moradaTexto === 'A definir') {
+        console.log(
+          `⚠️  [importarPropriedades] apt ${smoobuId} ("${apt.name}") sem morada — ` +
+            `location=${JSON.stringify(apt.location ?? null)}, ` +
+            `address=${JSON.stringify(apt.address ?? null)}, ` +
+            `keys=${Object.keys(apt).join(',')}`
+        );
       }
 
       // Verifica se JÁ EXISTE uma propriedade com este smoobu_id QUE PERTENÇA
