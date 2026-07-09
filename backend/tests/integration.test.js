@@ -1570,10 +1570,10 @@ describe('POST /api/gestor/smoobu/sincronizar-propriedades', () => {
     expect(p.ativo).toBe(false);
   });
 
-  it('Prompt 92 — força update de morada + capacidade em propriedade existente', async () => {
+  it('Prompt 104 — sincronizar NÃO sobrescreve morada se já preenchida (só capacidade)', async () => {
     process.env.SMOOBU_API_KEY = 'test-key-123';
 
-    // Propriedade já existente com morada e capacidade antigas + edits manuais.
+    // Propriedade já existente com morada preenchida + edits manuais.
     await Propriedade.create({
       smoobu_id: 'sync-1',
       nome: 'Casa Mantida',
@@ -1609,9 +1609,10 @@ describe('POST /api/gestor/smoobu/sincronizar-propriedades', () => {
     expect(res.body.existentes).toBe(0);
     expect(res.body.criadas).toBe(0);
 
-    // A morada e a capacidade foram sobrescritas pelo Smoobu (fonte de verdade).
+    // Prompt 104 — A morada NÃO foi sobrescrita (edição manual tem prioridade).
     const p = await Propriedade.findOne({ smoobu_id: 'sync-1' });
-    expect(p.morada).toBe('Rua Nova 10, 1000-001, Lisboa');
+    expect(p.morada).toBe('Rua Antiga');
+    // A capacidade foi atualizada.
     expect(p.capacidade_hospedes).toBe(5);
 
     // Mas nome, tempo e ativo continuam preservados (edições manuais).
@@ -3405,30 +3406,30 @@ describe('Correções: Calendário + Importar Propriedades', () => {
     expect(String(ausenciasNoCalendario[0].utilizador_id._id)).toBe(String(staffAtivo._id));
   });
 
-  it('importarPropriedades atualiza SEMPRE morada + capacidade de existentes (não só "A definir")', async () => {
+  it('Prompt 104 — importar NÃO sobrescreve morada se já preenchida (edição manual tem prioridade)', async () => {
     const Propriedade = require('../models/Propriedade');
     process.env.SMOOBU_API_KEY = 'test-key-123';
 
-    // Cria uma propriedade já existente com morada antiga.
+    // Cria uma propriedade já existente com morada preenchida pelo gestor.
     const propExistente = await Propriedade.create({
-      smoobu_id: 'imp-update-1',
-      nome: 'Casa Antiga',
-      morada: 'Rua Antiga 123',
+      smoobu_id: 'imp-nosobrepor',
+      nome: 'Casa com Morada',
+      morada: 'Rua do Gestor 123',
       empresa_id: empresaId,
       ativo: true,
       capacidade_hospedes: 2,
     });
 
-    // Smoobu devolve a MESMA propriedade com morada NOVA + capacidade NOVA.
+    // Smoobu devolve a MESMA propriedade com morada diferente + capacidade nova.
     const mockFetch = jest.fn().mockResolvedValue({
       ok: true,
       status: 200,
       json: async () => ({
         apartments: [
           {
-            id: 'imp-update-1',
-            name: 'Casa Antiga',
-            location: { street: 'Rua Nova 456', zip: '2000-001', city: 'Lisboa' },
+            id: 'imp-nosobrepor',
+            name: 'Casa com Morada',
+            location: { street: 'Rua do Smoobu 456', zip: '2000-001', city: 'Lisboa' },
             rooms: { maxOccupancy: 6 },
           },
         ],
@@ -3440,14 +3441,59 @@ describe('Correções: Calendário + Importar Propriedades', () => {
 
     const res = await authPost('/api/gestor/smoobu/propriedades', {});
     expect(res.status).toBe(200);
-    // Tem de ter atualizado (não "já existia").
+    // Capacidade foi atualizada (atualizadas >= 1).
     expect(res.body.atualizadas).toBe(1);
-    expect(res.body.existentes).toBe(0);
 
-    // Confirma que a morada e capacidade foram sobrescritas.
+    // A morada NÃO foi sobrescrita — mantém a do gestor.
     const depois = await Propriedade.findById(propExistente._id).lean();
-    expect(depois.morada).toBe('Rua Nova 456, 2000-001, Lisboa');
+    expect(depois.morada).toBe('Rua do Gestor 123');
+    // A capacidade foi atualizada.
     expect(depois.capacidade_hospedes).toBe(6);
+
+    delete process.env.SMOOBU_API_KEY;
+    if (global.fetch && global.fetch.__isMock) {
+      delete global.fetch.__isMock;
+    }
+  });
+
+  it('Prompt 104 — importar PREENCHE morada se estiver vazia ("A definir")', async () => {
+    const Propriedade = require('../models/Propriedade');
+    process.env.SMOOBU_API_KEY = 'test-key-123';
+
+    // Cria uma propriedade com morada "A definir" (vazia).
+    const propVazia = await Propriedade.create({
+      smoobu_id: 'imp-preenche',
+      nome: 'Casa Sem Morada',
+      morada: 'A definir',
+      empresa_id: empresaId,
+      ativo: true,
+    });
+
+    const mockFetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        apartments: [
+          {
+            id: 'imp-preenche',
+            name: 'Casa Sem Morada',
+            location: { street: 'Rua do Smoobu 789', zip: '3000-001', city: 'Coimbra' },
+            rooms: { maxOccupancy: 4 },
+          },
+        ],
+      }),
+      text: async () => '',
+    });
+    mockFetch.__isMock = true;
+    global.fetch = mockFetch;
+
+    const res = await authPost('/api/gestor/smoobu/propriedades', {});
+    expect(res.status).toBe(200);
+
+    // A morada foi preenchida pelo Smoobu (estava "A definir").
+    const depois = await Propriedade.findById(propVazia._id).lean();
+    expect(depois.morada).toBe('Rua do Smoobu 789, 3000-001, Coimbra');
+    expect(depois.capacidade_hospedes).toBe(4);
 
     delete process.env.SMOOBU_API_KEY;
     if (global.fetch && global.fetch.__isMock) {
