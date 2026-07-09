@@ -225,6 +225,25 @@ Stage Summary:
 - O load balancer mantém-se ativo em 3 sítios: webhook (nova reserva), auto-atribuição manual em lote (gestor) e **Fail-Safe noturno (novo)**.
 - 123 testes a passar (+4). Documentação atualizada. Próximo passo: commit + push para a branch `dev`.
 
+---
+
+Task ID: A8 (Ajuste — ocultar indisponíveis do dropdown)
+Agent: Z.ai Code
+Task: No modal de atribuição de tarefas, os staff indisponíveis (férias/doença/ausência) não devem aparecer na lista de seleção.
+
+Work Log:
+- Re-clonado o repositório (o `/home/z/Autocell` tinha sido removido) na branch `dev` (commit ff78b19, Prompt 98).
+- Lido o modal "Atribuir Tarefa" em `frontend/src/app/gestor/tarefas/page.tsx` (linhas 818-855): o `<select>` mostrava TODOS os staff com `staff.map()`, marcando os indisponíveis como `<option disabled>` com label "— 🌴 Indisponível (Férias/Doença/Ausência)" e um aviso amarelo abaixo.
+- Confirmado o mesmo padrão no modal de reatribuição do Calendário (`frontend/src/app/gestor/calendario/page.tsx` linhas 858-881) — mesmo comportamento com `equipa.map()`.
+- **Alteração 1 — `/gestor/tarefas/page.tsx`:** o `<select>` agora faz `.filter((u) => !indisponiveis.some((i) => i.utilizador_id === u._id))` antes do `.map()`, pelo que os indisponíveis **não aparecem** na lista. Removida a lógica de `disabled`/label especial. Aviso amarelo atualizado: "foram omitidos da lista" (era "não podem receber tarefas").
+- **Alteração 2 — `/gestor/calendario/page.tsx`:** mesma correção aplicada ao modal de reatribuição do calendário (`.filter()` antes do `.map()`, sem `disabled`, aviso atualizado).
+- **Validação:** `npm run lint` ✓ · `npx tsc --noEmit` ✓ · `npm run build` ✓ (todas as rotas compilaram).
+- **Documentação atualizada:** `docs/FRONTEND.md` (entrada "Ajuste" no histórico).
+
+Stage Summary:
+- Nos modais de atribuição/reatribuição (Tarefas e Calendário), a lista de staff só mostra quem está disponível nesse dia. Os indisponíveis (férias/doença/ausência aprovada) são omitidos do dropdown em vez de aparecem a cinzento/desativados.
+- O aviso amarelo mantém-se, agora a informar quantos foram omitidos.
+- Lint + tsc + build ✓. Documentação atualizada. Próximo passo: commit + push para a branch `dev`.
 
 
 
