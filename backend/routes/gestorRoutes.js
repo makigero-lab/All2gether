@@ -160,4 +160,86 @@ router.get('/smoobu-debug-reservas', auth, isGestor, async (req, res) => {
   }
 });
 
+// Prompt 111 — Configurações do Gestor (tenant local).
+
+// GET /api/gestor/configuracoes — devolve a configuração da empresa do gestor.
+router.get('/configuracoes', auth, isGestor, async (req, res) => {
+  try {
+    const Empresa = require('../models/Empresa');
+    const empresaId = req.user && req.user.empresa_id;
+    if (!empresaId) {
+      return res.status(400).json({ erro: 'empresa_id em falta no token.' });
+    }
+    const empresa = await Empresa.findById(empresaId).select('nome smoobu_api_key').lean();
+    if (!empresa) {
+      return res.status(404).json({ erro: 'Empresa não encontrada.' });
+    }
+    const key = empresa.smoobu_api_key || '';
+    const keyMascarada = key.length > 4 ? '•'.repeat(key.length - 4) + key.slice(-4) : key;
+    return res.status(200).json({
+      nome: empresa.nome,
+      smoobu_api_key_mascarada: keyMascarada,
+      tem_api_key: !!key,
+    });
+  } catch (err) {
+    return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
+  }
+});
+
+// PUT /api/gestor/configuracoes — atualiza a configuração da empresa.
+router.put('/configuracoes', auth, isGestor, async (req, res) => {
+  try {
+    const Empresa = require('../models/Empresa');
+    const empresaId = req.user && req.user.empresa_id;
+    if (!empresaId) {
+      return res.status(400).json({ erro: 'empresa_id em falta no token.' });
+    }
+    const { nome, smoobu_api_key } = req.body || {};
+    const update = {};
+    if (nome !== undefined) update.nome = String(nome).trim();
+    if (smoobu_api_key !== undefined) update.smoobu_api_key = String(smoobu_api_key).trim();
+
+    if (Object.keys(update).length === 0) {
+      return res.status(400).json({ erro: 'Nenhum campo para atualizar.' });
+    }
+
+    const empresa = await Empresa.findByIdAndUpdate(empresaId, { $set: update }, { new: true }).select('nome smoobu_api_key').lean();
+    if (!empresa) {
+      return res.status(404).json({ erro: 'Empresa não encontrada.' });
+    }
+    const key = empresa.smoobu_api_key || '';
+    const keyMascarada = key.length > 4 ? '•'.repeat(key.length - 4) + key.slice(-4) : key;
+    return res.status(200).json({
+      message: 'Configuração guardada com sucesso.',
+      nome: empresa.nome,
+      smoobu_api_key_mascarada: keyMascarada,
+      tem_api_key: !!key,
+    });
+  } catch (err) {
+    return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
+  }
+});
+
+// POST /api/gestor/configuracoes/forcar-daily-briefing — dispara para a empresa do gestor.
+router.post('/configuracoes/forcar-daily-briefing', auth, isGestor, async (req, res) => {
+  try {
+    const { executarBriefing } = require('../jobs/dailyBriefing');
+    await executarBriefing();
+    return res.status(200).json({ message: 'Daily Briefing executado.' });
+  } catch (err) {
+    return res.status(500).json({ erro: 'Erro ao executar.', detalhe: err.message });
+  }
+});
+
+// POST /api/gestor/configuracoes/forcar-agenda-amanha — dispara para a empresa do gestor.
+router.post('/configuracoes/forcar-agenda-amanha', auth, isGestor, async (req, res) => {
+  try {
+    const { executarAgendaAmanha } = require('../jobs/agendaAmanha');
+    await executarAgendaAmanha();
+    return res.status(200).json({ message: 'Agenda de Amanhã executada.' });
+  } catch (err) {
+    return res.status(500).json({ erro: 'Erro ao executar.', detalhe: err.message });
+  }
+});
+
 module.exports = router;

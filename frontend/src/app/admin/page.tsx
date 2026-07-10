@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   ShieldCheck,
-  LogOut,
   Loader2,
   RefreshCw,
   LogIn,
@@ -12,6 +11,7 @@ import {
   CheckCircle2,
   Users,
   Power,
+  Plus,
   UserPlus,
 } from "lucide-react";
 import { format } from "date-fns";
@@ -82,6 +82,11 @@ export default function SuperAdminPage() {
   const [formGestor, setFormGestor] = useState({ nome: "", email: "", password: "" });
   const [criandoGestor, setCriandoGestor] = useState(false);
   const [formGestorErro, setFormGestorErro] = useState<string | null>(null);
+
+  // Prompt 111 — Criar Nova Empresa.
+  const [showCriarEmpresa, setShowCriarEmpresa] = useState(false);
+  const [novaEmpresaNome, setNovaEmpresaNome] = useState("");
+  const [criandoEmpresa, setCriandoEmpresa] = useState(false);
 
   const carregar = useCallback(async () => {
     setLoading(true);
@@ -276,6 +281,31 @@ export default function SuperAdminPage() {
     }
   }
 
+  /** Prompt 111 — Criar Nova Empresa. */
+  async function handleCriarEmpresa(e: React.FormEvent) {
+    e.preventDefault();
+    if (!novaEmpresaNome.trim()) return;
+    setCriandoEmpresa(true);
+    try {
+      const res = await fetch("/api/admin/empresas", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nome: novaEmpresaNome.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.erro || `Erro ${res.status}`);
+      setShowCriarEmpresa(false);
+      setNovaEmpresaNome("");
+      setToast({ tipo: "sucesso", msg: `Empresa "${data.empresa.nome}" criada com sucesso.` });
+      await carregar();
+    } catch (e) {
+      setToast({ tipo: "erro", msg: e instanceof Error ? e.message : "Erro ao criar empresa." });
+    } finally {
+      setCriandoEmpresa(false);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
       {/* Cabeçalho */}
@@ -292,6 +322,14 @@ export default function SuperAdminPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            onClick={() => setShowCriarEmpresa(true)}
+            className="gap-2"
+            disabled={loading}
+          >
+            <Plus className="h-4 w-4" />
+            Criar Nova Empresa
+          </Button>
           <Button
             variant="outline"
             size="icon"
@@ -645,6 +683,51 @@ export default function SuperAdminPage() {
             Fechar
           </Button>
         </DialogFooter>
+      </Dialog>
+
+      {/* Prompt 111 — Modal Criar Nova Empresa */}
+      <Dialog open={showCriarEmpresa} onOpenChange={(o) => !o && setShowCriarEmpresa(false)}>
+        <DialogHeader>
+          <div>
+            <DialogTitle className="flex items-center gap-2">
+              <Plus className="h-5 w-5 text-primary" />
+              Criar Nova Empresa
+            </DialogTitle>
+            <DialogDescription>
+              Regista uma nova empresa no sistema. Poderás configurar a API Key do Smoobu depois.
+            </DialogDescription>
+          </div>
+          <DialogClose onClick={() => setShowCriarEmpresa(false)} />
+        </DialogHeader>
+        <form onSubmit={handleCriarEmpresa}>
+          <DialogContent className="space-y-4">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium" htmlFor="nova-empresa-nome">
+                Nome da Empresa
+              </label>
+              <Input
+                id="nova-empresa-nome"
+                value={novaEmpresaNome}
+                onChange={(e) => setNovaEmpresaNome(e.target.value)}
+                placeholder="Ex: Hotel Lisboa"
+                required
+                autoFocus
+              />
+            </div>
+          </DialogContent>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setShowCriarEmpresa(false)} disabled={criandoEmpresa}>
+              Cancelar
+            </Button>
+            <Button type="submit" disabled={criandoEmpresa || !novaEmpresaNome.trim()}>
+              {criandoEmpresa ? (
+                <><Loader2 className="mr-2 h-4 w-4 animate-spin" />A criar…</>
+              ) : (
+                <><Plus className="mr-2 h-4 w-4" />Criar Empresa</>
+              )}
+            </Button>
+          </DialogFooter>
+        </form>
       </Dialog>
     </div>
   );

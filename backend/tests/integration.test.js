@@ -1202,7 +1202,7 @@ describe('POST /api/gestor/smoobu/sincronizar', () => {
     delete process.env.SMOOBU_API_KEY;
     const res = await authPost('/api/gestor/smoobu/sincronizar', {});
     expect(res.status).toBe(400);
-    expect(res.body.erro).toMatch(/SMOOBU_API_KEY/);
+    expect(res.body.erro).toMatch(/Smoobu não configurada/);
   });
 
   it('com API key + fetch mockado → 200 + contadores', async () => {
@@ -1377,7 +1377,7 @@ describe('GET /api/gestor/smoobu/propriedades', () => {
     delete process.env.SMOOBU_API_KEY;
     const res = await authGet('/api/gestor/smoobu/propriedades');
     expect(res.status).toBe(400);
-    expect(res.body.erro).toMatch(/SMOOBU_API_KEY/);
+    expect(res.body.erro).toMatch(/Smoobu não configurada/);
   });
 
   it('com API key + fetch mockado → 200 + lista de apartamentos limpa', async () => {
@@ -1466,7 +1466,7 @@ describe('POST /api/gestor/smoobu/sincronizar-propriedades', () => {
     delete process.env.SMOOBU_API_KEY;
     const res = await authPost('/api/gestor/smoobu/sincronizar-propriedades', {});
     expect(res.status).toBe(400);
-    expect(res.body.erro).toMatch(/SMOOBU_API_KEY/);
+    expect(res.body.erro).toMatch(/Smoobu não configurada/);
   });
 
   it('com API key + fetch mockado → 200 + cria propriedades novas', async () => {
