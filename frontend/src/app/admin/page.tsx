@@ -156,6 +156,9 @@ export default function SuperAdminPage() {
       }
 
       // O proxy já substituiu o cookie httpOnly pelo novo token do gestor.
+      // Marca a sessão como impersonação para mostrar o banner "Voltar a Admin".
+      sessionStorage.setItem("autocell_impersonating", "true");
+
       // Redirecionamento forçado para /gestor.
       setToast({
         tipo: "sucesso",
@@ -274,7 +277,7 @@ export default function SuperAdminPage() {
   }
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-5xl flex-col gap-6 p-4 sm:p-6 lg:p-8">
+    <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
       {/* Cabeçalho */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -282,7 +285,7 @@ export default function SuperAdminPage() {
             <ShieldCheck className="h-6 w-6" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Super Admin</h1>
+            <h1 className="text-2xl font-bold tracking-tight">Empresas</h1>
             <p className="text-sm text-muted-foreground">
               {user?.nome ?? "Admin"} · Gestão de empresas e impersonation
             </p>
@@ -297,14 +300,6 @@ export default function SuperAdminPage() {
             aria-label="Atualizar"
           >
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-          </Button>
-          <Button
-            variant="ghost"
-            className="text-sm text-muted-foreground hover:text-destructive"
-            onClick={() => fazerLogout()}
-          >
-            <LogOut className="mr-2 h-4 w-4" />
-            Terminar Sessão
           </Button>
         </div>
       </div>
