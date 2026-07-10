@@ -346,8 +346,9 @@ export default function CalendarioOperacionalPage() {
       ]);
       setPropriedades((propRes.propriedades ?? []).filter((p) => p.ativo));
       setEquipa(
+        // Prompt 105 — Só staff pode receber limpezas.
         (equipaRes.utilizadores ?? []).filter(
-          (u) => u.role === "staff" || u.role === "gestor"
+          (u) => u.role === "staff"
         )
       );
     } catch (e) {
@@ -665,8 +666,19 @@ export default function CalendarioOperacionalPage() {
   // Filtra só tarefas reais (exclui eventos de ausência/folga que só fazem
   // sentido no calendário). Ordena por data crescente.
   const tarefasTabela = useMemo<TarefaCalendario[]>(() => {
+    // Prompt 105 — Só mostra tarefas de hoje em diante (não passado).
+    const agora = new Date();
+    const hojeInicio = new Date(
+      Date.UTC(agora.getUTCFullYear(), agora.getUTCMonth(), agora.getUTCDate())
+    ).getTime();
+
     return tarefas
-      .filter((t) => t.tipo !== "ausencia" && t.tipo !== "folga_fixa")
+      .filter(
+        (t) =>
+          t.tipo !== "ausencia" &&
+          t.tipo !== "folga_fixa" &&
+          new Date(t.data).getTime() >= hojeInicio
+      )
       .slice()
       .sort((a, b) => {
         try {
