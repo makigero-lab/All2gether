@@ -39,6 +39,7 @@ const staffRoutes = require('./routes/staffRoutes');
 const { iniciarDailyBriefing } = require('./jobs/dailyBriefing');
 const { iniciarAgendaAmanha } = require('./jobs/agendaAmanha');
 const { iniciarCaoGuarda } = require('./jobs/caoGuarda');
+const { iniciarArquivista } = require('./jobs/arquivista');
 const { configurarWebPush } = require('./utils/push');
 
 const app = express();
@@ -171,6 +172,10 @@ if (require.main === module) {
       // (Europe/Lisbon), envia push por cada tarefa de limpeza de hoje
       // ainda não concluída (lembra o staff de fechar o dia).
       iniciarCaoGuarda();
+
+      // Prompt 109 — Cron job "Arquivista": dia 1 de cada trimestre,
+      // move tarefas concluídas/canceladas com mais de 3 meses para o arquivo.
+      iniciarArquivista();
     })
     .catch((err) => {
       console.error('❌ Erro ao ligar ao MongoDB:', err.message);

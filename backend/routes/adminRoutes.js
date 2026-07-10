@@ -169,4 +169,123 @@ router.post('/registrar-webhooks', async (req, res) => {
   }
 });
 
+// Prompt 109 (update) — Forçar Cron Jobs manualmente.
+
+// Forçar Daily Briefing.
+router.post('/forcar-daily-briefing', async (req, res) => {
+  try {
+    const { executarBriefing } = require('../jobs/dailyBriefing');
+    await executarBriefing();
+    return res.status(200).json({ message: 'Daily Briefing executado com sucesso.' });
+  } catch (err) {
+    return res.status(500).json({ erro: 'Erro ao executar Daily Briefing.', detalhe: err.message });
+  }
+});
+
+// Forçar Agenda de Amanhã.
+router.post('/forcar-agenda-amanha', async (req, res) => {
+  try {
+    const { executarAgendaAmanha } = require('../jobs/agendaAmanha');
+    await executarAgendaAmanha();
+    return res.status(200).json({ message: 'Agenda de Amanhã executada com sucesso.' });
+  } catch (err) {
+    return res.status(500).json({ erro: 'Erro ao executar Agenda de Amanhã.', detalhe: err.message });
+  }
+});
+
+// Forçar Cão de Guarda.
+router.post('/forcar-cao-guarda', async (req, res) => {
+  try {
+    const { executarCaoGuarda } = require('../jobs/caoGuarda');
+    const resultado = await executarCaoGuarda();
+    return res.status(200).json({
+      message: 'Cão de Guarda executado com sucesso.',
+      failSafe: resultado.failSafe,
+      alertas: resultado.alertas,
+    });
+  } catch (err) {
+    return res.status(500).json({ erro: 'Erro ao executar Cão de Guarda.', detalhe: err.message });
+  }
+});
+
+// Enviar Push de Teste para o utilizador atual.
+router.post('/push-teste', async (req, res) => {
+  try {
+    const { notificarUtilizador } = require('../utils/notificar');
+    const userId = req.user && req.user.id;
+    if (!userId) {
+      return res.status(400).json({ erro: 'Utilizador sem ID no token.' });
+    }
+    notificarUtilizador(
+      String(userId),
+      '🧪 Push de Teste',
+      'Se estás a ver esta notificação, o sistema de push notifications está a funcionar!',
+      '/admin/sistema'
+    );
+    return res.status(200).json({ message: 'Push de teste enviado. Verifica o teu dispositivo (se tiveres subscrição ativa).' });
+  } catch (err) {
+    return res.status(500).json({ erro: 'Erro ao enviar push.', detalhe: err.message });
+  }
+});
+
+// Prompt 109 — Configuração da Empresa (SaaS).
+// GET: devolve a configuração atual da empresa do admin.
+router.get('/config-empresa', async (req, res) => {
+  try {
+    const Empresa = require('../models/Empresa');
+    const empresaId = req.user && req.user.empresa_id;
+    if (!empresaId) {
+      return res.status(400).json({ erro: 'Admin sem empresa_id associada.' });
+    }
+    const empresa = await Empresa.findById(empresaId).select('nome smoobu_api_key').lean();
+    if (!empresa) {
+      return res.status(404).json({ erro: 'Empresa não encontrada.' });
+    }
+    // Mascara a API key (mostra só os últimos 4 caracteres).
+    const key = empresa.smoobu_api_key || '';
+    const keyMascarada = key.length > 4 ? '•'.repeat(key.length - 4) + key.slice(-4) : key;
+    return res.status(200).json({
+      nome: empresa.nome,
+      smoobu_api_key_mascarada: keyMascarada,
+      tem_api_key: !!key,
+    });
+  } catch (err) {
+    return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
+  }
+});
+
+// PUT: atualiza a configuração da empresa do admin.
+router.put('/config-empresa', async (req, res) => {
+  try {
+    const Empresa = require('../models/Empresa');
+    const empresaId = req.user && req.user.empresa_id;
+    if (!empresaId) {
+      return res.status(400).json({ erro: 'Admin sem empresa_id associada.' });
+    }
+    const { nome, smoobu_api_key } = req.body || {};
+    const update = {};
+    if (nome !== undefined) update.nome = String(nome).trim();
+    if (smoobu_api_key !== undefined) update.smoobu_api_key = String(smoobu_api_key).trim();
+
+    if (Object.keys(update).length === 0) {
+      return res.status(400).json({ erro: 'Nenhum campo para atualizar.' });
+    }
+
+    const empresa = await Empresa.findByIdAndUpdate(empresaId, { $set: update }, { new: true }).select('nome smoobu_api_key').lean();
+    if (!empresa) {
+      return res.status(404).json({ erro: 'Empresa não encontrada.' });
+    }
+    const key = empresa.smoobu_api_key || '';
+    const keyMascarada = key.length > 4 ? '•'.repeat(key.length - 4) + key.slice(-4) : key;
+    return res.status(200).json({
+      message: 'Configuração guardada com sucesso.',
+      nome: empresa.nome,
+      smoobu_api_key_mascarada: keyMascarada,
+      tem_api_key: !!key,
+    });
+  } catch (err) {
+    return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
+  }
+});
+
 module.exports = router;
