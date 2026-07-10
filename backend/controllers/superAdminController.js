@@ -23,6 +23,9 @@ const bcrypt = require('bcryptjs');
 
 const Empresa = require('../models/Empresa');
 const Utilizador = require('../models/Utilizador');
+const Propriedade = require('../models/Propriedade');
+const Tarefa = require('../models/Tarefa');
+const WebhookLog = require('../models/WebhookLog');
 const { JWT_SECRET } = require('../middleware/auth');
 const { registarAuditoria } = require('../utils/auditoria');
 
@@ -33,36 +36,46 @@ const TOKEN_EXPIRACAO = process.env.JWT_EXPIRACAO || '7d';
 /* ------------------------------------------------------------------ */
 
 /**
- * Lista todas as empresas (cross-tenant), cruzando com o modelo Utilizador
- * para encontrar o Gestor principal (role 'gestor') de cada uma.
+ * Lista todas as empresas (cross-tenant) com gestor principal + estatísticas.
  *
- * Resposta 200: { empresas: [{ _id, nome, nif, plano_ativo, createdAt, gestor: { id, nome, email } | null }] }
+ * Prompt 112 — Adicionadas contagens de Propriedades e Tarefas.
+ *
+ * Resposta 200: { empresas: [{ _id, nome, nif, plano_ativo, createdAt,
+ *   gestor: { id, nome, email } | null,
+ *   num_propriedades: number,
+ *   num_tarefas: number }] }
  */
 exports.listarEmpresas = async (req, res) => {
   try {
     const empresas = await Empresa.find().sort({ createdAt: -1 }).lean();
 
-    // Para cada empresa, procura o gestor principal.
-    const empresasComGestor = await Promise.all(
+    // Para cada empresa, procura o gestor + contagens em paralelo.
+    const empresasComDados = await Promise.all(
       empresas.map(async (emp) => {
-        const gestor = await Utilizador.findOne({
-          empresa_id: emp._id,
-          role: 'gestor',
-          eliminado_em: null,
-        })
-          .select('nome email')
-          .lean();
+        const [gestor, numPropriedades, numTarefas] = await Promise.all([
+          Utilizador.findOne({
+            empresa_id: emp._id,
+            role: 'gestor',
+            eliminado_em: null,
+          })
+            .select('nome email')
+            .lean(),
+          Propriedade.countDocuments({ empresa_id: emp._id }),
+          Tarefa.countDocuments({ empresa_id: emp._id }),
+        ]);
 
         return {
           ...emp,
           gestor: gestor
             ? { id: String(gestor._id), nome: gestor.nome, email: gestor.email }
             : null,
+          num_propriedades: numPropriedades,
+          num_tarefas: numTarefas,
         };
       })
     );
 
-    return res.status(200).json({ empresas: empresasComGestor });
+    return res.status(200).json({ empresas: empresasComDados });
   } catch (err) {
     console.error('❌ listarEmpresas:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });

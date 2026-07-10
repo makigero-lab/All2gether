@@ -47,6 +47,7 @@ const gestorNavItems: NavItem[] = [
 // Itens do menu do ADMIN (super admin) — separado do gestor.
 const adminNavItems: NavItem[] = [
   { label: "Empresas", href: "/admin", icon: Building2 },
+  { label: "Webhooks", href: "/admin/webhooks", icon: Webhook },
   { label: "Sistema", href: "/admin/sistema", icon: Settings },
 ];
 

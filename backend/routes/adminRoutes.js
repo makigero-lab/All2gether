@@ -329,4 +329,46 @@ router.delete('/empresas/:id', async (req, res) => {
   }
 });
 
+// Prompt 112 — Monitor de Webhooks (Caixa Negra).
+
+// GET /api/admin/webhook-logs — lista todos os logs de webhooks (cross-tenant).
+router.get('/webhook-logs', async (req, res) => {
+  try {
+    const WebhookLog = require('../models/WebhookLog');
+    const { status, limit } = req.query;
+    const filtro = {};
+    if (status && ['recebido', 'processado', 'erro'].includes(status)) {
+      filtro.status = status;
+    }
+    const maxLimit = Math.min(Number(limit) || 100, 500);
+    const logs = await WebhookLog.find(filtro)
+      .sort({ createdAt: -1 })
+      .limit(maxLimit)
+      .lean();
+
+    return res.status(200).json({ logs, total: logs.length });
+  } catch (err) {
+    return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
+  }
+});
+
+// DELETE /api/admin/webhook-logs/limpar — elimina logs com mais de 30 dias.
+router.delete('/webhook-logs/limpar', async (req, res) => {
+  try {
+    const WebhookLog = require('../models/WebhookLog');
+    const limite = new Date();
+    limite.setDate(limite.getDate() - 30);
+
+    const resultado = await WebhookLog.deleteMany({ createdAt: { $lt: limite } });
+
+    console.log(`🧹 Limpeza de webhook logs: ${resultado.deletedCount} registos com mais de 30 dias apagados.`);
+    return res.status(200).json({
+      message: 'Logs antigos limpos com sucesso.',
+      apagados: resultado.deletedCount,
+    });
+  } catch (err) {
+    return res.status(500).json({ erro: 'Erro ao limpar logs.', detalhe: err.message });
+  }
+});
+
 module.exports = router;
