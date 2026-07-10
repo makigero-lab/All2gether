@@ -122,4 +122,23 @@ router.post('/smoobu/sincronizar-propriedades', auth, isGestor, sincronizarPropr
 // Smoobu — importar propriedades (scoped por empresa_id, morada='A definir').
 router.post('/smoobu/propriedades', auth, isGestor, importarPropriedades);
 
+// Smoobu — DEBUG temporário: devolve o payload cru do /api/apartments.
+router.get('/smoobu-debug', auth, isGestor, async (req, res) => {
+  const apiKey = process.env.SMOOBU_API_KEY;
+  if (!apiKey || !apiKey.trim()) {
+    return res.status(400).json({ erro: 'SMOOBU_API_KEY não configurada.' });
+  }
+  try {
+    const resp = await fetch('https://login.smoobu.com/api/apartments', {
+      method: 'GET',
+      headers: { 'Api-Key': apiKey.trim(), Accept: 'application/json' },
+      signal: AbortSignal.timeout(15000),
+    });
+    const body = await resp.json();
+    return res.status(resp.status).json(body);
+  } catch (err) {
+    return res.status(502).json({ erro: 'Erro ao ligar ao Smoobu.', detalhe: err.message });
+  }
+});
+
 module.exports = router;
