@@ -244,8 +244,9 @@ export default function AdminTarefasPage() {
       setTarefas(tarefasRes.tarefas ?? []);
       setPropriedades(propRes.propriedades ?? []);
       setStaff(
+        // Prompt 105 — Só staff (não gestores/admins) pode receber limpezas.
         (equipaRes.utilizadores ?? []).filter(
-          (u) => u.role === "staff" || u.role === "gestor"
+          (u) => u.role === "staff"
         )
       );
     } catch (e) {

@@ -141,4 +141,23 @@ router.get('/smoobu-debug', auth, isGestor, async (req, res) => {
   }
 });
 
+// Smoobu — DEBUG temporário: devolve o payload cru do /api/reservations (5 reservas).
+router.get('/smoobu-debug-reservas', auth, isGestor, async (req, res) => {
+  const apiKey = process.env.SMOOBU_API_KEY;
+  if (!apiKey || !apiKey.trim()) {
+    return res.status(400).json({ erro: 'SMOOBU_API_KEY não configurada.' });
+  }
+  try {
+    const resp = await fetch('https://login.smoobu.com/api/reservations?pageSize=5', {
+      method: 'GET',
+      headers: { 'Api-Key': apiKey.trim(), Accept: 'application/json' },
+      signal: AbortSignal.timeout(15000),
+    });
+    const body = await resp.json();
+    return res.status(resp.status).json(body);
+  } catch (err) {
+    return res.status(502).json({ erro: 'Erro ao ligar ao Smoobu.', detalhe: err.message });
+  }
+});
+
 module.exports = router;
