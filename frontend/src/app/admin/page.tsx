@@ -45,6 +45,8 @@ interface EmpresaDTO {
   plano_ativo: boolean;
   createdAt: string;
   gestor: { id: string; nome: string; email: string } | null;
+  num_propriedades?: number;
+  num_tarefas?: number;
 }
 
 /** Prompt 101 — Utilizador de uma empresa terceira (lista no modal). */
@@ -410,6 +412,8 @@ export default function SuperAdminPage() {
                   <tr className="border-b bg-muted/40 text-left">
                     <th className="px-4 py-3 font-medium">Agência</th>
                     <th className="px-4 py-3 font-medium">Gestor</th>
+                    <th className="px-4 py-3 text-center font-medium">Propriedades</th>
+                    <th className="px-4 py-3 text-center font-medium">Tarefas</th>
                     <th className="px-4 py-3 font-medium">Registo</th>
                     <th className="px-4 py-3 font-medium">Plano</th>
                     <th className="px-4 py-3 text-right font-medium">Ações</th>
@@ -439,6 +443,12 @@ export default function SuperAdminPage() {
                             Sem gestor
                           </span>
                         )}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className="font-medium">{emp.num_propriedades ?? 0}</span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span className="font-medium">{emp.num_tarefas ?? 0}</span>
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">
                         {emp.createdAt
