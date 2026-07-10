@@ -420,3 +420,42 @@ Stage Summary:
 - **Tarefas concluídas bloqueadas:** staff não consegue editar checklists/observações nem concluir/reatribuir uma tarefa já concluída.
 - **Checklist padrão:** 1 clique aplica os 6 itens a todas as propriedades da empresa.
 - 136 testes backend (mantidos). Lint + tsc + build ✓. Documentação atualizada. Próximo passo: commit + push para a branch `dev`.
+
+---
+
+Task ID: A15 (Prompt 113 — iteração 2: loop 401 robusto)
+Agent: Z.ai Code
+Task: O loop 401 em /api/auth/me continuava em produção mesmo após o Prompt 113. Investigação e fix mais robusto do cache de auth.
+
+Work Log:
+- Lido o erro de produção do utilizador (dezenas de GET /api/auth/me 401 em cascata no console de www.autocell.pt). Auditados TODOS os callers de lerUtilizador() e fetch("/api/auth/me"):
+  - `components/auth/route-guard.tsx` — useEffect [role, router] ✓ (1x por mount)
+  - `app/page.tsx` (landing /) — useEffect [router] ✓ (1x por mount)
+  - `app/login/page.tsx` — useEffect [router, from] + handleLogin ✓
+  - `app/admin/page.tsx` — useEffect ✓ (dentro de RouteGuard, só corre após auth OK)
+  - `app/admin/sistema/page.tsx` — useEffect ✓ (dentro de RouteGuard)
+  - `app/admin/webhooks/page.tsx` — useEffect ✓ (dentro de RouteGuard)
+  - `app/staff/page.tsx` — **PROBLEMA**: chamava `fetch("/api/auth/me")` DIRETAMENTE (bypass do cache) + `window.location.href = "/login"` em 401 (hard redirect, fonte de loop)
+- **Root cause do loop residual:** o cache in-flight do Prompt 113 só deduplicava chamadas CONCORRENTES (mesmo tick). Chamadas SEQUENCIAIS rápidas (ex.: redirect /admin → /login em milissegundos) cada uma fazia um fetch novo ao backend. Com um token expirado, isto gera N 401s durante a cascata de redirects.
+- **Fix — Cache temporal em `lib/auth.ts`:**
+  - `cache: { user, expiraEm }` — resultado POSITIVO cached 60s, NEGATIVO (null/401) cached 3s.
+  - `lerUtilizador()` verifica o cache ANTES de fazer fetch. Se válido, devolve sem ir ao backend.
+  - `limparCacheAuth()` exportada — limpa cache + in-flight. Deve ser chamada quando o cookie muda (login, logout, exit-impersonation).
+  - `fazerLogout()` já chama `limparCacheAuth()` internamente.
+- **Fix — `app/login/page.tsx`:** `handleLogin` chama `limparCacheAuth()` APÓS o login com sucesso (cookie definido) e ANTES do `router.push(destino)`. Isto garante que o RouteGuard no painel de destino vá ao backend buscar o user real (em vez de devolver um null cached de antes do login).
+- **Fix — `components/gestor/impersonation-banner.tsx`:** `handleVoltarAdmin` chama `limparCacheAuth()` após exit-impersonation (cookie mudou de gestor → admin).
+- **Fix — `app/staff/page.tsx`:** `carregar()` deixou de fazer `fetch("/api/auth/me")` direto. Agora usa `lerUtilizador()` (cached). Removido o `window.location.href = "/login"` em 401 — o RouteGuard do layout já trata do redirect; a página simplesmente não atualiza o user se lerUtilizador() devolver null. Isto elimina a fonte do loop no painel do staff.
+- Cenários validados mentalmente:
+  - (1) User válido em /admin: RouteGuard faz 1 fetch → cache 60s → admin/page.tsx e admin/sistema usam cache (0 fetches extra). Navegação entre páginas admin: 0 fetches (cache HIT).
+  - (2) Token expirado em /admin: RouteGuard faz 1 fetch → 401 → cache null 3s → redirect /login. /login chama lerUtilizador() → cache HIT (null) → 0 fetches extra. Só 1 401 em vez de N.
+  - (3) Login: form submit → cookie definido → limparCacheAuth() → redirect /admin → RouteGuard faz 1 fetch (cache limpo) → 200 → cache user 60s. Login não é bloqueado pelo negative cache.
+  - (4) Refresh (F5): cache in-memory perdido → 1 fetch novo. Expected.
+  - (5) Sessão expira mid-session (após 60s): próximo lerUtilizador() → 401 → cache null 3s → redirect /login (1 fetch). Sem burst.
+- **Nota sobre deploy:** o utilizador pode estar a ver o loop porque a produção (www.autocell.pt) ainda não tem o código do Prompt 113 (push para `dev`). Se o Verceldeploya do `main`, é preciso merge `dev` → `main`. Esta iteração torna o fix ainda mais robusto para quando for deployed.
+- **Validação:** backend 136/136 ✓. Frontend lint ✓ · tsc ✓ · build ✓.
+
+Stage Summary:
+- **Loop 401 resolvido de forma robusta:** cache temporal (positivo 60s, negativo 3s) em `lerUtilizador()` garante que, mesmo com múltiplas chamadas sequenciais rápidas (redirects em cascata), só 1 fetch vai ao backend por janela de 3s. O `inFlight` (Prompt 113) continua a deduplicar chamadas concorrentes.
+- **`limparCacheAuth()`** chamada em todos os pontos onde o cookie muda: login (após cookie definido), logout, exit-impersonation. Isto previne que o negative cache bloqueie o login.
+- **Staff page** deixou de fazer fetch direto a /api/auth/me + hard redirect — agora usa `lerUtilizador()` (cached) e delega o redirect para o RouteGuard.
+- 136 testes backend ✓. Lint + tsc + build ✓. Próximo passo: commit + push para `dev`. O utilizador deve fazer merge/deploy para produção.

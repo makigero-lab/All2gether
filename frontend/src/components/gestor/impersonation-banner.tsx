@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ShieldCheck, Loader2 } from "lucide-react";
+import { limparCacheAuth } from "@/lib/auth";
 
 /**
  * Banner de Impersonação — Prompt 110 / 113.
@@ -44,6 +45,8 @@ export function ImpersonationBanner() {
       });
       // Independentemente do resultado, limpa o marcador.
       sessionStorage.removeItem("autocell_impersonating");
+      // Limpa o cache de auth — o cookie mudou (gestor → admin).
+      limparCacheAuth();
 
       if (res.ok) {
         // Token de admin restaurado → vai para /admin.
@@ -55,6 +58,7 @@ export function ImpersonationBanner() {
       }
     } catch {
       sessionStorage.removeItem("autocell_impersonating");
+      limparCacheAuth();
       await fetch("/api/auth/logout", { method: "POST", credentials: "include" }).catch(() => {});
       window.location.href = "/login";
     } finally {

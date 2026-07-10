@@ -81,23 +81,22 @@ export default function StaffPage() {
   const carregar = useCallback(async () => {
     setLoading(true);
     try {
-      const [userRes, tarefasRes, ausenciasRes] = await Promise.all([
-        fetch("/api/auth/me", { credentials: "include", cache: "no-store" }),
+      // Prompt 113 — Usa lerUtilizador() (com cache temporal) em vez de
+      // fetch direto a /api/auth/me. Isto evita:
+      //   (a) um 401 separado que dispara window.location.href (loop);
+      //   (b) bypass do cache (cada carregar() batia no backend).
+      // O RouteGuard do layout já validou a sessão antes de esta página
+      // renderizar — se chegamos aqui, o user está autenticado. Se a
+      // sessão expirou a meio, lerUtilizador() devolve null (cache 3s)
+      // e simplesmente não atualizamos o user; o próximo carregar() ou
+      // navegação irá revalidar.
+      const userData = await lerUtilizador();
+      if (userData) setUser(userData);
+
+      const [tarefasRes, ausenciasRes] = await Promise.all([
         fetch("/api/auth/me/tarefas", { credentials: "include", cache: "no-store" }),
         fetch("/api/staff/ausencias", { credentials: "include", cache: "no-store" }),
       ]);
-
-      // v1.59.0 (Prompt 81) — Se a sessão expirou (401), redireciona para login
-      // em vez de ficar preso na página com chamadas falhadas acumuladas.
-      if (userRes.status === 401) {
-        window.location.href = "/login?from=" + encodeURIComponent("/staff");
-        return;
-      }
-
-      if (userRes.ok) {
-        const userData = await userRes.json();
-        if (userData?.utilizador) setUser(userData.utilizador);
-      }
 
       if (tarefasRes.ok) {
         const data = await tarefasRes.json();

@@ -15,6 +15,23 @@
  *   O middleware.ts (Edge) ainda consegue ler o cookie httpOnly diretamente
  *   (Edge runtime tem acesso a req.cookies), pelo que a proteção de rotas
  *   não precisa de fetch assíncrono.
+ *
+ * Prompt 113 — FIX DO LOOP 401 (iteração 2 — mais robusta):
+ *   A iterção 1 (Prompt 113) fez lerUtilizador() pura + cache in-flight.
+ *   Mas o cache in-flight só deduplica chamadas CONCORRENTES (mesmo tick).
+ *   Chamadas SEQUENCIAIS rápidas (ex.: redirect /admin → /login → /admin
+ *   em milissegundos) continuavam a bater no backend, gerando dezenas de
+ *   401 no console.
+ *
+ *   Esta iteração adiciona um **cache temporal**:
+ *     - Resultado POSITIVO (user): cache 60s → reduz fetches redundantes
+ *       durante navegação normal (RouteGuard + página + sub-componentes).
+ *     - Resultado NEGATIVO (null/401): cache 3s → bloqueia re-fetches
+ *       rápidos durante cascata de redirects, SEM bloquear login (o cache
+ *       é limpo por limparCacheAuth() no momento do login com sucesso).
+ *
+ *   Além disso, limparCacheAuth() é exportado para ser chamado pelo
+ *   login page (após cookie definido) e pelo logout (após cookie limpo).
  */
 
 export type Role = "admin" | "gestor" | "staff";
@@ -27,6 +44,45 @@ export interface UtilizadorAuth {
   empresa_id: string;
 }
 
+/* ------------------------------------------------------------------ */
+/* Cache temporal de auth (Prompt 113, iteração 2)                     */
+/* ------------------------------------------------------------------ */
+
+// Resultado em cache + timestamp de expiração.
+interface CacheEntry {
+  user: UtilizadorAuth | null;
+  expiraEm: number; // epoch ms
+}
+
+let cache: CacheEntry | null = null;
+let inFlight: Promise<UtilizadorAuth | null> | null = null;
+
+const TTL_POSITIVO_MS = 60_000; // 60s — user válido
+const TTL_NEGATIVO_MS = 3_000; // 3s — 401 (curto para não bloquear login)
+
+/**
+ * Limpa o cache de auth. DEVE ser chamado:
+ *   - Após login com sucesso (antes do redirect para o painel)
+ *   - Após logout (antes do redirect para /login)
+ *   - Após exit-impersonation (cookie mudou)
+ *
+ * Isto garante que a próxima chamada a lerUtilizador() vai ao backend
+ * buscar o estado real (em vez de devolver um resultado obsoleto).
+ */
+export function limparCacheAuth(): void {
+  cache = null;
+  inFlight = null;
+}
+
+function cacheValido(): CacheEntry | null {
+  if (!cache) return null;
+  if (Date.now() >= cache.expiraEm) {
+    cache = null;
+    return null;
+  }
+  return cache;
+}
+
 /**
  * Consulta o backend (via proxy /api/auth/me) para saber se o utilizador
  * está autenticado e qual o seu role. O token é lido do cookie httpOnly
@@ -34,31 +90,26 @@ export interface UtilizadorAuth {
  *
  * Devolve null se não estiver autenticado (sem cookie, token inválido, etc.).
  *
- * Prompt 113 — FIX DO LOOP 401:
- *   Antes, esta função fazia `window.location.href = /login` como efeito
- *   secundário sempre que recebia 401. Como VÁRIOS componentes chamam
- *   `lerUtilizador()` em paralelo (RouteGuard + página + sub-componentes),
- *   cada 401 disparava o seu próprio redirect hard, o que provocava dezenas
- *   de pedidos 401 em cascata e um loop visível no console.
+ * Cache:
+ *   - Se houver um resultado em cache válido (dentro do TTL), devolve-o
+ *     SEM ir ao backend.
+ *   - Se já houver um pedido em curso (in-flight), partilha a mesma
+ *     Promise (dedup de chamadas concorrentes).
+ *   - O resultado é colocado em cache com TTL diferente consoante seja
+ *     positivo (user) ou negativo (null).
  *
- *   Agora a função é PURA: devolve `null` em caso de falha e NÃO redireciona.
- *   A responsabilidade de redirecionar pertence ao caller (RouteGuard ou a
- *   própria página), que decide UMA vez.
- *
- *   Além disso, added um cache de "in-flight": se um pedido /api/auth/me já
- *   estiver a decorrer, os callers em paralelo partilham a MESMA promise
- *   (em vez de dispararem N fetches concorrentes). Isto elimina o burst de
- *   401s quando a página monta vários componentes protegidos ao mesmo tempo.
+ * NÃO redireciona. A responsabilidade de redirecionar pertence ao caller
+ * (RouteGuard ou a própria página).
  */
-
-// Cache de chamada em curso (in-flight dedup). Quando vários componentes
-// chamam lerUtilizador() no mesmo tick, partilham a mesma Promise.
-let inFlight: Promise<UtilizadorAuth | null> | null = null;
-
 export async function lerUtilizador(): Promise<UtilizadorAuth | null> {
-  // Se já há um pedido em curso, reutiliza-o (dedup).
+  // 1. Cache temporal — se válido, devolve sem ir ao backend.
+  const cached = cacheValido();
+  if (cached) return cached.user;
+
+  // 2. Cache in-flight — se um pedido já está a decorrer, partilha.
   if (inFlight) return inFlight;
 
+  // 3. Novo pedido.
   inFlight = (async () => {
     try {
       const res = await fetch("/api/auth/me", {
@@ -67,27 +118,31 @@ export async function lerUtilizador(): Promise<UtilizadorAuth | null> {
       });
 
       if (!res.ok) {
-        // Não redireciona aqui — o caller trata do redirect.
-        // (Prompt 113: removido o side-effect que causava o loop 401.)
+        // 401 = sem sessão. Cache negativo curto (3s) para evitar burst
+        // de 401s durante redirects, mas não bloquear login.
+        cache = { user: null, expiraEm: Date.now() + TTL_NEGATIVO_MS };
         return null;
       }
 
       const data = await res.json();
-      if (!data?.utilizador) return null;
+      if (!data?.utilizador) {
+        cache = { user: null, expiraEm: Date.now() + TTL_NEGATIVO_MS };
+        return null;
+      }
 
-      return data.utilizador as UtilizadorAuth;
+      const user = data.utilizador as UtilizadorAuth;
+      // Cache positivo longo (60s) — reduz fetches durante navegação.
+      cache = { user, expiraEm: Date.now() + TTL_POSITIVO_MS };
+      return user;
     } catch {
+      // Erro de rede — não cacheamos (pode ser temporário).
       return null;
+    } finally {
+      inFlight = null;
     }
   })();
 
-  try {
-    return await inFlight;
-  } finally {
-    // Limpa o cache depois de resolver para que uma chamada posterior
-    // (ex.: após login) volte a consultar o backend.
-    inFlight = null;
-  }
+  return inFlight;
 }
 
 /** True se o utilizador estiver autenticado (verifica via /api/auth/me). */
@@ -103,9 +158,10 @@ export async function estaAutenticado(): Promise<boolean> {
  *
  * Usa `window.location.href` (em vez de router.push) para garantir que
  * o estado do cliente é totalmente limpo (sem cache de dados do utilizador
- * anterior).
+ * anterior). Também limpa o cache temporal de auth.
  */
 export async function fazerLogout(): Promise<void> {
+  limparCacheAuth();
   try {
     await fetch("/api/auth/logout", { method: "POST" });
   } catch {

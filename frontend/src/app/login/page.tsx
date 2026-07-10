@@ -13,7 +13,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { lerUtilizador, rotaPorRole } from "@/lib/auth";
+import { lerUtilizador, rotaPorRole, limparCacheAuth } from "@/lib/auth";
 import type { LoginResponse } from "@/lib/api";
 
 /**
@@ -99,7 +99,12 @@ function LoginConteudo() {
 
       const data = (await res.json()) as LoginResponse;
 
-      // O proxy já definiu o cookie httpOnly. Redireciona conforme o role.
+      // O proxy já definiu o cookie httpOnly. Limpa o cache de auth (que
+      // pode ter um null cached de antes do login) para que o RouteGuard
+      // no painel de destino vá ao backend buscar o user real.
+      limparCacheAuth();
+
+      // Redireciona conforme o role.
       const destino = from || rotaPorRole(data.utilizador.role);
       router.push(destino);
     } catch (e) {
