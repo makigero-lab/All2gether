@@ -7,13 +7,16 @@
  *   1. Lê o cookie httpOnly do Super Admin (token atual).
  *   2. Faz POST /api/admin/empresas/:id/impersonar no backend (com o token do admin).
  *   3. O backend devolve um NOVO token JWT do gestor.
- *   4. Substitui o cookie httpOnly pelo novo token (do gestor).
- *   5. Devolve os dados do gestor ao browser.
+ *   4. Guarda o token de admin atual num cookie httpOnly separado
+ *      `autocell_admin_token` (para poder restaurar a sessão de admin depois).
+ *   5. Substitui o cookie httpOnly principal pelo novo token (do gestor).
+ *   6. Devolve os dados do gestor ao browser.
  *
  * O browser faz então window.location.href = '/gestor' e o sistema
  * passa a tratar o Super Admin como o Gestor daquela empresa.
  *
- * Para voltar a ser Super Admin: Terminar Sessão + login novamente.
+ * Para voltar a ser Super Admin: POST /api/auth/exit-impersonation (restaura
+ * o cookie `autocell_token` a partir do `autocell_admin_token` guardado).
  */
 
 import { cookies } from "next/headers";
@@ -21,6 +24,7 @@ import { NextResponse } from "next/server";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 const COOKIE_NAME = "autocell_token";
+const ADMIN_COOKIE_NAME = "autocell_admin_token";
 const COOKIE_MAX_AGE = 7 * 24 * 60 * 60; // 7 dias
 
 export async function POST(
@@ -59,7 +63,20 @@ export async function POST(
       return NextResponse.json(data, { status: res.status });
     }
 
-    // Substitui o cookie httpOnly pelo novo token (do gestor).
+    // Prompt 113 — Guarda o token de admin atual num cookie separado para
+    // permitir "Voltar a Admin" sem re-login. Só guarda se ainda não houver
+    // um admin_token guardado (evita encadear impersonações).
+    if (!cookieStore.get(ADMIN_COOKIE_NAME)?.value) {
+      cookieStore.set(ADMIN_COOKIE_NAME, adminToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "strict",
+        path: "/",
+        maxAge: COOKIE_MAX_AGE,
+      });
+    }
+
+    // Substitui o cookie httpOnly principal pelo novo token (do gestor).
     cookieStore.set(COOKIE_NAME, data.token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",

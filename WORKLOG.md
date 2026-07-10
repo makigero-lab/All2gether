@@ -381,3 +381,42 @@ Stage Summary:
 - 133 testes backend (+2). Documentação atualizada. Próximo passo: commit + push para a branch `dev`.
 
 
+
+---
+
+Task ID: A14 (Prompt 113)
+Agent: Z.ai Code
+Task: Mega Prompt de Correção (Alpha) — 5 fixes: (1) loop 401 + separação layouts + banner impersonação vermelho; (2) limpar cockpit admin; (3) Nova Tarefa no calendário + fix fuso horário; (4) bloquear tarefa concluída; (5) endpoint default-checklist.
+
+Work Log:
+- Lido o worklog (até A13), `lib/auth.ts`, `route-guard.tsx`, `middleware.ts`, `gestor/layout.tsx`, `admin-sidebar.tsx`, `admin/sistema/page.tsx`, `gestor/calendario/page.tsx`, `staff/detalhe-tarefa-client.tsx`, `gestor/tarefas/page.tsx`, `tarefaController.criarTarefa`, `utils/disponibilidade.js`, `gestorRoutes.js`, `Propriedade` model, proxy routes (impersonar/login/logout) e os testes de integração.
+- **Fix 1 — Loop 401 + Layouts + Impersonação:**
+  - `lib/auth.ts` `lerUtilizador()` — removido o side-effect `window.location.href=/login` em 401 (a função é agora PURA, devolve `null`). Adicionado cache **in-flight** (`inFlight` Promise): callers paralelos partilham 1 fetch em vez de N. Isto elimina o burst de 401s quando RouteGuard + página + sub-componentes chamam `lerUtilizador()` em simultâneo.
+  - `components/auth/route-guard.tsx` — redirect ÚNICO com flag `redirecionado`; se `!user` → `/login`; se role errado → painel certo desse role.
+  - `gestor/layout.tsx` mantém `AdminSidebar mode="gestor"` (nunca mostra menu de admin).
+  - **Banner de impersonação** — novo client component `components/gestor/impersonation-banner.tsx` (lê `sessionStorage` em `useEffect` — evita problemas de hidratação do antigo banner inline em server component). Botão **VERMELHO** "Voltar a Admin" que chama `POST /api/auth/exit-impersonation`.
+  - `api/admin/impersonar/[id]/route.ts` — guarda o token de admin atual num cookie httpOnly separado `autocell_admin_token` (antes de o substituir pelo do gestor).
+  - Novo `api/auth/exit-impersonation/route.ts` — copia `autocell_admin_token` de volta para `autocell_token` e apaga o backup. 400 se não houver backup.
+  - `api/auth/login/route.ts` e `api/auth/logout/route.ts` — limpam `autocell_admin_token` (não deixa sessões de impersonação órfãs).
+- **Fix 2 — Cockpit Admin limpo:** `admin/sistema/page.tsx` reescrito. Removidas as Tabs e TODAS as opções de Smoobu (Importar Propriedades, Sincronizar Reservas, Registrar Webhooks) e a tab Configuração (nome empresa + smoobu_api_key). Fica só: Forçar Cron Jobs globais (Daily Briefing, Cão de Guarda, Agenda de Amanhã) + Push Notifications de teste + Zona de Perigo (Hard Reset). Adicionado um Card-aviso a explicar que integrações estão em `/gestor/configuracoes`. Imports mortos removidos (Building2, Calendar, Webhook, Settings, Save, Tabs).
+- **Fix 3 — Calendário + timezone:**
+  - `lib/utils.ts` — novos helpers `paraIsoMeiaNoiteLocal("YYYY-MM-DD")` (constrói `new Date("YYYY-MM-DDT00:00:00")` = LOCAL, devolve `.toISOString()`) e `temHoraReal(iso)` (hora local ≥ 8).
+  - `gestor/calendario/page.tsx` — botão **"Nova Tarefa"** no cabeçalho abre modal (Propriedade, Data, Tempo, Tipo, Staff opcional) que faz POST com `paraIsoMeiaNoiteLocal(form.data)`. `eventos` mapping: se `!temHoraReal(t.data)` → evento **all-day** (`allDay: true`, start = YYYY-MM-DD); senão → evento timed (como antes). `horaTarefa`/`horaFimTarefa` devolvem "—" para tarefas sem hora real. Isto garante que tarefas manuais aparecem na faixa all-day das vistas semanal/diária (em vez de invisíveis abaixo do slotMinTime 08:00) e na Vista Tabela sem "01:00".
+  - `gestor/tarefas/page.tsx` — `handleSubmeter` envia `paraIsoMeiaNoiteLocal(form.data)` em vez de `form.data`.
+  - **Backend** `tarefaController.criarTarefa` — removida a normalização `Date.UTC(d.getUTCYear(), ...)` (que destruía a intenção de "meia-noite local" e empurrava a data para o dia anterior em UTC). Agora armazena o instante enviado pelo frontend diretamente (`dataNormalizada = d`). Comentário extenso a explicar o fix.
+  - **Backend** `utils/disponibilidade.js` — `verificarDisponibilidadeUtilizador` reescrito para ser **robusto a offset**: usa `Intl.DateTimeFormat` com `timeZone: 'Europe/Lisbon'` para extrair a data de calendário de Lisboa (YYYY-MM-DD) do instante, e compara datas de Lisboa da tarefa vs ausências. Janela de pesquisa ±1 dia + filtragem JS. `mensagemIndisponivel` também usa `dataLisboa`. Retrocompatível: para dados antigos (UTC midnight), `dataLisboa` devolve a mesma data de calendário → testes existentes continuam a passar.
+- **Fix 4 — Bloquear tarefa concluída:**
+  - `components/staff/detalhe-tarefa-client.tsx` — `jaConcluida = tarefa.estado === "concluida"`. Inicializa `itensMarcados` todos a `true` e `concluida = jaConcluida` (bloqueia UI). Checkbox `disabled={jaConcluida}`, Textarea `disabled={jaConcluida}`. Os botões Concluir/Atraso/Avaria ficam escondidos (via `!concluida &&`) e o banner "Limpeza Concluída!" mostra.
+  - `gestor/calendario/page.tsx` modal — botão "Reatribuir" e select de staff `disabled` quando `tarefaSelecionada.estado === "concluida"` (com `title` explicativo).
+- **Fix 5 — Endpoint default-checklist:** `gestorRoutes.js` — novo `POST /propriedades/default-checklist` (auth + isGestor) que faz `Propriedade.updateMany({ empresa_id }, { $set: { checklist: CHECKLIST_PADRAO } })` com o array pedido. Devolve `{ sucesso, message, checklist, modificadas, correspondidas }`. Frontend `/gestor/propriedades` ganhou botão **"Checklist Padrão"** (ícone ListChecks) com `confirm()` que chama o endpoint.
+- **Validação:** backend `npm test` → **136/136 ✓** (a reescrita da disponibilidade não partiu nenhum teste — é retrocompatível). Frontend `npm run lint` ✓ · `npx tsc --noEmit` ✓ (após fix de optional chaining no DialogFooter) · `npm run build` ✓ (todas as rotas built, incluindo o novo `/api/auth/exit-impersonation`).
+- **Documentação:** `README.md` (2 novos endpoints na tabela), `docs/BACKEND.md` (entrada Prompt 113 no histórico), `docs/FRONTEND.md` (entrada Prompt 113).
+
+Stage Summary:
+- **Loop 401 resolvido:** `lerUtilizador()` é pura + cache in-flight → 1 fetch por mount (em vez de N). RouteGuard faz o redirect único. Sem mais cascata de 401s no console.
+- **Impersonação reversível sem re-login:** o admin volta ao painel `/admin` com 1 clique no botão vermelho "Voltar a Admin" (token de admin restaurado de cookie de backup). Antes era preciso logout + login.
+- **Cockpit Admin limpo:** `/admin/sistema` só tem operações globais (cron jobs + push + hard reset). Smoobu/sync/webhooks/config vivem só em `/gestor/configuracoes`.
+- **Timezone corrigido:** tarefas manuais deixam de ser gravadas como 01:00 (UTC midnight → Lisboa 01:00). Agora são meia-noite LOCAL; renderizam como all-day no calendário (visíveis em todas as vistas) e como "—" na Vista Tabela. Disponibilidade (férias/ausências) continua a funcionar (comparação por data de Lisboa, robusta a offset).
+- **Tarefas concluídas bloqueadas:** staff não consegue editar checklists/observações nem concluir/reatribuir uma tarefa já concluída.
+- **Checklist padrão:** 1 clique aplica os 6 itens a todas as propriedades da empresa.
+- 136 testes backend (mantidos). Lint + tsc + build ✓. Documentação atualizada. Próximo passo: commit + push para a branch `dev`.

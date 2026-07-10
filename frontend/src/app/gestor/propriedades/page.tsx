@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Plus, Building2, Loader2, AlertCircle, RefreshCw, Power, Pencil, Download, CheckCircle2 } from "lucide-react";
+import { Plus, Building2, Loader2, AlertCircle, RefreshCw, Power, Pencil, Download, CheckCircle2, ListChecks } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -235,6 +235,38 @@ export default function PropriedadesPage() {
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editErro, setEditErro] = useState<string | null>(null);
 
+  // Prompt 113 — Aplicar checklist padrão a todas as propriedades.
+  const [checklistLoading, setChecklistLoading] = useState(false);
+
+  async function handleAplicarChecklistPadrao() {
+    if (!confirm(
+      "Isto vai SUBSTITUIR o checklist de TODAS as propriedades pelo padrão " +
+      "(Esvaziar lixo, Trocar roupa da cama, Trocar Toalhas, Limpar chão, " +
+      "Limpar vidros, Limpar pó). Continuar?"
+    )) {
+      return;
+    }
+    setChecklistLoading(true);
+    setErro(null);
+    setSincronizacaoOk(null);
+    try {
+      const res = await adminPost<{ message: string; modificadas: number }>(
+        "/api/gestor/propriedades/default-checklist",
+        {}
+      );
+      setSincronizacaoOk(res.message || `Checklist aplicada a ${res.modificadas} propriedade(s).`);
+      await carregar();
+    } catch (e) {
+      setErro(
+        e instanceof Error
+          ? `Falha ao aplicar checklist: ${e.message}`
+          : "Erro ao aplicar checklist padrão."
+      );
+    } finally {
+      setChecklistLoading(false);
+    }
+  }
+
   // Prompt 95 — Lista de staff da empresa (para o select de funcionário
   // preferencial no modal de edição). Carregada uma vez ao montar.
   const [staffList, setStaffList] = useState<UtilizadorDTO[]>([]);
@@ -351,6 +383,22 @@ export default function PropriedadesPage() {
             )}
             <span className="hidden sm:inline">
               {sincronizando ? "A importar…" : "Importar do Smoobu"}
+            </span>
+          </Button>
+          {/* Prompt 113 — Aplicar checklist padrão a todas as propriedades */}
+          <Button
+            variant="outline"
+            onClick={handleAplicarChecklistPadrao}
+            disabled={checklistLoading || propriedades.length === 0}
+            title="Aplica um checklist padrão (6 itens) a todas as propriedades. Substitui o existente."
+          >
+            {checklistLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <ListChecks className="h-4 w-4" />
+            )}
+            <span className="hidden sm:inline">
+              {checklistLoading ? "A aplicar…" : "Checklist Padrão"}
             </span>
           </Button>
           <Button onClick={() => setMostrarForm((v) => !v)}>
