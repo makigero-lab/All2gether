@@ -206,7 +206,7 @@ export default function SistemaPage() {
   }
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-5xl flex-col gap-6 p-4 sm:p-6 lg:p-8">
+    <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
       {/* Cabeçalho */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -217,16 +217,6 @@ export default function SistemaPage() {
             <h1 className="text-2xl font-bold tracking-tight">Cockpit de Sistema</h1>
             <p className="text-sm text-muted-foreground">Operações, manutenção e configuração</p>
           </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => (window.location.href = "/admin")} className="gap-2">
-            <ArrowLeft className="h-4 w-4" />
-            Voltar
-          </Button>
-          <Button variant="ghost" className="text-sm text-muted-foreground hover:text-destructive" onClick={() => fazerLogout()}>
-            <LogOut className="mr-2 h-4 w-4" />
-            Sair
-          </Button>
         </div>
       </div>
 

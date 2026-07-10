@@ -7,17 +7,17 @@ import {
   LayoutDashboard,
   Building2,
   Users,
-  CalendarDays,
   CalendarRange,
   ClipboardList,
   BarChart3,
   Webhook,
-  CalendarCheck,
   CalendarOff,
   Menu,
   X,
   Sparkles,
   LogOut,
+  ShieldCheck,
+  Settings,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -31,7 +31,8 @@ interface NavItem {
   icon: React.ComponentType<{ className?: string }>;
 }
 
-const navItems: NavItem[] = [
+// Itens do menu do GESTOR (operações) — sem links de Admin.
+const gestorNavItems: NavItem[] = [
   { label: "Dashboard", href: "/gestor", icon: LayoutDashboard },
   { label: "Propriedades", href: "/gestor/propriedades", icon: Building2 },
   { label: "Tarefas", href: "/gestor/tarefas", icon: ClipboardList },
@@ -42,22 +43,34 @@ const navItems: NavItem[] = [
   { label: "Webhooks", href: "/gestor/webhooks", icon: Webhook },
 ];
 
+// Itens do menu do ADMIN (super admin) — separado do gestor.
+const adminNavItems: NavItem[] = [
+  { label: "Empresas", href: "/admin", icon: Building2 },
+  { label: "Sistema", href: "/admin/sistema", icon: Settings },
+];
+
 /**
- * Barra lateral de navegação do Painel de Administração.
+ * Barra lateral de navegação.
  *
- * - Desktop (lg+): sidebar fixa à esquerda, sempre visível.
- * - Mobile: colapsada por defeito; abre como overlay ao tocar no botão de menu.
+ * Prompt 110 — Dois modos:
+ *   - "gestor": menu de operações (Dashboard, Propriedades, Tarefas, etc.)
+ *   - "admin": menu do super admin (Empresas, Sistema)
+ *
+ * O gestor NUNCA vê os links de admin.
  */
-export function AdminSidebar() {
+export function AdminSidebar({ mode = "gestor" }: { mode?: "gestor" | "admin" }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
 
+  const items = mode === "admin" ? adminNavItems : gestorNavItems;
+  const basePath = mode === "admin" ? "/admin" : "/gestor";
+
   const isActive = (href: string) =>
-    href === "/gestor" ? pathname === "/gestor" : pathname.startsWith(href);
+    href === basePath ? pathname === href : pathname.startsWith(href);
 
   const NavLinks = () => (
     <nav className="flex flex-col gap-1 px-3 py-4">
-      {navItems.map((item) => {
+      {items.map((item) => {
         const active = isActive(item.href);
         const Icon = item.icon;
         return (
@@ -81,14 +94,16 @@ export function AdminSidebar() {
     </nav>
   );
 
+  const brandLabel = mode === "admin" ? "Super Admin" : "Admin";
+
   const Brand = () => (
     <div className="flex h-16 items-center gap-2 border-b px-6">
       <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-        <Sparkles className="h-5 w-5" />
+        {mode === "admin" ? <ShieldCheck className="h-5 w-5" /> : <Sparkles className="h-5 w-5" />}
       </div>
       <div className="flex flex-col leading-none">
         <span className="text-sm font-bold">Autocell</span>
-        <span className="text-[11px] text-muted-foreground">Admin</span>
+        <span className="text-[11px] text-muted-foreground">{brandLabel}</span>
       </div>
     </div>
   );
@@ -105,7 +120,7 @@ export function AdminSidebar() {
         >
           <Menu className="h-5 w-5" />
         </Button>
-        <span className="text-sm font-semibold">Autocell — Admin</span>
+        <span className="text-sm font-semibold">Autocell — {brandLabel}</span>
       </header>
 
       {/* Sidebar — desktop */}
@@ -134,18 +149,16 @@ export function AdminSidebar() {
       {/* Sidebar — mobile (overlay) */}
       {open && (
         <div className="fixed inset-0 z-50 lg:hidden">
-          {/* backdrop */}
           <div
             className="absolute inset-0 bg-black/50"
             onClick={() => setOpen(false)}
             aria-hidden
           />
-          {/* painel */}
           <div className="absolute left-0 top-0 flex h-full w-72 max-w-[80%] flex-col bg-card shadow-xl">
             <div className="flex h-16 items-center justify-between border-b px-4">
               <div className="flex items-center gap-2">
                 <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                  <Sparkles className="h-5 w-5" />
+                  {mode === "admin" ? <ShieldCheck className="h-5 w-5" /> : <Sparkles className="h-5 w-5" />}
                 </div>
                 <span className="text-sm font-bold">Autocell</span>
               </div>
