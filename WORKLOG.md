@@ -459,3 +459,44 @@ Stage Summary:
 - **`limparCacheAuth()`** chamada em todos os pontos onde o cookie muda: login (após cookie definido), logout, exit-impersonation. Isto previne que o negative cache bloqueie o login.
 - **Staff page** deixou de fazer fetch direto a /api/auth/me + hard redirect — agora usa `lerUtilizador()` (cached) e delega o redirect para o RouteGuard.
 - 136 testes backend ✓. Lint + tsc + build ✓. Próximo passo: commit + push para `dev`. O utilizador deve fazer merge/deploy para produção.
+
+---
+
+Task ID: A16 (Prompt 114)
+Agent: Z.ai Code
+Task: Notificações In-App, Bugs Alpha e Lógica de Distâncias — 6 fixes: (1) Push; (2) Centro de Notificações (Sino); (3) Isolamento Menu Admin; (4) Staff ativo + capacidade; (5) Tolerância geocoding; (6) Haversine + warning.
+
+Work Log:
+- Lido o worklog (até A15), `push-notification-setup.tsx`, `Utilizador.js` (campo `pushSubscription`), `authController.pushSubscribe`, `gestor/layout.tsx`, `admin-sidebar.tsx`, `geocoding.js`, `tarefaController` (criar/atribuir/reatribuir), `gestorController` (getEquipa, criarPropriedade, atualizarPropriedade), `webhookController` (notificar), componentes de detalhe (gestor + staff).
+- **Fix 1 — Push:** Confirmado que o fluxo já estava completo. `push-notification-setup.tsx` faz `pushManager.subscribe` + `POST /api/auth/me/push-subscribe` (via catch-all proxy). Backend `pushSubscribe` guarda em `Utilizador.pushSubscription`. `utils/notificar.js` estendido para criar também notificação in-app (ver Fix 2).
+- **Fix 2 — Centro de Notificações (Sino):**
+  - Novo modelo `backend/models/Notificacao.js` (`utilizador_id`, `empresa_id`, `mensagem`, `tipo` enum [tarefa_atribuida, tarefa_reatribuida, tarefa_cancelada, aviso, sistema], `url`, `lida`, `data`, timestamps; índice composto `{ utilizador_id, lida, createdAt }`).
+  - Novo `backend/controllers/notificacaoController.js` (4 endpoints): `listarNotificacoes` (GET, query `?lidas=`), `contagemNotificacoes` (GET `/contagem`), `marcarTodasLidas` (PATCH `/marcar-lidas`), `marcarUmaLida` (PATCH `/:id/lida`). Rotas registadas em `authRoutes.js` montadas em `/api/auth/me/notificacoes` (qualquer utilizador autenticado).
+  - `utils/notificar.js` `notificarUtilizador()` agora envia push (se configurado + tiver subscrição) E cria registo `Notificacao` (fire-and-forget). Novo helper `criarNotificacaoInApp`. Assinatura estendida com `opts: { tipo, mensagem, empresa_id }`.
+  - `tarefaController` (criarTarefa, atribuirTarefa, reatribuirTarefa) + `webhookController.criarTarefaPorReserva` passam `opts.tipo` (`tarefa_atribuida`/`tarefa_reatribuida`) e `empresa_id`. Notificação gerada sempre que uma tarefa é atribuída ao staff.
+  - Frontend: novo `components/notification-bell.tsx` — ícone Bell com badge vermelho (count não-lidas), dropdown com lista, polling 30s, marca todas como lidas ao abrir. Renderizado no `GestorSidebar` (desktop + mobile) e no header do `/staff` (ao lado do logout).
+- **Fix 3 — Isolamento Menu Admin:** `/gestor/layout.tsx` deixou de importar `AdminSidebar` (partilhado, com `mode="gestor"`). Novo `components/gestor/gestor-sidebar.tsx` dedicado — NÃO importa nem renderiza nada de admin. Itens: Dashboard, Propriedades, Tarefas, Equipa, Ausências, Calendário, Relatórios, Webhooks, Configurações + Sino + Tema + Logout. Isolamento agora claro e auditável.
+- **Fix 4 — Staff ativo + Capacidade:**
+  - `/gestor/tarefas/page.tsx` e `/gestor/calendario/page.tsx` filtram `u.role === "staff" && u.ativo === true` nos dropdowns de atribuição (antes só filtravam role — staff inativos apareciam).
+  - `authController.minhaTarefaDetalhe` + `gestorController.getTarefas` + `getDadosCalendario` passam a fazer populate de `capacidade_hospedes`.
+  - `TarefaMock` (lib/api.ts) + `TarefaDetalheGestor` (gestor modal) ganham `capacidade_hospedes`.
+  - `components/gestor/detalhe-tarefa-modal.tsx` + `components/staff/detalhe-tarefa-client.tsx` mostram badge âmbar "Lotação máxima: N hóspede(s)" (ícone Users) — destacado no topo do detalhe.
+  - `/staff/tarefas/[id]/page.tsx` passa `capacidade_hospedes` do populate para o `DetalheTarefaClient`.
+- **Fix 5 — Tolerância Geocoding:** `geocoding.js` já fazia catch silencioso (return null). `gestorController.criarPropriedade` + `atualizarPropriedade` agora devolvem flag `warning` (string) quando o Nominatim falha/devolve vazio. Frontend (`propriedades/page.tsx`) captura `res.warning` e mostra Card âmbar a aconselhar simplificar a morada. Não bloqueia a criação/edição.
+- **Fix 6 — Haversine + Warning:**
+  - Novo `backend/utils/distancia.js` — `distanciaHaversine(origem, destino)` em km (raio 6371, fórmula `a = sin²(Δφ/2) + cos(φ1)·cos(φ2)·sin²(Δλ/2)`, `c = 2·atan2(√a, √(1−a))`, `d = R·c`). Robusto a null/NaN (return 0).
+  - `tarefaController` novo helper `verificarDistanciaTarefasDia(utilizadorId, data, propriedadeId)` — busca outras tarefas do staff no mesmo dia (excluindo canceladas/concluídas), popula coordenadas, calcula a distância máxima entre a propriedade atual e as outras. Se > `LIMITE_DISTANCIA_KM` (15km), devolve mensagem `Atenção: A tarefa anterior deste funcionário fica a X km de distância (em "Nome").`
+  - Integrado em `criarTarefa` (201 response), `atribuirTarefa` (200), `reatribuirTarefa` (200) — resposta JSON inclui `warning` se aplicável. NÃO bloqueia.
+  - Frontend: `/gestor/tarefas/page.tsx` (criar + atribuir), `/gestor/calendario/page.tsx` (criar + reatribuir) capturam `res.warning` e mostram Card âmbar (`border-amber-500/50 bg-amber-50`) com botão Fechar.
+- **Testes (7 novos, secção 22 "Prompt 114"):** (1) Haversine Lisboa→Porto ≈274km; (2) mesma coordenada = 0; (3) coordenadas inválidas = 0 (não crasha); (4) contagem notificações = 0 (sem notif); (5) criar tarefa atribuída gera notificação in-app + contagem incrementa + marcar lidas volta a 0; (6) criar 2 tarefas com propriedades distantes (Lisboa + Sintra ~28km) devolve warning com "km"; (7) criar propriedade com morada = 201 (mesmo se Nominatim falhar). `npm test` → **143/143 ✓**.
+- **Validação:** backend 143/143 ✓. Frontend `npm run lint` ✓ · `npx tsc --noEmit` ✓ · `npm run build` ✓.
+- **Documentação:** `README.md` (4 novos endpoints notificações), `docs/BACKEND.md` (entrada Prompt 114), `docs/FRONTEND.md` (entrada Prompt 114).
+
+Stage Summary:
+- **Push Notifications:** fluxo completo confirmado (subscribe + POST + guarda em Utilizador.pushSubscription).
+- **Centro de Notificações (Sino):** modelo `Notificacao` + 4 endpoints + `NotificationBell` (badge vermelho, dropdown, polling 30s, marcar lidas). Notificação gerada sempre que uma tarefa é atribuída ao staff (criar/atribuir/reatribuir/webhook).
+- **Isolamento Menu Admin:** `GestorSidebar` dedicado — `/gestor/layout.tsx` não importa nada de admin.
+- **Staff ativo:** dropdowns só mostram `ativo === true`. Capacidade destacada no detalhe (gestor + staff).
+- **Geocoding tolerante:** catch silencioso + flag `warning` na resposta + toast âmbar no frontend.
+- **Haversine:** `utils/distancia.js` + warning logístico >15km entre tarefas do mesmo dia do mesmo staff (não bloqueia, toast âmbar).
+- 143 testes backend (+7). Lint + tsc + build ✓. Documentação atualizada. Próximo passo: commit + push para `dev`.

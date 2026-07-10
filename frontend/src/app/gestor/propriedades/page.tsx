@@ -130,16 +130,21 @@ export default function PropriedadesPage() {
 
     setSubmitting(true);
     try {
-      await adminPost("/api/gestor/propriedades", {
-        nome: form.nome.trim(),
-        smoobu_id: form.smoobu_id.trim(),
-        morada: form.morada.trim(),
-        tempo_limpeza_minutos: tempo,
-        checklist: form.checklist
-          .split("\n")
-          .map((s) => s.trim())
-          .filter((s) => s.length > 0),
-      });
+      // Prompt 114 — Captura warning de geocoding (morada não georreferenciada).
+      const res = await adminPost<{ propriedade: PropriedadeDTO; warning?: string }>(
+        "/api/gestor/propriedades",
+        {
+          nome: form.nome.trim(),
+          smoobu_id: form.smoobu_id.trim(),
+          morada: form.morada.trim(),
+          tempo_limpeza_minutos: tempo,
+          checklist: form.checklist
+            .split("\n")
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0),
+        }
+      );
+      if (res.warning) setWarningToast(res.warning);
       // Limpa o formulário e atualiza a tabela automaticamente.
       setForm({ nome: "", smoobu_id: "", morada: "", tempo_limpeza_minutos: "45", checklist: "" });
       setMostrarForm(false);
@@ -187,6 +192,8 @@ export default function PropriedadesPage() {
   // Estado da sincronização de propriedades do Smoobu (importação em massa).
   const [sincronizando, setSincronizando] = useState(false);
   const [sincronizacaoOk, setSincronizacaoOk] = useState<string | null>(null);
+  // Prompt 114 — Toast de warning (ex.: geocoding falhou ao criar/editar).
+  const [warningToast, setWarningToast] = useState<string | null>(null);
 
   /**
    * Importa/atualiza propriedades do Smoobu (scoped por empresa).
@@ -321,7 +328,8 @@ export default function PropriedadesPage() {
 
     setEditSubmitting(true);
     try {
-      const res = await adminPut<{ propriedade: PropriedadeDTO }>(
+      // Prompt 114 — Captura warning de geocoding (nova morada não georreferenciada).
+      const res = await adminPut<{ propriedade: PropriedadeDTO; warning?: string }>(
         `/api/gestor/propriedades/${editando._id}`,
         {
           nome: editForm.nome.trim(),
@@ -337,6 +345,7 @@ export default function PropriedadesPage() {
             editForm.funcionario_preferencial_id.trim() || null,
         }
       );
+      if (res.warning) setWarningToast(res.warning);
       // Atualiza a linha na tabela.
       setPropriedades((prev) =>
         prev.map((x) => (x._id === editando._id ? res.propriedade : x))
@@ -612,6 +621,24 @@ export default function PropriedadesPage() {
               variant="outline"
               size="sm"
               onClick={() => setSincronizacaoOk(null)}
+              className="ml-auto"
+            >
+              Fechar
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Prompt 114 — Toast de warning (ex.: geocoding falhou) */}
+      {warningToast && (
+        <Card className="border-amber-500/50 bg-amber-50 dark:bg-amber-950/20">
+          <CardContent className="flex items-center gap-3 p-4 text-sm text-amber-700 dark:text-amber-300">
+            <AlertCircle className="h-5 w-5 shrink-0" />
+            <span>{warningToast}</span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setWarningToast(null)}
               className="ml-auto"
             >
               Fechar

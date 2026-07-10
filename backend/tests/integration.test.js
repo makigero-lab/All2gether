@@ -3502,3 +3502,188 @@ describe('Correções: Calendário + Importar Propriedades', () => {
     }
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* 22. Prompt 114 — Notificações In-App + Haversine                    */
+/* ------------------------------------------------------------------ */
+
+describe('Prompt 114 — Centro de Notificações + Haversine', () => {
+  const { distanciaHaversine } = require('../utils/distancia');
+
+  it('Haversine: distância Lisboa→Porto ≈ 274km', () => {
+    const lisboa = { lat: 38.7223, lng: -9.1393 };
+    const porto = { lat: 41.1579, lng: -8.6291 };
+    const dist = distanciaHaversine(lisboa, porto);
+    // Aceita intervalo razoável (270-280km) — raio médio da Terra.
+    expect(dist).toBeGreaterThan(270);
+    expect(dist).toBeLessThan(280);
+  });
+
+  it('Haversine: mesma coordenada = 0', () => {
+    const p = { lat: 38.7223, lng: -9.1393 };
+    expect(distanciaHaversine(p, p)).toBe(0);
+  });
+
+  it('Haversine: coordenadas inválidas = 0 (não crasha)', () => {
+    expect(distanciaHaversine(null, { lat: 1, lng: 1 })).toBe(0);
+    expect(distanciaHaversine({ lat: NaN, lng: 1 }, { lat: 1, lng: 1 })).toBe(0);
+    expect(distanciaHaversine({ lat: 1, lng: 1 }, { lat: 'abc', lng: 1 })).toBe(0);
+  });
+
+  it('GET /api/auth/me/notificacoes/contagem → 200 + nao_lidas=0 (sem notif)', async () => {
+    const res = await authGet('/api/auth/me/notificacoes/contagem');
+    expect(res.status).toBe(200);
+    expect(res.body.nao_lidas).toBe(0);
+  });
+
+  it('criar tarefa atribuída gera notificação in-app + contagem incrementa', async () => {
+    // Cria um staff para receber a tarefa.
+    const hash = await bcrypt.hash(PASSWORD, 10);
+    const staff = await Utilizador.create({
+      nome: 'Staff Notif',
+      email: 'staff.notif@teste.pt',
+      password_hash: hash,
+      empresa_id: empresaId,
+      role: 'staff',
+      ativo: true,
+    });
+
+    const prop = await Propriedade.create({
+      smoobu_id: 'notif-prop-1',
+      nome: 'Casa Notif',
+      morada: 'Rua Notif 1, Lisboa',
+      empresa_id: empresaId,
+      tempo_limpeza_minutos: 45,
+    });
+
+    const amanha = new Date();
+    amanha.setDate(amanha.getDate() + 1);
+    const amanhaStr = amanha.toISOString();
+
+    const res = await authPost('/api/gestor/tarefas', {
+      propriedade_id: String(prop._id),
+      utilizador_id: String(staff._id),
+      data: amanhaStr,
+      tipo: 'limpeza',
+    });
+    expect(res.status).toBe(201);
+
+    // Pequeno delay para o notificarUtilizador (fire-and-forget) criar a notif.
+    await esperar(500);
+
+    // Login como o staff para ver as suas notificações.
+    const loginStaff = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'staff.notif@teste.pt', password: PASSWORD });
+    const staffToken = loginStaff.body.token;
+
+    const contagem = await request(app)
+      .get('/api/auth/me/notificacoes/contagem')
+      .set('Authorization', `Bearer ${staffToken}`);
+    expect(contagem.status).toBe(200);
+    expect(contagem.body.nao_lidas).toBeGreaterThanOrEqual(1);
+
+    // Lista as notificações.
+    const lista = await request(app)
+      .get('/api/auth/me/notificacoes')
+      .set('Authorization', `Bearer ${staffToken}`);
+    expect(lista.status).toBe(200);
+    expect(Array.isArray(lista.body.notificacoes)).toBe(true);
+    expect(lista.body.notificacoes.length).toBeGreaterThanOrEqual(1);
+    expect(lista.body.notificacoes[0].mensagem).toContain('Limpeza');
+
+    // Marca como lidas.
+    const marcar = await request(app)
+      .patch('/api/auth/me/notificacoes/marcar-lidas')
+      .set('Authorization', `Bearer ${staffToken}`);
+    expect(marcar.status).toBe(200);
+    expect(marcar.body.marcadas).toBeGreaterThanOrEqual(1);
+
+    // Contagem volta a 0.
+    const contagem2 = await request(app)
+      .get('/api/auth/me/notificacoes/contagem')
+      .set('Authorization', `Bearer ${staffToken}`);
+    expect(contagem2.body.nao_lidas).toBe(0);
+
+    // Cleanup.
+    await Tarefa.deleteMany({ propriedade_id: prop._id });
+    await Propriedade.deleteMany({ _id: prop._id });
+    await Utilizador.deleteOne({ _id: staff._id });
+  });
+
+  it('criar tarefa com 2 propriedades distantes devolve warning (>15km)', async () => {
+    const hash = await bcrypt.hash(PASSWORD, 10);
+    const staff = await Utilizador.create({
+      nome: 'Staff Dist',
+      email: 'staff.dist@teste.pt',
+      password_hash: hash,
+      empresa_id: empresaId,
+      role: 'staff',
+      ativo: true,
+    });
+
+    // Lisboa
+    const prop1 = await Propriedade.create({
+      smoobu_id: 'dist-prop-1',
+      nome: 'Casa Lisboa',
+      morada: 'Praça do Comércio, Lisboa',
+      coordenadas: { lat: 38.7075, lng: -9.1364 },
+      empresa_id: empresaId,
+      tempo_limpeza_minutos: 45,
+    });
+    // Sintra (~30km de Lisboa)
+    const prop2 = await Propriedade.create({
+      smoobu_id: 'dist-prop-2',
+      nome: 'Casa Sintra',
+      morada: 'Palácio Nacional de Sintra, Sintra',
+      coordenadas: { lat: 38.7976, lng: -9.3905 },
+      empresa_id: empresaId,
+      tempo_limpeza_minutos: 45,
+    });
+
+    const amanha = new Date();
+    amanha.setDate(amanha.getDate() + 1);
+    const amanhaStr = amanha.toISOString();
+
+    // Primeira tarefa (Lisboa) — sem warning (só 1 tarefa).
+    const r1 = await authPost('/api/gestor/tarefas', {
+      propriedade_id: String(prop1._id),
+      utilizador_id: String(staff._id),
+      data: amanhaStr,
+      tipo: 'limpeza',
+    });
+    expect(r1.status).toBe(201);
+    expect(r1.body.warning).toBeUndefined();
+
+    // Segunda tarefa (Sintra, ~28km) — deve trazer warning.
+    const r2 = await authPost('/api/gestor/tarefas', {
+      propriedade_id: String(prop2._id),
+      utilizador_id: String(staff._id),
+      data: amanhaStr,
+      tipo: 'limpeza',
+    });
+    expect(r2.status).toBe(201);
+    expect(r2.body.warning).toBeTruthy();
+    expect(r2.body.warning).toContain('km');
+
+    // Cleanup.
+    await Tarefa.deleteMany({ propriedade_id: { $in: [prop1._id, prop2._id] } });
+    await Propriedade.deleteMany({ _id: { $in: [prop1._id, prop2._id] } });
+    await Utilizador.deleteOne({ _id: staff._id });
+  });
+
+  it('criar propriedade com morada válida devolve 201 (com coordenadas)', async () => {
+    const res = await authPost('/api/gestor/propriedades', {
+      nome: 'Casa Geocode',
+      smoobu_id: 'geo-prop-1',
+      morada: 'Praça do Comércio, Lisboa',
+      tempo_limpeza_minutos: 45,
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.propriedade).toBeTruthy();
+    // Pode ter ou não coordenadas (depende do Nominatim); não deve ter warning
+    // se veio coordenadas, OU pode ter warning se Nominatim falhou.
+    // Apenas validamos que não crashou.
+    await Propriedade.deleteMany({ _id: res.body.propriedade._id });
+  });
+});

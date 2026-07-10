@@ -254,15 +254,22 @@ exports.criarPropriedade = async (req, res) => {
     }
 
     // Geocoding: converte a morada em coordenadas (lat, lng).
-    // Se falhar, a propriedade é criada com coordenadas null (não bloqueia).
+    // Prompt 114 — Se o Nominatim devolver vazio (morada complexa) ou falhar,
+    // faz CATCH silenciosamente. A propriedade é criada com coordenadas null
+    // (não bloqueia). Devolve flag `geocoding_falhou` para o frontend mostrar
+    // um Toast de warning aconselhando a simplificar a morada.
     const moradaTrim = String(morada).trim();
     let coordenadas = { lat: null, lng: null };
+    let geocodingFalhou = false;
     try {
       const coords = await obterCoordenadas(moradaTrim);
       if (coords) {
         coordenadas = coords;
+      } else {
+        geocodingFalhou = true;
       }
     } catch (err) {
+      geocodingFalhou = true;
       console.error('⚠️  Geocoding falhou (propriedade criada sem coordenadas):', err.message);
     }
 
@@ -290,7 +297,11 @@ exports.criarPropriedade = async (req, res) => {
       detalhes: { smoobu_id: nova.smoobu_id, morada: nova.morada },
     });
 
-    return res.status(201).json({ propriedade: nova });
+    const respostaCriar = { propriedade: nova };
+    if (geocodingFalhou) {
+      respostaCriar.warning = 'Não foi possível georreferenciar a morada (coordenadas ficam vazias). Tenta simplificar a morada para ativar o cálculo de distâncias.';
+    }
+    return res.status(201).json(respostaCriar);
   } catch (err) {
     console.error('❌ criarPropriedade:', err.message);
 
@@ -377,7 +388,8 @@ exports.getTarefas = async (req, res) => {
     }
 
     const tarefas = await Tarefa.find(filtro)
-      .populate({ path: 'propriedade_id', select: 'nome' })
+      // Prompt 114 — Inclui capacidade_hospedes para destaque no detalhe.
+      .populate({ path: 'propriedade_id', select: 'nome capacidade_hospedes' })
       .populate({ path: 'utilizador_id', select: 'nome' })
       .sort({ data: 1 })
       .lean();
@@ -484,7 +496,8 @@ exports.getDadosCalendario = async (req, res) => {
     }
 
     const tarefas = await Tarefa.find(filtro)
-      .populate({ path: 'propriedade_id', select: 'nome morada coordenadas' })
+      // Prompt 114 — Inclui capacidade_hospedes para destaque no detalhe.
+      .populate({ path: 'propriedade_id', select: 'nome morada coordenadas capacidade_hospedes' })
       .populate({ path: 'utilizador_id', select: 'nome' })
       .sort({ data: 1 })
       .lean();
@@ -805,6 +818,9 @@ exports.atualizarPropriedade = async (req, res) => {
     }
 
     // Morada — se mudou, re-faz geocoding (best-effort).
+    // Prompt 114 — Se geocoding falhar/devolver vazio, mantém coordenadas
+    // antigas e devolve flag `geocoding_falhou` para o frontend avisar.
+    let geocodingFalhou = false;
     if (morada !== undefined) {
       const novaMorada = String(morada).trim();
       if (novaMorada !== propriedade.morada) {
@@ -813,9 +829,12 @@ exports.atualizarPropriedade = async (req, res) => {
           const coords = await obterCoordenadas(novaMorada);
           if (coords) {
             propriedade.coordenadas = coords;
+          } else {
+            geocodingFalhou = true;
           }
         } catch (err) {
           // Geocoding falhou → mantém coordenadas antigas (não bloqueia).
+          geocodingFalhou = true;
           console.error(
             '⚠️  Geocoding falhou na edição (coordenadas mantidas):',
             err.message
@@ -872,7 +891,12 @@ exports.atualizarPropriedade = async (req, res) => {
       detalhes: { smoobu_id: propriedade.smoobu_id, morada: propriedade.morada },
     });
 
-    return res.status(200).json({ propriedade });
+    return res.status(200).json({
+      propriedade,
+      ...(geocodingFalhou
+        ? { warning: 'Não foi possível georreferenciar a nova morada. Coordenadas antigas mantidas. Tenta simplificar a morada.' }
+        : {}),
+    });
   } catch (err) {
     console.error('❌ atualizarPropriedade:', err.message);
 

@@ -18,6 +18,12 @@ const router = express.Router();
 
 const { auth } = require('../middleware/auth');
 const { login, me, meuCalendario, minhasTarefas, minhaTarefaDetalhe, concluirMinhaTarefa } = require('../controllers/authController');
+const {
+  listarNotificacoes,
+  contagemNotificacoes,
+  marcarTodasLidas,
+  marcarUmaLida,
+} = require('../controllers/notificacaoController');
 
 /**
  * Limitador de taxa específico para a rota de login.
@@ -81,5 +87,12 @@ router.post('/me/push-subscribe', auth, pushSubscribe);
 
 // Remove a subscrição push do utilizador.
 router.post('/me/push-unsubscribe', auth, pushUnsubscribe);
+
+// Prompt 114 — Centro de Notificações In-App (O Sino).
+// Montadas em /api/auth/me/notificacoes (qualquer utilizador autenticado).
+router.get('/me/notificacoes', auth, listarNotificacoes);
+router.get('/me/notificacoes/contagem', auth, contagemNotificacoes);
+router.patch('/me/notificacoes/marcar-lidas', auth, marcarTodasLidas);
+router.patch('/me/notificacoes/:id/lida', auth, marcarUmaLida);
 
 module.exports = router;

@@ -131,6 +131,8 @@ export default function AdminTarefasPage() {
   const [staff, setStaff] = useState<UtilizadorDTO[]>([]);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
+  // Prompt 114 — Toast de warning (ex.: distância entre tarefas do mesmo dia).
+  const [warningToast, setWarningToast] = useState<string | null>(null);
 
   // Filtro: mostrar só tarefas com avarias.
   const [soAvarias, setSoAvarias] = useState(false);
@@ -246,8 +248,9 @@ export default function AdminTarefasPage() {
       setPropriedades(propRes.propriedades ?? []);
       setStaff(
         // Prompt 105 — Só staff (não gestores/admins) pode receber limpezas.
+        // Prompt 114 — Só staff ATIVO (não inativos/desativados).
         (equipaRes.utilizadores ?? []).filter(
-          (u) => u.role === "staff"
+          (u) => u.role === "staff" && u.ativo === true
         )
       );
     } catch (e) {
@@ -272,16 +275,22 @@ export default function AdminTarefasPage() {
 
     setSubmitting(true);
     try {
-      await adminPost("/api/gestor/tarefas", {
-        propriedade_id: form.propriedade_id,
-        utilizador_id: form.utilizador_id || null,
-        // Prompt 113 — envia meia-noite LOCAL (ISO com Z) em vez de
-        // "YYYY-MM-DD" (que o backend interpretaria como UTC midnight e
-        // apareceria como 01:00 em Lisboa).
-        data: paraIsoMeiaNoiteLocal(form.data),
-        tempo_limpeza_minutos: Number(form.tempo_limpeza_minutos) || 45,
-        tipo: form.tipo,
-      });
+      // Prompt 114 — Captura warning de distância (Haversine > 15km entre
+      // tarefas do mesmo dia do mesmo staff).
+      const res = await adminPost<{ tarefa: TarefaAdmin; warning?: string }>(
+        "/api/gestor/tarefas",
+        {
+          propriedade_id: form.propriedade_id,
+          utilizador_id: form.utilizador_id || null,
+          // Prompt 113 — envia meia-noite LOCAL (ISO com Z) em vez de
+          // "YYYY-MM-DD" (que o backend interpretaria como UTC midnight e
+          // apareceria como 01:00 em Lisboa).
+          data: paraIsoMeiaNoiteLocal(form.data),
+          tempo_limpeza_minutos: Number(form.tempo_limpeza_minutos) || 45,
+          tipo: form.tipo,
+        }
+      );
+      if (res.warning) setWarningToast(res.warning);
       setForm({ propriedade_id: "", utilizador_id: "", data: "", tempo_limpeza_minutos: "45", tipo: "limpeza" });
       setMostrarForm(false);
       await carregar();
@@ -296,9 +305,12 @@ export default function AdminTarefasPage() {
     if (!atribuindo || !atribuirUserId) return;
     setAtribuirSubmitting(true);
     try {
-      await adminPatch(`/api/gestor/tarefas/${atribuindo._id}/atribuir`, {
-        utilizador_id: atribuirUserId,
-      });
+      // Prompt 114 — Captura warning de distância.
+      const res = await adminPatch<{ tarefa: TarefaAdmin; warning?: string }>(
+        `/api/gestor/tarefas/${atribuindo._id}/atribuir`,
+        { utilizador_id: atribuirUserId }
+      );
+      if (res.warning) setWarningToast(res.warning);
       setAtribuindo(null);
       setAtribuirUserId("");
       await carregar();
@@ -616,6 +628,17 @@ export default function AdminTarefasPage() {
             <AlertCircle className="h-5 w-5 shrink-0" />
             <span>{erro}</span>
             <Button variant="outline" size="sm" onClick={carregar} className="ml-auto">Tentar novamente</Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Prompt 114 — Toast de warning (ex.: distância entre tarefas do mesmo dia) */}
+      {warningToast && (
+        <Card className="border-amber-500/50 bg-amber-50 dark:bg-amber-950/20">
+          <CardContent className="flex items-center gap-3 p-4 text-sm text-amber-700 dark:text-amber-300">
+            <AlertCircle className="h-5 w-5 shrink-0" />
+            <span>{warningToast}</span>
+            <Button variant="outline" size="sm" onClick={() => setWarningToast(null)} className="ml-auto">Fechar</Button>
           </CardContent>
         </Card>
       )}
