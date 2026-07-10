@@ -109,9 +109,11 @@ router.post('/sincronizar-reservas', async (req, res) => {
 
 // Registrar Webhooks no Smoobu — configura o webhook URL no Smoobu via API.
 router.post('/registrar-webhooks', async (req, res) => {
-  const apiKey = process.env.SMOOBU_API_KEY;
-  if (!apiKey || !apiKey.trim()) {
-    return res.status(400).json({ erro: 'SMOOBU_API_KEY não configurada nas variáveis de ambiente.' });
+  const { _obterApiKeySmoobu } = require('../controllers/smoobuController');
+  const empresaId = req.user && req.user.empresa_id;
+  const apiKey = await _obterApiKeySmoobu(empresaId);
+  if (!apiKey) {
+    return res.status(400).json({ erro: 'API Key do Smoobu não configurada. Define-a nas Configurações da empresa.' });
   }
 
   // O URL do webhook deve ser o endpoint público do backend.
@@ -285,6 +287,45 @@ router.put('/config-empresa', async (req, res) => {
     });
   } catch (err) {
     return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
+  }
+});
+
+// Prompt 111 — CRUD de Empresas (Super Admin).
+
+// Criar Nova Empresa.
+router.post('/empresas', async (req, res) => {
+  try {
+    const Empresa = require('../models/Empresa');
+    const { nome, smoobu_api_key } = req.body || {};
+    if (!nome || !String(nome).trim()) {
+      return res.status(400).json({ erro: 'Nome da empresa é obrigatório.' });
+    }
+    const nova = await Empresa.create({
+      nome: String(nome).trim(),
+      smoobu_api_key: smoobu_api_key ? String(smoobu_api_key).trim() : '',
+    });
+    return res.status(201).json({ empresa: nova });
+  } catch (err) {
+    return res.status(500).json({ erro: 'Erro ao criar empresa.', detalhe: err.message });
+  }
+});
+
+// Eliminar Empresa (soft — marca plano_ativo = false).
+router.delete('/empresas/:id', async (req, res) => {
+  try {
+    const Empresa = require('../models/Empresa');
+    const { id } = req.params;
+    const mongoose = require('mongoose');
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ erro: 'ID inválido.' });
+    }
+    const empresa = await Empresa.findByIdAndDelete(id);
+    if (!empresa) {
+      return res.status(404).json({ erro: 'Empresa não encontrada.' });
+    }
+    return res.status(200).json({ message: 'Empresa eliminada com sucesso.' });
+  } catch (err) {
+    return res.status(500).json({ erro: 'Erro ao eliminar empresa.', detalhe: err.message });
   }
 });
 

@@ -20,8 +20,39 @@
 
 const Tarefa = require('../models/Tarefa');
 const Propriedade = require('../models/Propriedade');
+const Empresa = require('../models/Empresa');
 // v1.60.0 (Prompt 83) — Geocoding automático de moradas importadas do Smoobu.
 const { obterCoordenadas } = require('../utils/geocoding');
+
+/**
+ * Prompt 111 — Obtém a API Key do Smoobu para a empresa do utilizador.
+ *
+ * Prioridade:
+ *   1. Empresa.smoobu_api_key (multi-tenant SaaS — cada empresa tem a sua)
+ *   2. process.env.SMOOBU_API_KEY (fallback global para retrocompatibilidade)
+ *
+ * @param {string} empresaId
+ * @returns {Promise<string|null>} — a API key ou null se não configurada
+ */
+async function obterApiKeySmoobu(empresaId) {
+  // 1. Tenta ler a API key da empresa (multi-tenant).
+  if (empresaId) {
+    try {
+      const empresa = await Empresa.findById(empresaId).select('smoobu_api_key').lean();
+      if (empresa && empresa.smoobu_api_key && empresa.smoobu_api_key.trim()) {
+        return empresa.smoobu_api_key.trim();
+      }
+    } catch {
+      // Se falhar a leitura da empresa, continua para o fallback.
+    }
+  }
+  // 2. Fallback: variável de ambiente global.
+  const envKey = process.env.SMOOBU_API_KEY;
+  return envKey && envKey.trim() ? envKey.trim() : null;
+}
+
+// Exporta para reutilização noutros controladores.
+exports._obterApiKeySmoobu = obterApiKeySmoobu;
 
 /**
  * Extrai a morada de um apartamento do Smoobu, cobrindo várias estruturas
@@ -100,11 +131,11 @@ function extrairMoradaSmoobu(apt) {
  *   500 — erro interno
  */
 exports.sincronizarReservas = async (req, res) => {
-  const apiKey = process.env.SMOOBU_API_KEY;
-  if (!apiKey || !apiKey.trim()) {
+  const empresaId = req.user && req.user.empresa_id;
+  const apiKey = await obterApiKeySmoobu(empresaId);
+  if (!apiKey) {
     return res.status(400).json({
-      erro:
-        'SMOOBU_API_KEY não configurada. Define-a nas variáveis de ambiente do backend.',
+      erro: 'API Key do Smoobu não configurada. Define-a nas Configurações da empresa ou na variável SMOOBU_API_KEY.',
     });
   }
 
@@ -299,11 +330,11 @@ exports.sincronizarReservas = async (req, res) => {
  *   500 — erro interno
  */
 exports.getPropriedadesSmoobu = async (req, res) => {
-  const apiKey = process.env.SMOOBU_API_KEY;
-  if (!apiKey || !apiKey.trim()) {
+  const empresaId = req.user && req.user.empresa_id;
+  const apiKey = await obterApiKeySmoobu(empresaId);
+  if (!apiKey) {
     return res.status(400).json({
-      erro:
-        'SMOOBU_API_KEY não configurada. Define-a nas variáveis de ambiente do backend.',
+      erro: 'API Key do Smoobu não configurada. Define-a nas Configurações da empresa.',
     });
   }
 
@@ -408,18 +439,17 @@ exports.getPropriedadesSmoobu = async (req, res) => {
  *   500 — erro interno
  */
 exports.sincronizarPropriedades = async (req, res) => {
-  const apiKey = process.env.SMOOBU_API_KEY;
-  if (!apiKey || !apiKey.trim()) {
-    return res.status(400).json({
-      erro:
-        'SMOOBU_API_KEY não configurada. Define-a nas variáveis de ambiente do backend.',
-    });
-  }
-
   // empresa_id vem do JWT (injetado pelo middleware auth).
   const empresaId = req.user && req.user.empresa_id;
   if (!empresaId) {
     return res.status(400).json({ erro: 'empresa_id em falta no token.' });
+  }
+
+  const apiKey = await obterApiKeySmoobu(empresaId);
+  if (!apiKey) {
+    return res.status(400).json({
+      erro: 'API Key do Smoobu não configurada. Define-a nas Configurações da empresa.',
+    });
   }
 
   // Fetch ao Smoobu (mesmo endpoint do getPropriedadesSmoobu).
@@ -598,16 +628,16 @@ exports.sincronizarPropriedades = async (req, res) => {
  * Resposta 200: { totalRecebidas, criadas, existentes, erros, detalheErros }
  */
 exports.importarPropriedades = async (req, res) => {
-  const apiKey = process.env.SMOOBU_API_KEY;
-  if (!apiKey || !apiKey.trim()) {
-    return res.status(400).json({
-      erro: 'SMOOBU_API_KEY não configurada. Define-a nas variáveis de ambiente do backend.',
-    });
-  }
-
   const empresaId = req.user && req.user.empresa_id;
   if (!empresaId) {
     return res.status(400).json({ erro: 'empresa_id em falta no token.' });
+  }
+
+  const apiKey = await obterApiKeySmoobu(empresaId);
+  if (!apiKey) {
+    return res.status(400).json({
+      erro: 'API Key do Smoobu não configurada. Define-a nas Configurações da empresa.',
+    });
   }
 
   let respostaSmoobu;

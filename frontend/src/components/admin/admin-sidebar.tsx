@@ -41,6 +41,7 @@ const gestorNavItems: NavItem[] = [
   { label: "Calendário", href: "/gestor/calendario", icon: CalendarRange },
   { label: "Relatórios", href: "/gestor/relatorios", icon: BarChart3 },
   { label: "Webhooks", href: "/gestor/webhooks", icon: Webhook },
+  { label: "Configurações", href: "/gestor/configuracoes", icon: Settings },
 ];
 
 // Itens do menu do ADMIN (super admin) — separado do gestor.
