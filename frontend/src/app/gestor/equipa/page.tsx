@@ -277,9 +277,9 @@ function EquipaPage() {
   const [baixaSubmitting, setBaixaSubmitting] = useState(false);
   const [baixaResultado, setBaixaResultado] = useState<string | null>(null);
 
-  // Utilizadores que podem ser responsáveis (admin + gestor).
+  // Utilizadores que podem ser responsáveis (só gestor — admin não aparece).
   const responsaveisPossiveis = utilizadores.filter(
-    (u) => u.role === "admin" || u.role === "gestor"
+    (u) => u.role === "gestor"
   );
 
   // IDs dos utilizadores com ausência aprovada para hoje (para mostrar badge).
