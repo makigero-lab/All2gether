@@ -662,23 +662,28 @@ export default function CalendarioOperacionalPage() {
     }
   }
 
-  /* --- Prompt 99 — Tarefas para a Vista Tabela --- */
-  // Filtra só tarefas reais (exclui eventos de ausência/folga que só fazem
-  // sentido no calendário). Ordena por data crescente.
+  /* --- Prompt 99/106 — Tarefas para a Vista Tabela --- */
+  // Filtra só tarefas reais (exclui eventos de ausência/folga) e aplica
+  // a regra das -2h: só mostra tarefas cuja hora de FIM seja posterior a
+  // (agora - 2h). Tarefas que terminaram há mais de 2h são escondidas.
   const tarefasTabela = useMemo<TarefaCalendario[]>(() => {
-    // Prompt 105 — Só mostra tarefas de hoje em diante (não passado).
+    // Prompt 106 — now - 2h: limite operacional.
     const agora = new Date();
-    const hojeInicio = new Date(
-      Date.UTC(agora.getUTCFullYear(), agora.getUTCMonth(), agora.getUTCDate())
-    ).getTime();
+    const limiteOperacional = new Date(agora.getTime() - 2 * 60 * 60 * 1000).getTime();
 
     return tarefas
-      .filter(
-        (t) =>
-          t.tipo !== "ausencia" &&
-          t.tipo !== "folga_fixa" &&
-          new Date(t.data).getTime() >= hojeInicio
-      )
+      .filter((t) => {
+        if (t.tipo === "ausencia" || t.tipo === "folga_fixa") return false;
+
+        // Calcula a hora de fim da tarefa (início + tempo_limpeza_minutos).
+        const inicio = new Date(t.data).getTime();
+        const fim = inicio + (t.tempo_limpeza_minutos || 45) * 60000;
+
+        // Mostra se a hora de FIM for posterior a (now - 2h).
+        // Tarefas que ainda estão a decorrer ou que terminaram há menos de
+        // 2h continuam visíveis. As mais antigas são escondidas.
+        return fim >= limiteOperacional;
+      })
       .slice()
       .sort((a, b) => {
         try {
