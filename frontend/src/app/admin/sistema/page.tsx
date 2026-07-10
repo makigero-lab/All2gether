@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   ShieldCheck,
   LogOut,
@@ -32,11 +33,13 @@ import {
   DialogContent,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { fazerLogout } from "@/lib/auth";
+import { fazerLogout, lerUtilizador } from "@/lib/auth";
 
 type Toast = { tipo: "sucesso" | "erro"; msg: string } | null;
 
 export default function SistemaPage() {
+  const router = useRouter();
+  const [authChecked, setAuthChecked] = useState(false);
   const [loading, setLoading] = useState<string | null>(null);
   const [toast, setToast] = useState<Toast>(null);
   const [showResetModal, setShowResetModal] = useState(false);
@@ -74,9 +77,31 @@ export default function SistemaPage() {
     }
   }, []);
 
+  // Auth check — valida o token antes de carregar qualquer dados.
+  // Previne o loop de 401 quando o token está expirado/inválido.
   useEffect(() => {
-    carregarConfig();
-  }, [carregarConfig]);
+    let redirecionado = false;
+    lerUtilizador()
+      .then((u) => {
+        if (u === null) {
+          redirecionado = true;
+          router.replace("/login");
+          return;
+        }
+        if (u.role !== "admin") {
+          redirecionado = true;
+          router.replace("/gestor");
+          return;
+        }
+        setAuthChecked(true);
+        return carregarConfig();
+      })
+      .catch(() => {
+        if (!redirecionado) {
+          router.replace("/login");
+        }
+      });
+  }, [carregarConfig, router]);
 
   async function executarAcao(nome: string, url: string, method: "POST" | "DELETE" = "POST") {
     setLoading(nome);
@@ -168,6 +193,15 @@ export default function SistemaPage() {
         )}
         {loading === nome ? "A executar…" : label}
       </Button>
+    );
+  }
+
+  // Enquanto o auth não é validado, mostra loading (previne 401 loop).
+  if (!authChecked) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
     );
   }
 
