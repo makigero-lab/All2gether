@@ -112,8 +112,10 @@ A API arranca na porta definida em `PORT` (por defeito **5000**).
 | `GET`  | `/api/gestor/smoobu/propriedades` | Lista apartamentos do Smoobu (para dropdown no fluxo de criação). Requer `SMOOBU_API_KEY`. **Auth:** JWT. |
 | `POST` | `/api/gestor/smoobu/sincronizar-propriedades` | Importa apartamentos do Smoobu em massa. Cria os novos e **atualiza sempre** a morada + capacidade_hospedes dos já existentes (com re-geocoding) quando o Smoobu as traz (Prompt 92). Requer `SMOOBU_API_KEY`. **Auth:** JWT. |
 | `GET`  | `/api/gestor/setup` | Bootstrap do "Cliente Zero" (Empresa + Admin + Gestor + Staff + Propriedade de teste). Idempotente. **PÚBLICO.** |
+| `POST` | `/api/gestor/propriedades/default-checklist` | Aplica o checklist padrão (6 itens) a TODAS as propriedades da empresa. Substitui o existente. **Auth:** JWT + `isGestor`. (Prompt 113) |
 | `GET`  | `/api/admin/empresas` | Lista todas as empresas (cross-tenant) com gestor principal. **Auth:** JWT + `isAdmin`. |
-| `POST` | `/api/admin/empresas/:id/impersonar` | Gera token JWT do gestor de uma empresa (impersonation). Se a empresa não tiver gestor ativo, o admin faz override (token com empresa_id alvo + role 'gestor'). **Auth:** JWT + `isAdmin`. |
+| `POST` | `/api/admin/empresas/:id/impersonar` | Gera token JWT do gestor de uma empresa (impersonation). Se a empresa não tiver gestor ativo, o admin faz override (token com empresa_id alvo + role 'gestor'). Guarda o token de admin num cookie separado para "Voltar a Admin". **Auth:** JWT + `isAdmin`. |
+| `POST` | `/api/auth/exit-impersonation` | Restaura a sessão de Super Admin após impersonação (copia o cookie `autocell_admin_token` de volta para `autocell_token`). **Auth:** implícita (cookie). (Prompt 113) |
 | `GET`  | `/api/admin/empresas/:empresaId/utilizadores` | Lista todos os utilizadores (gestores + staff) de uma empresa terceira. **Auth:** JWT + `isAdmin`. |
 | `POST` | `/api/admin/empresas/:empresaId/utilizadores` | Cria um gestor/staff numa empresa terceira (empresa_id vem do URL). Body: `nome`, `email`, `password`, `role?`. **Auth:** JWT + `isAdmin`. |
 | `PATCH`| `/api/admin/empresas/:empresaId/utilizadores/:utilizadorId/estado` | Alterna ativo/inativo de um utilizador de uma empresa terceira. Body (opcional): `{ ativo: boolean }`. **Auth:** JWT + `isAdmin`. |

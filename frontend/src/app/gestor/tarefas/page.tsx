@@ -48,6 +48,7 @@ import {
 } from "@/lib/api";
 import { PaginationBar } from "@/components/admin/pagination-bar";
 import { DetalheTarefaModal } from "@/components/gestor/detalhe-tarefa-modal";
+import { paraIsoMeiaNoiteLocal } from "@/lib/utils";
 
 interface TarefaAdmin {
   _id: string;
@@ -274,7 +275,10 @@ export default function AdminTarefasPage() {
       await adminPost("/api/gestor/tarefas", {
         propriedade_id: form.propriedade_id,
         utilizador_id: form.utilizador_id || null,
-        data: form.data,
+        // Prompt 113 — envia meia-noite LOCAL (ISO com Z) em vez de
+        // "YYYY-MM-DD" (que o backend interpretaria como UTC midnight e
+        // apareceria como 01:00 em Lisboa).
+        data: paraIsoMeiaNoiteLocal(form.data),
         tempo_limpeza_minutos: Number(form.tempo_limpeza_minutos) || 45,
         tipo: form.tipo,
       });

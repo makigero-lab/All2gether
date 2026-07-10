@@ -13,6 +13,7 @@ import {
   Sparkles,
   Table,
   Download,
+  Plus,
 } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -25,8 +26,9 @@ import ptLocale from "@fullcalendar/core/locales/pt";
 import type { DatesSetArg, EventClickArg, EventContentArg, EventInput } from "@fullcalendar/core";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { cn } from "@/lib/utils";
+import { cn, paraIsoMeiaNoiteLocal, temHoraReal } from "@/lib/utils";
 import {
   Dialog,
   DialogHeader,
@@ -157,9 +159,12 @@ function primeiroNome(nome: string | undefined): string {
   return nome.split(" ")[0];
 }
 
-/** Devolve a hora "HH:mm" se a data ISO tiver componente de tempo; senão "—". */
+/** Devolve a hora "HH:mm" se a tarefa tiver hora real de trabalho; senão "—". */
 function horaTarefa(dataISO: string): string {
   if (!dataISO || !dataISO.includes("T")) return "—";
+  // Prompt 113 — Tarefas sem hora real (meia-noite local / UTC midnight antigo)
+  // não mostram hora, só a data.
+  if (!temHoraReal(dataISO)) return "—";
   try {
     return format(parseISO(dataISO), "HH:mm");
   } catch {
@@ -170,6 +175,7 @@ function horaTarefa(dataISO: string): string {
 /** Calcula a hora de fim estimada (início + tempo_limpeza_minutos). */
 function horaFimTarefa(dataISO: string, minutos: number): string {
   if (!dataISO || !dataISO.includes("T")) return "—";
+  if (!temHoraReal(dataISO)) return "—";
   try {
     const inicio = parseISO(dataISO);
     const fim = new Date(inicio.getTime() + (minutos || 0) * 60000);
@@ -427,12 +433,34 @@ export default function CalendarioOperacionalPage() {
       }
 
       const inicio = new Date(t.data);
-      const fim = new Date(inicio.getTime() + (t.tempo_limpeza_minutos || 45) * 60000);
+      // Prompt 113 — Tarefas sem hora real de trabalho (criadas só com data,
+      // ainda não atribuídas pelo load balancer) são renderizadas como
+      // "todo o dia" (all-day). Isto garante que aparecem nas Vistas Semanal
+      // e Diária (na faixa de all-day no topo) em vez de ficarem invisíveis
+      // abaixo do slotMinTime 08:00.
+      const semHoraReal = !temHoraReal(t.data);
       // Prompt 74, ponto 5 — cores pastel por estado
       const paleta = paletaPorEstado(t.estado);
       // Prompt 80, ponto 1 — classe extra para destaque forte de por_atribuir.
       const classNames =
         t.estado === "por_atribuir" ? ["fc-evt-por-atribuir"] : [];
+
+      if (semHoraReal) {
+        // Evento all-day: só precisa da data (YYYY-MM-DD).
+        return {
+          id: t._id,
+          title: t.propriedade_id?.nome ?? "—",
+          start: inicio.toISOString().slice(0, 10),
+          allDay: true,
+          backgroundColor: paleta.bg,
+          borderColor: paleta.border,
+          textColor: paleta.text,
+          extendedProps: t,
+          classNames,
+        } as EventInput;
+      }
+
+      const fim = new Date(inicio.getTime() + (t.tempo_limpeza_minutos || 45) * 60000);
       return {
         id: t._id,
         title: t.propriedade_id?.nome ?? "—",
@@ -662,6 +690,51 @@ export default function CalendarioOperacionalPage() {
     }
   }
 
+  /* --- Prompt 113 — Nova Tarefa Manual (a partir do calendário) --- */
+  const [mostrarNovaTarefa, setMostrarNovaTarefa] = useState(false);
+  const [novaTarefaLoading, setNovaTarefaLoading] = useState(false);
+  const [novaTarefaErro, setNovaTarefaErro] = useState<string | null>(null);
+  const [novaForm, setNovaForm] = useState({
+    propriedade_id: "",
+    utilizador_id: "",
+    data: "",
+    tempo_limpeza_minutos: "45",
+    tipo: "limpeza",
+  });
+
+  async function handleCriarTarefa(e: React.FormEvent) {
+    e.preventDefault();
+    setNovaTarefaErro(null);
+    if (!novaForm.propriedade_id || !novaForm.data) {
+      setNovaTarefaErro("Propriedade e Data são obrigatórias.");
+      return;
+    }
+    setNovaTarefaLoading(true);
+    try {
+      await adminPost("/api/gestor/tarefas", {
+        propriedade_id: novaForm.propriedade_id,
+        utilizador_id: novaForm.utilizador_id || null,
+        // Prompt 113 — meia-noite LOCAL (ISO com Z) para não gravar como 01:00.
+        data: paraIsoMeiaNoiteLocal(novaForm.data),
+        tempo_limpeza_minutos: Number(novaForm.tempo_limpeza_minutos) || 45,
+        tipo: novaForm.tipo,
+      });
+      setNovaForm({
+        propriedade_id: "",
+        utilizador_id: "",
+        data: "",
+        tempo_limpeza_minutos: "45",
+        tipo: "limpeza",
+      });
+      setMostrarNovaTarefa(false);
+      await carregarTarefas();
+    } catch (e) {
+      setNovaTarefaErro(e instanceof Error ? e.message : "Erro ao criar tarefa.");
+    } finally {
+      setNovaTarefaLoading(false);
+    }
+  }
+
   /* --- Prompt 99/106 — Tarefas para a Vista Tabela --- */
   // Filtra só tarefas reais (exclui eventos de ausência/folga) e aplica
   // a regra das -2h: só mostra tarefas cuja hora de FIM seja posterior a
@@ -778,6 +851,20 @@ export default function CalendarioOperacionalPage() {
             aria-label="Atualizar"
           >
             <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
+          </Button>
+          {/* Prompt 113 — Nova Tarefa Manual direto do calendário */}
+          <Button
+            variant="outline"
+            onClick={() => {
+              setNovaTarefaErro(null);
+              setMostrarNovaTarefa(true);
+            }}
+            disabled={loading}
+            title="Cria uma tarefa manualmente (limpeza, manutenção, etc.)."
+            className="gap-2"
+          >
+            <Plus className="h-4 w-4" />
+            Nova Tarefa
           </Button>
           {/* v1.64.0 (Prompt 87) — Auto-Atribuir Pendentes */}
           <Button
@@ -1211,7 +1298,8 @@ export default function CalendarioOperacionalPage() {
                 id="reatribuir"
                 value={reatribuindoPara}
                 onChange={(e) => setReatribuindoPara(e.target.value)}
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                disabled={tarefaSelecionada.estado === "concluida"}
+                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <option value="">— Selecionar staff —</option>
                 {equipa
@@ -1282,7 +1370,16 @@ export default function CalendarioOperacionalPage() {
           <Button
             type="button"
             onClick={handleReatribuir}
-            disabled={!reatribuindoPara || reatribuindo}
+            disabled={
+              tarefaSelecionada?.estado === "concluida" ||
+              !reatribuindoPara ||
+              reatribuindo
+            }
+            title={
+              tarefaSelecionada?.estado === "concluida"
+                ? "Tarefa concluída — não pode ser reatribuída."
+                : undefined
+            }
           >
             {reatribuindo ? (
               <>
@@ -1340,6 +1437,128 @@ export default function CalendarioOperacionalPage() {
               <>
                 <Sparkles className="mr-2 h-4 w-4" />
                 Sim, auto-atribuir
+              </>
+            )}
+          </Button>
+        </DialogFooter>
+      </Dialog>
+
+      {/* Prompt 113 — Dialog: Nova Tarefa Manual */}
+      <Dialog open={mostrarNovaTarefa} onOpenChange={setMostrarNovaTarefa}>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Plus className="h-5 w-5 text-primary" />
+            Nova Tarefa
+          </DialogTitle>
+          <DialogDescription>
+            Cria uma tarefa manual no calendário. A data é tratada como local
+            (Lisboa) — a tarefa aparece no dia certo em todas as vistas.
+          </DialogDescription>
+          <DialogClose onClick={() => setMostrarNovaTarefa(false)} />
+        </DialogHeader>
+        <DialogContent>
+          <form onSubmit={handleCriarTarefa} className="space-y-4">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium" htmlFor="nt-prop">Propriedade</label>
+              <select
+                id="nt-prop"
+                value={novaForm.propriedade_id}
+                onChange={(e) => setNovaForm((f) => ({ ...f, propriedade_id: e.target.value }))}
+                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                required
+              >
+                <option value="">— Selecionar —</option>
+                {propriedades.map((p) => (
+                  <option key={p._id} value={p._id}>{p.nome}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium" htmlFor="nt-data">Data</label>
+                <Input
+                  id="nt-data"
+                  type="date"
+                  value={novaForm.data}
+                  onChange={(e) => setNovaForm((f) => ({ ...f, data: e.target.value }))}
+                  required
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium" htmlFor="nt-tempo">Tempo (min)</label>
+                <Input
+                  id="nt-tempo"
+                  type="number"
+                  min={5}
+                  step={5}
+                  value={novaForm.tempo_limpeza_minutos}
+                  onChange={(e) => setNovaForm((f) => ({ ...f, tempo_limpeza_minutos: e.target.value }))}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium" htmlFor="nt-tipo">Tipo</label>
+              <select
+                id="nt-tipo"
+                value={novaForm.tipo}
+                onChange={(e) => setNovaForm((f) => ({ ...f, tipo: e.target.value }))}
+                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="limpeza">Limpeza</option>
+                <option value="manutencao">Manutenção</option>
+                <option value="check_in">Check-in</option>
+                <option value="check_out">Check-out</option>
+                <option value="outro">Outro</option>
+              </select>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium" htmlFor="nt-staff">
+                Atribuir a (opcional)
+              </label>
+              <select
+                id="nt-staff"
+                value={novaForm.utilizador_id}
+                onChange={(e) => setNovaForm((f) => ({ ...f, utilizador_id: e.target.value }))}
+                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="">— Por atribuir (deixar órfã) —</option>
+                {equipa.map((u) => (
+                  <option key={u._id} value={u._id}>{u.nome}</option>
+                ))}
+              </select>
+            </div>
+
+            {novaTarefaErro && (
+              <p className="text-sm text-destructive">{novaTarefaErro}</p>
+            )}
+          </form>
+        </DialogContent>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setMostrarNovaTarefa(false)}
+            disabled={novaTarefaLoading}
+          >
+            Cancelar
+          </Button>
+          <Button
+            type="button"
+            onClick={handleCriarTarefa}
+            disabled={novaTarefaLoading || !novaForm.propriedade_id || !novaForm.data}
+          >
+            {novaTarefaLoading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                A criar…
+              </>
+            ) : (
+              <>
+                <Plus className="mr-2 h-4 w-4" />
+                Criar Tarefa
               </>
             )}
           </Button>

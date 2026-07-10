@@ -62,6 +62,43 @@ router.post('/propriedades', auth, isGestor, criarPropriedade);
 router.put('/propriedades/:id', auth, isGestor, atualizarPropriedade);
 router.patch('/propriedades/:id/estado', auth, isGestor, alternarEstadoPropriedade);
 
+// Prompt 113 — Aplica um checklist padrão a TODAS as propriedades ativas da
+// empresa do gestor. Endpoint temporário/onboarding para poupar o gestor de
+// definir item a item. Substitui o checklist existente (não faz merge).
+router.post('/propriedades/default-checklist', auth, isGestor, async (req, res) => {
+  try {
+    const Propriedade = require('../models/Propriedade');
+    const empresaId = req.user && req.user.empresa_id;
+    if (!empresaId) {
+      return res.status(400).json({ erro: 'empresa_id em falta no token.' });
+    }
+
+    const CHECKLIST_PADRAO = [
+      'Esvaziar lixo',
+      'Trocar roupa da cama',
+      'Trocar Toalhas',
+      'Limpar chão',
+      'Limpar vidros',
+      'Limpar pó',
+    ];
+
+    const resultado = await Propriedade.updateMany(
+      { empresa_id: empresaId },
+      { $set: { checklist: CHECKLIST_PADRAO } }
+    );
+
+    return res.status(200).json({
+      sucesso: true,
+      message: `Checklist padrão aplicada a ${resultado.modifiedCount} propriedade(s).`,
+      checklist: CHECKLIST_PADRAO,
+      modificadas: resultado.modifiedCount,
+      correspondidas: resultado.matchedCount,
+    });
+  } catch (err) {
+    return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
+  }
+});
+
 // Calendário Geral de Operações — lista tarefas com filtro de datas.
 router.get('/tarefas', auth, isGestor, getTarefas);
 

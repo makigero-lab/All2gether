@@ -186,14 +186,29 @@ exports.criarTarefa = async (req, res) => {
       });
     }
 
-    // Normaliza data para meia-noite UTC (necessário para validar disponibilidade).
+    // Prompt 113 — FIX DE FUSO HORÁRIO (Lisboa/WEST):
+    //   Antes, a data era normalizada para meia-noite UTC via
+    //   `Date.UTC(d.getUTCFullYear(), ...)`. Como o frontend enviava
+    //   "2026-07-15" (date-only), `new Date("2026-07-15")` = meia-noite UTC,
+    //   que em Lisboa (UTC+1 no verão) aparecia como 01:00 do mesmo dia — e
+    //   ficava abaixo do slotMinTime 08:00 do calendário, invisível nas
+    //   vistas semanal/diária.
+    //
+    //   Agora o frontend envia um ISO de meia-noite LOCAL
+    //   (ex.: "2026-07-14T23:00:00.000Z" para Lisboa 15/07). Armazenamos o
+    //   instante DIRETAMENTE, SEM re-normalizar para meia-noite UTC (essa
+    //   re-normalização é que destruía a intenção de "meia-noite local" e
+    //   empurrava a data para o dia anterior em UTC).
+    //
+    //   A função verificarDisponibilidadeUtilizador foi tornada robusta a
+    //   offset (compara pela data de Lisboa), pelo que a validação de
+    //   férias/ausências continua a funcionar tanto para tarefas antigas
+    //   (UTC midnight) como para as novas (local midnight).
     const d = new Date(data);
     if (isNaN(d.getTime())) {
       return res.status(400).json({ erro: 'data inválida.' });
     }
-    const dataNormalizada = new Date(
-      Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
-    );
+    const dataNormalizada = d;
 
     // Valida utilizador_id se vier.
     let utilizadorValidado = null;

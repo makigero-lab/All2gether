@@ -1,29 +1,21 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ShieldCheck,
-  LogOut,
   Loader2,
-  Building2,
-  Calendar,
-  Webhook,
   AlertTriangle,
-  ArrowLeft,
   CheckCircle2,
   AlertCircle,
   Bell,
   Clock,
-  Save,
   Settings,
-  Wrench,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   Dialog,
   DialogHeader,
@@ -33,10 +25,23 @@ import {
   DialogContent,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { fazerLogout, lerUtilizador } from "@/lib/auth";
+import { lerUtilizador } from "@/lib/auth";
 
 type Toast = { tipo: "sucesso" | "erro"; msg: string } | null;
 
+/**
+ * Cockpit de Sistema do Super Admin — Prompt 109 / 113.
+ *
+ * Prompt 113 — Limpeza da Arquitetura SaaS:
+ *   Este painel é ESTRITAMENTE para operações de sistema globais:
+ *     - Forçar Cron Jobs globais (Daily Briefing, Cão de Guarda, Agenda de Amanhã)
+ *     - Push de teste (infraestrutura de notificações)
+ *     - Hard Reset (apagar todas as Propriedades + Tarefas)
+ *
+ *   TODAS as opções de Smoobu, Sincronizações, Webhooks e Configuração de
+ *   empresa (nome, API key) foram REMOVIDAS daqui. Essas integrações
+ *   pertencem apenas a /gestor/configuracoes (escopo por tenant).
+ */
 export default function SistemaPage() {
   const router = useRouter();
   const [authChecked, setAuthChecked] = useState(false);
@@ -46,36 +51,10 @@ export default function SistemaPage() {
   const [confirmText, setConfirmText] = useState("");
   const [resetLoading, setResetLoading] = useState(false);
 
-  // Tab 2 — Config da empresa.
-  const [configNome, setConfigNome] = useState("");
-  const [configApiKey, setConfigApiKey] = useState("");
-  const [configMascarada, setConfigMascarada] = useState("");
-  const [configTemKey, setConfigTemKey] = useState(false);
-  const [configLoading, setConfigLoading] = useState(true);
-  const [configSaving, setConfigSaving] = useState(false);
-  const [editApiKey, setEditApiKey] = useState(false);
-
   function showToast(tipo: "sucesso" | "erro", msg: string) {
     setToast({ tipo, msg });
     setTimeout(() => setToast(null), 6000);
   }
-
-  const carregarConfig = useCallback(async () => {
-    setConfigLoading(true);
-    try {
-      const res = await fetch("/api/admin/config-empresa", { credentials: "include" });
-      const data = await res.json();
-      if (res.ok) {
-        setConfigNome(data.nome || "");
-        setConfigMascarada(data.smoobu_api_key_mascarada || "");
-        setConfigTemKey(data.tem_api_key || false);
-      }
-    } catch {
-      // silencioso
-    } finally {
-      setConfigLoading(false);
-    }
-  }, []);
 
   // Auth check — valida o token antes de carregar qualquer dados.
   // Previne o loop de 401 quando o token está expirado/inválido.
@@ -94,14 +73,13 @@ export default function SistemaPage() {
           return;
         }
         setAuthChecked(true);
-        return carregarConfig();
       })
       .catch(() => {
         if (!redirecionado) {
           router.replace("/login");
         }
       });
-  }, [carregarConfig, router]);
+  }, [router]);
 
   async function executarAcao(nome: string, url: string, method: "POST" | "DELETE" = "POST") {
     setLoading(nome);
@@ -133,35 +111,6 @@ export default function SistemaPage() {
       showToast("erro", e instanceof Error ? e.message : "Erro no hard reset.");
     } finally {
       setResetLoading(false);
-    }
-  }
-
-  async function salvarConfig(e: React.FormEvent) {
-    e.preventDefault();
-    setConfigSaving(true);
-    setToast(null);
-    try {
-      const body: Record<string, string> = {};
-      if (configNome) body.nome = configNome;
-      if (editApiKey && configApiKey) body.smoobu_api_key = configApiKey;
-
-      const res = await fetch("/api/admin/config-empresa", {
-        method: "PUT",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.erro || `Erro ${res.status}`);
-      setConfigMascarada(data.smoobu_api_key_mascarada || "");
-      setConfigTemKey(data.tem_api_key || false);
-      setEditApiKey(false);
-      setConfigApiKey("");
-      showToast("sucesso", data.message || "Configuração guardada com sucesso.");
-    } catch (e) {
-      showToast("erro", e instanceof Error ? e.message : "Erro ao guardar configuração.");
-    } finally {
-      setConfigSaving(false);
     }
   }
 
@@ -215,10 +164,26 @@ export default function SistemaPage() {
           </div>
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Cockpit de Sistema</h1>
-            <p className="text-sm text-muted-foreground">Operações, manutenção e configuração</p>
+            <p className="text-sm text-muted-foreground">
+              Operações globais de manutenção e automação
+            </p>
           </div>
         </div>
       </div>
+
+      {/* Aviso de arquitetura SaaS */}
+      <Card className="border-primary/30 bg-primary/5">
+        <CardContent className="flex items-start gap-3 p-4 text-sm">
+          <Settings className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+          <div className="text-muted-foreground">
+            <strong className="text-foreground">Painel de Sistema (global).</strong>{" "}
+            Aqui só operações globais: forçar cron jobs, push de teste e hard reset.
+            As integrações de cada empresa (Smoobu, sincronizações, webhooks,
+            configuração) estão em{" "}
+            <strong className="text-foreground">/gestor/configuracoes</strong>.
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Toast */}
       {toast && (
@@ -231,155 +196,61 @@ export default function SistemaPage() {
         </Card>
       )}
 
-      {/* Tabs */}
-      <Tabs defaultValue="operacoes" className="w-full">
-        <TabsList>
-          <TabsTrigger value="operacoes" className="gap-1.5">
-            <Wrench className="h-4 w-4" />
-            Operações
-          </TabsTrigger>
-          <TabsTrigger value="config" className="gap-1.5">
-            <Settings className="h-4 w-4" />
-            Configuração
-          </TabsTrigger>
-        </TabsList>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        {/* Forçar Rotinas (Cron Jobs globais) */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Clock className="h-5 w-5 text-primary" />
+              Forçar Rotinas (Cron Jobs)
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Dispara manualmente os cron jobs diários globais (todas as empresas).
+            </p>
+            <ActionButton nome="Daily Briefing" icon={Clock} label="Daily Briefing (08h)" url="/api/admin/forcar-daily-briefing" variant="outline" />
+            <ActionButton nome="Cão de Guarda" icon={Clock} label="Cão de Guarda (18h)" url="/api/admin/forcar-cao-guarda" variant="outline" />
+            <ActionButton nome="Agenda de Amanhã" icon={Clock} label="Agenda de Amanhã (19h)" url="/api/admin/forcar-agenda-amanha" variant="outline" />
+          </CardContent>
+        </Card>
 
-        {/* =================== TAB 1: OPERAÇÕES =================== */}
-        <TabsContent value="operacoes" className="mt-4">
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            {/* Sincronizações */}
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Building2 className="h-5 w-5 text-primary" />
-                  Sincronizações Smoobu
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <p className="text-sm text-muted-foreground">Importa propriedades, sincroniza reservas e regista webhooks.</p>
-                <ActionButton nome="Sincronizar Propriedades" icon={Building2} label="Importar Propriedades" url="/api/admin/sincronizar-propriedades" variant="outline" />
-                <ActionButton nome="Sincronizar Reservas" icon={Calendar} label="Sincronizar Reservas" url="/api/admin/sincronizar-reservas" variant="outline" />
-                <ActionButton nome="Registrar Webhooks" icon={Webhook} label="Registrar Webhooks" url="/api/admin/registrar-webhooks" variant="outline" />
-              </CardContent>
-            </Card>
+        {/* Push Notifications */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Bell className="h-5 w-5 text-primary" />
+              Push Notifications
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Envia uma notificação push de teste para o teu dispositivo.
+            </p>
+            <ActionButton nome="Push de Teste" icon={Bell} label="Enviar Push de Teste" url="/api/admin/push-teste" />
+          </CardContent>
+        </Card>
 
-            {/* Forçar Rotinas */}
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Clock className="h-5 w-5 text-primary" />
-                  Forçar Rotinas (Cron Jobs)
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <p className="text-sm text-muted-foreground">Dispara manualmente os cron jobs diários.</p>
-                <ActionButton nome="Daily Briefing" icon={Clock} label="Daily Briefing (08h)" url="/api/admin/forcar-daily-briefing" variant="outline" />
-                <ActionButton nome="Cão de Guarda" icon={Clock} label="Cão de Guarda (18h)" url="/api/admin/forcar-cao-guarda" variant="outline" />
-                <ActionButton nome="Agenda de Amanhã" icon={Clock} label="Agenda de Amanhã (19h)" url="/api/admin/forcar-agenda-amanha" variant="outline" />
-              </CardContent>
-            </Card>
-
-            {/* Push Notifications */}
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Bell className="h-5 w-5 text-primary" />
-                  Push Notifications
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <p className="text-sm text-muted-foreground">Envia uma notificação push de teste para o teu dispositivo.</p>
-                <ActionButton nome="Push de Teste" icon={Bell} label="Enviar Push de Teste" url="/api/admin/push-teste" />
-              </CardContent>
-            </Card>
-
-            {/* Zona de Perigo */}
-            <Card className="border-destructive/50">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base text-destructive">
-                  <AlertTriangle className="h-5 w-5" />
-                  Zona de Perigo
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <p className="text-sm text-muted-foreground">
-                  Apaga <strong>TODAS as Propriedades e Tarefas</strong>. Ação irreversível.
-                </p>
-                <Button variant="destructive" className="w-full gap-2" onClick={() => setShowResetModal(true)} disabled={loading !== null}>
-                  <AlertTriangle className="h-4 w-4" />
-                  Hard Reset (Limpar DB)
-                </Button>
-              </CardContent>
-            </Card>
-          </div>
-        </TabsContent>
-
-        {/* =================== TAB 2: CONFIGURAÇÃO =================== */}
-        <TabsContent value="config" className="mt-4">
-          <Card className="max-w-lg">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Settings className="h-5 w-5 text-primary" />
-                Configuração da Empresa
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {configLoading ? (
-                <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                  A carregar configuração…
-                </div>
-              ) : (
-                <form onSubmit={salvarConfig} className="space-y-4">
-                  <div className="space-y-1.5">
-                    <label className="text-sm font-medium" htmlFor="cfg-nome">Nome da Empresa</label>
-                    <Input id="cfg-nome" value={configNome} onChange={(e) => setConfigNome(e.target.value)} placeholder="Nome da empresa" />
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-sm font-medium">Smoobu API Key</label>
-                    {editApiKey ? (
-                      <div className="space-y-2">
-                        <Input
-                          type="password"
-                          value={configApiKey}
-                          onChange={(e) => setConfigApiKey(e.target.value)}
-                          placeholder="Cola aqui a API Key do Smoobu"
-                          autoComplete="off"
-                        />
-                        <Button type="button" variant="ghost" size="sm" onClick={() => { setEditApiKey(false); setConfigApiKey(""); }}>
-                          Cancelar
-                        </Button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        <code className="flex-1 rounded-md border bg-muted/40 px-3 py-2 text-sm font-mono text-muted-foreground">
-                          {configTemKey ? configMascarada : "Não configurada"}
-                        </code>
-                        <Button type="button" variant="outline" size="sm" onClick={() => setEditApiKey(true)}>
-                          {configTemKey ? "Alterar" : "Definir"}
-                        </Button>
-                      </div>
-                    )}
-                    <p className="text-xs text-muted-foreground">
-                      Cada empresa (tenant) pode ter a sua própria API Key do Smoobu.
-                      Quando definida, substitui a variável de ambiente global.
-                    </p>
-                  </div>
-
-                  <Button type="submit" disabled={configSaving} className="gap-2">
-                    {configSaving ? (
-                      <><Loader2 className="h-4 w-4 animate-spin" />A guardar…</>
-                    ) : (
-                      <><Save className="h-4 w-4" />Guardar Configuração</>
-                    )}
-                  </Button>
-                </form>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+        {/* Zona de Perigo */}
+        <Card className="border-destructive/50 md:col-span-2">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              Zona de Perigo
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Apaga <strong>TODAS as Propriedades e Tarefas</strong> de todas as
+              empresas. Ação irreversível.
+            </p>
+            <Button variant="destructive" className="w-full gap-2" onClick={() => setShowResetModal(true)} disabled={loading !== null}>
+              <AlertTriangle className="h-4 w-4" />
+              Hard Reset (Limpar DB)
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
 
       {/* Modal Hard Reset */}
       <Dialog open={showResetModal} onOpenChange={(o) => !o && setShowResetModal(false)}>

@@ -42,6 +42,10 @@ export async function POST(req: Request) {
       maxAge: COOKIE_MAX_AGE,
     });
 
+    // Prompt 113 — Num login fresco, limpa qualquer cookie de backup de
+    // admin que tenha ficado de uma impersonação anterior.
+    cookieStore.delete("autocell_admin_token");
+
     // Devolve ao browser apenas os dados do utilizador (sem o token).
     return NextResponse.json({ utilizador: data.utilizador });
   } catch {

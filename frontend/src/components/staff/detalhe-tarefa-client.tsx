@@ -89,11 +89,17 @@ export function DetalheTarefaClient({
   const router = useRouter();
   const Icon = tipoIcon[tarefa.tipo];
 
+  // Prompt 113 — Se a tarefa JÁ estiver concluída (ex.: reabrir o detalhe),
+  // bloqueia TODA a interação: checklists, observações, Concluir, Atraso,
+  // Avaria. Mostra o estado final sem permitir editar.
+  const jaConcluida = tarefa.estado === "concluida";
+
   const [itensMarcados, setItensMarcados] = useState<boolean[]>(
-    () => checklist.map(() => false)
+    // Se já estiver concluída, pré-marca todos os itens (reflete o final).
+    () => checklist.map(() => jaConcluida)
   );
   const [observacoes, setObservacoes] = useState("");
-  const [concluida, setConcluida] = useState(false);
+  const [concluida, setConcluida] = useState(jaConcluida);
   const [concluindo, setConcluindo] = useState(false);
   const [erroConcluir, setErroConcluir] = useState<string | null>(null);
 
@@ -290,6 +296,7 @@ export function DetalheTarefaClient({
                       id={checkboxId}
                       checked={checked}
                       onCheckedChange={(v) => toggleItem(index, v)}
+                      disabled={jaConcluida}
                     />
                     <label
                       htmlFor={checkboxId}
@@ -337,6 +344,7 @@ export function DetalheTarefaClient({
               placeholder="Ex.: faltava toalhas no WC; torneira da cozinha a pingar…"
               rows={4}
               maxLength={500}
+              disabled={jaConcluida}
             />
             <p className="mt-1 text-right text-xs text-muted-foreground">
               {observacoes.length}/500

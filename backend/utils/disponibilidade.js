@@ -13,15 +13,41 @@
  *   - tarefaController.criarTarefa (criação manual com atribuição direta)
  *
  * v1.59.0 — Prompt 81: fix crítico de atribuir a staff de férias.
+ * Prompt 113 — Tornado robusto a offset de fuso horário (Lisboa/WEST):
+ *   A comparação passa a ser feita pela DATA DE CALENDÁRIO de Lisboa
+ *   (YYYY-MM-DD) em vez do instante UTC midnight. Isto garante que uma
+ *   tarefa criada às 00:00 local (23:00Z do dia anterior em UTC) ainda
+ *   conta como "mesmo dia" para efeitos de férias/ausência — que podem
+ *   estar armazenadas quer em UTC midnight quer em local midnight.
  */
 
 const Ausencia = require('../models/Ausencia');
 
 /**
+ * Devolve a data de calendário (YYYY-MM-DD) de um instante no fuso de
+ * Lisboa (Europe/Lisbon). Usa Intl.DateTimeFormat (suportado pelo Node sem
+ * libs externas). Ex.: 2026-07-14T23:00:00Z → "2026-07-15" (Lisboa UTC+1).
+ */
+const fmtLisboa = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Europe/Lisbon',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+
+function dataLisboa(instante) {
+  try {
+    return fmtLisboa.format(new Date(instante)); // en-CA → YYYY-MM-DD
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Verifica se o utilizador tem uma ausência APROVADA que cubra o dia da tarefa.
  *
  * @param {string|import('mongoose').Types.ObjectId} utilizadorId
- * @param {Date} dataTarefa - dia da tarefa (qualquer hora; é normalizada)
+ * @param {Date|string|number} dataTarefa - instante da tarefa (qualquer hora)
  * @returns {Promise<{ indisponivel: boolean, ausencia?: { tipo: string, data_inicio: Date, data_fim: Date } }>}
  */
 async function verificarDisponibilidadeUtilizador(utilizadorId, dataTarefa) {
@@ -29,30 +55,41 @@ async function verificarDisponibilidadeUtilizador(utilizadorId, dataTarefa) {
     return { indisponivel: false };
   }
 
-  // Normaliza o dia da tarefa para meia-noite UTC.
-  const d = new Date(dataTarefa);
-  const diaTarefa = new Date(
-    Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
-  );
+  const diaStr = dataLisboa(dataTarefa);
+  if (!diaStr) {
+    return { indisponivel: false };
+  }
 
-  // Procura ausências aprovadas que cubram este dia.
-  // Sobreposição: data_inicio <= diaTarefa <= data_fim.
-  const ausencia = await Ausencia.findOne({
+  // Janela de pesquisa ampla (±1 dia em torno do dia da tarefa) para apanhar
+  // ausências armazenadas em UTC midnight ou local midnight. Depois filtra
+  // em JS pela data de Lisboa para precisão total.
+  const diaInicio = new Date(diaStr + 'T00:00:00Z');
+  const diaFim = new Date(diaInicio.getTime() + 48 * 60 * 60 * 1000); // +2 dias
+
+  const candidatos = await Ausencia.find({
     utilizador_id: utilizadorId,
     estado: 'aprovada',
-    data_inicio: { $lte: diaTarefa },
-    data_fim: { $gte: diaTarefa },
+    data_inicio: { $lte: diaFim },
+    data_fim: { $gte: diaInicio },
   })
     .select('tipo data_inicio data_fim')
     .lean();
 
-  if (ausencia) {
+  // Compara pela data de Lisboa (robusto a offset).
+  const emAusencia = candidatos.find((a) => {
+    const ini = dataLisboa(a.data_inicio);
+    const fim = dataLisboa(a.data_fim);
+    if (!ini || !fim) return false;
+    return diaStr >= ini && diaStr <= fim;
+  });
+
+  if (emAusencia) {
     return {
       indisponivel: true,
       ausencia: {
-        tipo: ausencia.tipo,
-        data_inicio: ausencia.data_inicio,
-        data_fim: ausencia.data_fim,
+        tipo: emAusencia.tipo,
+        data_inicio: emAusencia.data_inicio,
+        data_fim: emAusencia.data_fim,
       },
     };
   }
@@ -72,8 +109,8 @@ function mensagemIndisponivel(ausencia) {
     : ausencia.tipo === 'doenca' ? 'Baixa por doença'
     : 'Ausência aprovada';
 
-  const inicio = new Date(ausencia.data_inicio).toLocaleDateString('pt-PT');
-  const fim = new Date(ausencia.data_fim).toLocaleDateString('pt-PT');
+  const inicio = dataLisboa(ausencia.data_inicio);
+  const fim = dataLisboa(ausencia.data_fim);
 
   if (inicio === fim) {
     return `${tipoLabel} neste dia (${inicio}).`;

@@ -34,39 +34,59 @@ export interface UtilizadorAuth {
  *
  * Devolve null se não estiver autenticado (sem cookie, token inválido, etc.).
  *
- * v1.59.0 (Prompt 81) — Em caso de 401 (token expirado/inválido), se NÃO
- * estivermos já em /login, redireciona para /login para evitar loops de
- * chamadas autenticadas falhadas. Isto resolve o problema de o utilizador
- * ficar preso numa página protegida após expirar a sessão, com dezenas de
- * pedidos 401 acumulados no console.
+ * Prompt 113 — FIX DO LOOP 401:
+ *   Antes, esta função fazia `window.location.href = /login` como efeito
+ *   secundário sempre que recebia 401. Como VÁRIOS componentes chamam
+ *   `lerUtilizador()` em paralelo (RouteGuard + página + sub-componentes),
+ *   cada 401 disparava o seu próprio redirect hard, o que provocava dezenas
+ *   de pedidos 401 em cascata e um loop visível no console.
+ *
+ *   Agora a função é PURA: devolve `null` em caso de falha e NÃO redireciona.
+ *   A responsabilidade de redirecionar pertence ao caller (RouteGuard ou a
+ *   própria página), que decide UMA vez.
+ *
+ *   Além disso, added um cache de "in-flight": se um pedido /api/auth/me já
+ *   estiver a decorrer, os callers em paralelo partilham a MESMA promise
+ *   (em vez de dispararem N fetches concorrentes). Isto elimina o burst de
+ *   401s quando a página monta vários componentes protegidos ao mesmo tempo.
  */
-export async function lerUtilizador(): Promise<UtilizadorAuth | null> {
-  try {
-    const res = await fetch("/api/auth/me", {
-      cache: "no-store",
-      credentials: "include",
-    });
 
-    if (!res.ok) {
-      // 401 = token expirado ou inválido. Redireciona para login se não
-      // estivermos já lá (evita loop na própria página de login).
-      if (res.status === 401 && typeof window !== "undefined") {
-        const pathname = window.location.pathname;
-        if (pathname !== "/login" && pathname !== "/") {
-          // Adiciona ?from= para o utilizador voltar após login.
-          const from = encodeURIComponent(pathname + window.location.search);
-          window.location.href = `/login?from=${from}`;
-        }
+// Cache de chamada em curso (in-flight dedup). Quando vários componentes
+// chamam lerUtilizador() no mesmo tick, partilham a mesma Promise.
+let inFlight: Promise<UtilizadorAuth | null> | null = null;
+
+export async function lerUtilizador(): Promise<UtilizadorAuth | null> {
+  // Se já há um pedido em curso, reutiliza-o (dedup).
+  if (inFlight) return inFlight;
+
+  inFlight = (async () => {
+    try {
+      const res = await fetch("/api/auth/me", {
+        cache: "no-store",
+        credentials: "include",
+      });
+
+      if (!res.ok) {
+        // Não redireciona aqui — o caller trata do redirect.
+        // (Prompt 113: removido o side-effect que causava o loop 401.)
+        return null;
       }
+
+      const data = await res.json();
+      if (!data?.utilizador) return null;
+
+      return data.utilizador as UtilizadorAuth;
+    } catch {
       return null;
     }
+  })();
 
-    const data = await res.json();
-    if (!data?.utilizador) return null;
-
-    return data.utilizador as UtilizadorAuth;
-  } catch {
-    return null;
+  try {
+    return await inFlight;
+  } finally {
+    // Limpa o cache depois de resolver para que uma chamada posterior
+    // (ex.: após login) volte a consultar o backend.
+    inFlight = null;
   }
 }
 
