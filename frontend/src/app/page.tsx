@@ -1,43 +1,30 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { ArrowRight } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { lerUtilizador, rotaPorRole } from "@/lib/auth";
 
 /**
  * Landing page — ponto de entrada público.
  *
  * Estética premium: fundo limpo, marca minimalista, um único botão de ação.
  *
- * Se o utilizador já tiver um token válido (cookie httpOnly), é redirecionado
- * automaticamente para o seu painel (admin → /admin, gestor → /gestor,
- * staff → /staff). A verificação é feita via fetch a /api/auth/me (proxy
- * que lê o cookie httpOnly no servidor).
+ * Prompt 113 (iteração 3) — Removido o fetch a /api/auth/me.
+ *
+ * Antes, esta página chamava `lerUtilizador()` no mount para detetar se o
+ * utilizador já tinha sessão e redirecionar para o painel. Mas isso gerava
+ * 1 pedido 401 no console de qualquer visitante sem sessão (a maioria).
+ *
+ * Ora, o `middleware.ts` (Edge) JÁ faz essa verificação via cookie httpOnly:
+ *   - Se autenticado em `/` → redirect para o painel do role.
+ *   - Se NÃO autenticado em `/` → deixa passar (mostra a landing).
+ *
+ * Logo, se a HomePage renderiza, é porque o utilizador NÃO está autenticado.
+ * Não há nada a verificar — o fetch seria sempre 401 e desnecessário.
+ * O botão "Entrar na Plataforma" leva a `/login` (que também não faz fetch).
  */
 export default function HomePage() {
-  const router = useRouter();
-  const [aVerificar, setAVerificar] = useState(true);
-
-  useEffect(() => {
-    let cancelado = false;
-    (async () => {
-      const user = await lerUtilizador();
-      if (cancelado) return;
-      if (user) {
-        router.replace(rotaPorRole(user.role));
-      } else {
-        setAVerificar(false);
-      }
-    })();
-    return () => {
-      cancelado = true;
-    };
-  }, [router]);
-
   return (
     <main className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-background px-6 py-16">
       {/* Padrão de fundo subtil (grid em pontos) — dá profundidade sem distrair */}

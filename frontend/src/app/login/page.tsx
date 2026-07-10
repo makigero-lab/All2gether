@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Loader2, AlertCircle, ArrowLeft } from "lucide-react";
@@ -13,7 +13,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { lerUtilizador, rotaPorRole, limparCacheAuth } from "@/lib/auth";
+import { rotaPorRole, limparCacheAuth } from "@/lib/auth";
 import type { LoginResponse } from "@/lib/api";
 
 /**
@@ -23,11 +23,22 @@ import type { LoginResponse } from "@/lib/api";
  * Ao submeter:
  *   1. POST /api/auth/login (proxy same-origin que encaminha para o backend
  *      e guarda o token num cookie httpOnly no servidor).
- *   2. Em caso de sucesso, consulta /api/auth/me para confirmar o role e
- *      redireciona para o painel correto (admin→/admin, gestor→/gestor,
- *      staff→/staff) ou para ?from= se vier de uma rota protegida.
+ *   2. Em caso de sucesso, redireciona para o painel correto
+ *      (admin→/admin, gestor→/gestor, staff→/staff) ou para ?from= se
+ *      vier de uma rota protegida.
  *
- * Se o utilizador já tiver sessão, é redirecionado automaticamente.
+ * Prompt 113 (iteração 3) — Removido o fetch a /api/auth/me no mount.
+ *
+ * Antes, esta página chamava `lerUtilizador()` no mount para detetar sessão
+ * existente e redirecionar. Mas isso gerava 1 pedido 401 no console de
+ * qualquer visitante sem sessão.
+ *
+ * O `middleware.ts` (Edge) JÁ faz essa verificação via cookie httpOnly:
+ *   - Se autenticado em `/login` → redirect para o painel do role.
+ *   - Se NÃO autenticado em `/login` → deixa passar (mostra o formulário).
+ *
+ * Logo, se a LoginPage renderiza, é porque o utilizador NÃO está autenticado.
+ * Não há nada a verificar — mostrar o formulário de login diretamente.
  */
 export default function LoginPage() {
   return (
@@ -51,21 +62,6 @@ function LoginConteudo() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
-
-  // Se já estiver autenticado, redireciona para o painel (ou para ?from=).
-  useEffect(() => {
-    let cancelado = false;
-    (async () => {
-      const user = await lerUtilizador();
-      if (cancelado) return;
-      if (user) {
-        router.replace(from || rotaPorRole(user.role));
-      }
-    })();
-    return () => {
-      cancelado = true;
-    };
-  }, [router, from]);
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
