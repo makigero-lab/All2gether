@@ -314,6 +314,8 @@ export default function CalendarioOperacionalPage() {
   const [equipa, setEquipa] = useState<UtilizadorDTO[]>([]);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
+  // Prompt 114 — Toast de warning (ex.: distância entre tarefas do mesmo dia).
+  const [warningToast, setWarningToast] = useState<string | null>(null);
 
   // SSR-safe mount: FullCalendar só pode ser renderizado no cliente.
   const [mounted, setMounted] = useState(false);
@@ -353,8 +355,9 @@ export default function CalendarioOperacionalPage() {
       setPropriedades((propRes.propriedades ?? []).filter((p) => p.ativo));
       setEquipa(
         // Prompt 105 — Só staff pode receber limpezas.
+        // Prompt 114 — Só staff ATIVO (não inativos/desativados).
         (equipaRes.utilizadores ?? []).filter(
-          (u) => u.role === "staff"
+          (u) => u.role === "staff" && u.ativo === true
         )
       );
     } catch (e) {
@@ -611,14 +614,17 @@ export default function CalendarioOperacionalPage() {
     if (!tarefaSelecionada || !reatribuindoPara) return;
     setReatribuindo(true);
     try {
+      // Prompt 114 — Captura warning de distância.
       const res = await adminPatch<{
         tarefa: TarefaCalendario;
         novo_inicio: string;
         origem: string;
         tempo_viagem: number;
+        warning?: string;
       }>(`/api/gestor/tarefas/${tarefaSelecionada._id}/reatribuir`, {
         utilizador_id: reatribuindoPara,
       });
+      if (res.warning) setWarningToast(res.warning);
 
       // Atualiza localmente a tarefa no estado com a data recalculada.
       const novoStaff = equipa.find((u) => u._id === reatribuindoPara);
@@ -711,14 +717,19 @@ export default function CalendarioOperacionalPage() {
     }
     setNovaTarefaLoading(true);
     try {
-      await adminPost("/api/gestor/tarefas", {
-        propriedade_id: novaForm.propriedade_id,
-        utilizador_id: novaForm.utilizador_id || null,
-        // Prompt 113 — meia-noite LOCAL (ISO com Z) para não gravar como 01:00.
-        data: paraIsoMeiaNoiteLocal(novaForm.data),
-        tempo_limpeza_minutos: Number(novaForm.tempo_limpeza_minutos) || 45,
-        tipo: novaForm.tipo,
-      });
+      // Prompt 114 — Captura warning de distância (Haversine > 15km).
+      const res = await adminPost<{ tarefa: TarefaCalendario; warning?: string }>(
+        "/api/gestor/tarefas",
+        {
+          propriedade_id: novaForm.propriedade_id,
+          utilizador_id: novaForm.utilizador_id || null,
+          // Prompt 113 — meia-noite LOCAL (ISO com Z) para não gravar como 01:00.
+          data: paraIsoMeiaNoiteLocal(novaForm.data),
+          tempo_limpeza_minutos: Number(novaForm.tempo_limpeza_minutos) || 45,
+          tipo: novaForm.tipo,
+        }
+      );
+      if (res.warning) setWarningToast(res.warning);
       setNovaForm({
         propriedade_id: "",
         utilizador_id: "",
@@ -1016,6 +1027,17 @@ export default function CalendarioOperacionalPage() {
           <span>{erro}</span>
           <Button variant="outline" size="sm" onClick={carregarTarefas} className="ml-auto">
             Tentar novamente
+          </Button>
+        </div>
+      )}
+
+      {/* Prompt 114 — Toast de warning (ex.: distância entre tarefas do mesmo dia) */}
+      {warningToast && (
+        <div className="flex items-center gap-3 rounded-lg border border-amber-500/50 bg-amber-50 p-4 text-sm text-amber-700 dark:bg-amber-950/20 dark:text-amber-300">
+          <AlertCircle className="h-5 w-5 shrink-0" />
+          <span className="flex-1">{warningToast}</span>
+          <Button variant="outline" size="sm" onClick={() => setWarningToast(null)} className="ml-auto">
+            Fechar
           </Button>
         </div>
       )}

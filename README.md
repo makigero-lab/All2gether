@@ -116,6 +116,10 @@ A API arranca na porta definida em `PORT` (por defeito **5000**).
 | `GET`  | `/api/admin/empresas` | Lista todas as empresas (cross-tenant) com gestor principal. **Auth:** JWT + `isAdmin`. |
 | `POST` | `/api/admin/empresas/:id/impersonar` | Gera token JWT do gestor de uma empresa (impersonation). Se a empresa não tiver gestor ativo, o admin faz override (token com empresa_id alvo + role 'gestor'). Guarda o token de admin num cookie separado para "Voltar a Admin". **Auth:** JWT + `isAdmin`. |
 | `POST` | `/api/auth/exit-impersonation` | Restaura a sessão de Super Admin após impersonação (copia o cookie `autocell_admin_token` de volta para `autocell_token`). **Auth:** implícita (cookie). (Prompt 113) |
+| `GET`  | `/api/auth/me/notificacoes` | Lista notificações in-app do utilizador (query `?lidas=false` para só não-lidas). **Auth:** JWT. (Prompt 114) |
+| `GET`  | `/api/auth/me/notificacoes/contagem` | Contagem de notificações não-lidas (para o badge do sino). **Auth:** JWT. (Prompt 114) |
+| `PATCH`| `/api/auth/me/notificacoes/marcar-lidas` | Marca TODAS as notificações não-lidas como lidas. **Auth:** JWT. (Prompt 114) |
+| `PATCH`| `/api/auth/me/notificacoes/:id/lida` | Marca UMA notificação como lida. **Auth:** JWT. (Prompt 114) |
 | `GET`  | `/api/admin/empresas/:empresaId/utilizadores` | Lista todos os utilizadores (gestores + staff) de uma empresa terceira. **Auth:** JWT + `isAdmin`. |
 | `POST` | `/api/admin/empresas/:empresaId/utilizadores` | Cria um gestor/staff numa empresa terceira (empresa_id vem do URL). Body: `nome`, `email`, `password`, `role?`. **Auth:** JWT + `isAdmin`. |
 | `PATCH`| `/api/admin/empresas/:empresaId/utilizadores/:utilizadorId/estado` | Alterna ativo/inativo de um utilizador de uma empresa terceira. Body (opcional): `{ ativo: boolean }`. **Auth:** JWT + `isAdmin`. |

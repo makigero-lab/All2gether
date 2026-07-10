@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/dialog";
 import { fazerLogout, lerUtilizador } from "@/lib/auth";
 import type { UtilizadorAuth } from "@/lib/auth";
+import { NotificationBell } from "@/components/notification-bell";
 
 /**
  * Interface para a tarefa real vinda da API.
@@ -197,17 +198,20 @@ export default function StaffPage() {
               </span>
             </div>
           </div>
-          {/* Botão logout */}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="text-muted-foreground hover:text-destructive"
-            onClick={() => fazerLogout()}
-            aria-label="Terminar sessão"
-            title="Terminar sessão"
-          >
-            <LogOut className="h-5 w-5" />
-          </Button>
+          {/* Prompt 114 — Sino de Notificações + Botão logout */}
+          <div className="flex items-center gap-1">
+            <NotificationBell />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-muted-foreground hover:text-destructive"
+              onClick={() => fazerLogout()}
+              aria-label="Terminar sessão"
+              title="Terminar sessão"
+            >
+              <LogOut className="h-5 w-5" />
+            </Button>
+          </div>
         </div>
 
         {/* Data + resumo */}

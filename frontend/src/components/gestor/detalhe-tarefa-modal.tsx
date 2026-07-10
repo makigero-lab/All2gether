@@ -9,6 +9,7 @@ import {
   LogOut,
   Wrench,
   User,
+  Users,
   AlertTriangle,
   StickyNote,
 } from "lucide-react";
@@ -46,7 +47,7 @@ export interface TarefaDetalheGestor {
     pax?: number | null;
     nome_hospede?: string | null;
   } | null;
-  propriedade_id?: { nome: string; morada?: string } | null;
+  propriedade_id?: { nome: string; morada?: string; capacidade_hospedes?: number | null } | null;
   utilizador_id?: { nome: string } | null;
 }
 
@@ -180,6 +181,18 @@ export function DetalheTarefaModal({
                 </span>
               )}
             </div>
+
+            {/* Prompt 114 — Lotação/Capacidade Máxima destacada */}
+            {tarefa.propriedade_id?.capacidade_hospedes != null &&
+              tarefa.propriedade_id.capacidade_hospedes > 0 && (
+                <div className="flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-50 px-3 py-2 text-sm dark:bg-amber-950/20">
+                  <Users className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                  <span className="text-amber-900 dark:text-amber-100">
+                    <strong>Lotação máxima:</strong>{" "}
+                    {tarefa.propriedade_id.capacidade_hospedes} hóspede(s)
+                  </span>
+                </div>
+              )}
 
             {/* Prompt 95 — Card de detalhes da reserva Smoobu */}
             <DetalhesReservaCard detalhes={tarefa.detalhes_reserva} />

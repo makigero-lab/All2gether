@@ -18,6 +18,7 @@ import {
   Check,
   AlertTriangle,
   Loader2,
+  Users,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -263,6 +264,17 @@ export function DetalheTarefaClient({
 
       {/* Conteúdo principal */}
       <main className="flex-1 space-y-5 p-5">
+        {/* Prompt 114 — Lotação/Capacidade Máxima destacada */}
+        {tarefa.capacidade_hospedes != null && tarefa.capacidade_hospedes > 0 && (
+          <div className="flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-50 px-3 py-2.5 text-sm dark:bg-amber-950/20">
+            <Users className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+            <span className="text-amber-900 dark:text-amber-100">
+              <strong>Lotação máxima:</strong>{" "}
+              {tarefa.capacidade_hospedes} hóspede(s)
+            </span>
+          </div>
+        )}
+
         {/* Prompt 95 — Card de detalhes da reserva Smoobu (se existir). */}
         <DetalhesReservaCard detalhes={tarefa.detalhes_reserva} />
 

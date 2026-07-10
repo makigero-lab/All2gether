@@ -20,6 +20,83 @@ const {
   verificarDisponibilidadeUtilizador,
   mensagemIndisponivel,
 } = require('../utils/disponibilidade');
+// Prompt 114 — Haversine para warning logístico (>15km entre tarefas do mesmo dia).
+const { distanciaHaversine } = require('../utils/distancia');
+
+/**
+ * Prompt 114 — Limite de distância (km) para warning logístico.
+ * Se um staff tiver duas tarefas no mesmo dia em propriedades a mais de
+ * 15km, o backend retorna um warning (não bloqueia) para o gestor ter
+ * noção da logística.
+ */
+const LIMITE_DISTANCIA_KM = 15;
+
+/**
+ * Prompt 114 — Verifica se o staff tem outra(s) tarefa(s) no mesmo dia e,
+ * se ambas as propriedades tiverem coordenadas, calcula a distância entre
+ * a tarefa atual e a mais próxima. Se > LIMITE_DISTANCIA_KM, devolve um
+ * warning.
+ *
+ * @param {string} utilizadorId
+ * @param {Date} dataTarefa
+ * @param {string} propriedadeIdAtual
+ * @returns {Promise<string|null>} mensagem de warning ou null
+ */
+async function verificarDistanciaTarefasDia(utilizadorId, dataTarefa, propriedadeIdAtual) {
+  try {
+    if (!utilizadorId || !dataTarefa || !propriedadeIdAtual) return null;
+
+    // Normaliza o dia (meia-noite UTC para comparar mesmo-dia).
+    const d = new Date(dataTarefa);
+    const inicioDia = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+    const fimDia = new Date(inicioDia.getTime() + 24 * 60 * 60 * 1000);
+
+    // Busca as outras tarefas do staff nesse dia (excluindo a atual e
+    // canceladas/concluídas que já não contam para logística).
+    const outrasTarefas = await Tarefa.find({
+      utilizador_id: utilizadorId,
+      data: { $gte: inicioDia, $lt: fimDia },
+      _id: { $ne: null },
+      estado: { $nin: ['cancelada', 'concluida'] },
+    })
+      .populate('propriedade_id', 'coordenadas nome')
+      .lean();
+
+    if (!outrasTarefas || outrasTarefas.length === 0) return null;
+
+    // Carrega a propriedade atual para obter coordenadas.
+    const propAtual = await Propriedade.findById(propriedadeIdAtual).select('coordenadas nome').lean();
+    if (!propAtual || !propAtual.coordenadas) return null;
+    const coordAtual = propAtual.coordenadas;
+    if (typeof coordAtual.lat !== 'number' || typeof coordAtual.lng !== 'number') return null;
+
+    // Calcula a distância para cada outra tarefa e fica com a máxima.
+    let distanciaMax = 0;
+    let propriedadeDistante = null;
+    for (const t of outrasTarefas) {
+      const coordOutra = t.propriedade_id?.coordenadas;
+      if (!coordOutra || typeof coordOutra.lat !== 'number' || typeof coordOutra.lng !== 'number') continue;
+      // Ignora se for a MESMA propriedade (distância 0).
+      if (String(t.propriedade_id?._id) === String(propriedadeIdAtual)) continue;
+      const dist = distanciaHaversine(coordAtual, coordOutra);
+      if (dist > distanciaMax) {
+        distanciaMax = dist;
+        propriedadeDistante = t.propriedade_id;
+      }
+    }
+
+    if (distanciaMax > LIMITE_DISTANCIA_KM) {
+      const kmFmt = distanciaMax.toFixed(1).replace('.', ',');
+      const nomeOutra = propriedadeDistante?.nome ?? 'outra propriedade';
+      return `Atenção: A tarefa anterior deste funcionário fica a ${kmFmt} km de distância (em "${nomeOutra}").`;
+    }
+
+    return null;
+  } catch (err) {
+    console.error('⚠️  verificarDistanciaTarefasDia:', err.message);
+    return null; // não bloqueia em caso de erro
+  }
+}
 // v1.63.0 (Prompt 86) — Load balancer partilhado do webhookController para
 // a auto-atribuição em lote.
 const { _determinarUtilizadorAtribuido: determinarUtilizadorAtribuido } = require('./webhookController');
@@ -264,7 +341,8 @@ exports.criarTarefa = async (req, res) => {
           String(utilizadorValidado),
           tituloNotif,
           corpoNotif,
-          '/staff'
+          '/staff',
+          { tipo: 'tarefa_atribuida', empresa_id: String(empresaId) }
         );
       } catch (e) {
         // Fire-and-forget: não bloqueia a criação.
@@ -272,7 +350,19 @@ exports.criarTarefa = async (req, res) => {
       }
     }
 
-    return res.status(201).json({ tarefa: nova });
+    // Prompt 114 — Warning logístico (distância entre tarefas do mesmo dia).
+    let warning = null;
+    if (utilizadorValidado) {
+      warning = await verificarDistanciaTarefasDia(
+        utilizadorValidado,
+        dataNormalizada,
+        propriedade_id
+      );
+    }
+
+    const resposta = { tarefa: nova };
+    if (warning) resposta.warning = warning;
+    return res.status(201).json(resposta);
   } catch (err) {
     console.error('❌ criarTarefa:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
@@ -352,16 +442,12 @@ exports.atribuirTarefa = async (req, res) => {
         )
           .select('nome')
           .lean();
-        const dataFmt = new Date(tarefa.data).toLocaleDateString('pt-PT', {
-          day: '2-digit',
-          month: '2-digit',
-          year: 'numeric',
-        });
         notificarUtilizador(
           String(tarefa.utilizador_id),
           '🔄 Tarefa reatribuída',
           `Foste escalado para limpar a ${propriedade?.nome ?? 'Propriedade'}.`,
-          '/staff'
+          '/staff',
+          { tipo: 'tarefa_reatribuida', empresa_id: String(empresaId) }
         );
       } catch (e) {
         // Fire-and-forget: não bloqueia a resposta.
@@ -369,7 +455,19 @@ exports.atribuirTarefa = async (req, res) => {
       }
     }
 
-    return res.status(200).json({ tarefa });
+    // Prompt 114 — Warning logístico (distância entre tarefas do mesmo dia).
+    let warning = null;
+    if (utilizador_id) {
+      warning = await verificarDistanciaTarefasDia(
+        String(tarefa.utilizador_id),
+        tarefa.data,
+        String(tarefa.propriedade_id)
+      );
+    }
+
+    const resposta = { tarefa };
+    if (warning) resposta.warning = warning;
+    return res.status(200).json(resposta);
   } catch (err) {
     console.error('❌ atribuirTarefa:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
@@ -576,21 +674,31 @@ exports.reatribuirTarefa = async (req, res) => {
         String(novoUser._id),
         '🔄 Tarefa reatribuída',
         `Foste escalado para limpar a ${propriedade.nome ?? 'Propriedade'}.`,
-        '/staff'
+        '/staff',
+        { tipo: 'tarefa_reatribuida', empresa_id: String(empresaId) }
       );
     } catch (e) {
       console.error('⚠️  notificar reatribuição:', e.message);
     }
 
+    // Prompt 114 — Warning logístico (distância entre tarefas do mesmo dia).
+    const warning = await verificarDistanciaTarefasDia(
+      String(novoUser._id),
+      tarefa.data,
+      String(tarefa.propriedade_id)
+    );
+
     const tarefaResp = tarefa.toObject();
     delete tarefaResp.__v;
 
-    return res.status(200).json({
+    const resposta = {
       tarefa: tarefaResp,
       novo_inicio: resultadoScheduler.data.toISOString(),
       origem: resultadoScheduler.origem,
       tempo_viagem: resultadoScheduler.tempoViagem,
-    });
+    };
+    if (warning) resposta.warning = warning;
+    return res.status(200).json(resposta);
   } catch (err) {
     console.error('❌ reatribuirTarefa:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });

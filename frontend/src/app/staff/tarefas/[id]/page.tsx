@@ -64,6 +64,8 @@ export default function DetalheTarefaPage({
     endereco: tarefa.propriedade_id?.morada,
     // Prompt 95 — detalhes da reserva Smoobu (para card de destaque).
     detalhes_reserva: tarefa.detalhes_reserva ?? null,
+    // Prompt 114 — Lotação máxima da propriedade (para destaque no detalhe).
+    capacidade_hospedes: tarefa.propriedade_id?.capacidade_hospedes ?? null,
   };
 
   // Usa a checklist real da propriedade (vinda do populate do backend).

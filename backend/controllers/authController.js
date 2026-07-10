@@ -244,7 +244,8 @@ exports.minhaTarefaDetalhe = async (req, res) => {
       _id: id,
       utilizador_id: req.user.id,
     })
-      .populate({ path: 'propriedade_id', select: 'nome morada coordenadas checklist' })
+      // Prompt 114 — Inclui capacidade_hospedes para destaque no detalhe.
+      .populate({ path: 'propriedade_id', select: 'nome morada coordenadas checklist capacidade_hospedes' })
       .lean();
 
     if (!tarefa) {

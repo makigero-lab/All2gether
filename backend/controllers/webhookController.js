@@ -771,13 +771,15 @@ async function criarTarefaPorReserva(reservaId, smoobuPropId, dataTarefaRaw, det
 
     // v1.37.0 — Notificação push ao staff (se tiver subscrição ativa).
     // v1.65.0 (Prompt 88) — Mensagem mais descritiva.
+    // Prompt 114 — Agora cria também notificação in-app (tipo: tarefa_atribuida).
     const { notificarUtilizador } = require('../utils/notificar');
     const propNome = propriedade?.nome ?? 'Propriedade';
     notificarUtilizador(
       String(utilizadorAtribuido),
       '🧹 Nova Limpeza Atribuída',
       `Foste escalado para limpar a ${propNome}.`,
-      '/staff'
+      '/staff',
+      { tipo: 'tarefa_atribuida', empresa_id: String(empresaId) }
     );
   } else {
     console.log(
