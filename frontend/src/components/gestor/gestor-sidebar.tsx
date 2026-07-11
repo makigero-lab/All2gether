@@ -10,7 +10,6 @@ import {
   CalendarRange,
   ClipboardList,
   BarChart3,
-  Webhook,
   CalendarOff,
   Menu,
   X,
@@ -31,30 +30,33 @@ interface NavItem {
   icon: React.ComponentType<{ className?: string }>;
 }
 
-// Itens do menu do GESTOR (operações) — SEM nenhum link de Admin.
+/**
+ * Prompt 115 — Separação ABSOLUTA de menus.
+ *
+ * O array de links do Gestor contém APENAS:
+ *   Dashboard, Calendário, Tarefas, Propriedades, Equipa, Ausências,
+ *   Relatórios, Configurações.
+ *
+ * NÃO há nenhum link para 'Sistema', 'Empresas', 'Webhooks' ou 'Admin'.
+ * Este ficheiro é dedicado ao Gestor e não partilha código com o Admin.
+ */
 const gestorNavItems: NavItem[] = [
   { label: "Dashboard", href: "/gestor", icon: LayoutDashboard },
-  { label: "Propriedades", href: "/gestor/propriedades", icon: Building2 },
+  { label: "Calendário", href: "/gestor/calendario", icon: CalendarRange },
   { label: "Tarefas", href: "/gestor/tarefas", icon: ClipboardList },
+  { label: "Propriedades", href: "/gestor/propriedades", icon: Building2 },
   { label: "Equipa", href: "/gestor/equipa", icon: Users },
   { label: "Ausências / Férias", href: "/gestor/ausencias", icon: CalendarOff },
-  { label: "Calendário", href: "/gestor/calendario", icon: CalendarRange },
   { label: "Relatórios", href: "/gestor/relatorios", icon: BarChart3 },
-  { label: "Webhooks", href: "/gestor/webhooks", icon: Webhook },
   { label: "Configurações", href: "/gestor/configuracoes", icon: Settings },
 ];
 
 /**
  * Barra lateral do Painel do Gestor de Operações.
  *
- * Prompt 114 — Isolamento ESTRITO do menu Admin:
- *   Este componente é dedicado ao Gestor. NÃO importa nem renderiza NADA de
- *   admin. Antes, o `gestor/layout.tsx` usava `AdminSidebar` (partilhado)
- *   com `mode="gestor"` — o que era confuso e levantava dúvidas sobre
- *   isolamento. Agora há um componente separado, claro e auditável.
- *
- * O gestor só vê operações (Dashboard, Propriedades, Tarefas, Equipa,
- * Ausências, Calendário, Relatórios, Webhooks, Configurações).
+ * Prompt 115 — Separação ABSOLUTA: este componente NÃO importa nem renderiza
+ * NADA de admin. Antes, o `gestor/layout.tsx` usava `AdminSidebar` (partilhado)
+ * com `mode="gestor"` — agora há um componente dedicado e isolado.
  */
 export function GestorSidebar() {
   const pathname = usePathname();
@@ -98,7 +100,7 @@ export function GestorSidebar() {
       </div>
       <div className="flex flex-col leading-none">
         <span className="text-sm font-bold">Autocell</span>
-        <span className="text-[11px] text-muted-foreground">Admin</span>
+        <span className="text-[11px] text-muted-foreground">Gestor</span>
       </div>
     </div>
   );
@@ -115,7 +117,7 @@ export function GestorSidebar() {
         >
           <Menu className="h-5 w-5" />
         </Button>
-        <span className="flex-1 text-sm font-semibold">Autocell — Admin</span>
+        <span className="flex-1 text-sm font-semibold">Autocell — Gestor</span>
         <NotificationBell />
       </header>
 

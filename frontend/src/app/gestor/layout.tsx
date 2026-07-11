@@ -5,13 +5,13 @@ import { ImpersonationBanner } from "@/components/gestor/impersonation-banner";
 /**
  * Layout do Painel do Gestor de Operações.
  *
- * Prompt 114 — Isolamento ESTRITO do menu Admin:
- *   Este layout NÃO importa nem renderiza QUALQUER componente de Admin.
- *   Antes usava `AdminSidebar` (partilhado, com `mode="gestor"`) — agora
- *   usa o `GestorSidebar` dedicado, que só contém os items de operações.
+ * Prompt 115 — Separação ABSOLUTA:
+ *   Importa e usa EXCLUSIVAMENTE o <GestorSidebar/>. Não há nenhuma lógica
+ *   que importe o menu de admin. O GestorSidebar é um componente dedicado
+ *   (sem `mode` prop) que só contém links de operações do gestor.
  *
- *   O gestor vê apenas: Dashboard, Propriedades, Tarefas, Equipa, Ausências,
- *   Calendário, Relatórios, Webhooks, Configurações + Sino de Notificações.
+ *   O gestor vê apenas: Dashboard, Calendário, Tarefas, Propriedades,
+ *   Equipa, Ausências, Relatórios, Configurações + Sino de Notificações.
  *
  * Protegido por RouteGuard (role "gestor").
  *
