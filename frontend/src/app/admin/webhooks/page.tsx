@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { lerUtilizador } from "@/lib/auth";
+import { parsearDataSegura } from "@/lib/utils";
 
 interface WebhookLogDTO {
   _id: string;
@@ -38,8 +39,10 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "success" | "dest
 };
 
 function formatarData(iso: string): string {
+  const d = parsearDataSegura(iso);
+  if (!d) return iso;
   try {
-    return new Date(iso).toLocaleString("pt-PT", {
+    return d.toLocaleString("pt-PT", {
       day: "2-digit",
       month: "2-digit",
       year: "numeric",

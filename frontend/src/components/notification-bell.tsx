@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Bell, Check } from "lucide-react";
 
-import { cn } from "@/lib/utils";
+import { cn, parsearDataSegura } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
 /**
@@ -143,8 +143,9 @@ export function NotificationBell() {
   }
 
   function formatarData(iso: string): string {
+    const d = parsearDataSegura(iso);
+    if (!d) return "";
     try {
-      const d = new Date(iso);
       const agora = new Date();
       const diffMs = agora.getTime() - d.getTime();
       const diffMin = Math.floor(diffMs / 60000);

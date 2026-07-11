@@ -9,10 +9,10 @@ import {
   Wrench,
   ChevronRight,
 } from "lucide-react";
-import { format, parseISO } from "date-fns";
+import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 
-import { cn } from "@/lib/utils";
+import { cn, parsearDataSegura } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -53,7 +53,8 @@ function formatarMinutos(min: number) {
 function horaInicio(dataISO?: string): string {
   if (!dataISO) return "—";
   try {
-    const d = parseISO(dataISO);
+    const d = parsearDataSegura(dataISO);
+    if (!d) return "—";
     // Se for meia-noite exata (00:00), considera "sem hora definida".
     if (d.getHours() === 0 && d.getMinutes() === 0) return "—";
     return format(d, "HH:mm", { locale: pt });

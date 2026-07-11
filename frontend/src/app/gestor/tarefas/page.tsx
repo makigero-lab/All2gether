@@ -48,6 +48,7 @@ import {
 } from "@/lib/api";
 import { PaginationBar } from "@/components/admin/pagination-bar";
 import { DetalheTarefaModal } from "@/components/gestor/detalhe-tarefa-modal";
+import { parsearDataSegura } from "@/lib/utils";
 
 interface TarefaAdmin {
   _id: string;
@@ -87,8 +88,10 @@ const ESTADO_VARIANT: Record<string, "default" | "secondary" | "success" | "warn
 };
 
 function formatarData(iso: string): string {
+  const d = parsearDataSegura(iso);
+  if (!d) return iso;
   try {
-    return new Date(iso).toLocaleDateString("pt-PT", {
+    return d.toLocaleDateString("pt-PT", {
       day: "2-digit",
       month: "2-digit",
       year: "numeric",
@@ -103,8 +106,9 @@ function formatarData(iso: string): string {
  * Se a data for meia-noite exata (sem hora definida), mostra só a data.
  */
 function formatarDataHora(iso: string): string {
+  const d = parsearDataSegura(iso);
+  if (!d) return iso;
   try {
-    const d = new Date(iso);
     const data = d.toLocaleDateString("pt-PT", {
       day: "2-digit",
       month: "2-digit",

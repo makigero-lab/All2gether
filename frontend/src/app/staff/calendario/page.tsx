@@ -16,7 +16,7 @@ import {
   LogIn,
   LogOut,
 } from "lucide-react";
-import { format, parseISO, isSameDay, addDays } from "date-fns";
+import { format, isSameDay, addDays } from "date-fns";
 import { pt } from "date-fns/locale";
 
 import { Button } from "@/components/ui/button";
@@ -25,7 +25,7 @@ import {
   Card,
   CardContent,
 } from "@/components/ui/card";
-import { cn } from "@/lib/utils";
+import { cn, parsearDataSegura } from "@/lib/utils";
 
 /**
  * Página de Calendário Pessoal do Staff (/staff/calendario).
@@ -74,7 +74,8 @@ const tipoIcon: Record<string, React.ComponentType<{ className?: string }>> = {
 function horaInicio(dataISO?: string): string {
   if (!dataISO) return "—";
   try {
-    const d = parseISO(dataISO);
+    const d = parsearDataSegura(dataISO);
+    if (!d) return "—";
     if (d.getHours() === 0 && d.getMinutes() === 0) return "—";
     return format(d, "HH:mm", { locale: pt });
   } catch {
@@ -118,13 +119,21 @@ export default function StaffCalendarioPage() {
         for (let i = 0; i < 30; i++) {
           const dia = addDays(hoje, i);
           const tarefasDoDia = data.tarefas
-            .filter((t) => isSameDay(parseISO(t.data), dia))
+            .filter((t) => {
+              const d = parsearDataSegura(t.data);
+              return d ? isSameDay(d, dia) : false;
+            })
             // Ordena por hora de início (mais cedo primeiro).
-            .sort((a, b) => new Date(a.data).getTime() - new Date(b.data).getTime());
+            .sort((a, b) => {
+              const da = parsearDataSegura(a.data);
+              const db = parsearDataSegura(b.data);
+              return (da?.getTime() ?? 0) - (db?.getTime() ?? 0);
+            });
 
           const ausenciaDoDia = data.ausencias.find((a) => {
-            const inicio = parseISO(a.data_inicio);
-            const fim = parseISO(a.data_fim);
+            const inicio = parsearDataSegura(a.data_inicio);
+            const fim = parsearDataSegura(a.data_fim);
+            if (!inicio || !fim) return false;
             return dia >= inicio && dia <= fim;
           }) ?? null;
 

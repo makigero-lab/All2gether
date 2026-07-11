@@ -50,10 +50,76 @@ export function paraIsoMeiaNoiteLocal(dataYYYYMMDD: string): string {
  */
 export function temHoraReal(dataISO: string): boolean {
   try {
-    const d = new Date(dataISO);
+    const d = parsearDataSegura(dataISO);
+    if (!d) return true;
     // Hora LOCAL (o browser está em Lisboa).
     return d.getHours() >= 8;
   } catch {
     return true;
+  }
+}
+
+/**
+ * Prompt Extra (Vacina Anti-Safari) — Parsing de datas compatível com iOS/Safari.
+ *
+ * O Safari (WebKit) NÃO suporta:
+ *   - `new Date("2026-07-15 14:00:00")` (espaço em vez de T) → Invalid Date
+ *   - `new Date("2026-07-15")` (date-only) → interpretado como UTC (não local)
+ *
+ * Esta função normaliza QUALQUER string de data para o formato seguro
+ * ISO 8601 antes de a passar ao `new Date()`:
+ *   1. Substitui espaços por "T" (YYYY-MM-DD HH:mm:ss → YYYY-MM-DDTHH:mm:ss)
+ *   2. Se for date-only (YYYY-MM-DD), adiciona "T00:00:00" (interpretado como LOCAL)
+ *   3. Devolve o objeto Date (ou null se inválida)
+ *
+ * Usar SEMPRE esta função em vez de `new Date(iso)` direto para strings
+ * que vêm do backend (que podem ter formato com espaço, ex.: checkin/checkout
+ * do Smoobu).
+ *
+ * @param input string de data (ISO, date-only, ou com espaço)
+ * @returns Date válido ou null se a data for inválida
+ */
+export function parsearDataSegura(input: string | Date | null | undefined): Date | null {
+  if (!input) return null;
+  if (input instanceof Date) return isNaN(input.getTime()) ? null : input;
+
+  let str = String(input).trim();
+
+  // 1. Se for date-only "YYYY-MM-DD", adiciona T00:00:00 (LOCAL, não UTC).
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    str = `${str}T00:00:00`;
+  }
+
+  // 2. Substitui espaço por "T" (Safari não suporta "YYYY-MM-DD HH:mm:ss").
+  //    Mas só se tiver o padrão YYYY-MM-DD seguido de espaço + HH:mm.
+  str = str.replace(/^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})/, "$1T$2");
+
+  // 3. Cria o Date. Se não tiver Z (UTC), é interpretado como LOCAL.
+  const d = new Date(str);
+  if (isNaN(d.getTime())) return null;
+  return d;
+}
+
+/**
+ * Prompt Extra (Vacina Anti-Safari) — Formata uma data de forma segura.
+ *
+ * Usa `parsearDataSegura` internamente para garantir compatibilidade com
+ * Safari/iOS. Devolve string formatada ou fallback.
+ *
+ * @param input string de data
+ * @param formatFn função de formatação (ex.: do date-fns)
+ * @param fallback string a devolver se a data for inválida
+ */
+export function formatarDataSegura(
+  input: string | Date | null | undefined,
+  formatFn: (d: Date) => string,
+  fallback = "—"
+): string {
+  const d = parsearDataSegura(input);
+  if (!d) return fallback;
+  try {
+    return formatFn(d);
+  } catch {
+    return fallback;
   }
 }

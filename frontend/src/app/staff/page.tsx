@@ -28,6 +28,8 @@ import {
 import { fazerLogout, lerUtilizador } from "@/lib/auth";
 import type { UtilizadorAuth } from "@/lib/auth";
 import { NotificationBell } from "@/components/notification-bell";
+// Prompt Extra — parsearDataSegura para compatibilidade Safari/iOS.
+import { parsearDataSegura } from "@/lib/utils";
 
 /**
  * Interface para a tarefa real vinda da API.
@@ -113,8 +115,9 @@ export default function StaffPage() {
         );
         const temFaltaHoje = (ausData.ausencias ?? []).some((a: { estado: string; data_inicio: string; data_fim: string }) => {
           if (a.estado !== "pendente_emergencia") return false;
-          const ini = new Date(a.data_inicio);
-          const fim = new Date(a.data_fim);
+          const ini = parsearDataSegura(a.data_inicio);
+          const fim = parsearDataSegura(a.data_fim);
+          if (!ini || !fim) return false;
           return hojeUTC >= ini && hojeUTC <= fim;
         });
         setFaltaPendente(temFaltaHoje);
@@ -196,7 +199,7 @@ export default function StaffPage() {
     const grupos: Record<string, TarefaReal[]> = {};
     for (const t of tarefasAtivas) {
       // Extrai a data de calendário (Lisboa) da tarefa.
-      const dia = new Date(t.data).toLocaleDateString("pt-PT", { timeZone: "Europe/Lisbon" });
+      const dia = (parsearDataSegura(t.data) ?? new Date()).toLocaleDateString("pt-PT", { timeZone: "Europe/Lisbon" });
       if (!grupos[dia]) grupos[dia] = [];
       grupos[dia].push(t);
     }

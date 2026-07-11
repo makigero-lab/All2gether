@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/dialog";
 import { fazerLogout, lerUtilizador } from "@/lib/auth";
 import type { UtilizadorAuth } from "@/lib/auth";
+import { formatarDataSegura } from "@/lib/utils";
 
 /* ------------------------------------------------------------------ */
 /* Tipos                                                               */
@@ -506,9 +507,11 @@ export default function SuperAdminPage() {
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">
                         {emp.createdAt
-                          ? format(new Date(emp.createdAt), "d MMM yyyy", {
-                              locale: pt,
-                            })
+                          ? formatarDataSegura(
+                              emp.createdAt,
+                              (d) => format(d, "d MMM yyyy", { locale: pt }),
+                              "—"
+                            )
                           : "—"}
                       </td>
                       <td className="px-4 py-3">

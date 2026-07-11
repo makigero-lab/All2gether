@@ -23,6 +23,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { adminGet, adminPost } from "@/lib/api";
+import { parsearDataSegura } from "@/lib/utils";
 
 /* ------------------------------------------------------------------ */
 /* Tipos                                                               */
@@ -69,7 +70,8 @@ const FILTROS: { id: WebhookStatus | "todos"; label: string }[] = [
 /* ------------------------------------------------------------------ */
 
 function formatarData(iso: string): string {
-  const d = new Date(iso);
+  const d = parsearDataSegura(iso);
+  if (!d) return iso;
   return d.toLocaleString("pt-PT", {
     day: "2-digit",
     month: "2-digit",
