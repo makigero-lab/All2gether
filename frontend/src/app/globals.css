@@ -464,3 +464,51 @@
   border-radius: calc(var(--radius) - 1px);
   margin-top: 1px;
 }
+
+/* ------------------------------------------------------------------ */
+/* Prompt 118 — Estilos de impressão (Exportar PDF nos Relatórios)     */
+/* ------------------------------------------------------------------ */
+/* Quando o utilizador carrega em "Exportar PDF" (window.print()), estes */
+/* estilos escondem a sidebar, o header mobile e outros elementos de    */
+/* navegação, deixando só o conteúdo do relatório (gráficos + métricas). */
+@media print {
+  /* Esconde sidebars, headers e botões de navegação. */
+  aside,
+  header[class*="sticky"],
+  [class*="print:hidden"] {
+    display: none !important;
+  }
+
+  /* O layout flex-row (sidebar + main) passa a só main, em largura total. */
+  .lg\:flex-row {
+    flex-direction: column !important;
+  }
+
+  /* Remove o padding da página para a impressão usar toda a largura. */
+  body {
+    background: white !important;
+  }
+
+  /* Garante que os gráficos (recharts SVG) não quebram entre páginas. */
+  .recharts-wrapper,
+  .recharts-surface {
+    page-break-inside: avoid;
+  }
+
+  /* Cards não quebram entre páginas. */
+  [class*="rounded-lg"],
+  [class*="rounded-xl"] {
+    page-break-inside: avoid;
+  }
+
+  /* Cores de fundo dos cards ficam brancas para poupar tinta. */
+  [class*="bg-card"],
+  [class*="bg-muted"] {
+    background: white !important;
+  }
+
+  /* Remove shadows que não aparecem na impressão. */
+  * {
+    box-shadow: none !important;
+  }
+}

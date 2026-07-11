@@ -19,6 +19,7 @@ import {
   AlertTriangle,
   Loader2,
   Users,
+  CalendarRange,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -260,6 +261,40 @@ export function DetalheTarefaClient({
             </span>
           )}
         </div>
+
+        {/* Prompt 118 — Data da Limpeza + Hora destacadas no topo */}
+        {tarefa.data && (
+          <div className="mt-3 flex items-center gap-3 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5">
+            <CalendarRange className="h-5 w-5 shrink-0 text-primary" />
+            <div className="flex-1">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                Data da Limpeza
+              </p>
+              <p className="text-sm font-bold text-foreground">
+                {(() => {
+                  try {
+                    const d = new Date(tarefa.data);
+                    const dataFmt = d.toLocaleDateString("pt-PT", {
+                      weekday: "long",
+                      day: "numeric",
+                      month: "long",
+                      year: "numeric",
+                      timeZone: "Europe/Lisbon",
+                    });
+                    const hora = d.toLocaleTimeString("pt-PT", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      timeZone: "Europe/Lisbon",
+                    });
+                    return hora !== "00:00" ? `${dataFmt} · ${hora}` : dataFmt;
+                  } catch {
+                    return tarefa.data;
+                  }
+                })()}
+              </p>
+            </div>
+          </div>
+        )}
       </header>
 
       {/* Conteúdo principal */}

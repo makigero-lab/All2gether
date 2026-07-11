@@ -1,25 +1,28 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Bell, Check } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
 /**
- * Sino de Notificações In-App — Prompt 114.
+ * Sino de Notificações In-App — Prompt 114 / 118.
  *
  * Mostra um ícone de sino com badge vermelho (count de não-lidas). Ao
- * clicar, abre um dropdown com a lista de notificações e marca todas como
- * lidas via PATCH /api/auth/me/notificacoes/marcar-lidas.
+ * clicar, abre um dropdown com a lista de notificações.
  *
- * Componente genérico — funciona para qualquer utilizador autenticado
- * (gestor ou staff). Usa o proxy /api/auth/me/notificacoes (cookie httpOnly).
+ * Prompt 118 — Melhorias:
+ *   - Dropdown com max-h-[80vh] + overflow-y-auto (não transborda o ecrã).
+ *   - Notificações clicáveis: ao clicar, faz PATCH para marcar como lida e
+ *     redireciona para a tarefa em questão (se houver tarefa_id).
+ *   - Ao abrir, marca todas como lidas (depois de mostrar a lista).
  *
- * Polling: a cada 30s, refaz a contagem de não-lidas para manter o badge
- * atualizado sem precisar de refresh.
+ * Polling: a cada 30s, refaz a contagem de não-lidas.
  */
 export function NotificationBell() {
+  const router = useRouter();
   const [naoLidas, setNaoLidas] = useState(0);
   const [aberto, setAberto] = useState(false);
   const [notificacoes, setNotificacoes] = useState<Array<{
@@ -29,6 +32,7 @@ export function NotificationBell() {
     url: string;
     lida: boolean;
     data: string;
+    tarefa_id?: string | null;
   }>>([]);
   const [carregando, setCarregando] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -100,10 +104,41 @@ export function NotificationBell() {
             credentials: "include",
           });
           setNaoLidas(0);
+          // Atualiza o estado local para refletir "lida".
+          setNotificacoes((prev) => prev.map((n) => ({ ...n, lida: true })));
         } catch {
           // silencioso
         }
       }
+    }
+  }
+
+  /**
+   * Prompt 118 — Ao clicar numa notificação:
+   *   1. Faz PATCH para marcar como lida (se ainda não estiver).
+   *   2. Redireciona para a tarefa (se houver tarefa_id) ou para o url.
+   */
+  async function handleClickNotificacao(n: typeof notificacoes[number]) {
+    // Marca como lida (individual) se ainda não estiver.
+    if (!n.lida) {
+      try {
+        await fetch(`/api/auth/me/notificacoes/${n._id}/lida`, {
+          method: "PATCH",
+          credentials: "include",
+        });
+        setNotificacoes((prev) =>
+          prev.map((x) => (x._id === n._id ? { ...x, lida: true } : x))
+        );
+      } catch {
+        // silencioso
+      }
+    }
+    setAberto(false);
+    // Redireciona para a tarefa (staff) ou para o url.
+    if (n.tarefa_id) {
+      router.push(`/staff/tarefas/${n.tarefa_id}`);
+    } else if (n.url) {
+      router.push(n.url);
     }
   }
 
@@ -141,8 +176,8 @@ export function NotificationBell() {
       </Button>
 
       {aberto && (
-        <div className="absolute right-0 top-full z-50 mt-2 w-80 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border bg-card shadow-lg">
-          <div className="flex items-center justify-between border-b px-4 py-3">
+        <div className="absolute right-0 top-full z-50 mt-2 flex max-h-[80vh] w-80 max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-lg border bg-card shadow-lg">
+          <div className="flex shrink-0 items-center justify-between border-b px-4 py-3">
             <span className="text-sm font-semibold">Notificações</span>
             {naoLidas > 0 && (
               <span className="text-xs text-muted-foreground">
@@ -150,7 +185,7 @@ export function NotificationBell() {
               </span>
             )}
           </div>
-          <div className="max-h-96 overflow-y-auto">
+          <div className="flex-1 overflow-y-auto">
             {carregando ? (
               <div className="px-4 py-8 text-center text-sm text-muted-foreground">
                 A carregar…
@@ -165,8 +200,9 @@ export function NotificationBell() {
                 {notificacoes.map((n) => (
                   <li
                     key={n._id}
+                    onClick={() => handleClickNotificacao(n)}
                     className={cn(
-                      "flex items-start gap-3 px-4 py-3 text-sm transition-colors hover:bg-accent/50",
+                      "flex cursor-pointer items-start gap-3 px-4 py-3 text-sm transition-colors hover:bg-accent/50",
                       !n.lida && "bg-primary/5"
                     )}
                   >
@@ -185,7 +221,7 @@ export function NotificationBell() {
             )}
           </div>
           {notificacoes.length > 0 && (
-            <div className="border-t px-4 py-2 text-center">
+            <div className="shrink-0 border-t px-4 py-2 text-center">
               <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
                 <Check className="h-3 w-3" />
                 Marcaste tudo como lido

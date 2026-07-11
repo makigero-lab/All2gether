@@ -27,6 +27,8 @@ export function PushNotificationSetup() {
   const [mostrar, setMostrar] = useState(false);
   const [ativando, setAtivando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
+  // Prompt 118 — feedback de sucesso (banner verde momentâneo).
+  const [sucesso, setSucesso] = useState(false);
 
   const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
 
@@ -102,8 +104,9 @@ export function PushNotificationSetup() {
         throw new Error(data?.erro || `Erro ${res.status}`);
       }
 
-      // Sucesso — esconde o banner.
-      setMostrar(false);
+      // Prompt 118 — Confirmação visual de sucesso antes de esconder o banner.
+      setSucesso(true);
+      setTimeout(() => setMostrar(false), 1500);
     } catch (err) {
       setErro(
         err instanceof Error
@@ -116,38 +119,52 @@ export function PushNotificationSetup() {
   }
 
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm">
-      <Bell className="h-4 w-4 shrink-0 text-primary" />
-      <span className="flex-1 text-muted-foreground">
-        🔔 Ative as notificações para ser avisado de novas limpezas e alterações.
+    <div className={`flex items-center gap-2 rounded-lg border p-3 text-sm transition-colors ${
+      sucesso
+        ? "border-emerald-500/50 bg-emerald-50 dark:bg-emerald-950/20"
+        : "border-primary/30 bg-primary/5"
+    }`}>
+      {sucesso ? (
+        <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+      ) : (
+        <Bell className="h-4 w-4 shrink-0 text-primary" />
+      )}
+      <span className={`flex-1 ${sucesso ? "text-emerald-700 dark:text-emerald-300" : "text-muted-foreground"}`}>
+        {sucesso
+          ? "✅ Notificações ativadas com sucesso! A subscrição foi guardada."
+          : "🔔 Ative as notificações para ser avisado de novas limpezas e alterações."}
       </span>
-      {erro && (
+      {!sucesso && erro && (
         <span className="text-xs text-destructive">{erro}</span>
       )}
-      <Button
-        size="sm"
-        onClick={handleAtivar}
-        disabled={ativando}
-        className="shrink-0"
-      >
-        {ativando ? (
-          <>
-            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-            A ativar…
-          </>
-        ) : (
-          "Ativar"
-        )}
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-7 w-7 shrink-0"
-        onClick={() => setMostrar(false)}
-        aria-label="Dispensar"
-      >
-        <X className="h-3.5 w-3.5" />
-      </Button>
+      {!sucesso && (
+        <>
+          <Button
+            size="sm"
+            onClick={handleAtivar}
+            disabled={ativando}
+            className="shrink-0"
+          >
+            {ativando ? (
+              <>
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                A ativar…
+              </>
+            ) : (
+              "Ativar"
+            )}
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 shrink-0"
+            onClick={() => setMostrar(false)}
+            aria-label="Dispensar"
+          >
+            <X className="h-3.5 w-3.5" />
+          </Button>
+        </>
+      )}
     </div>
   );
 }

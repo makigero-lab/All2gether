@@ -11,6 +11,7 @@ import {
   TrendingUp,
   AlertTriangle,
   Timer,
+  FileDown,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -275,8 +276,8 @@ export default function RelatoriosPage() {
 
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
-      {/* Cabeçalho */}
-      <div className="hidden flex-col gap-1 lg:flex">
+      {/* Cabeçalho — escondido na impressão (print:hidden) */}
+      <div className="hidden flex-col gap-1 lg:flex print:hidden">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-bold tracking-tight">Relatórios</h1>
           <Button
@@ -288,14 +289,25 @@ export default function RelatoriosPage() {
           >
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           </Button>
+          {/* Prompt 118 — Exportar PDF (window.print otimizado com @media print) */}
+          <Button
+            variant="outline"
+            onClick={() => window.print()}
+            disabled={loading || !data}
+            title="Gera um PDF limpo com os gráficos e métricas (usa a janela de impressão do browser)"
+            className="gap-2"
+          >
+            <FileDown className="h-4 w-4" />
+            Exportar PDF
+          </Button>
         </div>
         <p className="text-sm text-muted-foreground">
           Produtividade da equipa e distribuição de tarefas no período selecionado.
         </p>
       </div>
 
-      {/* Filtro de período */}
-      <Card>
+      {/* Filtro de período — escondido na impressão */}
+      <Card className="print:hidden">
         <CardContent className="flex flex-wrap items-end gap-3 p-4">
           <div className="flex flex-col gap-1.5">
             <span className="text-xs font-medium text-muted-foreground">Período rápido</span>
@@ -378,6 +390,18 @@ export default function RelatoriosPage() {
         </Card>
       ) : data ? (
         <>
+          {/* Cabeçalho de impressão — só visível no PDF (hidden no ecrã) */}
+          <div className="hidden print:block mb-4">
+            <h1 className="text-xl font-bold">Relatório de Produtividade — Autocell</h1>
+            <p className="text-sm text-muted-foreground">
+              Período: {formatarDataCurta(data.periodo.inicio.slice(0, 10))} a{" "}
+              {formatarDataCurta(data.periodo.fim.slice(0, 10))}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Gerado em {new Date().toLocaleDateString("pt-PT", { day: "2-digit", month: "long", year: "numeric" })}
+            </p>
+          </div>
+
           {/* Cartões de resumo */}
           <div className="grid gap-4 sm:grid-cols-3 xl:grid-cols-7">
             {stats.map((s) => {

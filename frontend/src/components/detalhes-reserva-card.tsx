@@ -85,7 +85,7 @@ export function DetalhesReservaCard({
             <Users className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
             <div className="min-w-0">
               <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                Hóspedes
+                Nº de Hóspedes
               </p>
               <p className="text-sm font-semibold">
                 {detalhes.pax != null ? `${detalhes.pax}` : "—"}
@@ -96,7 +96,7 @@ export function DetalhesReservaCard({
             <User className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
             <div className="min-w-0">
               <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                Hóspede
+                Nome do Hóspede
               </p>
               <p className="truncate text-sm font-semibold" title={detalhes.nome_hospede ?? undefined}>
                 {detalhes.nome_hospede || "—"}
