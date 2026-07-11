@@ -99,10 +99,18 @@ ausenciaSchema.pre('save', function preSave(next) {
   next();
 });
 
-// Índice único composto { utilizador_id, data_inicio } — evita duplicar o
-// MESMO início de ausência para o mesmo utilizador (mas permite intervalos
-// sobrepostos de tipos diferentes se necessário; a validação de sobreposição
-// real é feita no controller para dar mensagem clara).
-ausenciaSchema.index({ utilizador_id: 1, data_inicio: 1 }, { unique: true });
+// Prompt 116 — O índice único composto { utilizador_id, data_inicio } foi
+// REMOVIDO. Antes, bloqueava a criação de uma nova ausência mesmo quando a
+// existente estava 'rejeitada' (o índice não distingue estados). Como o
+// Prompt 116 exige que ausências rejeitadas NÃO bloqueiem a criação de novos
+// pedidos no mesmo período, a verificação de sobreposição passou a ser feita
+// EXCLUSIVAMENTE no controller (registarAusencia), que exclui 'rejeitada' na
+// query. MongoDB partial indexes não suportam $ne em partialFilterExpression,
+// pelo que remover o índice único é a solução mais limpa. A verificação do
+// controller continua a impedir duplicados reais (mesmo período, mesmo user,
+// estado pendente/aprovada).
+// Índices não-únicos para queries frequentes:
+ausenciaSchema.index({ utilizador_id: 1, data_inicio: 1 });
+ausenciaSchema.index({ empresa_id: 1, estado: 1 });
 
 module.exports = mongoose.model('Ausencia', ausenciaSchema);

@@ -693,6 +693,29 @@ async function criarTarefaPorReserva(reservaId, smoobuPropId, dataTarefaRaw, det
 
   const empresaId = propriedade.empresa_id;
 
+  // Prompt 116 — Rejeita webhooks de empresas inativas (ativa: false).
+  // A empresa foi desativada pelo Super Admin — nenhuma tarefa deve ser
+  // criada/atualizada para propriedades dessa empresa.
+  try {
+    const Empresa = require('../models/Empresa');
+    const empresa = await Empresa.findById(empresaId).select('ativa').lean();
+    if (empresa && empresa.ativa === false) {
+      console.warn(
+        `⚠️  Empresa ${empresaId} está inativa — webhook rejeitado (propriedade "${propriedade.nome}").`
+      );
+      throw new Error(
+        `Empresa inativa. Webhooks rejeitados. Propriedade "${propriedade.nome}".`
+      );
+    }
+  } catch (empErr) {
+    // Se for o erro de empresa inativa, re-lança para parar o processamento.
+    if (empErr.message && empErr.message.includes('Empresa inativa')) {
+      throw empErr;
+    }
+    // Outros erros (ex.: BD) — loga mas não bloqueia (best-effort).
+    console.error('⚠️  Verificação de empresa ativa falhou:', empErr.message);
+  }
+
   // Tempo de limpeza (calculado antes do load balancer, que o usa no SLA).
   const tempoLimpeza =
     content.tempo_limpeza_minutos ??

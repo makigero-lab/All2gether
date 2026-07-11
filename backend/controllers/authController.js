@@ -77,6 +77,19 @@ exports.login = async (req, res) => {
       return res.status(401).json({ erro: MSG_INVALIDAS });
     }
 
+    // Prompt 116 — Bloqueia o login se a empresa estiver inativa (ativa: false).
+    // O Super Admin (role 'admin') é exceção — pode sempre entrar para
+    // reativar a empresa. O admin não tem empresa_id de operações.
+    if (utilizador.role !== 'admin' && utilizador.empresa_id) {
+      const Empresa = require('../models/Empresa');
+      const empresa = await Empresa.findById(utilizador.empresa_id).select('ativa').lean();
+      if (empresa && empresa.ativa === false) {
+        return res.status(403).json({
+          erro: 'A tua empresa está desativada. Contacta o suporte.',
+        });
+      }
+    }
+
     // Gera o JWT com o payload essencial.
     const token = jwt.sign(
       {

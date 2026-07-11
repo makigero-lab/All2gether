@@ -331,6 +331,80 @@ router.delete('/empresas/:id', async (req, res) => {
   }
 });
 
+// Prompt 116 — Toggle do estado `ativa` de uma empresa.
+// Quando `ativa: false`:
+//   - o login é bloqueado para todos os utilizadores desta empresa (exceto admin);
+//   - os webhooks do Smoobu são rejeitados (ver webhookController).
+// Body (opcional): { ativa: boolean } — se não vier, alterna o estado atual.
+router.patch('/empresas/:id/toggle-status', async (req, res) => {
+  try {
+    const Empresa = require('../models/Empresa');
+    const { id } = req.params;
+    const mongoose = require('mongoose');
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ erro: 'ID inválido.' });
+    }
+    const empresa = await Empresa.findById(id);
+    if (!empresa) {
+      return res.status(404).json({ erro: 'Empresa não encontrada.' });
+    }
+    const novoEstado = typeof req.body?.ativa === 'boolean' ? req.body.ativa : !empresa.ativa;
+    empresa.ativa = novoEstado;
+    await empresa.save();
+    return res.status(200).json({
+      message: `Empresa ${novoEstado ? 'ativada' : 'desativada'} com sucesso.`,
+      empresa: { _id: String(empresa._id), nome: empresa.nome, ativa: empresa.ativa },
+    });
+  } catch (err) {
+    return res.status(500).json({ erro: 'Erro ao alterar estado da empresa.', detalhe: err.message });
+  }
+});
+
+// Prompt 116 — Hard reset de UMA empresa específica.
+// Apaga apenas as Tarefas e Propriedades dessa empresa (não toca noutras
+// empresas, nem em utilizadores/ausências/auditoria).
+router.post('/empresas/:id/hard-reset', async (req, res) => {
+  try {
+    const Empresa = require('../models/Empresa');
+    const Propriedade = require('../models/Propriedade');
+    const Tarefa = require('../models/Tarefa');
+    const { id } = req.params;
+    const mongoose = require('mongoose');
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ erro: 'ID inválido.' });
+    }
+    const empresa = await Empresa.findById(id).select('_id nome').lean();
+    if (!empresa) {
+      return res.status(404).json({ erro: 'Empresa não encontrada.' });
+    }
+    const [propApagadas, tarefasApagadas] = await Promise.all([
+      Propriedade.deleteMany({ empresa_id: id }),
+      Tarefa.deleteMany({ empresa_id: id }),
+    ]);
+    // Auditoria.
+    const { registarAuditoria } = require('../utils/auditoria');
+    registarAuditoria({
+      utilizador_id: req.user.id,
+      utilizador_nome: req.user.nome || 'Super Admin',
+      empresa_id: id,
+      acao: 'hard-reset',
+      recurso: 'empresa',
+      recurso_id: id,
+      descricao: `Hard reset da empresa "${empresa.nome}": ${propApagadas.deletedCount} propriedade(s) e ${tarefasApagadas.deletedCount} tarefa(s) apagadas.`,
+      detalhes: { propriedades: propApagadas.deletedCount, tarefas: tarefasApagadas.deletedCount },
+    });
+    return res.status(200).json({
+      message: `Hard reset concluído para a empresa "${empresa.nome}".`,
+      detalhe: {
+        propriedades_apagadas: propApagadas.deletedCount,
+        tarefas_apagadas: tarefasApagadas.deletedCount,
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({ erro: 'Erro no hard reset da empresa.', detalhe: err.message });
+  }
+});
+
 // Prompt 112 — Monitor de Webhooks (Caixa Negra).
 
 // GET /api/admin/webhook-logs — lista todos os logs de webhooks (cross-tenant).

@@ -24,6 +24,16 @@ const empresaSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    // Prompt 116 — Estado da empresa (SaaS). Quando `false`:
+    //   - o login é bloqueado para todos os utilizadores desta empresa;
+    //   - os webhooks do Smoobu são rejeitados (propriedades não criam tarefas).
+    // Diferente de `plano_ativo` (que é informativo/comercial) — `ativa`
+    // é o bloqueio operacional efetivo.
+    ativa: {
+      type: Boolean,
+      default: true,
+      index: true,
+    },
     // Prompt 109 — API Key do Smoobu por empresa (multi-tenant SaaS).
     // Quando preenchida, as operações de sincronização usam esta chave
     // em vez da variável de ambiente SMOOBU_API_KEY global.
