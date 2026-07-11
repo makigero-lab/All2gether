@@ -55,6 +55,14 @@ const NotificacaoSchema = new mongoose.Schema(
       type: String,
       default: '/staff',
     },
+    // Prompt 116 — referência opcional à tarefa que originou a notificação
+    // (ex.: para o frontend abrir o detalhe da tarefa ao clicar no sino).
+    tarefa_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Tarefa',
+      default: null,
+      index: true,
+    },
     lida: {
       type: Boolean,
       default: false,

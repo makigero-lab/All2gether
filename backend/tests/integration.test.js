@@ -3729,3 +3729,233 @@ describe('Prompt 114 — Centro de Notificações + Haversine', () => {
     await Propriedade.deleteMany({ _id: res.body.propriedade._id });
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* 23. Prompt 116 — Fundação SaaS, Notificações e Lógica de Negócio    */
+/* ------------------------------------------------------------------ */
+
+describe('Prompt 116 — Fundação SaaS + Lógica de Negócio', () => {
+  it('Empresa tem campo ativa (default true)', async () => {
+    const Empresa = require('../models/Empresa');
+    const emp = await Empresa.create({ nome: 'Empresa Ativa Test' });
+    expect(emp.ativa).toBe(true);
+    await Empresa.deleteOne({ _id: emp._id });
+  });
+
+  it('PATCH /api/admin/empresas/:id/toggle-status desativa empresa', async () => {
+    const Empresa = require('../models/Empresa');
+    const emp = await Empresa.create({ nome: 'Empresa Toggle Test', ativa: true });
+
+    const res = await authPatch(`/api/admin/empresas/${emp._id}/toggle-status`, { ativa: false });
+    expect(res.status).toBe(200);
+    expect(res.body.empresa.ativa).toBe(false);
+
+    const depois = await Empresa.findById(emp._id).select('ativa').lean();
+    expect(depois.ativa).toBe(false);
+
+    await Empresa.deleteOne({ _id: emp._id });
+  });
+
+  it('login bloqueado para utilizadores de empresa inativa (exceto admin)', async () => {
+    const Empresa = require('../models/Empresa');
+    const hash = await bcrypt.hash(PASSWORD, 10);
+    const emp = await Empresa.create({ nome: 'Empresa Inativa Login', ativa: false });
+    const staff = await Utilizador.create({
+      nome: 'Staff Inativo Empresa',
+      email: 'staff.empresa.inativa@teste.pt',
+      password_hash: hash,
+      empresa_id: emp._id,
+      role: 'staff',
+      ativo: true,
+    });
+
+    const res = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'staff.empresa.inativa@teste.pt', password: PASSWORD });
+    expect(res.status).toBe(403);
+    expect(res.body.erro).toContain('desativada');
+
+    await Utilizador.deleteOne({ _id: staff._id });
+    await Empresa.deleteOne({ _id: emp._id });
+  });
+
+  it('sobreposição de ausência NÃO bloqueia com ausência rejeitada', async () => {
+    const Ausencia = require('../models/Ausencia');
+    const hash = await bcrypt.hash(PASSWORD, 10);
+    const staff = await Utilizador.create({
+      nome: 'Staff Sobreposicao',
+      email: 'staff.sobreposicao@teste.pt',
+      password_hash: hash,
+      empresa_id: empresaId,
+      role: 'staff',
+      ativo: true,
+    });
+
+    const amanha = new Date();
+    amanha.setDate(amanha.getDate() + 1);
+    const amanhaStr = amanha.toISOString().slice(0, 10);
+    // Normaliza para UTC midnight (igual ao que o controller faz).
+    const amanhaNorm = new Date(Date.UTC(amanha.getUTCFullYear(), amanha.getUTCMonth(), amanha.getUTCDate()));
+
+    // Cria uma ausência REJEITADA para amanhã (datas normalizadas).
+    await Ausencia.create({
+      utilizador_id: staff._id,
+      empresa_id: empresaId,
+      data_inicio: amanhaNorm,
+      data_fim: amanhaNorm,
+      tipo: 'ferias',
+      estado: 'rejeitada',
+    });
+
+    // Tenta criar nova ausência para o mesmo período — deve SER POSSÍVEL
+    // (a rejeitada não bloqueia).
+    const res = await authPost('/api/gestor/ausencias', {
+      utilizador_id: String(staff._id),
+      data_inicio: amanhaStr,
+      data_fim: amanhaStr,
+      tipo: 'ferias',
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.ausencia).toBeTruthy();
+
+    await Ausencia.deleteMany({ utilizador_id: staff._id });
+    await Utilizador.deleteOne({ _id: staff._id });
+  });
+
+  it('GET /api/gestor/equipa exclui admin e utilizadores inativos', async () => {
+    const hash = await bcrypt.hash(PASSWORD, 10);
+    // Staff ativo — deve aparecer.
+    const staffAtivo = await Utilizador.create({
+      nome: 'Staff Ativo Equipa',
+      email: 'staff.ativo.equipa@teste.pt',
+      password_hash: hash,
+      empresa_id: empresaId,
+      role: 'staff',
+      ativo: true,
+    });
+    // Staff inativo — NÃO deve aparecer.
+    const staffInativo = await Utilizador.create({
+      nome: 'Staff Inativo Equipa',
+      email: 'staff.inativo.equipa@teste.pt',
+      password_hash: hash,
+      empresa_id: empresaId,
+      role: 'staff',
+      ativo: false,
+    });
+    // Gestor ativo — deve aparecer.
+    const gestor = await Utilizador.create({
+      nome: 'Gestor Equipa',
+      email: 'gestor.equipa@teste.pt',
+      password_hash: hash,
+      empresa_id: empresaId,
+      role: 'gestor',
+      ativo: true,
+    });
+
+    const res = await authGet('/api/gestor/equipa');
+    expect(res.status).toBe(200);
+    const emails = res.body.utilizadores.map((u) => u.email);
+    expect(emails).toContain('staff.ativo.equipa@teste.pt');
+    expect(emails).toContain('gestor.equipa@teste.pt');
+    // Admin NÃO aparece.
+    expect(emails).not.toContain('admin@teste.pt');
+    // Inativo NÃO aparece.
+    expect(emails).not.toContain('staff.inativo.equipa@teste.pt');
+
+    await Utilizador.deleteMany({
+      _id: { $in: [staffAtivo._id, staffInativo._id, gestor._id] },
+    });
+  });
+
+  it('POST /api/admin/empresas/:id/hard-reset apaga só propriedades+tarefas dessa empresa', async () => {
+    const Empresa = require('../models/Empresa');
+    const Propriedade = require('../models/Propriedade');
+    const Tarefa = require('../models/Tarefa');
+
+    // Empresa própria para o teste.
+    const emp = await Empresa.create({ nome: 'Empresa Hard Reset Scoped' });
+    const prop = await Propriedade.create({
+      smoobu_id: 'hr-scoped-prop',
+      nome: 'Casa HR Scoped',
+      morada: 'Rua HR',
+      empresa_id: emp._id,
+      tempo_limpeza_minutos: 45,
+    });
+    await Tarefa.create({
+      empresa_id: emp._id,
+      propriedade_id: prop._id,
+      data: new Date(),
+      tipo: 'limpeza',
+      estado: 'atribuida',
+    });
+
+    // Propriedade da empresa base (NÃO deve ser apagada).
+    const propBase = await Propriedade.create({
+      smoobu_id: 'hr-base-prop',
+      nome: 'Casa Base',
+      morada: 'Rua Base',
+      empresa_id: empresaId,
+      tempo_limpeza_minutos: 45,
+    });
+
+    const res = await authPost(`/api/admin/empresas/${emp._id}/hard-reset`, {});
+    expect(res.status).toBe(200);
+    expect(res.body.detalhe.propriedades_apagadas).toBeGreaterThanOrEqual(1);
+    expect(res.body.detalhe.tarefas_apagadas).toBeGreaterThanOrEqual(1);
+
+    // A propriedade da empresa base continua a existir.
+    const propBaseDepois = await Propriedade.findById(propBase._id).lean();
+    expect(propBaseDepois).toBeTruthy();
+
+    await Propriedade.deleteMany({ _id: propBase._id });
+    await Empresa.deleteOne({ _id: emp._id });
+  });
+
+  it('criarTarefa com hora + hospedes + check_in/out grava detalhes_reserva e hora local', async () => {
+    const hash = await bcrypt.hash(PASSWORD, 10);
+    const staff = await Utilizador.create({
+      nome: 'Staff Hora Test',
+      email: 'staff.hora.test@teste.pt',
+      password_hash: hash,
+      empresa_id: empresaId,
+      role: 'staff',
+      ativo: true,
+    });
+    const prop = await Propriedade.create({
+      smoobu_id: 'hora-prop-1',
+      nome: 'Casa Hora',
+      morada: 'Rua Hora 1',
+      empresa_id: empresaId,
+      tempo_limpeza_minutos: 45,
+    });
+
+    const amanha = new Date();
+    amanha.setDate(amanha.getDate() + 1);
+    const amanhaStr = amanha.toISOString().slice(0, 10);
+
+    const res = await authPost('/api/gestor/tarefas', {
+      propriedade_id: String(prop._id),
+      utilizador_id: String(staff._id),
+      data: amanhaStr,
+      hora: '14:30',
+      check_in: amanhaStr,
+      check_out: amanhaStr,
+      hospedes: 4,
+      tipo: 'limpeza',
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.tarefa).toBeTruthy();
+    // detalhes_reserva preenchido
+    expect(res.body.tarefa.detalhes_reserva).toBeTruthy();
+    expect(res.body.tarefa.detalhes_reserva.pax).toBe(4);
+    expect(res.body.tarefa.detalhes_reserva.checkin).toBe(amanhaStr);
+    // A hora deve ser 14:30 LOCAL (não 00:00 UTC).
+    const dataTarefa = new Date(res.body.tarefa.data);
+    expect(dataTarefa.getHours()).toBe(14);
+    expect(dataTarefa.getMinutes()).toBe(30);
+
+    await Tarefa.deleteMany({ propriedade_id: prop._id });
+    await Propriedade.deleteMany({ _id: prop._id });
+    await Utilizador.deleteOne({ _id: staff._id });
+  });
+});

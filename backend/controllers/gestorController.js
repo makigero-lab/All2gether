@@ -926,7 +926,17 @@ exports.getEquipa = async (req, res) => {
     const { ok, empresaId } = obterEmpresaId(req, res);
     if (!ok) return;
 
-    const utilizadores = await Utilizador.find({ empresa_id: empresaId, eliminado_em: null })
+    // Prompt 116 — Filtro rigoroso da equipa:
+    //   - só utilizadores ativos (ativo: true)
+    //   - exclui ESTritamente o Super Admin (role: 'admin') — nunca pode
+    //     aparecer nas listas do Gestor
+    //   - exclui eliminados (soft delete)
+    const utilizadores = await Utilizador.find({
+      empresa_id: empresaId,
+      eliminado_em: null,
+      ativo: true,
+      role: { $ne: 'admin' },
+    })
       .select('-password_hash') // nunca expor a hash
       .populate({ path: 'responsavel_id', select: 'nome email role' })
       .sort({ nome: 1 })

@@ -233,7 +233,21 @@ exports.criarTarefa = async (req, res) => {
     const { ok, empresaId } = obterEmpresaId(req, res);
     if (!ok) return;
 
-    const { propriedade_id, utilizador_id, data, tempo_limpeza_minutos, tipo } = req.body || {};
+    // Prompt 116 — aceita novos campos opcionais: hora, check_in, check_out, hospedes.
+    //   - hora: "HH:mm" (combina com `data` para definir a hora local da tarefa)
+    //   - check_in / check_out: strings (datas/horas da reserva Smoobu)
+    //   - hospedes: número de hóspedes (vai para detalhes_reserva.pax)
+    const {
+      propriedade_id,
+      utilizador_id,
+      data,
+      hora,
+      check_in,
+      check_out,
+      hospedes,
+      tempo_limpeza_minutos,
+      tipo,
+    } = req.body || {};
 
     if (!propriedade_id || !data) {
       return res.status(400).json({
@@ -263,29 +277,52 @@ exports.criarTarefa = async (req, res) => {
       });
     }
 
-    // Prompt 113 — FIX DE FUSO HORÁRIO (Lisboa/WEST):
-    //   Antes, a data era normalizada para meia-noite UTC via
-    //   `Date.UTC(d.getUTCFullYear(), ...)`. Como o frontend enviava
-    //   "2026-07-15" (date-only), `new Date("2026-07-15")` = meia-noite UTC,
-    //   que em Lisboa (UTC+1 no verão) aparecia como 01:00 do mesmo dia — e
-    //   ficava abaixo do slotMinTime 08:00 do calendário, invisível nas
-    //   vistas semanal/diária.
+    // Prompt 116 — Constrói a data/hora da tarefa no FUSO LOCAL correto.
     //
-    //   Agora o frontend envia um ISO de meia-noite LOCAL
-    //   (ex.: "2026-07-14T23:00:00.000Z" para Lisboa 15/07). Armazenamos o
-    //   instante DIRETAMENTE, SEM re-normalizar para meia-noite UTC (essa
-    //   re-normalização é que destruía a intenção de "meia-noite local" e
-    //   empurrava a data para o dia anterior em UTC).
+    //   `data` pode vir como:
+    //     - "2026-07-15" (date-only) → se `hora` vier, combina; senão meia-noite local.
+    //     - "2026-07-15T14:30" (com hora) → já tem hora local; ignora `hora`.
+    //     - ISO completo com Z → instante absoluto.
     //
-    //   A função verificarDisponibilidadeUtilizador foi tornada robusta a
-    //   offset (compara pela data de Lisboa), pelo que a validação de
-    //   férias/ausências continua a funcionar tanto para tarefas antigas
-    //   (UTC midnight) como para as novas (local midnight).
-    const d = new Date(data);
-    if (isNaN(d.getTime())) {
+    //   Para garantir que a hora é interpretada como LOCAL (Lisboa) e não UTC,
+    //   usamos `new Date("YYYY-MM-DDTHH:mm")` (sem Z) quando a data é date-only
+    //   + hora separada. Isto evita o bug de gravar às 00:00 UTC (que em
+    //   Lisboa aparece como 01:00).
+    //
+    //   A função verificarDisponibilidadeUtilizador é robusta a offset
+    //   (compara pela data de Lisboa), pelo que a validação de férias/ausências
+    //   continua a funcionar qualquer que seja a representação.
+    let dataNormalizada;
+    const dataStr = String(data).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dataStr)) {
+      // date-only "YYYY-MM-DD"
+      const horaStr = hora && /^\d{1,2}:\d{2}$/.test(String(hora).trim())
+        ? String(hora).trim().padStart(5, '0')
+        : '00:00';
+      // `new Date("YYYY-MM-DDTHH:mm")` (sem Z) = LOCAL (timezone do servidor/Node).
+      dataNormalizada = new Date(`${dataStr}T${horaStr}`);
+    } else {
+      // Já vem com hora ou ISO — usa diretamente.
+      dataNormalizada = new Date(dataStr);
+    }
+    if (isNaN(dataNormalizada.getTime())) {
       return res.status(400).json({ erro: 'data inválida.' });
     }
-    const dataNormalizada = d;
+
+    // Prompt 116 — Monta detalhes_reserva com os campos opcionais.
+    const detalhesReserva = {};
+    if (check_in !== undefined && check_in !== null && String(check_in).trim()) {
+      detalhesReserva.checkin = String(check_in).trim();
+    }
+    if (check_out !== undefined && check_out !== null && String(check_out).trim()) {
+      detalhesReserva.checkout = String(check_out).trim();
+    }
+    if (hospedes !== undefined && hospedes !== null && hospedes !== '') {
+      const paxNum = Number(hospedes);
+      if (!Number.isNaN(paxNum) && paxNum >= 0) {
+        detalhesReserva.pax = paxNum;
+      }
+    }
 
     // Valida utilizador_id se vier.
     let utilizadorValidado = null;
@@ -326,6 +363,8 @@ exports.criarTarefa = async (req, res) => {
       tempo_limpeza_minutos: Number(tempo_limpeza_minutos) || propriedade.tempo_limpeza_minutos || 45,
       tipo: tipo || 'limpeza',
       estado: utilizadorValidado ? 'atribuida' : 'por_atribuir',
+      // Prompt 116 — só guarda detalhes_reserva se houver algum campo preenchido.
+      ...(Object.keys(detalhesReserva).length > 0 ? { detalhes_reserva: detalhesReserva } : {}),
     });
 
     // v1.65.0 (Prompt 88) — Notifica o staff se a tarefa foi criada já atribuída.
