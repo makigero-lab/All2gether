@@ -15,8 +15,10 @@ import {
   Download,
   Plus,
 } from "lucide-react";
-import { format, parseISO } from "date-fns";
+import { format } from "date-fns";
 import { pt } from "date-fns/locale";
+// Prompt Extra — parsearDataSegura para compatibilidade Safari/iOS.
+import { parsearDataSegura, formatarDataSegura } from "@/lib/utils";
 
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
@@ -166,7 +168,10 @@ function horaTarefa(dataISO: string): string {
   // não mostram hora, só a data.
   if (!temHoraReal(dataISO)) return "—";
   try {
-    return format(parseISO(dataISO), "HH:mm");
+    // Prompt Extra — parsearDataSegura para compatibilidade Safari/iOS.
+    const d = parsearDataSegura(dataISO);
+    if (!d) return "—";
+    return format(d, "HH:mm");
   } catch {
     return "—";
   }
@@ -177,7 +182,9 @@ function horaFimTarefa(dataISO: string, minutos: number): string {
   if (!dataISO || !dataISO.includes("T")) return "—";
   if (!temHoraReal(dataISO)) return "—";
   try {
-    const inicio = parseISO(dataISO);
+    // Prompt Extra — parsearDataSegura para compatibilidade Safari/iOS.
+    const inicio = parsearDataSegura(dataISO);
+    if (!inicio) return "—";
     const fim = new Date(inicio.getTime() + (minutos || 0) * 60000);
     return format(fim, "HH:mm");
   } catch {
@@ -435,7 +442,7 @@ export default function CalendarioOperacionalPage() {
         } as EventInput;
       }
 
-      const inicio = new Date(t.data);
+      const inicio = parsearDataSegura(t.data) ?? new Date();
       // Prompt 113 — Tarefas sem hora real de trabalho (criadas só com data,
       // ainda não atribuídas pelo load balancer) são renderizadas como
       // "todo o dia" (all-day). Isto garante que aparecem nas Vistas Semanal
@@ -774,7 +781,7 @@ export default function CalendarioOperacionalPage() {
         if (t.tipo === "ausencia" || t.tipo === "folga_fixa") return false;
 
         // Calcula a hora de fim da tarefa (início + tempo_limpeza_minutos).
-        const inicio = new Date(t.data).getTime();
+        const inicio = (parsearDataSegura(t.data) ?? new Date(0)).getTime();
         const fim = inicio + (t.tempo_limpeza_minutos || 45) * 60000;
 
         // Mostra se a hora de FIM for posterior a (now - 2h).
@@ -785,7 +792,7 @@ export default function CalendarioOperacionalPage() {
       .slice()
       .sort((a, b) => {
         try {
-          return parseISO(a.data).getTime() - parseISO(b.data).getTime();
+          return (parsearDataSegura(a.data)?.getTime() ?? 0) - (parsearDataSegura(b.data)?.getTime() ?? 0);
         } catch {
           return 0;
         }
@@ -820,7 +827,7 @@ export default function CalendarioOperacionalPage() {
         .slice()
         .sort((a, b) => {
           try {
-            return parseISO(a.data).getTime() - parseISO(b.data).getTime();
+            return (parsearDataSegura(a.data)?.getTime() ?? 0) - (parsearDataSegura(b.data)?.getTime() ?? 0);
           } catch {
             return 0;
           }
@@ -1286,9 +1293,7 @@ export default function CalendarioOperacionalPage() {
               <div className="flex items-center gap-2">
                 <CalendarRange className="h-4 w-4 text-muted-foreground" />
                 <span>
-                  {format(parseISO(tarefaSelecionada.data), "EEEE, d 'de' MMMM yyyy", {
-                    locale: pt,
-                  })}
+                  {formatarDataSegura(tarefaSelecionada.data, (d) => format(d, "EEEE, d 'de' MMMM yyyy", { locale: pt }), "—")}
                 </span>
               </div>
               <div className="flex items-center gap-2">

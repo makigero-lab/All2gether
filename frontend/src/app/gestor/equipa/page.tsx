@@ -21,7 +21,7 @@ import {
   CheckCircle2,
   User,
 } from "lucide-react";
-import { format, parseISO } from "date-fns";
+import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 
 import { Button } from "@/components/ui/button";
@@ -59,6 +59,7 @@ import {
   type Role,
 } from "@/lib/api";
 import { PaginationBar } from "@/components/admin/pagination-bar";
+import { formatarDataSegura, parsearDataSegura } from "@/lib/utils";
 
 /**
  * Página de Equipa — Painel de Administração.
@@ -139,11 +140,11 @@ const TIPO_VARIANT: Record<string, "default" | "secondary" | "outline"> = {
 
 /** Formata uma data ISO (yyyy-MM-dd) para "d MMM yyyy" em PT. */
 function formatarData(iso: string): string {
-  try {
-    return format(parseISO(iso), "d MMM yyyy", { locale: pt });
-  } catch {
-    return iso;
-  }
+  return formatarDataSegura(
+    iso,
+    (d) => format(d, "d MMM yyyy", { locale: pt }),
+    iso
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -311,9 +312,9 @@ function EquipaPage() {
       );
       const setAusentes = new Set<string>();
       for (const a of ausenciasRes.ausencias ?? []) {
-        const ini = new Date(a.data_inicio);
-        const fim = new Date(a.data_fim);
-        if (hojeUTC >= ini && hojeUTC <= fim && a.utilizador_id) {
+        const ini = parsearDataSegura(a.data_inicio);
+        const fim = parsearDataSegura(a.data_fim);
+        if (ini && fim && hojeUTC >= ini && hojeUTC <= fim && a.utilizador_id) {
           setAusentes.add(a.utilizador_id);
         }
       }

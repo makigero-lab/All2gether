@@ -9,6 +9,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import type { DetalhesReservaDTO } from "@/lib/api";
+// Prompt Extra — parsearDataSegura para compatibilidade Safari/iOS.
+import { parsearDataSegura } from "@/lib/utils";
 
 /**
  * Card de destaque com os detalhes da reserva Smoobu (Prompt 95 / Fase 1.5).
@@ -22,9 +24,10 @@ import type { DetalhesReservaDTO } from "@/lib/api";
  */
 function formatarData(iso?: string | null): string {
   if (!iso) return "—";
+  // Prompt Extra — parsearDataSegura normaliza "YYYY-MM-DD HH:mm:ss" (Safari).
+  const d = parsearDataSegura(iso);
+  if (!d) return iso;
   try {
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return iso;
     return d.toLocaleDateString("pt-PT", {
       day: "2-digit",
       month: "2-digit",

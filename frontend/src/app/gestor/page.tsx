@@ -14,7 +14,7 @@ import {
   ArrowRight,
 } from "lucide-react";
 import Link from "next/link";
-import { format, parseISO } from "date-fns";
+import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 
 import {
@@ -28,6 +28,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { adminGet, adminPatch } from "@/lib/api";
 import { PushNotificationSetup } from "@/components/gestor/push-notification-setup";
+import { formatarDataSegura } from "@/lib/utils";
 
 interface DashboardData {
   totalPropriedades: number;
@@ -182,11 +183,11 @@ export default function AdminDashboardPage() {
                       <span className="text-orange-700/70 dark:text-orange-300/70">·</span>
                       <span>
                         {(() => {
-                          try {
-                            return format(parseISO(t.data), "EEE d MMM 'às' HH:mm", { locale: pt });
-                          } catch {
-                            return t.data;
-                          }
+                          return formatarDataSegura(
+                            t.data,
+                            (d) => format(d, "EEE d MMM 'às' HH:mm", { locale: pt }),
+                            t.data
+                          );
                         })()}
                       </span>
                     </li>

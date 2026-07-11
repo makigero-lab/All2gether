@@ -14,6 +14,9 @@ import {
   StickyNote,
 } from "lucide-react";
 
+// Prompt Extra — parsearDataSegura para compatibilidade Safari/iOS.
+import { parsearDataSegura } from "@/lib/utils";
+
 import {
   Dialog,
   DialogHeader,
@@ -87,8 +90,10 @@ const ESTADO_VARIANT: Record<
 };
 
 function formatarDataHora(iso: string): string {
+  // Prompt Extra — parsearDataSegura para compatibilidade Safari/iOS.
+  const d = parsearDataSegura(iso);
+  if (!d) return iso;
   try {
-    const d = new Date(iso);
     const data = d.toLocaleDateString("pt-PT", {
       day: "2-digit",
       month: "2-digit",

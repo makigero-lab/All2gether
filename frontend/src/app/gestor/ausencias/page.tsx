@@ -38,6 +38,7 @@ import {
   adminPatch,
   type AusenciaDTO,
 } from "@/lib/api";
+import { parsearDataSegura } from "@/lib/utils";
 
 /**
  * /gestor/ausencias — Ecrã de Férias/Ausências (Prompt 95 / Fase 1.5).
@@ -93,8 +94,10 @@ const ESTADO_VARIANT: Record<
 };
 
 function formatarData(iso: string): string {
+  const d = parsearDataSegura(iso);
+  if (!d) return iso;
   try {
-    return new Date(iso).toLocaleDateString("pt-PT", {
+    return d.toLocaleDateString("pt-PT", {
       day: "2-digit",
       month: "2-digit",
       year: "numeric",

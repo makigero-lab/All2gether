@@ -12,7 +12,7 @@ import {
   Trash2,
   Send,
 } from "lucide-react";
-import { format, parseISO } from "date-fns";
+import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 
 import {
@@ -30,6 +30,7 @@ import {
   DialogContent,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { formatarDataSegura } from "@/lib/utils";
 
 /* ------------------------------------------------------------------ */
 /* Tipos                                                               */
@@ -72,11 +73,11 @@ const ESTADO_CONFIG: Record<
 /* ------------------------------------------------------------------ */
 
 function formatarData(iso: string): string {
-  try {
-    return format(parseISO(iso), "d MMM yyyy", { locale: pt });
-  } catch {
-    return iso;
-  }
+  return formatarDataSegura(
+    iso,
+    (d) => format(d, "d MMM yyyy", { locale: pt }),
+    iso
+  );
 }
 
 /**

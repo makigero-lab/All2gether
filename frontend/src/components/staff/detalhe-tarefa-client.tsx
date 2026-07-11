@@ -22,7 +22,7 @@ import {
   CalendarRange,
 } from "lucide-react";
 
-import { cn } from "@/lib/utils";
+import { cn, parsearDataSegura } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
@@ -272,8 +272,10 @@ export function DetalheTarefaClient({
               </p>
               <p className="text-sm font-bold text-foreground">
                 {(() => {
+                  // Prompt Extra — parsearDataSegura para compatibilidade Safari/iOS.
+                  const d = parsearDataSegura(tarefa.data);
+                  if (!d) return tarefa.data ?? "—";
                   try {
-                    const d = new Date(tarefa.data);
                     const dataFmt = d.toLocaleDateString("pt-PT", {
                       weekday: "long",
                       day: "numeric",
@@ -288,7 +290,7 @@ export function DetalheTarefaClient({
                     });
                     return hora !== "00:00" ? `${dataFmt} · ${hora}` : dataFmt;
                   } catch {
-                    return tarefa.data;
+                    return tarefa.data ?? "—";
                   }
                 })()}
               </p>
