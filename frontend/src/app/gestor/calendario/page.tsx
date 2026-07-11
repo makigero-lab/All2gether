@@ -28,7 +28,7 @@ import type { DatesSetArg, EventClickArg, EventContentArg, EventInput } from "@f
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { cn, paraIsoMeiaNoiteLocal, temHoraReal } from "@/lib/utils";
+import { cn, temHoraReal } from "@/lib/utils";
 import {
   Dialog,
   DialogHeader,
@@ -700,10 +700,15 @@ export default function CalendarioOperacionalPage() {
   const [mostrarNovaTarefa, setMostrarNovaTarefa] = useState(false);
   const [novaTarefaLoading, setNovaTarefaLoading] = useState(false);
   const [novaTarefaErro, setNovaTarefaErro] = useState<string | null>(null);
+  // Prompt 117 — adicionados hora, check_in, check_out, hospedes.
   const [novaForm, setNovaForm] = useState({
     propriedade_id: "",
     utilizador_id: "",
     data: "",
+    hora: "",
+    check_in: "",
+    check_out: "",
+    hospedes: "",
     tempo_limpeza_minutos: "45",
     tipo: "limpeza",
   });
@@ -718,13 +723,18 @@ export default function CalendarioOperacionalPage() {
     setNovaTarefaLoading(true);
     try {
       // Prompt 114 — Captura warning de distância (Haversine > 15km).
+      // Prompt 117 — envia hora, check_in, check_out, hospedes. A combinação
+      // data + hora é tratada pelo backend como LOCAL (não UTC midnight).
       const res = await adminPost<{ tarefa: TarefaCalendario; warning?: string }>(
         "/api/gestor/tarefas",
         {
           propriedade_id: novaForm.propriedade_id,
           utilizador_id: novaForm.utilizador_id || null,
-          // Prompt 113 — meia-noite LOCAL (ISO com Z) para não gravar como 01:00.
-          data: paraIsoMeiaNoiteLocal(novaForm.data),
+          data: novaForm.data,
+          hora: novaForm.hora || undefined,
+          check_in: novaForm.check_in || undefined,
+          check_out: novaForm.check_out || undefined,
+          hospedes: novaForm.hospedes ? Number(novaForm.hospedes) : undefined,
           tempo_limpeza_minutos: Number(novaForm.tempo_limpeza_minutos) || 45,
           tipo: novaForm.tipo,
         }
@@ -734,6 +744,10 @@ export default function CalendarioOperacionalPage() {
         propriedade_id: "",
         utilizador_id: "",
         data: "",
+        hora: "",
+        check_in: "",
+        check_out: "",
+        hospedes: "",
         tempo_limpeza_minutos: "45",
         tipo: "limpeza",
       });
@@ -1508,6 +1522,15 @@ export default function CalendarioOperacionalPage() {
                 />
               </div>
               <div className="space-y-1.5">
+                <label className="text-sm font-medium" htmlFor="nt-hora">Hora da Limpeza</label>
+                <Input
+                  id="nt-hora"
+                  type="time"
+                  value={novaForm.hora}
+                  onChange={(e) => setNovaForm((f) => ({ ...f, hora: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1.5">
                 <label className="text-sm font-medium" htmlFor="nt-tempo">Tempo (min)</label>
                 <Input
                   id="nt-tempo"
@@ -1516,6 +1539,35 @@ export default function CalendarioOperacionalPage() {
                   step={5}
                   value={novaForm.tempo_limpeza_minutos}
                   onChange={(e) => setNovaForm((f) => ({ ...f, tempo_limpeza_minutos: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium" htmlFor="nt-hospedes">Nº de Hóspedes</label>
+                <Input
+                  id="nt-hospedes"
+                  type="number"
+                  min={0}
+                  value={novaForm.hospedes}
+                  onChange={(e) => setNovaForm((f) => ({ ...f, hospedes: e.target.value }))}
+                  placeholder="0"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium" htmlFor="nt-checkin">Data de Check-in</label>
+                <Input
+                  id="nt-checkin"
+                  type="date"
+                  value={novaForm.check_in}
+                  onChange={(e) => setNovaForm((f) => ({ ...f, check_in: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium" htmlFor="nt-checkout">Data de Check-out</label>
+                <Input
+                  id="nt-checkout"
+                  type="date"
+                  value={novaForm.check_out}
+                  onChange={(e) => setNovaForm((f) => ({ ...f, check_out: e.target.value }))}
                 />
               </div>
             </div>
