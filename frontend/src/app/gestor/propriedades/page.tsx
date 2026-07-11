@@ -144,7 +144,12 @@ export default function PropriedadesPage() {
             .filter((s) => s.length > 0),
         }
       );
-      if (res.warning) setWarningToast(res.warning);
+      // Prompt 117 — Aviso de geocoding INLINE (não toast global).
+      if (res.warning) {
+        setMoradaWarning("Morada guardada, mas não encontrada no GPS. Simplifica-a (ex: remova R/C, Esq).");
+      } else {
+        setMoradaWarning(null);
+      }
       // Limpa o formulário e atualiza a tabela automaticamente.
       setForm({ nome: "", smoobu_id: "", morada: "", tempo_limpeza_minutos: "45", checklist: "" });
       setMostrarForm(false);
@@ -192,8 +197,11 @@ export default function PropriedadesPage() {
   // Estado da sincronização de propriedades do Smoobu (importação em massa).
   const [sincronizando, setSincronizando] = useState(false);
   const [sincronizacaoOk, setSincronizacaoOk] = useState<string | null>(null);
-  // Prompt 114 — Toast de warning (ex.: geocoding falhou ao criar/editar).
-  const [warningToast, setWarningToast] = useState<string | null>(null);
+  // Prompt 117 — Aviso de geocoding INLINE (junto ao campo morada, não toast global).
+  // String preenchida quando o Nominatim falha ao georreferenciar a morada.
+  const [moradaWarning, setMoradaWarning] = useState<string | null>(null);
+  // Aviso inline do modal de edição (morada editada não georreferenciada).
+  const [editMoradaWarning, setEditMoradaWarning] = useState<string | null>(null);
 
   /**
    * Importa/atualiza propriedades do Smoobu (scoped por empresa).
@@ -345,7 +353,12 @@ export default function PropriedadesPage() {
             editForm.funcionario_preferencial_id.trim() || null,
         }
       );
-      if (res.warning) setWarningToast(res.warning);
+      // Prompt 117 — Aviso de geocoding INLINE no modal de edição.
+      if (res.warning) {
+        setEditMoradaWarning("Morada guardada, mas não encontrada no GPS. Simplifica-a (ex: remova R/C, Esq).");
+      } else {
+        setEditMoradaWarning(null);
+      }
       // Atualiza a linha na tabela.
       setPropriedades((prev) =>
         prev.map((x) => (x._id === editando._id ? res.propriedade : x))
@@ -509,12 +522,20 @@ export default function PropriedadesPage() {
                   <Input
                     id="morada"
                     value={form.morada}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, morada: e.target.value }))
-                    }
+                    onChange={(e) => {
+                      setForm((f) => ({ ...f, morada: e.target.value }));
+                      setMoradaWarning(null);
+                    }}
                     placeholder="Ex.: Rua das Flores 12, Lisboa"
                     required
                   />
+                  {/* Prompt 117 — Aviso de geocoding INLINE (não toast global) */}
+                  {moradaWarning && (
+                    <p className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-300">
+                      <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      <span>{moradaWarning}</span>
+                    </p>
+                  )}
                 </div>
                 <div className="space-y-1.5">
                   <label
@@ -621,24 +642,6 @@ export default function PropriedadesPage() {
               variant="outline"
               size="sm"
               onClick={() => setSincronizacaoOk(null)}
-              className="ml-auto"
-            >
-              Fechar
-            </Button>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Prompt 114 — Toast de warning (ex.: geocoding falhou) */}
-      {warningToast && (
-        <Card className="border-amber-500/50 bg-amber-50 dark:bg-amber-950/20">
-          <CardContent className="flex items-center gap-3 p-4 text-sm text-amber-700 dark:text-amber-300">
-            <AlertCircle className="h-5 w-5 shrink-0" />
-            <span>{warningToast}</span>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setWarningToast(null)}
               className="ml-auto"
             >
               Fechar
@@ -794,11 +797,19 @@ export default function PropriedadesPage() {
               <Input
                 id="edit-morada"
                 value={editForm.morada}
-                onChange={(e) =>
-                  setEditForm((f) => ({ ...f, morada: e.target.value }))
-                }
+                onChange={(e) => {
+                  setEditForm((f) => ({ ...f, morada: e.target.value }));
+                  setEditMoradaWarning(null);
+                }}
                 required
               />
+              {/* Prompt 117 — Aviso de geocoding INLINE no modal de edição */}
+              {editMoradaWarning && (
+                <p className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-300">
+                  <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span>{editMoradaWarning}</span>
+                </p>
+              )}
             </div>
             <div className="space-y-1.5">
               <label

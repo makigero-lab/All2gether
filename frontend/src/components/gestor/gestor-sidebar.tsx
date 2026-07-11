@@ -15,7 +15,6 @@ import {
   X,
   Sparkles,
   LogOut,
-  Settings,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -40,6 +39,13 @@ interface NavItem {
  * NÃO há nenhum link para 'Sistema', 'Empresas', 'Webhooks' ou 'Admin'.
  * Este ficheiro é dedicado ao Gestor e não partilha código com o Admin.
  */
+/**
+ * Prompt 117 — Limpeza do Layout do Gestor:
+ *   Removido ESTRITAMENTE o item 'Configurações'. O Gestor não gere API keys
+ *   nem webhooks (essas integrações pertencem à Gaveta do Admin em
+ *   /admin/empresas/[id]). O Gestor apenas vê operações:
+ *   Dashboard, Calendário, Tarefas, Propriedades, Equipa, Ausências, Relatórios.
+ */
 const gestorNavItems: NavItem[] = [
   { label: "Dashboard", href: "/gestor", icon: LayoutDashboard },
   { label: "Calendário", href: "/gestor/calendario", icon: CalendarRange },
@@ -48,7 +54,6 @@ const gestorNavItems: NavItem[] = [
   { label: "Equipa", href: "/gestor/equipa", icon: Users },
   { label: "Ausências / Férias", href: "/gestor/ausencias", icon: CalendarOff },
   { label: "Relatórios", href: "/gestor/relatorios", icon: BarChart3 },
-  { label: "Configurações", href: "/gestor/configuracoes", icon: Settings },
 ];
 
 /**

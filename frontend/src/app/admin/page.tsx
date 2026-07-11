@@ -13,6 +13,9 @@ import {
   Power,
   Plus,
   UserPlus,
+  Settings,
+  Trash2,
+  AlertTriangle,
 } from "lucide-react";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -43,6 +46,8 @@ interface EmpresaDTO {
   nome: string;
   nif?: string;
   plano_ativo: boolean;
+  // Prompt 116 — campo ativa (controlo operacional SaaS).
+  ativa?: boolean;
   createdAt: string;
   gestor: { id: string; nome: string; email: string } | null;
   num_propriedades?: number;
@@ -89,6 +94,11 @@ export default function SuperAdminPage() {
   const [showCriarEmpresa, setShowCriarEmpresa] = useState(false);
   const [novaEmpresaNome, setNovaEmpresaNome] = useState("");
   const [criandoEmpresa, setCriandoEmpresa] = useState(false);
+
+  // Prompt 117 — Suspender/Ativar + Apagar empresa.
+  const [togglingEmpresaId, setTogglingEmpresaId] = useState<string | null>(null);
+  const [apagarEmpresaId, setApagarEmpresaId] = useState<string | null>(null);
+  const [apagarLoading, setApagarLoading] = useState(false);
 
   const carregar = useCallback(async () => {
     setLoading(true);
@@ -183,6 +193,50 @@ export default function SuperAdminPage() {
       });
     } finally {
       setImpersonando(null);
+    }
+  }
+
+  /** Prompt 117 — Suspender/Ativar empresa (toggle do campo ativa). */
+  async function handleToggleStatus(emp: EmpresaDTO) {
+    setTogglingEmpresaId(emp._id);
+    setToast(null);
+    try {
+      const res = await fetch(`/api/admin/empresas/${emp._id}/toggle-status`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ativa: !emp.ativa }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.erro || `Erro ${res.status}`);
+      setToast({ tipo: "sucesso", msg: data.message || "Estado alterado." });
+      await carregar();
+    } catch (e) {
+      setToast({ tipo: "erro", msg: e instanceof Error ? e.message : "Erro ao alterar estado." });
+    } finally {
+      setTogglingEmpresaId(null);
+    }
+  }
+
+  /** Prompt 117 — Apagar empresa (hard delete — irreversível). */
+  async function handleApagarEmpresa() {
+    if (!apagarEmpresaId) return;
+    setApagarLoading(true);
+    setToast(null);
+    try {
+      const res = await fetch(`/api/admin/empresas/${apagarEmpresaId}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.erro || `Erro ${res.status}`);
+      setToast({ tipo: "sucesso", msg: data.message || "Empresa eliminada." });
+      setApagarEmpresaId(null);
+      await carregar();
+    } catch (e) {
+      setToast({ tipo: "erro", msg: e instanceof Error ? e.message : "Erro ao eliminar empresa." });
+    } finally {
+      setApagarLoading(false);
     }
   }
 
@@ -458,12 +512,27 @@ export default function SuperAdminPage() {
                           : "—"}
                       </td>
                       <td className="px-4 py-3">
-                        <Badge variant={emp.plano_ativo ? "default" : "secondary"}>
-                          {emp.plano_ativo ? "Ativo" : "Inativo"}
-                        </Badge>
+                        <div className="flex flex-col gap-1">
+                          <Badge variant={emp.plano_ativo ? "default" : "secondary"}>
+                            {emp.plano_ativo ? "Ativo" : "Inativo"}
+                          </Badge>
+                          {emp.ativa === false && (
+                            <Badge variant="destructive">Suspensa</Badge>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <div className="flex items-center justify-end gap-2">
+                        <div className="flex flex-wrap items-center justify-end gap-2">
+                          {/* Prompt 117 — Gerir Configurações (gaveta da empresa) */}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => router.push(`/admin/empresas/${emp._id}`)}
+                            title={`Gerir configurações de ${emp.nome}`}
+                          >
+                            <Settings className="mr-1.5 h-3.5 w-3.5" />
+                            Gerir Configurações
+                          </Button>
                           {/* Prompt 101 — Gerir Utilizadores da empresa */}
                           <Button
                             size="sm"
@@ -472,7 +541,7 @@ export default function SuperAdminPage() {
                             title={`Gerir utilizadores de ${emp.nome}`}
                           >
                             <Users className="mr-1.5 h-3.5 w-3.5" />
-                            Gerir Utilizadores
+                            Utilizadores
                           </Button>
                           <Button
                             size="sm"
@@ -492,7 +561,38 @@ export default function SuperAdminPage() {
                             ) : (
                               <LogIn className="mr-1.5 h-3.5 w-3.5" />
                             )}
-                            Entrar como Gestor
+                            Entrar
+                          </Button>
+                          {/* Prompt 117 — Suspender/Ativar */}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleToggleStatus(emp)}
+                            disabled={togglingEmpresaId === emp._id}
+                            title={emp.ativa === false ? "Reativar empresa" : "Suspender empresa (bloqueia logins e webhooks)"}
+                            className={
+                              emp.ativa === false
+                                ? "text-emerald-600 border-emerald-400 hover:bg-emerald-50"
+                                : "text-amber-600 border-amber-400 hover:bg-amber-50"
+                            }
+                          >
+                            {togglingEmpresaId === emp._id ? (
+                              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Power className="mr-1.5 h-3.5 w-3.5" />
+                            )}
+                            {emp.ativa === false ? "Ativar" : "Suspender"}
+                          </Button>
+                          {/* Prompt 117 — Apagar (irreversível) */}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setApagarEmpresaId(emp._id)}
+                            title="Apagar empresa (irreversível)"
+                            className="text-destructive border-destructive/40 hover:bg-destructive/10"
+                          >
+                            <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                            Apagar
                           </Button>
                         </div>
                       </td>
@@ -739,6 +839,71 @@ export default function SuperAdminPage() {
           </DialogFooter>
         </form>
       </Dialog>
+
+      {/* Prompt 117 — Modal Apagar Empresa (irreversível) */}
+      <Dialog open={apagarEmpresaId !== null} onOpenChange={(o) => !o && setApagarEmpresaId(null)}>
+        <DialogHeader>
+          <div>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              Apagar Empresa
+            </DialogTitle>
+            <DialogDescription>
+              Esta ação é <strong>irreversível</strong>. A empresa e todos os
+              seus dados (propriedades, tarefas, utilizadores, ausências) serão
+              permanentemente eliminados. Escreve <strong>APAGAR</strong> para confirmar.
+            </DialogDescription>
+          </div>
+          <DialogClose onClick={() => setApagarEmpresaId(null)} />
+        </DialogHeader>
+        <DialogContent>
+          <ApagarConfirmInput
+            onConfirm={handleApagarEmpresa}
+            onCancel={() => setApagarEmpresaId(null)}
+            loading={apagarLoading}
+          />
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+/** Input de confirmação para apagar empresa (escrever "APAGAR"). */
+function ApagarConfirmInput({
+  onConfirm,
+  onCancel,
+  loading,
+}: {
+  onConfirm: () => void;
+  onCancel: () => void;
+  loading: boolean;
+}) {
+  const [texto, setTexto] = useState("");
+  return (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <label className="text-sm font-medium" htmlFor="apagar-text">Escreve &ldquo;APAGAR&rdquo;:</label>
+        <Input
+          id="apagar-text"
+          value={texto}
+          onChange={(e) => setTexto(e.target.value)}
+          placeholder="APAGAR"
+          className="font-mono"
+          autoComplete="off"
+        />
+      </div>
+      <DialogFooter>
+        <Button type="button" variant="outline" onClick={onCancel} disabled={loading}>
+          Cancelar
+        </Button>
+        <Button type="button" variant="destructive" onClick={onConfirm} disabled={texto !== "APAGAR" || loading}>
+          {loading ? (
+            <><Loader2 className="mr-2 h-4 w-4 animate-spin" />A apagar…</>
+          ) : (
+            <><Trash2 className="mr-2 h-4 w-4" />Apagar Definitivamente</>
+          )}
+        </Button>
+      </DialogFooter>
     </div>
   );
 }

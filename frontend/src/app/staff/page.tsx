@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Clock,
@@ -182,6 +182,50 @@ export default function StaffPage() {
   const tarefasAtivas = tarefas.filter((t) => t.estado !== "concluida");
   const tarefasConcluidas = tarefas.filter((t) => t.estado === "concluida");
 
+  /**
+   * Prompt 118 — Agrupa as tarefas ativas por dia (YYYY-MM-DD) para mostrar
+   * separadores visuais: "Hoje", "Amanhã", "15 de Outubro".
+   * Devolve um array ordenado de { chave, label, itens }.
+   */
+  const gruposPorDia = useMemo(() => {
+    const hojeStr = new Date().toLocaleDateString("pt-PT", { timeZone: "Europe/Lisbon" });
+    const amanha = new Date();
+    amanha.setDate(amanha.getDate() + 1);
+    const amanhaStr = amanha.toLocaleDateString("pt-PT", { timeZone: "Europe/Lisbon" });
+
+    const grupos: Record<string, TarefaReal[]> = {};
+    for (const t of tarefasAtivas) {
+      // Extrai a data de calendário (Lisboa) da tarefa.
+      const dia = new Date(t.data).toLocaleDateString("pt-PT", { timeZone: "Europe/Lisbon" });
+      if (!grupos[dia]) grupos[dia] = [];
+      grupos[dia].push(t);
+    }
+
+    // Converte para array ordenado por data.
+    return Object.entries(grupos)
+      .map(([dia, itens]) => {
+        // Label amigável: "Hoje" / "Amanhã" / "15 de Outubro".
+        let label: string;
+        if (dia === hojeStr) {
+          label = "Hoje";
+        } else if (dia === amanhaStr) {
+          label = "Amanhã";
+        } else {
+          // Parse dd/mm/yyyy → Date para formatar.
+          const [d, m, y] = dia.split("/");
+          const dt = new Date(Number(y), Number(m) - 1, Number(d));
+          label = dt.toLocaleDateString("pt-PT", { day: "numeric", month: "long" });
+        }
+        return { chave: dia, label, itens };
+      })
+      .sort((a, b) => {
+        // Ordena por data (parse dd/mm/yyyy).
+        const [da, ma, ya] = a.chave.split("/").map(Number);
+        const [db, mb, yb] = b.chave.split("/").map(Number);
+        return new Date(ya, ma - 1, da).getTime() - new Date(yb, mb - 1, db).getTime();
+      });
+  }, [tarefasAtivas]);
+
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-md flex-col bg-muted/20">
       {/* Cabeçalho */}
@@ -280,32 +324,46 @@ export default function StaffPage() {
           </div>
         ) : (
           <>
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-              Tarefas de hoje
-            </h2>
-            <div className="space-y-4">
-              {tarefasAtivas.map((t) => (
-                <TaskCard key={t._id} tarefa={adaptarTarefa(t)} />
-              ))}
-            </div>
+            {/* Prompt 118 — Tarefas agrupadas por dia com separadores visuais */}
+            {gruposPorDia.map((grupo) => (
+              <div key={grupo.chave} className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <h2 className="text-sm font-bold uppercase tracking-wide text-primary">
+                    {grupo.label}
+                  </h2>
+                  <span className="text-xs text-muted-foreground">
+                    {grupo.itens.length} tarefa(s)
+                  </span>
+                  <div className="h-px flex-1 bg-border" />
+                </div>
+                <div className="space-y-4">
+                  {grupo.itens.map((t) => (
+                    <TaskCard key={t._id} tarefa={adaptarTarefa(t)} />
+                  ))}
+                </div>
+              </div>
+            ))}
 
             {tarefasConcluidas.length > 0 && (
-              <>
-                <h2 className="pt-4 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                  Concluídas ({tarefasConcluidas.length})
-                </h2>
+              <div className="space-y-3">
+                <div className="flex items-center gap-3 pt-2">
+                  <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                    Concluídas ({tarefasConcluidas.length})
+                  </h2>
+                  <div className="h-px flex-1 bg-border" />
+                </div>
                 <div className="space-y-4 opacity-60">
                   {tarefasConcluidas.map((t) => (
                     <TaskCard key={t._id} tarefa={adaptarTarefa(t)} />
                   ))}
                 </div>
-              </>
+              </div>
             )}
 
             {tarefas.length === 0 && (
               <div className="mt-10 flex flex-col items-center gap-2 text-center text-muted-foreground">
                 <ClipboardList className="h-10 w-10 opacity-40" />
-                <p className="text-sm">Sem tarefas atribuídas para hoje.</p>
+                <p className="text-sm">Sem tarefas atribuídas.</p>
               </div>
             )}
           </>

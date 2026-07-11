@@ -48,7 +48,6 @@ import {
 } from "@/lib/api";
 import { PaginationBar } from "@/components/admin/pagination-bar";
 import { DetalheTarefaModal } from "@/components/gestor/detalhe-tarefa-modal";
-import { paraIsoMeiaNoiteLocal } from "@/lib/utils";
 
 interface TarefaAdmin {
   _id: string;
@@ -177,11 +176,16 @@ export default function AdminTarefasPage() {
   }, [pagina, totalPaginas]);
 
   // Formulário de criação
+  // Prompt 117 — adicionados hora, check_in, check_out, hospedes.
   const [mostrarForm, setMostrarForm] = useState(false);
   const [form, setForm] = useState({
     propriedade_id: "",
     utilizador_id: "",
     data: "",
+    hora: "",
+    check_in: "",
+    check_out: "",
+    hospedes: "",
     tempo_limpeza_minutos: "45",
     tipo: "limpeza",
   });
@@ -277,21 +281,36 @@ export default function AdminTarefasPage() {
     try {
       // Prompt 114 — Captura warning de distância (Haversine > 15km entre
       // tarefas do mesmo dia do mesmo staff).
+      // Prompt 117 — envia hora, check_in, check_out, hospedes.
+      // A combinação data + hora é enviada como "YYYY-MM-DD" + "HH:mm"
+      // separados — o backend combina como LOCAL (new Date("YYYY-MM-DDTHH:mm")
+      // sem Z) para não gravar às 00:00 UTC.
       const res = await adminPost<{ tarefa: TarefaAdmin; warning?: string }>(
         "/api/gestor/tarefas",
         {
           propriedade_id: form.propriedade_id,
           utilizador_id: form.utilizador_id || null,
-          // Prompt 113 — envia meia-noite LOCAL (ISO com Z) em vez de
-          // "YYYY-MM-DD" (que o backend interpretaria como UTC midnight e
-          // apareceria como 01:00 em Lisboa).
-          data: paraIsoMeiaNoiteLocal(form.data),
+          data: form.data,
+          hora: form.hora || undefined,
+          check_in: form.check_in || undefined,
+          check_out: form.check_out || undefined,
+          hospedes: form.hospedes ? Number(form.hospedes) : undefined,
           tempo_limpeza_minutos: Number(form.tempo_limpeza_minutos) || 45,
           tipo: form.tipo,
         }
       );
       if (res.warning) setWarningToast(res.warning);
-      setForm({ propriedade_id: "", utilizador_id: "", data: "", tempo_limpeza_minutos: "45", tipo: "limpeza" });
+      setForm({
+        propriedade_id: "",
+        utilizador_id: "",
+        data: "",
+        hora: "",
+        check_in: "",
+        check_out: "",
+        hospedes: "",
+        tempo_limpeza_minutos: "45",
+        tipo: "limpeza",
+      });
       setMostrarForm(false);
       await carregar();
     } catch (e) {
@@ -603,6 +622,26 @@ export default function AdminTarefasPage() {
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium">Tempo (min)</label>
                   <Input type="number" min={0} value={form.tempo_limpeza_minutos} onChange={(e) => setForm((f) => ({ ...f, tempo_limpeza_minutos: e.target.value }))} />
+                </div>
+                {/* Prompt 117 — Hora da Limpeza (combina com Data como LOCAL) */}
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">Hora da Limpeza</label>
+                  <Input type="time" value={form.hora} onChange={(e) => setForm((f) => ({ ...f, hora: e.target.value }))} />
+                </div>
+                {/* Prompt 117 — Data de Check-in */}
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">Data de Check-in</label>
+                  <Input type="date" value={form.check_in} onChange={(e) => setForm((f) => ({ ...f, check_in: e.target.value }))} />
+                </div>
+                {/* Prompt 117 — Data de Check-out */}
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">Data de Check-out</label>
+                  <Input type="date" value={form.check_out} onChange={(e) => setForm((f) => ({ ...f, check_out: e.target.value }))} />
+                </div>
+                {/* Prompt 117 — Nº de Hóspedes */}
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">Nº de Hóspedes</label>
+                  <Input type="number" min={0} value={form.hospedes} onChange={(e) => setForm((f) => ({ ...f, hospedes: e.target.value }))} placeholder="0" />
                 </div>
               </div>
               {formErro && (

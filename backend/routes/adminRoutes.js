@@ -405,6 +405,121 @@ router.post('/empresas/:id/hard-reset', async (req, res) => {
   }
 });
 
+// Prompt 117 — Gaveta da Empresa: endpoints scoped por :id (empresa_id).
+// O admin atua sobre UMA empresa específica, fazendo override do
+// req.user.empresa_id para os controllers partilhados do gestor.
+
+// GET /api/admin/empresas/:id/config — devolve nome + smoobu_api_key (mascarada).
+router.get('/empresas/:id/config', async (req, res) => {
+  try {
+    const Empresa = require('../models/Empresa');
+    const { id } = req.params;
+    const mongoose = require('mongoose');
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ erro: 'ID inválido.' });
+    }
+    const emp = await Empresa.findById(id).select('nome smoobu_api_key ativa').lean();
+    if (!emp) return res.status(404).json({ erro: 'Empresa não encontrada.' });
+    const key = emp.smoobu_api_key || '';
+    const keyMascarada = key.length > 4 ? '•'.repeat(key.length - 4) + key.slice(-4) : key;
+    return res.status(200).json({
+      nome: emp.nome,
+      ativa: emp.ativa,
+      smoobu_api_key_mascarada: keyMascarada,
+      tem_api_key: !!key,
+    });
+  } catch (err) {
+    return res.status(500).json({ erro: 'Erro ao carregar config.', detalhe: err.message });
+  }
+});
+
+// PUT /api/admin/empresas/:id/config — atualiza nome + smoobu_api_key.
+router.put('/empresas/:id/config', async (req, res) => {
+  try {
+    const Empresa = require('../models/Empresa');
+    const { id } = req.params;
+    const mongoose = require('mongoose');
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ erro: 'ID inválido.' });
+    }
+    const { nome, smoobu_api_key } = req.body || {};
+    const update = {};
+    if (nome !== undefined) update.nome = String(nome).trim();
+    if (smoobu_api_key !== undefined) update.smoobu_api_key = String(smoobu_api_key).trim();
+    if (Object.keys(update).length === 0) {
+      return res.status(400).json({ erro: 'Nenhum campo para atualizar.' });
+    }
+    const emp = await Empresa.findByIdAndUpdate(id, { $set: update }, { new: true }).select('nome smoobu_api_key').lean();
+    if (!emp) return res.status(404).json({ erro: 'Empresa não encontrada.' });
+    const key = emp.smoobu_api_key || '';
+    const keyMascarada = key.length > 4 ? '•'.repeat(key.length - 4) + key.slice(-4) : key;
+    return res.status(200).json({
+      message: 'Configuração guardada.',
+      nome: emp.nome,
+      smoobu_api_key_mascarada: keyMascarada,
+      tem_api_key: !!key,
+    });
+  } catch (err) {
+    return res.status(500).json({ erro: 'Erro ao guardar config.', detalhe: err.message });
+  }
+});
+
+// POST /api/admin/empresas/:id/sincronizar-propriedades — scoped.
+router.post('/empresas/:id/sincronizar-propriedades', async (req, res) => {
+  const { id } = req.params;
+  const mongoose = require('mongoose');
+  if (!mongoose.isValidObjectId(id)) {
+    return res.status(400).json({ erro: 'ID inválido.' });
+  }
+  // Override temporário do empresa_id para o importarPropriedades.
+  req.user = { ...req.user, empresa_id: id };
+  return importarPropriedades(req, res);
+});
+
+// POST /api/admin/empresas/:id/sincronizar-reservas — scoped.
+router.post('/empresas/:id/sincronizar-reservas', async (req, res) => {
+  const { id } = req.params;
+  const mongoose = require('mongoose');
+  if (!mongoose.isValidObjectId(id)) {
+    return res.status(400).json({ erro: 'ID inválido.' });
+  }
+  req.user = { ...req.user, empresa_id: id };
+  return sincronizarReservas(req, res);
+});
+
+// POST /api/admin/empresas/:id/registrar-webhooks — scoped.
+router.post('/empresas/:id/registrar-webhooks', async (req, res) => {
+  const { id } = req.params;
+  const mongoose = require('mongoose');
+  if (!mongoose.isValidObjectId(id)) {
+    return res.status(400).json({ erro: 'ID inválido.' });
+  }
+  req.user = { ...req.user, empresa_id: id };
+  // Reutiliza a lógica do /registrar-webhooks global (já lê empresa_id do req.user).
+  const { _obterApiKeySmoobu } = require('../controllers/smoobuController');
+  const apiKey = await _obterApiKeySmoobu(id);
+  if (!apiKey || !apiKey.trim()) {
+    return res.status(400).json({ erro: 'Smoobu não configurada para esta empresa.' });
+  }
+  try {
+    const webhookUrl = process.env.SMOOBU_WEBHOOK_URL || `${req.protocol}://${req.get('host')}/webhooks/smoobu`;
+    const resp = await fetch('https://login.smoobu.com/api/webhooks', {
+      method: 'POST',
+      headers: { 'Api-Key': apiKey.trim(), 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ url: webhookUrl, type: 'reservation' }),
+      signal: AbortSignal.timeout(15000),
+    });
+    const body = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      console.error(`❌ registrar-webhooks (scoped): Smoobu devolveu ${resp.status}`, body);
+      return res.status(resp.status).json({ erro: 'Smoobu rejeitou o registo.', detalhe: body });
+    }
+    return res.status(200).json({ message: 'Webhook registado no Smoobu.', webhookUrl, smoobu: body });
+  } catch (err) {
+    return res.status(502).json({ erro: 'Erro ao ligar ao Smoobu.', detalhe: err.message });
+  }
+});
+
 // Prompt 112 — Monitor de Webhooks (Caixa Negra).
 
 // GET /api/admin/webhook-logs — lista todos os logs de webhooks (cross-tenant).
