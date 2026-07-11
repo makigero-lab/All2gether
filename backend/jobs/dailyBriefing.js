@@ -143,7 +143,10 @@ async function executarBriefing() {
         staffId,
         '📋 Daily Briefing',
         `Tens ${count} tarefa(s) hoje.`,
-        '/staff'
+        '/staff',
+        // Prompt 115 — Daily Briefing é uma notificação "principal" → cria
+        // registo in-app (sino) para o staff ver mesmo se não viu o push.
+        { criarInApp: true, tipo: 'sistema' }
       );
       pushesEnviados++;
     }

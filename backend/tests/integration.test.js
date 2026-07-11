@@ -3536,7 +3536,7 @@ describe('Prompt 114 — Centro de Notificações + Haversine', () => {
     expect(res.body.nao_lidas).toBe(0);
   });
 
-  it('criar tarefa atribuída gera notificação in-app + contagem incrementa', async () => {
+  it('criar tarefa NÃO gera notificação in-app (push only) — Prompt 115 não inunda o sino', async () => {
     // Cria um staff para receber a tarefa.
     const hash = await bcrypt.hash(PASSWORD, 10);
     const staff = await Utilizador.create({
@@ -3568,7 +3568,7 @@ describe('Prompt 114 — Centro de Notificações + Haversine', () => {
     });
     expect(res.status).toBe(201);
 
-    // Pequeno delay para o notificarUtilizador (fire-and-forget) criar a notif.
+    // Pequeno delay para o notificarUtilizador (fire-and-forget) tentar criar.
     await esperar(500);
 
     // Login como o staff para ver as suas notificações.
@@ -3577,11 +3577,53 @@ describe('Prompt 114 — Centro de Notificações + Haversine', () => {
       .send({ email: 'staff.notif@teste.pt', password: PASSWORD });
     const staffToken = loginStaff.body.token;
 
+    // Prompt 115 — Atribuição de tarefa é push-only: NÃO cria notificação
+    // in-app. O sino deve ficar a 0 (não inunda o utilizador).
     const contagem = await request(app)
       .get('/api/auth/me/notificacoes/contagem')
       .set('Authorization', `Bearer ${staffToken}`);
     expect(contagem.status).toBe(200);
-    expect(contagem.body.nao_lidas).toBeGreaterThanOrEqual(1);
+    expect(contagem.body.nao_lidas).toBe(0);
+
+    // Cleanup.
+    await Tarefa.deleteMany({ propriedade_id: prop._id });
+    await Propriedade.deleteMany({ _id: prop._id });
+    await Utilizador.deleteOne({ _id: staff._id });
+  });
+
+  it('criarNotificacaoInApp cria notificação + contagem incrementa + marcar lidas (sino funciona para notificações principais)', async () => {
+    const { criarNotificacaoInApp } = require('../utils/notificar');
+    const hash = await bcrypt.hash(PASSWORD, 10);
+    const staff = await Utilizador.create({
+      nome: 'Staff Sino',
+      email: 'staff.sino@teste.pt',
+      password_hash: hash,
+      empresa_id: empresaId,
+      role: 'staff',
+      ativo: true,
+    });
+
+    // Cria uma notificação "principal" diretamente (simula o que o Daily
+    // Briefing / Cão de Guarda fazem com criarInApp: true).
+    await criarNotificacaoInApp(String(staff._id), '📋 Daily Briefing: Tens 3 tarefas hoje.', {
+      tipo: 'sistema',
+      url: '/staff',
+      empresa_id: empresaId,
+    });
+    await esperar(300);
+
+    // Login como o staff.
+    const loginStaff = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'staff.sino@teste.pt', password: PASSWORD });
+    const staffToken = loginStaff.body.token;
+
+    // Contagem = 1.
+    const contagem = await request(app)
+      .get('/api/auth/me/notificacoes/contagem')
+      .set('Authorization', `Bearer ${staffToken}`);
+    expect(contagem.status).toBe(200);
+    expect(contagem.body.nao_lidas).toBe(1);
 
     // Lista as notificações.
     const lista = await request(app)
@@ -3589,15 +3631,15 @@ describe('Prompt 114 — Centro de Notificações + Haversine', () => {
       .set('Authorization', `Bearer ${staffToken}`);
     expect(lista.status).toBe(200);
     expect(Array.isArray(lista.body.notificacoes)).toBe(true);
-    expect(lista.body.notificacoes.length).toBeGreaterThanOrEqual(1);
-    expect(lista.body.notificacoes[0].mensagem).toContain('Limpeza');
+    expect(lista.body.notificacoes.length).toBe(1);
+    expect(lista.body.notificacoes[0].mensagem).toContain('Daily Briefing');
 
     // Marca como lidas.
     const marcar = await request(app)
       .patch('/api/auth/me/notificacoes/marcar-lidas')
       .set('Authorization', `Bearer ${staffToken}`);
     expect(marcar.status).toBe(200);
-    expect(marcar.body.marcadas).toBeGreaterThanOrEqual(1);
+    expect(marcar.body.marcadas).toBe(1);
 
     // Contagem volta a 0.
     const contagem2 = await request(app)
@@ -3606,8 +3648,8 @@ describe('Prompt 114 — Centro de Notificações + Haversine', () => {
     expect(contagem2.body.nao_lidas).toBe(0);
 
     // Cleanup.
-    await Tarefa.deleteMany({ propriedade_id: prop._id });
-    await Propriedade.deleteMany({ _id: prop._id });
+    const Notificacao = require('../models/Notificacao');
+    await Notificacao.deleteMany({ utilizador_id: staff._id });
     await Utilizador.deleteOne({ _id: staff._id });
   });
 

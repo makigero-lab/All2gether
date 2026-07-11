@@ -222,7 +222,9 @@ router.post('/push-teste', async (req, res) => {
       String(userId),
       '🧪 Push de Teste',
       'Se estás a ver esta notificação, o sistema de push notifications está a funcionar!',
-      '/admin/sistema'
+      '/admin/sistema',
+      // Prompt 115 — Push de teste cria in-app para o admin confirmar visualmente.
+      { criarInApp: true, tipo: 'sistema' }
     );
     return res.status(200).json({ message: 'Push de teste enviado. Verifica o teu dispositivo (se tiveres subscrição ativa).' });
   } catch (err) {

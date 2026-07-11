@@ -270,7 +270,9 @@ exports.faltaHoje = async (req, res) => {
           String(g._id),
           '🚨 Falta de emergência',
           `${nomeStaff} reportou falta para hoje.`,
-          '/gestor/aprovacoes'
+          '/gestor/aprovacoes',
+          // Prompt 115 — Falta de emergência é "principal" → cria in-app.
+          { criarInApp: true, tipo: 'aviso' }
         );
       }
     } catch (e) {
@@ -470,7 +472,9 @@ exports.reportarAvaria = async (req, res) => {
             String(g._id),
             '🛠️ Nova Avaria Reportada',
             `${propNome}: ${descricaoCurta}`,
-            '/gestor/tarefas'
+            '/gestor/tarefas',
+            // Prompt 115 — Avaria reportada é "principal" → cria in-app.
+            { criarInApp: true, tipo: 'aviso' }
           );
         } catch (e) {
           // Fire-and-forget por gestor: não bloqueia os outros.
