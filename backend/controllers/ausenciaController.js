@@ -376,14 +376,17 @@ exports.aprovarRejeitarAusencia = async (req, res) => {
         String(ausencia.utilizador_id),
         '✅ Ausência aprovada',
         `O teu pedido de ${ausencia.tipo} (${dataInicioFmt} a ${dataFimFmt}) foi aprovado.`,
-        '/staff/ausencias'
+        '/staff/ausencias',
+        // Prompt 115 — Decisão de ausência é "principal" → cria in-app.
+        { criarInApp: true, tipo: 'sistema' }
       );
     } else {
       notificarUtilizador(
         String(ausencia.utilizador_id),
         '❌ Ausência rejeitada',
         `O teu pedido de ${ausencia.tipo} (${dataInicioFmt} a ${dataFimFmt}) foi rejeitado.`,
-        '/staff/ausencias'
+        '/staff/ausencias',
+        { criarInApp: true, tipo: 'sistema' }
       );
     }
 

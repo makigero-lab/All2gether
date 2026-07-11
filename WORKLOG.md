@@ -500,3 +500,23 @@ Stage Summary:
 - **Geocoding tolerante:** catch silencioso + flag `warning` na resposta + toast âmbar no frontend.
 - **Haversine:** `utils/distancia.js` + warning logístico >15km entre tarefas do mesmo dia do mesmo staff (não bloqueia, toast âmbar).
 - 143 testes backend (+7). Lint + tsc + build ✓. Documentação atualizada. Próximo passo: commit + push para `dev`.
+
+---
+
+Task ID: A17 (Prompt 115)
+Agent: Z.ai Code
+Task: Separação ABSOLUTA de menus e layouts (frontend) + fix definitivo do loop 401. 4 replaces completos: gestor-sidebar, admin-sidebar, layouts, route-guard.
+
+Work Log:
+- Re-clonado o repo (clone anterior foi removido) na branch `dev` (commit 31833e5, Prompt 114).
+- Lido o estado atual: `gestor-sidebar.tsx` (já dedicado mas com Webhooks e ordem errada), `admin-sidebar.tsx` (componente partilhado com `mode` prop + array `gestorNavItems`), `admin/layout.tsx` (usa `<AdminSidebar mode="admin" />`), `gestor/layout.tsx` (já usa `GestorSidebar`), `route-guard.tsx` (usa `lerUtilizador` + `router.replace` soft).
+- **Fix 1 — GestorSidebar (replace completo):** `gestor-sidebar.tsx` reescrito. `gestorNavItems` contém APENAS: Dashboard (/gestor), Calendário (/gestor/calendario), Tarefas (/gestor/tarefas), Propriedades (/gestor/propriedades), Equipa (/gestor/equipa), Ausências (/gestor/ausencias), Relatórios (/gestor/relatorios), Configurações (/gestor/configuracoes). Removido Webhooks (não estava na lista do Prompt 115). Brand label mudado de "Admin" para "Gestor" (era confuso). NENHUM link para Sistema/Empresas/Admin.
+- **Fix 2 — AdminSidebar (replace completo):** `admin-sidebar.tsx` reescrito. Removido o `mode` prop e o array `gestorNavItems` (o componente partilhado foi eliminado). `adminNavItems` contém APENAS: Empresas (/admin), Sistema/Webhooks (/admin/sistema), Webhooks (/admin/webhooks). Componente dedicado — não importa nem renderiza nada do gestor.
+- **Fix 3 — Layouts isolados:** `admin/layout.tsx` agora usa `<AdminSidebar />` (sem `mode` prop). `gestor/layout.tsx` já usava `<GestorSidebar />` (confirmado, sem alterações necessárias além do comentário). Ambos importam EXCLUSIVAMENTE o seu sidebar dedicado.
+- **Fix 4 — RouteGuard (loop 401 definitivo):** `route-guard.tsx` reescrito. Antes: `lerUtilizador()` → null → `router.replace("/login")` (soft redirect) → re-mount → novo fetch → 401 → loop. Agora: `lerUtilizador()` → null → `limparCacheAuth()` + `fazerLogout()` (POST /api/auth/logout que limpa cookie httpOnly + `window.location.href = "/login"` — redirect HARD). O redirect HARD reinicia o estado do cliente (não há re-mount do guard, não há cache obsoleto). Sem retry: em 401 não volta a tentar o fetch. Role errado → redirect HARD (`window.location.href`) para o painel certo. Usa `lerUtilizador()` (em vez de fetch cru) para popular o cache temporal — as páginas que também chamam `lerUtilizador()` acertam no cache (1 fetch total, não 2).
+- **Validação:** `npm run lint` ✓ · `npx tsc --noEmit` ✓ · `npm run build` ✓ (todas as rotas built, middleware 26.8kB).
+
+Stage Summary:
+- **Separação ABSOLUTA:** `GestorSidebar` e `AdminSidebar` são componentes totalmente separados, sem código partilhado, sem `mode` prop. O gestor vê SÓ operações (8 items); o admin vê SÓ gestão (3 items).
+- **Loop 401 resolvido definitivamente:** RouteGuard faz `fazerLogout()` (redirect HARD via `window.location.href`) em vez de `router.replace` (soft). O estado do cliente é reiniciado — não há re-mount, não há loop.
+- Lint + tsc + build ✓. Commit `368dd94` pushed para `dev`.

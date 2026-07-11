@@ -1,10 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 
-import { lerUtilizador, type Role } from "@/lib/auth";
+import { fazerLogout, lerUtilizador, limparCacheAuth, type Role } from "@/lib/auth";
 
 interface RouteGuardProps {
   /** Role exigida para esta área ("admin" | "gestor" | "staff"). */
@@ -17,50 +16,69 @@ interface RouteGuardProps {
  *
  * O `middleware.ts` já bloqueia o acesso no servidor (redireciona para /login
  * sem token, e redireciona para o painel certo se o role não bate com a rota).
- * Este componente é uma **segunda camada** que:
- *   - valida via fetch a /api/auth/me (proxy que lê o cookie httpOnly no
- *     servidor e consulta o backend) se o utilizador está autenticado;
- *   - garante que o role corresponde ao role da área;
- *   - mostra um spinner enquanto valida (evita flash de conteúdo protegido).
+ * Este componente é uma **segunda camada** que valida a sessão via
+ * `lerUtilizador()` (fetch a /api/auth/me com cache temporal).
  *
- * Se algo falhar, redireciona UMA vez:
- *   - sem sessão (null) → /login
- *   - sessão válida mas role errado → painel correto desse role
+ * Prompt 115 — Resolução DEFINITIVA do Loop 401:
+ *   Antes, o guard chamava `lerUtilizador()` e, se devolvesse null, fazia
+ *   `router.replace("/login")` (soft redirect). O problema: o `router.replace`
+ *   é client-side — a página alvo podia voltar a montar e chamar o guard
+ *   outra vez, gerando outro 401, num ciclo sem fim.
  *
- * Prompt 113 — Loop 401: `lerUtilizador()` passou a ser pura (não redireciona
- * internamente). O redirect é responsabilidade exclusiva deste guard, feito
- * uma só vez com uma flag `redirecionado`. Isto elimina o burst de pedidos
- * 401 em cascata que ocorria quando vários componentes chamavam
- * `lerUtilizador()` em paralelo e cada um disparava o seu próprio redirect.
+ *   Agora, se `lerUtilizador()` devolver null (401):
+ *     1. Limpa o cache de auth (`limparCacheAuth`).
+ *     2. Faz **logout imediato** (`fazerLogout` → POST /api/auth/logout que
+ *        limpa o cookie httpOnly + `window.location.href = "/login"`).
+ *     3. O redirect é **HARD** (`window.location.href`, não `router.replace`)
+ *        — o estado do cliente é totalmente reiniciado, não há re-mount do
+ *        guard nem cache obsoleto. Isto quebra o loop definitivamente.
+ *
+ *   Sem retry: em caso de 401, o guard NÃO volta a tentar o fetch. Vai
+ *   direto para /login.
+ *
+ *   Usa `lerUtilizador()` (em vez de fetch cru) para popular o cache temporal
+ *   — assim as páginas que também chamam `lerUtilizador()` acertam no cache
+ *   (1 fetch total, não 2).
  */
 export function RouteGuard({ role, children }: RouteGuardProps) {
-  const router = useRouter();
   const [ok, setOk] = useState(false);
 
   useEffect(() => {
-    let redirecionado = false;
+    let cancelado = false;
+
     (async () => {
       const user = await lerUtilizador();
-      if (redirecionado) return;
+      if (cancelado) return;
 
+      // 401 / sem sessão → logout imediato + redirect HARD para /login.
+      // Sem retry. O fazerLogout limpa o cookie e faz window.location.href.
       if (!user) {
-        redirecionado = true;
-        router.replace("/login");
+        limparCacheAuth();
+        await fazerLogout();
         return;
       }
 
-      // Role errado → manda para o painel certo desse role.
+      // Role errado → redirect HARD para o painel certo desse role.
       if (user.role !== role) {
-        redirecionado = true;
         const destino =
-          user.role === "admin" ? "/admin" : user.role === "gestor" ? "/gestor" : "/staff";
-        router.replace(destino);
+          user.role === "admin"
+            ? "/admin"
+            : user.role === "gestor"
+            ? "/gestor"
+            : "/staff";
+        window.location.href = destino;
         return;
       }
 
+      // Tudo OK → renderiza children.
       setOk(true);
     })();
-  }, [role, router]);
+
+    return () => {
+      cancelado = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [role]);
 
   if (!ok) {
     return (

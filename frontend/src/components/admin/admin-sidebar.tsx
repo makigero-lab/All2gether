@@ -4,20 +4,13 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import {
-  LayoutDashboard,
   Building2,
-  Users,
-  CalendarRange,
-  ClipboardList,
-  BarChart3,
-  Webhook,
-  CalendarOff,
   Menu,
   X,
-  Sparkles,
-  LogOut,
   ShieldCheck,
+  LogOut,
   Settings,
+  Webhook,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -31,48 +24,41 @@ interface NavItem {
   icon: React.ComponentType<{ className?: string }>;
 }
 
-// Itens do menu do GESTOR (operações) — sem links de Admin.
-const gestorNavItems: NavItem[] = [
-  { label: "Dashboard", href: "/gestor", icon: LayoutDashboard },
-  { label: "Propriedades", href: "/gestor/propriedades", icon: Building2 },
-  { label: "Tarefas", href: "/gestor/tarefas", icon: ClipboardList },
-  { label: "Equipa", href: "/gestor/equipa", icon: Users },
-  { label: "Ausências / Férias", href: "/gestor/ausencias", icon: CalendarOff },
-  { label: "Calendário", href: "/gestor/calendario", icon: CalendarRange },
-  { label: "Relatórios", href: "/gestor/relatorios", icon: BarChart3 },
-  { label: "Webhooks", href: "/gestor/webhooks", icon: Webhook },
-  { label: "Configurações", href: "/gestor/configuracoes", icon: Settings },
-];
-
-// Itens do menu do ADMIN (super admin) — separado do gestor.
+/**
+ * Prompt 115 — Separação ABSOLUTA de menus.
+ *
+ * O array de links do Admin contém APENAS:
+ *   Empresas (/admin) e Sistema/Webhooks (/admin/sistema).
+ *
+ * NÃO há nenhum link de operações do gestor (Dashboard, Propriedades,
+ * Tarefas, etc.). Este ficheiro é dedicado ao Admin e não partilha código
+ * com o Gestor. Não tem `mode` prop — é exclusivamente para o painel /admin.
+ */
 const adminNavItems: NavItem[] = [
   { label: "Empresas", href: "/admin", icon: Building2 },
+  { label: "Sistema / Webhooks", href: "/admin/sistema", icon: Settings },
   { label: "Webhooks", href: "/admin/webhooks", icon: Webhook },
-  { label: "Sistema", href: "/admin/sistema", icon: Settings },
 ];
 
 /**
- * Barra lateral de navegação.
+ * Barra lateral do Painel do Super Admin.
  *
- * Prompt 110 — Dois modos:
- *   - "gestor": menu de operações (Dashboard, Propriedades, Tarefas, etc.)
- *   - "admin": menu do super admin (Empresas, Sistema)
- *
- * O gestor NUNCA vê os links de admin.
+ * Prompt 115 — Separação ABSOLUTA: este componente NÃO importa nem renderiza
+ * NADA do gestor. Antes era um componente partilhado com `mode` prop; agora
+ * é dedicado ao Admin.
  */
-export function AdminSidebar({ mode = "gestor" }: { mode?: "gestor" | "admin" }) {
+export function AdminSidebar() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
 
-  const items = mode === "admin" ? adminNavItems : gestorNavItems;
-  const basePath = mode === "admin" ? "/admin" : "/gestor";
+  const basePath = "/admin";
 
   const isActive = (href: string) =>
     href === basePath ? pathname === href : pathname.startsWith(href);
 
   const NavLinks = () => (
     <nav className="flex flex-col gap-1 px-3 py-4">
-      {items.map((item) => {
+      {adminNavItems.map((item) => {
         const active = isActive(item.href);
         const Icon = item.icon;
         return (
@@ -96,16 +82,14 @@ export function AdminSidebar({ mode = "gestor" }: { mode?: "gestor" | "admin" })
     </nav>
   );
 
-  const brandLabel = mode === "admin" ? "Super Admin" : "Admin";
-
   const Brand = () => (
     <div className="flex h-16 items-center gap-2 border-b px-6">
       <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-        {mode === "admin" ? <ShieldCheck className="h-5 w-5" /> : <Sparkles className="h-5 w-5" />}
+        <ShieldCheck className="h-5 w-5" />
       </div>
       <div className="flex flex-col leading-none">
         <span className="text-sm font-bold">Autocell</span>
-        <span className="text-[11px] text-muted-foreground">{brandLabel}</span>
+        <span className="text-[11px] text-muted-foreground">Super Admin</span>
       </div>
     </div>
   );
@@ -122,7 +106,7 @@ export function AdminSidebar({ mode = "gestor" }: { mode?: "gestor" | "admin" })
         >
           <Menu className="h-5 w-5" />
         </Button>
-        <span className="text-sm font-semibold">Autocell — {brandLabel}</span>
+        <span className="text-sm font-semibold">Autocell — Super Admin</span>
       </header>
 
       {/* Sidebar — desktop */}
@@ -160,7 +144,7 @@ export function AdminSidebar({ mode = "gestor" }: { mode?: "gestor" | "admin" })
             <div className="flex h-16 items-center justify-between border-b px-4">
               <div className="flex items-center gap-2">
                 <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                  {mode === "admin" ? <ShieldCheck className="h-5 w-5" /> : <Sparkles className="h-5 w-5" />}
+                  <ShieldCheck className="h-5 w-5" />
                 </div>
                 <span className="text-sm font-bold">Autocell</span>
               </div>

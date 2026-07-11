@@ -226,7 +226,9 @@ async function alertasTarefasIncompletas() {
       String(u._id),
       '⚠️ Tarefa Incompleta',
       `Ainda não marcaste a limpeza da ${nomePropriedade} como concluída. Por favor, atualiza a app!`,
-      '/staff'
+      '/staff',
+      // Prompt 115 — Alerta de tarefa incompleta é "principal" → cria in-app.
+      { criarInApp: true, tipo: 'aviso' }
     );
     notificadas++;
   }

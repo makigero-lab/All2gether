@@ -105,7 +105,9 @@ async function executarAgendaAmanha() {
         '📅 Agenda de Amanhã',
         `Tens ${count} ${count === 1 ? 'tarefa agendada' : 'tarefas agendadas'}. ` +
           `Entra na app para ver o itinerário`,
-        '/staff'
+        '/staff',
+        // Prompt 115 — Agenda de Amanhã é "principal" → cria in-app.
+        { criarInApp: true, tipo: 'sistema' }
       );
       notificados++;
     }
