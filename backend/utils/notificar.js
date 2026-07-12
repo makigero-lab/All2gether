@@ -41,7 +41,7 @@ function getNotificacaoModel() {
  *
  * @param {string} utilizadorId
  * @param {string} mensagem
- * @param {{ tipo?: string, url?: string, empresa_id?: string }} [opts]
+ * @param {{ tipo?: string, url?: string, empresa_id?: string, tarefa_id?: string }} [opts]
  */
 async function criarNotificacaoInApp(utilizadorId, mensagem, opts = {}) {
   try {
@@ -52,6 +52,7 @@ async function criarNotificacaoInApp(utilizadorId, mensagem, opts = {}) {
       tipo: opts.tipo || 'sistema',
       url: opts.url || '/staff',
       empresa_id: opts.empresa_id || null,
+      tarefa_id: opts.tarefa_id || null,
       lida: false,
     });
   } catch (err) {
@@ -107,6 +108,7 @@ async function notificarUtilizador(utilizadorId, title, body, url = '/staff', op
         tipo: opts.tipo || 'sistema',
         url,
         empresa_id: empresaId,
+        tarefa_id: opts.tarefa_id || null,
       });
     }
   } catch (err) {

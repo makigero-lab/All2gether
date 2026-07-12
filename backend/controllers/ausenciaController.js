@@ -171,14 +171,13 @@ exports.registarAusencia = async (req, res) => {
     // Valida sobreposição: não pode haver outra ausência do mesmo utilizador
     // cujo intervalo se sobreponha [inicio, fim].
     // Sobreposição: existing.data_inicio <= fim AND existing.data_fim >= inicio
-    // Prompt 116 — NÃO considera ausências rejeitadas (uma ausência rejeitada
-    // não bloqueia a criação de um novo pedido no mesmo período). Só
-    // pendente/aprovada/pendente_emergencia contam como sobreposição real.
+    // Prompt 123 — SÓ bloqueia se houver uma ausência com estado 'pendente'
+    // ou 'aprovada'. 'rejeitada' e 'pendente_emergencia' NÃO bloqueiam.
     const sobreposta = await Ausencia.findOne({
       utilizador_id,
       data_inicio: { $lte: fim },
       data_fim: { $gte: inicio },
-      estado: { $ne: 'rejeitada' },
+      estado: { $in: ['pendente', 'aprovada'] },
     });
     if (sobreposta) {
       return res.status(409).json({

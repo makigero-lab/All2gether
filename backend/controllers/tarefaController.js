@@ -87,8 +87,10 @@ async function verificarDistanciaTarefasDia(utilizadorId, dataTarefa, propriedad
 
     if (distanciaMax > LIMITE_DISTANCIA_KM) {
       const kmFmt = distanciaMax.toFixed(1).replace('.', ',');
+      // Prompt 123 — Estimativa de tempo de viagem (média de 40 km/h).
+      const tempoViagemMin = Math.ceil((distanciaMax / 40) * 60);
       const nomeOutra = propriedadeDistante?.nome ?? 'outra propriedade';
-      return `Atenção: A tarefa anterior deste funcionário fica a ${kmFmt} km de distância (em "${nomeOutra}").`;
+      return `Atenção: A tarefa anterior deste funcionário fica a ${kmFmt} km de distância (em "${nomeOutra}"), tempo de viagem estimado ${tempoViagemMin} min.`;
     }
 
     return null;
@@ -353,6 +355,49 @@ exports.criarTarefa = async (req, res) => {
       }
 
       utilizadorValidado = user._id;
+
+      // Prompt 123 — Validação de Conflito de Horário.
+      // Verifica se o staff já tem uma tarefa cuja hora de início ou fim
+      // se sobrepõe à hora que estamos a tentar marcar. Se sim, 409.
+      // SÓ aplica quando a tarefa tem hora real (>= 08:00) — tarefas sem
+      // hora (00:00) são "all-day" e ainda não estão agendadas.
+      const tempoMinutos = Number(tempo_limpeza_minutos) || propriedade.tempo_limpeza_minutos || 45;
+      const horaLocal = dataNormalizada.getHours();
+      if (horaLocal >= 8) {
+        const novoInicio = dataNormalizada.getTime();
+        const novoFim = novoInicio + tempoMinutos * 60 * 1000;
+
+        // Busca tarefas do staff no mesmo dia (não canceladas/concluídas).
+        const dDia = new Date(dataNormalizada);
+        const inicioDia = new Date(Date.UTC(dDia.getUTCFullYear(), dDia.getUTCMonth(), dDia.getUTCDate()));
+        const fimDia = new Date(inicioDia.getTime() + 24 * 60 * 60 * 1000);
+
+        const tarefasExistentes = await Tarefa.find({
+          utilizador_id: utilizadorValidado,
+          data: { $gte: inicioDia, $lt: fimDia },
+          estado: { $nin: ['cancelada', 'concluida'] },
+        })
+          .populate('propriedade_id', 'nome')
+          .lean();
+
+        for (const tExist of tarefasExistentes) {
+          const existHoraLocal = new Date(tExist.data).getHours();
+          // Só verifica conflito se a tarefa existente também tiver hora real.
+          if (existHoraLocal < 8) continue;
+          const existInicio = new Date(tExist.data).getTime();
+          const existFim = existInicio + (tExist.tempo_limpeza_minutos || 45) * 60 * 1000;
+          // Overlap: novoInicio < existFim AND novoFim > existInicio
+          if (novoInicio < existFim && novoFim > existInicio) {
+            const horaExist = new Date(tExist.data).toLocaleTimeString('pt-PT', {
+              hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Lisbon',
+            });
+            return res.status(409).json({
+              erro: `O funcionário já tem uma tarefa agendada neste horário (${horaExist} — ${tExist.propriedade_id?.nome ?? 'Propriedade'}).`,
+              codigo: 'CONFLITO_HORARIO',
+            });
+          }
+        }
+      }
     }
 
     const nova = await Tarefa.create({
@@ -368,6 +413,9 @@ exports.criarTarefa = async (req, res) => {
     });
 
     // v1.65.0 (Prompt 88) — Notifica o staff se a tarefa foi criada já atribuída.
+    // Prompt 123 — Cria automaticamente um registo Notificacao (criarInApp: true)
+    // para tarefas manuais atribuídas. O gestor criou a tarefa propositadamente
+    // — o staff deve ver no sino.
     if (utilizadorValidado) {
       try {
         const tituloNotif = tipo === 'manutencao'
@@ -381,7 +429,7 @@ exports.criarTarefa = async (req, res) => {
           tituloNotif,
           corpoNotif,
           '/staff',
-          { tipo: 'tarefa_atribuida', empresa_id: String(empresaId) }
+          { tipo: 'tarefa_atribuida', empresa_id: String(empresaId), criarInApp: true, tarefa_id: String(nova._id) }
         );
       } catch (e) {
         // Fire-and-forget: não bloqueia a criação.

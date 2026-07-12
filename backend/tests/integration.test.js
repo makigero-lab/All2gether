@@ -3536,7 +3536,7 @@ describe('Prompt 114 — Centro de Notificações + Haversine', () => {
     expect(res.body.nao_lidas).toBe(0);
   });
 
-  it('criar tarefa NÃO gera notificação in-app (push only) — Prompt 115 não inunda o sino', async () => {
+  it('criar tarefa manual com staff gera notificação in-app (Prompt 123)', async () => {
     // Cria um staff para receber a tarefa.
     const hash = await bcrypt.hash(PASSWORD, 10);
     const staff = await Utilizador.create({
@@ -3568,7 +3568,7 @@ describe('Prompt 114 — Centro de Notificações + Haversine', () => {
     });
     expect(res.status).toBe(201);
 
-    // Pequeno delay para o notificarUtilizador (fire-and-forget) tentar criar.
+    // Pequeno delay para o notificarUtilizador (fire-and-forget) criar.
     await esperar(500);
 
     // Login como o staff para ver as suas notificações.
@@ -3577,13 +3577,17 @@ describe('Prompt 114 — Centro de Notificações + Haversine', () => {
       .send({ email: 'staff.notif@teste.pt', password: PASSWORD });
     const staffToken = loginStaff.body.token;
 
-    // Prompt 115 — Atribuição de tarefa é push-only: NÃO cria notificação
-    // in-app. O sino deve ficar a 0 (não inunda o utilizador).
+    // Prompt 123 — Atribuição de tarefa MANUAL cria notificação in-app
+    // (criarInApp: true) para o staff ver no sino.
     const contagem = await request(app)
       .get('/api/auth/me/notificacoes/contagem')
       .set('Authorization', `Bearer ${staffToken}`);
     expect(contagem.status).toBe(200);
-    expect(contagem.body.nao_lidas).toBe(0);
+    expect(contagem.body.nao_lidas).toBeGreaterThanOrEqual(1);
+
+    // Limpa notificações para não afetar outros testes.
+    const Notificacao = require('../models/Notificacao');
+    await Notificacao.deleteMany({ utilizador_id: staff._id });
 
     // Cleanup.
     await Tarefa.deleteMany({ propriedade_id: prop._id });
@@ -3685,7 +3689,9 @@ describe('Prompt 114 — Centro de Notificações + Haversine', () => {
 
     const amanha = new Date();
     amanha.setDate(amanha.getDate() + 1);
-    const amanhaStr = amanha.toISOString();
+    // Prompt 123 — usa date-only (YYYY-MM-DD) para ambas as tarefas, evitando
+    // o conflito de horário (tarefas sem hora real = all-day, não conflitam).
+    const amanhaStr = amanha.toISOString().slice(0, 10);
 
     // Primeira tarefa (Lisboa) — sem warning (só 1 tarefa).
     const r1 = await authPost('/api/gestor/tarefas', {
@@ -3707,6 +3713,8 @@ describe('Prompt 114 — Centro de Notificações + Haversine', () => {
     expect(r2.status).toBe(201);
     expect(r2.body.warning).toBeTruthy();
     expect(r2.body.warning).toContain('km');
+    // Prompt 123 — warning inclui tempo de viagem estimado.
+    expect(r2.body.warning).toContain('min');
 
     // Cleanup.
     await Tarefa.deleteMany({ propriedade_id: { $in: [prop1._id, prop2._id] } });
