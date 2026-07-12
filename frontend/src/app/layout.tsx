@@ -1,5 +1,4 @@
 import type { Metadata, Viewport } from "next";
-import Script from "next/script";
 import { Inter } from "next/font/google";
 import "./globals.css";
 
@@ -42,6 +41,20 @@ export const viewport: Viewport = {
   maximumScale: 1,
 };
 
+/**
+ * Prompt 120 — Remoção do Script Agressivo de Reload.
+ *
+ * O <Script id="chunk-load-error-handler"> que foi adicionado no Prompt 119
+ * estava a causar um loop infinito de reloads (White Screen of Death). O
+ * listener 'error' intercetava não só ChunkLoadError mas também erros
+ * benignos de hidratação e recursos, disparando window.location.reload()
+ * repetidamente antes da renderização completar.
+ *
+ * Removido completamente. A resiliência a ChunkLoadError agora confia
+ * APENAS na configuração do next-pwa (skipWaiting + clientsClaim +
+ * runtimeCaching NetworkFirst) no next.config.mjs, que atualiza os
+ * ficheiros obsoletos sem forçar reloads agressivos no DOM.
+ */
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -51,77 +64,6 @@ export default function RootLayout({
     <html lang="pt-PT" suppressHydrationWarning>
       <body className={`${inter.variable} font-sans antialiased`}>
         {children}
-
-        {/*
-         * Prompt 119 — Captura Global do ChunkLoadError.
-         *
-         * Após um novo deployment, o browser pode ter em memória referências
-         * a chunks de JS antigos (com hashes que já não existem no servidor).
-         * Quando o Next.js tenta carregar esses chunks (lazy loading de
-         * páginas), ocorre um ChunkLoadError e a página fica em branco.
-         *
-         * Este script (beforeInteractive — corre antes do hidrate) instala
-         * dois listeners:
-         *   1. window.addEventListener('error') — interceta erros de loading
-         *      de chunks (a mensagem contém "Loading chunk" ou "ChunkLoadError").
-         *   2. window.addEventListener('unhandledrejection') — interceta
-         *      promessas rejeitadas com o mesmo padrão (dynamic imports).
-         *
-         * Em ambos os casos, faz window.location.reload() para forçar o
-         * browser a ir buscar a nova versão ao servidor. Um flag
-         * (sessionStorage) previne loops infinitos se o reload também falhar.
-         */}
-        <Script id="chunk-load-error-handler" strategy="beforeInteractive">
-          {`
-            (function() {
-              var CHUNK_ERROR_PATTERNS = ['ChunkLoadError', 'Loading chunk', 'Loading CSS chunk', 'Failed to fetch dynamically imported module'];
-              var RELOAD_FLAG = 'autocell_chunk_reload';
-
-              function isChunkError(msg) {
-                if (!msg) return false;
-                var lower = String(msg).toLowerCase();
-                return CHUNK_ERROR_PATTERNS.some(function(p) {
-                  return lower.indexOf(p.toLowerCase()) !== -1;
-                });
-              }
-
-              function handleChunkError() {
-                // Previne loop infinito: se já fizemos reload há menos de
-                // 10 segundos, não volta a fazer (deixa o erro aparecer).
-                try {
-                  var last = sessionStorage.getItem(RELOAD_FLAG);
-                  var now = Date.now();
-                  if (last && (now - Number(last)) < 10000) {
-                    return; // já reloadamos há pouco, não repetir
-                  }
-                  sessionStorage.setItem(RELOAD_FLAG, String(now));
-                } catch (e) {
-                  // sessionStorage pode falhar (modo privado) — reload à mesma.
-                }
-                // Força reload bypassando a cache do browser.
-                if (window.location.reload) {
-                  window.location.reload();
-                }
-              }
-
-              // 1. Erros síncronos (ex.: <script> tag loading).
-              window.addEventListener('error', function(event) {
-                var msg = event.message || (event.error && event.error.message) || '';
-                if (isChunkError(msg)) {
-                  handleChunkError();
-                }
-              });
-
-              // 2. Promessas rejeitadas (ex.: dynamic import() falha).
-              window.addEventListener('unhandledrejection', function(event) {
-                var msg = event.reason && (event.reason.message || event.reason.name || String(event.reason));
-                if (isChunkError(msg)) {
-                  handleChunkError();
-                }
-              });
-            })();
-          `}
-        </Script>
       </body>
     </html>
   );

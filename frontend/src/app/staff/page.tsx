@@ -175,11 +175,21 @@ export default function StaffPage() {
     0
   );
 
-  const hoje = new Date().toLocaleDateString("pt-PT", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-  });
+  // Prompt 120 — Evitar mismatch de hidratação: a data formatada depende do
+  // timezone do cliente. No SSR (servidor UTC) e no CSR (browser Lisboa) o
+  // output pode diferir (especialmente perto da meia-noite). Só renderizamos
+  // a data depois do mount (client-side).
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+  const hoje = mounted
+    ? new Date().toLocaleDateString("pt-PT", {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+      })
+    : "";
 
   // Filtra apenas tarefas não concluídas para a lista principal.
   const tarefasAtivas = tarefas.filter((t) => t.estado !== "concluida");
