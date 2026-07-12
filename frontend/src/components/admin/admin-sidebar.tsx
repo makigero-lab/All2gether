@@ -9,8 +9,6 @@ import {
   X,
   ShieldCheck,
   LogOut,
-  Settings,
-  Webhook,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -25,19 +23,15 @@ interface NavItem {
 }
 
 /**
- * Prompt 115 — Separação ABSOLUTA de menus.
+ * Prompt 122 — Limpeza do Menu Global.
  *
- * O array de links do Admin contém APENAS:
- *   Empresas (/admin) e Sistema/Webhooks (/admin/sistema).
- *
- * NÃO há nenhum link de operações do gestor (Dashboard, Propriedades,
- * Tarefas, etc.). Este ficheiro é dedicado ao Admin e não partilha código
- * com o Gestor. Não tem `mode` prop — é exclusivamente para o painel /admin.
+ * O menu lateral do Admin global tem APENAS 'Empresas' (e Logout).
+ * Removidos ESTRITAMENTE os links para 'Sistema' (/admin/sistema) e
+ * 'Webhooks' (/admin/webhooks). A gestão de webhooks e sistema global
+ * foi consolidada na Gaveta da Empresa (/admin/empresas/[id]).
  */
 const adminNavItems: NavItem[] = [
   { label: "Empresas", href: "/admin", icon: Building2 },
-  { label: "Sistema / Webhooks", href: "/admin/sistema", icon: Settings },
-  { label: "Webhooks", href: "/admin/webhooks", icon: Webhook },
 ];
 
 /**
