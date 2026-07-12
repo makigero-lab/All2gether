@@ -18,8 +18,6 @@ export const metadata: Metadata = {
     statusBarStyle: "default",
     title: "Autocell",
   },
-  // mobile-web-app-capable é o standard moderno (apple-mobile-web-app-capable
-  // está deprecated). Mantemos ambos para compatibilidade com iOS antigo.
   other: {
     "mobile-web-app-capable": "yes",
   },
@@ -28,9 +26,7 @@ export const metadata: Metadata = {
       { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
       { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
     ],
-    apple: [
-      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
-    ],
+    apple: [{ url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" }],
   },
 };
 
@@ -42,18 +38,15 @@ export const viewport: Viewport = {
 };
 
 /**
- * Prompt 120 — Remoção do Script Agressivo de Reload.
+ * RootLayout — estrutura base do App Router (Prompt 121).
  *
- * O <Script id="chunk-load-error-handler"> que foi adicionado no Prompt 119
- * estava a causar um loop infinito de reloads (White Screen of Death). O
- * listener 'error' intercetava não só ChunkLoadError mas também erros
- * benignos de hidratação e recursos, disparando window.location.reload()
- * repetidamente antes da renderização completar.
+ * Versão limpa e funcional, sem Scripts de erro, sem handlers de cache,
+ * sem manipulações do Service Worker. Apenas a estrutura obrigatória:
+ *   <html lang="pt"> <body> {children} </body> </html>
  *
- * Removido completamente. A resiliência a ChunkLoadError agora confia
- * APENAS na configuração do next-pwa (skipWaiting + clientsClaim +
- * runtimeCaching NetworkFirst) no next.config.mjs, que atualiza os
- * ficheiros obsoletos sem forçar reloads agressivos no DOM.
+ * O `suppressHydrationWarning` no <html> é necessário porque o next-themes
+ * (ThemeToggle) injeta a classe dark/light no <html> via JS — sem esta flag,
+ * o Next.js warna sobre mismatch entre SSR e CSR.
  */
 export default function RootLayout({
   children,
