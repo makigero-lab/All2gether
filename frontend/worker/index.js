@@ -2,14 +2,62 @@
  * Custom Worker — Autocell PWA
  *
  * Este ficheiro é importado pelo Service Worker gerado pelo next-pwa.
- * Contém os event listeners para Web Push (notificações push nativas).
+ * Contém os event listeners para Web Push (notificações push nativas) e
+ * limpeza de caches antigas no evento activate (Prompt 119).
  *
  * Eventos:
+ *   - activate: limpa caches de versões antigas do Workbox (evita
+ *     ChunkLoadError após deployments)
  *   - push: recebe a notificação do servidor e mostra ao utilizador
  *   - notificationclick: abre/foca a janela no URL da notificação
  *
  * Payload esperado (JSON): { title, body, url }
  */
+
+// Prompt 119 — Limpeza de caches antigas no evento activate.
+//
+// Após um novo deployment, o Workbox cria caches com nomes que incluem
+// sufixos de versão (ex.: "next-chunks-cache-v1"). As caches da versão
+// anterior ficam órfãs e podem conter chunks de JS com hashes obsoletos
+// que já não existem no servidor. Se o SW os servir a partir da cache,
+// ocorre ChunkLoadError.
+//
+// No evento activate, percorremos todas as caches e eliminamos as que
+// não correspondem às caches atuais (definidas no runtimeCaching do
+// next.config.mjs). Isto garante que só as caches da versão atual
+// permanecem.
+self.addEventListener("activate", (event) => {
+  // Caches válidas da versão atual do SW (devem bater com o runtimeCaching
+  // do next.config.mjs + as caches internas do Workbox).
+  const CACHES_VALIDAS = [
+    "next-chunks-cache",
+    "next-css-cache",
+    "static-images-cache",
+    "workbox-precache-v2",
+    "start-url-cache",
+  ];
+
+  event.waitUntil(
+    (async () => {
+      try {
+        const cacheNames = await caches.keys();
+        await Promise.all(
+          cacheNames.map((cacheName) => {
+            // Elimina qualquer cache que não esteja na lista de válidas.
+            // Isto inclui caches de versões antigas (ex.: "next-chunks-cache-v0").
+            if (!CACHES_VALIDAS.includes(cacheName)) {
+              console.log(`[SW] A eliminar cache antiga: ${cacheName}`);
+              return caches.delete(cacheName);
+            }
+            return Promise.resolve();
+          })
+        );
+      } catch (err) {
+        console.error("[SW] Erro ao limpar caches antigas:", err);
+      }
+    })()
+  );
+});
 
 // Event listener para mensagens push recebidas do servidor.
 self.addEventListener("push", (event) => {
