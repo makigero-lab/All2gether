@@ -14,7 +14,8 @@ import { Button } from "@/components/ui/button";
  * clicar, abre um dropdown com a lista de notificações.
  *
  * Prompt 118 — Melhorias:
- *   - Dropdown com max-h-[80vh] + overflow-y-auto (não transborda o ecrã).
+ *   - Dropdown com max-h-[70vh] + overflow-y-auto, w-[300px] sm:w-[400px],
+ *     ancorado à direita (right-0 origin-top-right) — não transborda mobile.
  *   - Notificações clicáveis: ao clicar, faz PATCH para marcar como lida e
  *     redireciona para a tarefa em questão (se houver tarefa_id).
  *   - Ao abrir, marca todas como lidas (depois de mostrar a lista).
@@ -177,7 +178,7 @@ export function NotificationBell() {
       </Button>
 
       {aberto && (
-        <div className="absolute right-0 top-full z-50 mt-2 flex max-h-[80vh] w-80 max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-lg border bg-card shadow-lg">
+        <div className="absolute right-0 top-full z-50 mt-2 flex max-h-[70vh] w-[300px] max-w-[calc(100vw-1rem)] flex-col origin-top-right overflow-hidden rounded-lg border bg-card shadow-lg sm:w-[400px]">
           <div className="flex shrink-0 items-center justify-between border-b px-4 py-3">
             <span className="text-sm font-semibold">Notificações</span>
             {naoLidas > 0 && (

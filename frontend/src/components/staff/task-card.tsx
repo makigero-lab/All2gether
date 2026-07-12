@@ -136,7 +136,7 @@ export function TaskCard({ tarefa }: { tarefa: TarefaMock }) {
           {tarefa.endereco && (
             <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
               <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              <span className="line-clamp-2">{tarefa.endereco}</span>
+              <span className="whitespace-normal break-words">{tarefa.endereco}</span>
             </p>
           )}
 
