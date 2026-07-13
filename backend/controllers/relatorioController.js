@@ -8,6 +8,7 @@
  */
 
 const mongoose = require('mongoose');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 const Tarefa = require('../models/Tarefa');
 const Utilizador = require('../models/Utilizador');
 const Propriedade = require('../models/Propriedade');
@@ -283,9 +284,9 @@ exports.getRelatorioProdutividade = async (req, res) => {
  * Gera um "Resumo Executivo" com IA a partir dos dados do relatório
  * (limpezas totais, horas, faltas, produtividade por staff, etc.).
  *
- * Estratégia (best-effort):
- *   1. Se OPENAI_API_KEY existir → chama OpenAI (gpt-4o-mini).
- *   2. Se GEMINI_API_KEY existir  → chama Google Gemini.
+ * Estratégia (best-effort, Prompt 125):
+ *   1. Se GEMINI_API_KEY existir  → chama Google Gemini (@google/generative-ai SDK).
+ *   2. Else se OPENAI_API_KEY existir → chama OpenAI (gpt-4o-mini).
  *   3. Se nenhuma chave existir OU a chamada falhar → devolve um
  *      placeholder estruturado gerado localmente a partir dos dados
  *      (com secções "Visão Geral", "Tendências", "Recomendações").
@@ -300,20 +301,20 @@ exports.getResumoIA = async (req, res) => {
     // Payload normalizado para construir o prompt / o placeholder.
     const contexto = construirContexto(dados);
 
-    /* ---- Tentativa LLM (best-effort) ---- */
+    /* ---- Tentativa LLM (best-effort) — Prompt 125: Gemini tem prioridade ---- */
     let resumoLLM = null;
 
-    if (process.env.OPENAI_API_KEY) {
-      try {
-        resumoLLM = await chamarOpenAI(contexto);
-      } catch (err) {
-        console.warn('⚠️  OpenAI falhou, a usar placeholder:', err.message);
-      }
-    } else if (process.env.GEMINI_API_KEY) {
+    if (process.env.GEMINI_API_KEY) {
       try {
         resumoLLM = await chamarGemini(contexto);
       } catch (err) {
         console.warn('⚠️  Gemini falhou, a usar placeholder:', err.message);
+      }
+    } else if (process.env.OPENAI_API_KEY) {
+      try {
+        resumoLLM = await chamarOpenAI(contexto);
+      } catch (err) {
+        console.warn('⚠️  OpenAI falhou, a usar placeholder:', err.message);
       }
     }
 
@@ -478,29 +479,22 @@ async function chamarOpenAI(contexto) {
 /**
  * Chama a API do Google Gemini (generateContent) e devolve o texto.
  * Modelo: gemini-1.5-flash (rápido e barato, equivalente ao gpt-4o-mini).
+ *
+ * Prompt 125 — refactorizada para usar o SDK oficial @google/generative-ai
+ * em vez do `fetch` cru. O SDK trata autenticação, retries e parsing.
  */
 async function chamarGemini(contexto) {
   const prompt = construirPrompt(contexto);
-  const modelo = 'gemini-1.5-flash';
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${process.env.GEMINI_API_KEY}`;
 
-  const resposta = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.4, maxOutputTokens: 700 },
-    }),
+  const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+
+  const result = await model.generateContent({
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    generationConfig: { temperature: 0.4, maxOutputTokens: 700 },
   });
 
-  if (!resposta.ok) {
-    const txt = await resposta.text().catch(() => '');
-    throw new Error(`Gemini ${resposta.status}: ${txt.slice(0, 200)}`);
-  }
-
-  const json = await resposta.json();
-  const texto =
-    json?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+  const texto = result?.response?.text?.()?.trim();
   if (!texto) throw new Error('Gemini: resposta vazia.');
   return texto;
 }

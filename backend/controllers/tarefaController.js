@@ -328,6 +328,8 @@ exports.criarTarefa = async (req, res) => {
 
     // Valida utilizador_id se vier.
     let utilizadorValidado = null;
+    // Prompt 125 — Soft block: warning de conflito de horário (em vez de 409).
+    let conflitoWarning = null;
     if (utilizador_id) {
       if (!mongoose.isValidObjectId(utilizador_id)) {
         return res.status(400).json({ erro: 'utilizador_id inválido.' });
@@ -358,9 +360,14 @@ exports.criarTarefa = async (req, res) => {
 
       // Prompt 123 — Validação de Conflito de Horário.
       // Verifica se o staff já tem uma tarefa cuja hora de início ou fim
-      // se sobrepõe à hora que estamos a tentar marcar. Se sim, 409.
+      // se sobrepõe à hora que estamos a tentar marcar.
       // SÓ aplica quando a tarefa tem hora real (>= 08:00) — tarefas sem
       // hora (00:00) são "all-day" e ainda não estão agendadas.
+      //
+      // Prompt 125 — Soft block: em vez de rejeitar com 409, definimos um
+      // `conflitoWarning` e deixamos a tarefa ser criada. O warning é
+      // incluído na resposta (201) para o gestor ser avisado. O conflito
+      // tem prioridade sobre o warning logístico (distância entre tarefas).
       const tempoMinutos = Number(tempo_limpeza_minutos) || propriedade.tempo_limpeza_minutos || 45;
       const horaLocal = dataNormalizada.getHours();
       if (horaLocal >= 8) {
@@ -391,10 +398,8 @@ exports.criarTarefa = async (req, res) => {
             const horaExist = new Date(tExist.data).toLocaleTimeString('pt-PT', {
               hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Lisbon',
             });
-            return res.status(409).json({
-              erro: `O funcionário já tem uma tarefa agendada neste horário (${horaExist} — ${tExist.propriedade_id?.nome ?? 'Propriedade'}).`,
-              codigo: 'CONFLITO_HORARIO',
-            });
+            conflitoWarning = `O funcionário já tem uma tarefa agendada neste horário (${horaExist} — ${tExist.propriedade_id?.nome ?? 'Propriedade'}).`;
+            break; // não bloqueia — só regista o warning
           }
         }
       }
@@ -447,8 +452,11 @@ exports.criarTarefa = async (req, res) => {
       );
     }
 
+    // Prompt 125 — Soft block de conflitos: o warning de conflito (se houver)
+    // tem prioridade sobre o warning logístico (distância).
     const resposta = { tarefa: nova };
     if (warning) resposta.warning = warning;
+    if (conflitoWarning) resposta.warning = conflitoWarning;
     return res.status(201).json(resposta);
   } catch (err) {
     console.error('❌ criarTarefa:', err.message);
