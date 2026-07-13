@@ -128,9 +128,19 @@ export default function PropriedadesPage() {
       return;
     }
 
+    // Prompt 126 — Confirmação de morada inválida (GPS não encontrado).
+    // Se moradaWarning está ativo e o utilizador ainda não confirmou, pede
+    // um 2º clique (set moradaConfirmada=true) sem submeter novamente.
+    if (moradaWarning && !moradaConfirmada) {
+      setMoradaConfirmada(true);
+      return;
+    }
+
     setSubmitting(true);
     try {
       // Prompt 114 — Captura warning de geocoding (morada não georreferenciada).
+      // Prompt 126 — Envia flag forcar_morada para o backend saber que o
+      // utilizador confirmou a morada inválida (futura extensão).
       const res = await adminPost<{ propriedade: PropriedadeDTO; warning?: string }>(
         "/api/gestor/propriedades",
         {
@@ -142,15 +152,22 @@ export default function PropriedadesPage() {
             .split("\n")
             .map((s) => s.trim())
             .filter((s) => s.length > 0),
+          forcar_morada: moradaConfirmada || undefined,
         }
       );
       // Prompt 117 — Aviso de geocoding INLINE (não toast global).
+      // Prompt 126 — Se voltar a haver warning, mantém o form aberto para o
+      // utilizador confirmar (reset moradaConfirmada para exigir novo clique).
       if (res.warning) {
         setMoradaWarning("Morada guardada, mas não encontrada no GPS. Simplifica-a (ex: remova R/C, Esq).");
-      } else {
-        setMoradaWarning(null);
+        setMoradaConfirmada(false);
+        // Atualiza a tabela (a propriedade foi criada) mas não fecha o form.
+        await carregar();
+        return;
       }
-      // Limpa o formulário e atualiza a tabela automaticamente.
+      // Sem warning — limpa o formulário e fecha.
+      setMoradaWarning(null);
+      setMoradaConfirmada(false);
       setForm({ nome: "", smoobu_id: "", morada: "", tempo_limpeza_minutos: "45", checklist: "" });
       setMostrarForm(false);
       await carregar();
@@ -202,6 +219,11 @@ export default function PropriedadesPage() {
   const [moradaWarning, setMoradaWarning] = useState<string | null>(null);
   // Aviso inline do modal de edição (morada editada não georreferenciada).
   const [editMoradaWarning, setEditMoradaWarning] = useState<string | null>(null);
+  // Prompt 126 — Confirmação explícita de morada inválida (GPS não encontrado).
+  // Depois do 1º submit com warning, o botão muda para "Confirmar Morada Inválida"
+  // e é necessário um 2º clique para confirmar.
+  const [moradaConfirmada, setMoradaConfirmada] = useState(false);
+  const [editMoradaConfirmada, setEditMoradaConfirmada] = useState(false);
 
   /**
    * Importa/atualiza propriedades do Smoobu (scoped por empresa).
@@ -315,6 +337,9 @@ export default function PropriedadesPage() {
       funcionario_preferencial_id: p.funcionario_preferencial_id ?? "",
     });
     setEditErro(null);
+    // Prompt 126 — Reset dos avisos de morada ao abrir o modal.
+    setEditMoradaWarning(null);
+    setEditMoradaConfirmada(false);
   }
 
   /** Submete a edição da propriedade. */
@@ -334,9 +359,17 @@ export default function PropriedadesPage() {
       return;
     }
 
+    // Prompt 126 — Confirmação de morada inválida no modal de edição.
+    if (editMoradaWarning && !editMoradaConfirmada) {
+      setEditMoradaConfirmada(true);
+      return;
+    }
+
     setEditSubmitting(true);
     try {
       // Prompt 114 — Captura warning de geocoding (nova morada não georreferenciada).
+      // Prompt 126 — Envia flag forcar_morada para o backend saber que o
+      // utilizador confirmou a morada inválida.
       const res = await adminPut<{ propriedade: PropriedadeDTO; warning?: string }>(
         `/api/gestor/propriedades/${editando._id}`,
         {
@@ -351,14 +384,22 @@ export default function PropriedadesPage() {
           // → null no backend (remove o preferencial).
           funcionario_preferencial_id:
             editForm.funcionario_preferencial_id.trim() || null,
+          forcar_morada: editMoradaConfirmada || undefined,
         }
       );
       // Prompt 117 — Aviso de geocoding INLINE no modal de edição.
+      // Prompt 126 — Se voltar a haver warning, mantém o modal aberto.
       if (res.warning) {
         setEditMoradaWarning("Morada guardada, mas não encontrada no GPS. Simplifica-a (ex: remova R/C, Esq).");
-      } else {
-        setEditMoradaWarning(null);
+        setEditMoradaConfirmada(false);
+        // Atualiza a linha na tabela mas não fecha o modal.
+        setPropriedades((prev) =>
+          prev.map((x) => (x._id === editando._id ? res.propriedade : x))
+        );
+        return;
       }
+      setEditMoradaWarning(null);
+      setEditMoradaConfirmada(false);
       // Atualiza a linha na tabela.
       setPropriedades((prev) =>
         prev.map((x) => (x._id === editando._id ? res.propriedade : x))
@@ -423,7 +464,11 @@ export default function PropriedadesPage() {
               {checklistLoading ? "A aplicar…" : "Checklist Padrão"}
             </span>
           </Button>
-          <Button onClick={() => setMostrarForm((v) => !v)}>
+          <Button onClick={() => {
+            setMostrarForm((v) => !v);
+            setMoradaWarning(null);
+            setMoradaConfirmada(false);
+          }}>
             <Plus className="h-4 w-4" />
             Nova Propriedade
           </Button>
@@ -525,6 +570,8 @@ export default function PropriedadesPage() {
                     onChange={(e) => {
                       setForm((f) => ({ ...f, morada: e.target.value }));
                       setMoradaWarning(null);
+                      // Prompt 126 — Reset da confirmação quando a morada muda.
+                      setMoradaConfirmada(false);
                     }}
                     placeholder="Ex.: Rua das Flores 12, Lisboa"
                     required
@@ -588,15 +635,22 @@ export default function PropriedadesPage() {
               )}
 
               <div className="flex items-center gap-2">
-                <Button type="submit" disabled={submitting}>
+                <Button
+                  type="submit"
+                  disabled={submitting}
+                  variant={moradaWarning ? "outline" : "default"}
+                  className={moradaWarning ? "border-amber-500/50 text-amber-700 hover:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/50 dark:hover:bg-amber-500/10" : ""}
+                >
                   {submitting ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
                       A guardar…
                     </>
+                  ) : moradaWarning ? (
+                    "Confirmar Morada Inválida"
                   ) : (
                     "Guardar Propriedade"
-                    )}
+                  )}
                 </Button>
                 <Button
                   type="button"
@@ -604,6 +658,8 @@ export default function PropriedadesPage() {
                   onClick={() => {
                     setMostrarForm(false);
                     setFormErro(null);
+                    setMoradaWarning(null);
+                    setMoradaConfirmada(false);
                     setForm({ nome: "", smoobu_id: "", morada: "", tempo_limpeza_minutos: "45", checklist: "" });
                   }}
                   disabled={submitting}
@@ -800,6 +856,8 @@ export default function PropriedadesPage() {
                 onChange={(e) => {
                   setEditForm((f) => ({ ...f, morada: e.target.value }));
                   setEditMoradaWarning(null);
+                  // Prompt 126 — Reset da confirmação quando a morada muda.
+                  setEditMoradaConfirmada(false);
                 }}
                 required
               />
@@ -894,17 +952,28 @@ export default function PropriedadesPage() {
             <Button
               type="button"
               variant="outline"
-              onClick={() => setEditando(null)}
+              onClick={() => {
+                setEditando(null);
+                setEditMoradaWarning(null);
+                setEditMoradaConfirmada(false);
+              }}
               disabled={editSubmitting}
             >
               Cancelar
             </Button>
-            <Button type="submit" disabled={editSubmitting}>
+            <Button
+              type="submit"
+              disabled={editSubmitting}
+              variant={editMoradaWarning ? "outline" : "default"}
+              className={editMoradaWarning ? "border-amber-500/50 text-amber-700 hover:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/50 dark:hover:bg-amber-500/10" : ""}
+            >
               {editSubmitting ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   A guardar…
                 </>
+              ) : editMoradaWarning ? (
+                "Confirmar Morada Inválida"
               ) : (
                 "Guardar alterações"
               )}

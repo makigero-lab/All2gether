@@ -195,6 +195,10 @@ export default function AdminTarefasPage() {
   });
   const [submitting, setSubmitting] = useState(false);
   const [formErro, setFormErro] = useState<string | null>(null);
+  // Prompt 126 — Conflito de horário (soft block): o backend cria a tarefa e
+  // devolve um warning com a palavra "horário". Em vez de fechar o form,
+  // mostramos um aviso inline e pedimos um 2º clique ("Forçar Agendamento").
+  const [conflitoForcar, setConflitoForcar] = useState(false);
 
   // Modal de atribuição
   const [atribuindo, setAtribuindo] = useState<TarefaAdmin | null>(null);
@@ -289,6 +293,8 @@ export default function AdminTarefasPage() {
       // A combinação data + hora é enviada como "YYYY-MM-DD" + "HH:mm"
       // separados — o backend combina como LOCAL (new Date("YYYY-MM-DDTHH:mm")
       // sem Z) para não gravar às 00:00 UTC.
+      // Prompt 126 — Se conflitoForcar=true (2º clique), envia flag para o
+      // backend ignorar o conflito de horário.
       const res = await adminPost<{ tarefa: TarefaAdmin; warning?: string }>(
         "/api/gestor/tarefas",
         {
@@ -301,9 +307,34 @@ export default function AdminTarefasPage() {
           hospedes: form.hospedes ? Number(form.hospedes) : undefined,
           tempo_limpeza_minutos: Number(form.tempo_limpeza_minutos) || 45,
           tipo: form.tipo,
+          forcar: conflitoForcar || undefined,
         }
       );
-      if (res.warning) setWarningToast(res.warning);
+
+      // Prompt 126 — Conflito de horário: o warning contém a palavra "horário".
+      // No 1º clique (conflitoForcar=false), mostra o aviso inline e NÃO fecha
+      // o form. No 2º clique (conflitoForcar=true), o utilizador já confirmou —
+      // fecha o form normalmente.
+      const temConflitoHorario =
+        !!res.warning && res.warning.toLowerCase().includes("horário");
+
+      if (temConflitoHorario && !conflitoForcar) {
+        // 1º clique com conflito: ativa o modo "Forçar Agendamento".
+        setConflitoForcar(true);
+        // Não mostra como toast global — o aviso aparece inline acima do botão.
+        setSubmitting(false);
+        return;
+      }
+
+      // 2º clique (conflito confirmado) ou sem conflito: fluxo normal.
+      // Reset do flag de conflito.
+      setConflitoForcar(false);
+
+      // Warning logístico (distância > 15km) — mostra como toast.
+      if (res.warning && !temConflitoHorario) {
+        setWarningToast(res.warning);
+      }
+
       setForm({
         propriedade_id: "",
         utilizador_id: "",
@@ -539,7 +570,10 @@ export default function AdminTarefasPage() {
               {autoAtribuindo ? "A atribuir…" : "Auto-Atribuir Pendentes"}
             </span>
           </Button>
-          <Button onClick={() => setMostrarForm((v) => !v)}>
+          <Button onClick={() => {
+            setMostrarForm((v) => !v);
+            setConflitoForcar(false);
+          }}>
             <Plus className="h-4 w-4" />
             Nova Tarefa
           </Button>
@@ -653,11 +687,39 @@ export default function AdminTarefasPage() {
                   <AlertCircle className="h-4 w-4" />{formErro}
                 </p>
               )}
+              {/* Prompt 126 — Aviso inline de conflito de horário (não toast). */}
+              {conflitoForcar && (
+                <p className="flex items-center gap-2 rounded-md border border-amber-500/50 bg-amber-50 dark:bg-amber-950/20 px-3 py-2 text-sm font-medium text-amber-700 dark:text-amber-300">
+                  <AlertCircle className="h-4 w-4 shrink-0" />
+                  ⚠️ Conflito de horário detetado. Confirma o agendamento?
+                </p>
+              )}
               <div className="flex items-center gap-2">
-                <Button type="submit" disabled={submitting}>
-                  {submitting ? <><Loader2 className="h-4 w-4 animate-spin" />A guardar…</> : "Criar Tarefa"}
+                <Button
+                  type="submit"
+                  disabled={submitting}
+                  variant={conflitoForcar ? "outline" : "default"}
+                  className={conflitoForcar ? "border-destructive/50 text-destructive hover:bg-destructive/10 dark:text-amber-400 dark:border-amber-500/50 dark:hover:bg-amber-500/10" : ""}
+                >
+                  {submitting ? (
+                    <><Loader2 className="h-4 w-4 animate-spin" />A guardar…</>
+                  ) : conflitoForcar ? (
+                    "Forçar Agendamento"
+                  ) : (
+                    "Criar Tarefa"
+                  )}
                 </Button>
-                <Button type="button" variant="outline" onClick={() => setMostrarForm(false)} disabled={submitting}>Cancelar</Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setMostrarForm(false);
+                    setConflitoForcar(false);
+                  }}
+                  disabled={submitting}
+                >
+                  Cancelar
+                </Button>
               </div>
             </form>
           </CardContent>

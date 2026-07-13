@@ -11,13 +11,38 @@ import {
   CheckCircle2,
   AlertCircle,
   Settings,
+  ScrollText,
+  RefreshCw,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogClose,
+  DialogContent,
+} from "@/components/ui/dialog";
+import { adminGet } from "@/lib/api";
 
 type Toast = { tipo: "sucesso" | "erro"; msg: string } | null;
+
+// Prompt 126 — Tipos para os logs de webhooks (smoobu) exibidos no modal.
+interface WebhookLogDTO {
+  _id: string;
+  payload: Record<string, unknown>;
+  status: "recebido" | "processado" | "erro";
+  erro_msg: string | null;
+  createdAt: string;
+}
+interface WebhooksResponse {
+  webhooks: WebhookLogDTO[];
+  total: number;
+}
 
 export default function ConfiguracoesPage() {
   const [loading, setLoading] = useState(true);
@@ -99,6 +124,51 @@ export default function ConfiguracoesPage() {
     } finally {
       setActionLoading(null);
     }
+  }
+
+  // Prompt 126 — Modal de Logs de Sincronização Smoobu (webhooks).
+  const [mostrarLogs, setMostrarLogs] = useState(false);
+  const [logs, setLogs] = useState<WebhookLogDTO[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logsErro, setLogsErro] = useState<string | null>(null);
+
+  const carregarLogs = useCallback(async () => {
+    setLogsLoading(true);
+    setLogsErro(null);
+    try {
+      const res = await adminGet<WebhooksResponse>("/api/gestor/webhooks");
+      setLogs(res.webhooks ?? []);
+    } catch (e) {
+      setLogsErro(e instanceof Error ? e.message : "Erro ao carregar logs.");
+    } finally {
+      setLogsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (mostrarLogs) {
+      carregarLogs();
+    }
+  }, [mostrarLogs, carregarLogs]);
+
+  function formatarDataLog(iso: string): string {
+    try {
+      return new Date(iso).toLocaleString("pt-PT", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch {
+      return iso;
+    }
+  }
+
+  function extrairEvento(payload: WebhookLogDTO["payload"]): string {
+    const action = (payload?.action as string | undefined) ??
+      ((payload?.content as Record<string, unknown> | undefined)?.action as string | undefined);
+    return action ?? "—";
   }
 
   if (loading) {
@@ -194,6 +264,11 @@ export default function ConfiguracoesPage() {
               {actionLoading === "Registrar Webhooks" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Webhook className="h-4 w-4" />}
               Registrar Webhooks
             </Button>
+            {/* Prompt 126 — Botão para abrir o modal de logs de sincronização Smoobu. */}
+            <Button variant="outline" className="w-full gap-2" onClick={() => setMostrarLogs(true)}>
+              <ScrollText className="h-4 w-4" />
+              Logs de Sincronização Smoobu
+            </Button>
           </CardContent>
         </Card>
 
@@ -218,6 +293,99 @@ export default function ConfiguracoesPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Prompt 126 — Modal de Logs de Sincronização Smoobu (webhooks). */}
+      <Dialog open={mostrarLogs} onOpenChange={setMostrarLogs}>
+        <DialogHeader>
+          <div>
+            <DialogTitle className="flex items-center gap-2">
+              <ScrollText className="h-5 w-5 text-primary" />
+              Logs de Sincronização Smoobu
+            </DialogTitle>
+            <DialogDescription>
+              Histórico de webhooks recebidos do Smoobu (ordem decrescente).
+            </DialogDescription>
+          </div>
+          <DialogClose onClick={() => setMostrarLogs(false)} />
+        </DialogHeader>
+        <DialogContent className="space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted-foreground">
+              {logs.length} webhook(s)
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={carregarLogs}
+              disabled={logsLoading}
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${logsLoading ? "animate-spin" : ""}`} />
+              Atualizar
+            </Button>
+          </div>
+
+          {logsLoading ? (
+            <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              A carregar logs…
+            </div>
+          ) : logsErro ? (
+            <div className="flex items-center gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              <span>{logsErro}</span>
+            </div>
+          ) : logs.length === 0 ? (
+            <div className="flex flex-col items-center gap-2 py-8 text-center text-muted-foreground">
+              <ScrollText className="h-8 w-8 opacity-40" />
+              <p className="text-sm">Sem webhooks registados.</p>
+              <p className="text-xs">
+                Quando o Smoobu enviar uma reserva, o evento aparecerá aqui.
+              </p>
+            </div>
+          ) : (
+            <ul className="max-h-[50vh] divide-y overflow-y-auto rounded-md border">
+              {logs.map((w) => {
+                const evento = extrairEvento(w.payload);
+                const variant =
+                  w.status === "processado"
+                    ? "success"
+                    : w.status === "erro"
+                    ? "destructive"
+                    : "outline";
+                const label =
+                  w.status === "processado"
+                    ? "Processado"
+                    : w.status === "erro"
+                    ? "Erro"
+                    : "Recebido";
+                return (
+                  <li key={w._id} className="flex items-start gap-3 px-3 py-2.5">
+                    <div className="flex min-w-0 flex-1 flex-col gap-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant={variant} className="shrink-0 text-[10px]">
+                          {label}
+                        </Badge>
+                        <span className="truncate text-sm font-medium">
+                          {evento}
+                        </span>
+                      </div>
+                      <span className="text-xs text-muted-foreground">
+                        {formatarDataLog(w.createdAt)}
+                      </span>
+                      {w.erro_msg && (
+                        <span className="text-xs text-destructive">
+                          {w.erro_msg}
+                        </span>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

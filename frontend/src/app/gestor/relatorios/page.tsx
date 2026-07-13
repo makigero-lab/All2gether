@@ -236,6 +236,12 @@ export default function RelatoriosPage() {
     if (!data || !pdfExportRef.current) return;
     setPdfLoading(true);
     try {
+      // Prompt 126 — Espera 500ms para garantir que o React acabou de
+      // renderizar o resumo IA (e restante conteúdo) no div de exportação
+      // antes de o html2canvas o capturar. Sem isto, em pedidos rápidos o
+      // PDF sai em branco (o conteúdo ainda não estava no DOM).
+      await new Promise(resolve => setTimeout(resolve, 500));
+
       // Import dinâmico para evitar problemas de SSR com html2pdf.js.
       const html2pdf = (await import("html2pdf.js")).default;
       const el = pdfExportRef.current;

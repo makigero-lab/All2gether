@@ -178,7 +178,7 @@ export function NotificationBell() {
       </Button>
 
       {aberto && (
-        <div className="absolute right-0 top-full z-50 mt-2 flex max-h-[70vh] w-[300px] max-w-[calc(100vw-1rem)] flex-col origin-top-right overflow-hidden rounded-lg border bg-card shadow-lg sm:w-[400px]">
+        <div className="absolute right-0 top-full z-50 mt-2 flex max-h-[70vh] w-[calc(100vw-2rem)] max-w-sm flex-col origin-top-right overflow-hidden rounded-lg border bg-card shadow-lg">
           <div className="flex shrink-0 items-center justify-between border-b px-4 py-3">
             <span className="text-sm font-semibold">Notificações</span>
             {naoLidas > 0 && (

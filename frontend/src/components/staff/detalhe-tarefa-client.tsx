@@ -20,6 +20,7 @@ import {
   Loader2,
   Users,
   CalendarRange,
+  ClipboardList,
 } from "lucide-react";
 
 import { cn, parsearDataSegura } from "@/lib/utils";
@@ -314,6 +315,23 @@ export function DetalheTarefaClient({
 
         {/* Prompt 95 — Card de detalhes da reserva Smoobu (se existir). */}
         <DetalhesReservaCard detalhes={tarefa.detalhes_reserva} />
+
+        {/* Prompt 126 — Observações/notas internas da propriedade (regras de acesso, etc.). */}
+        {tarefa.observacoes_propriedade && tarefa.observacoes_propriedade.trim() && (
+          <Card className="border-primary/30">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <ClipboardList className="h-5 w-5 text-primary" />
+                Observações da Propriedade
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0">
+              <p className="whitespace-pre-wrap text-sm text-foreground">
+                {tarefa.observacoes_propriedade}
+              </p>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Checklist interativa */}
         <Card>
