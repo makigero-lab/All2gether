@@ -275,3 +275,388 @@ exports.getRelatorioProdutividade = async (req, res) => {
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
   }
 };
+
+/* ------------------------------------------------------------------ */
+/* POST /api/gestor/relatorios/ai-summary                              */
+/* ------------------------------------------------------------------ */
+/**
+ * Gera um "Resumo Executivo" com IA a partir dos dados do relatório
+ * (limpezas totais, horas, faltas, produtividade por staff, etc.).
+ *
+ * Estratégia (best-effort):
+ *   1. Se OPENAI_API_KEY existir → chama OpenAI (gpt-4o-mini).
+ *   2. Se GEMINI_API_KEY existir  → chama Google Gemini.
+ *   3. Se nenhuma chave existir OU a chamada falhar → devolve um
+ *      placeholder estruturado gerado localmente a partir dos dados
+ *      (com secções "Visão Geral", "Tendências", "Recomendações").
+ *
+ * Body: payload do relatório (resumo + porStaff + porDia + ...).
+ * Resposta 200: { resumo: "..." }
+ */
+exports.getResumoIA = async (req, res) => {
+  try {
+    const dados = req.body || {};
+
+    // Payload normalizado para construir o prompt / o placeholder.
+    const contexto = construirContexto(dados);
+
+    /* ---- Tentativa LLM (best-effort) ---- */
+    let resumoLLM = null;
+
+    if (process.env.OPENAI_API_KEY) {
+      try {
+        resumoLLM = await chamarOpenAI(contexto);
+      } catch (err) {
+        console.warn('⚠️  OpenAI falhou, a usar placeholder:', err.message);
+      }
+    } else if (process.env.GEMINI_API_KEY) {
+      try {
+        resumoLLM = await chamarGemini(contexto);
+      } catch (err) {
+        console.warn('⚠️  Gemini falhou, a usar placeholder:', err.message);
+      }
+    }
+
+    const resumo = resumoLLM || gerarPlaceholder(contexto);
+
+    return res.status(200).json({ resumo });
+  } catch (err) {
+    console.error('❌ getResumoIA:', err.message);
+    // Em caso de erro inesperado, devolve ainda um placeholder para
+    // garantir que o frontend recebe sempre um resumo utilizável.
+    try {
+      const contexto = construirContexto(req.body || {});
+      return res.status(200).json({ resumo: gerarPlaceholder(contexto) });
+    } catch {
+      return res.status(500).json({ erro: 'Erro interno do servidor.' });
+    }
+  }
+};
+
+/* ------------------------------------------------------------------ */
+/* Helpers — getResumoIA                                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Constrói um objecto normalizado a partir do body do pedido.
+ * Suporta tanto a estrutura completa do /produtividade como um
+ * subconjunto parcial (apenas resumo). Tudo é opcional e tem defaults.
+ */
+function construirContexto(dados) {
+  const r = dados.resumo || {};
+  const periodo = dados.periodo || {};
+
+  return {
+    periodoInicio: periodo.inicio || null,
+    periodoFim: periodo.fim || null,
+    totalTarefas: r.totalTarefas ?? dados.totalTarefas ?? 0,
+    concluidas: r.concluidas ?? dados.concluidas ?? 0,
+    taxaConclusao: r.taxaConclusao ?? dados.taxaConclusao ?? 0,
+    emAtraso: r.emAtraso ?? dados.emAtraso ?? 0,
+    taxaAtraso: r.taxaAtraso ?? dados.taxaAtraso ?? 0,
+    cargaTotalMinutos: r.cargaTotalMinutos ?? dados.cargaTotalMinutos ?? 0,
+    tempoMedioMinutos:
+      r.tempoMedioMinutos ?? r.tempoEstimadoMedioMinutos ?? dados.tempoMedioMinutos ?? 0,
+    tempoRealMedioMinutos:
+      r.tempoRealMedioMinutos ?? dados.tempoRealMedioMinutos ?? 0,
+    porStaff: Array.isArray(dados.porStaff) ? dados.porStaff : [],
+    porPropriedade: Array.isArray(dados.porPropriedade)
+      ? dados.porPropriedade
+      : [],
+    porDia: Array.isArray(dados.porDia) ? dados.porDia : [],
+    porEstado: Array.isArray(dados.porEstado) ? dados.porEstado : [],
+  };
+}
+
+/**
+ * Constrói um prompt em português europeu focado em gestão
+ * (tendências e eficiência), a partir do contexto normalizado.
+ */
+function construirPrompt(contexto) {
+  const pctConclusao = Math.round(contexto.taxaConclusao * 100);
+  const pctAtraso = Math.round(contexto.taxaAtraso * 100);
+  const horasTotal = (contexto.cargaTotalMinutos / 60).toFixed(1);
+  const tempoMedio = (contexto.tempoMedioMinutos / 60).toFixed(2);
+  const tempoReal = (contexto.tempoRealMedioMinutos / 60).toFixed(2);
+
+  const topStaff = [...contexto.porStaff]
+    .sort((a, b) => b.taxaConclusao - a.taxaConclusao)
+    .slice(0, 5)
+    .map(
+      (s) =>
+        `- ${s.nome}: ${s.concluidas}/${s.total} concluídas (${Math.round(
+          s.taxaConclusao * 100
+        )}%), carga ${Math.round(s.carga_minutos / 60 * 10) / 10}h`
+    )
+    .join('\n') || '- (sem dados de staff)';
+
+  const topProps = [...contexto.porPropriedade]
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 5)
+    .map(
+      (p) =>
+        `- ${p.nome}: ${p.total} tarefas, carga ${
+          Math.round((p.carga_minutos / 60) * 10) / 10
+        }h`
+    )
+    .join('\n') || '- (sem dados de propriedades)';
+
+  return `És um analista de operações de uma empresa de Alojamento Local (Autocell).
+Escreve um "Resumo Executivo" em português de Portugal, focado em gestão
+(tendências e eficiência), a partir dos seguintes dados do período.
+
+Dados:
+- Total de tarefas: ${contexto.totalTarefas}
+- Tarefas concluídas: ${contexto.concluidas} (${pctConclusao}%)
+- Tarefas em atraso: ${contexto.emAtraso} (${pctAtraso}%)
+- Carga total estimada: ${horasTotal}h
+- Tempo médio estimado por tarefa: ${tempoMedio}h
+- Tempo real médio por tarefa (concluídas): ${tempoReal}h
+
+Top staff (por taxa de conclusão):
+${topStaff}
+
+Top propriedades (por nº de tarefas):
+${topProps}
+
+Estrutura obrigatória (usa exactamente estes títulos em markdown):
+## Visão Geral
+(parágrafo curto com os números-chave)
+
+## Tendências
+(2-4 bullets sobre padrões: picos de carga, atrasos, eficiência real vs estimada)
+
+## Recomendações
+(3-4 bullets acionáveis focados em gestão: redistribuição de carga,
+formação, revisão de estimativas, etc.)
+
+Máximo 350 palavras. Tom profissional, conciso, sem clichés.`;
+}
+
+/**
+ * Chama a API da OpenAI (gpt-4o-mini) e devolve o texto do resumo.
+ * Lança erro se a resposta não for bem-sucedida.
+ */
+async function chamarOpenAI(contexto) {
+  const prompt = construirPrompt(contexto);
+
+  const resposta = await fetch(
+    'https://api.openai.com/v1/chat/completions',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content:
+              'És um assistente de análise de operações para gestão de Alojamento Local. Responde sempre em português de Portugal.',
+          },
+          { role: 'user', content: prompt },
+        ],
+        temperature: 0.4,
+        max_tokens: 700,
+      }),
+    }
+  );
+
+  if (!resposta.ok) {
+    const txt = await resposta.text().catch(() => '');
+    throw new Error(`OpenAI ${resposta.status}: ${txt.slice(0, 200)}`);
+  }
+
+  const json = await resposta.json();
+  const texto = json?.choices?.[0]?.message?.content?.trim();
+  if (!texto) throw new Error('OpenAI: resposta vazia.');
+  return texto;
+}
+
+/**
+ * Chama a API do Google Gemini (generateContent) e devolve o texto.
+ * Modelo: gemini-1.5-flash (rápido e barato, equivalente ao gpt-4o-mini).
+ */
+async function chamarGemini(contexto) {
+  const prompt = construirPrompt(contexto);
+  const modelo = 'gemini-1.5-flash';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${process.env.GEMINI_API_KEY}`;
+
+  const resposta = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.4, maxOutputTokens: 700 },
+    }),
+  });
+
+  if (!resposta.ok) {
+    const txt = await resposta.text().catch(() => '');
+    throw new Error(`Gemini ${resposta.status}: ${txt.slice(0, 200)}`);
+  }
+
+  const json = await resposta.json();
+  const texto =
+    json?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+  if (!texto) throw new Error('Gemini: resposta vazia.');
+  return texto;
+}
+
+/**
+ * Gera um resumo executivo estruturado localmente, sem chamar qualquer
+ * API externa. Sempre útil e profissional (não é uma mensagem de erro).
+ */
+function gerarPlaceholder(contexto) {
+  const pctConclusao = Math.round(contexto.taxaConclusao * 100);
+  const pctAtraso = Math.round(contexto.taxaAtraso * 100);
+  const horasTotal = (contexto.cargaTotalMinutos / 60).toFixed(1);
+  const tempoMedio = (contexto.tempoMedioMinutos / 60).toFixed(2);
+  const tempoReal = (contexto.tempoRealMedioMinutos / 60).toFixed(2);
+
+  const periodoTxt =
+    contexto.periodoInicio && contexto.periodoFim
+      ? `no período de ${contexto.periodoInicio.slice(0, 10)} a ${contexto.periodoFim.slice(0, 10)}`
+      : 'no período selecionado';
+
+  /* ---- Visão Geral ---- */
+  const visaoGeral = `Foram processadas **${contexto.totalTarefas} tarefas** ${periodoTxt}, das quais **${contexto.concluidas} foram concluídas** (taxa de conclusão de ${pctConclusao}%). Registaram-se **${contexto.emAtraso} tarefas em atraso** (${pctAtraso}% do total). A carga total estimada foi de **${horasTotal}h**, com um tempo médio estimado de ${tempoMedio}h por tarefa${
+    contexto.tempoRealMedioMinutos > 0
+      ? ` e um tempo real médio de ${tempoReal}h nas concluídas`
+      : ''
+  }.`;
+
+  /* ---- Tendências ---- */
+  const tendencias = [];
+
+  if (pctConclusao >= 90) {
+    tendencias.push(
+      `- **Alta taxa de conclusão (${pctConclusao}%)**: a equipa está a cumprir a maioria das tarefas planeadas, indicando boa capacidade de execução.`
+    );
+  } else if (pctConclusao >= 70) {
+    tendencias.push(
+      `- **Taxa de conclusão moderada (${pctConclusao}%)**: há espaço para otimização do fluxo de trabalho e melhor distribuição de carga.`
+    );
+  } else if (contexto.totalTarefas > 0) {
+    tendencias.push(
+      `- **Taxa de conclusão baixa (${pctConclusao}%)**: prioritário rever planeamento, atribuições e possíveis bloqueios operacionais.`
+    );
+  }
+
+  if (pctAtraso > 15) {
+    tendencias.push(
+      `- **Taxa de atraso elevada (${pctAtraso}%)**: sinal de alerta — rever prazos, estimativas e capacidade da equipa.`
+    );
+  } else if (pctAtraso > 0) {
+    tendencias.push(
+      `- **Atrasos contidos (${pctAtraso}%)**: dentro de margens aceitáveis, mas convém monitorizar os casos pontuais.`
+    );
+  }
+
+  if (
+    contexto.tempoRealMedioMinutos > 0 &&
+    contexto.tempoMedioMinutos > 0
+  ) {
+    const diff = contexto.tempoRealMedioMinutos - contexto.tempoMedioMinutos;
+    const diffPct = Math.round((diff / contexto.tempoMedioMinutos) * 100);
+    if (diff <= 0) {
+      tendencias.push(
+        `- **Eficiência acima do estimado**: o tempo real médio (${tempoReal}h) foi **${Math.abs(
+          diffPct
+        )}% inferior** ao estimado (${tempoMedio}h) — as estimativas podem estar conservadoras.`
+      );
+    } else {
+      tendencias.push(
+        `- **Tempo real acima do estimado** (${tempoReal}h vs ${tempoMedio}h, +${diffPct}%): rever precisão das estimativas ou identificar causas (formação, logística, propriedades mais exigentes).`
+      );
+    }
+  }
+
+  // Tendência de carga por staff (concentração).
+  if (contexto.porStaff.length > 1) {
+    const cargas = contexto.porStaff
+      .filter((s) => s.total > 0)
+      .map((s) => s.total);
+    if (cargas.length > 1) {
+      const max = Math.max(...cargas);
+      const min = Math.min(...cargas);
+      if (max > min * 2) {
+        tendencias.push(
+          `- **Distribuição de carga desequilibrada**: o staff com mais tarefas tem ${max} e o com menos tem ${min} — possível sobrecarga pontual.`
+        );
+      }
+    }
+  }
+
+  if (tendencias.length === 0) {
+    tendencias.push(
+      `- Sem dados suficientes para identificar tendências significativas neste período.`
+    );
+  }
+
+  /* ---- Recomendações ---- */
+  const recomendacoes = [];
+
+  if (pctConclusao < 90 && contexto.totalTarefas > 0) {
+    recomendacoes.push(
+      `Reforçar o acompanhamento das ${contexto.totalTarefas - contexto.concluidas} tarefas não concluídas: identificar bloqueios e reatribuir sempre que necessário.`
+    );
+  } else {
+    recomendacoes.push(
+      `Manter o ritmo de execução atual e continuar a monitorizar indicadores de qualidade (não apenas volume).`
+    );
+  }
+
+  if (pctAtraso > 10) {
+    recomendacoes.push(
+      `Implementar revisão semanal de atrasos: analisar causas raiz (subdimensionamento de equipa, estimativas irrealistas, logística) e ajustar planeamento.`
+    );
+  }
+
+  if (
+    contexto.tempoRealMedioMinutos > 0 &&
+    contexto.tempoRealMedioMinutos > contexto.tempoMedioMinutos * 1.1
+  ) {
+    recomendacoes.push(
+      `Recalcular as estimativas de tempo de limpeza por propriedade com base no tempo real observado — os valores atuais estão subestimados.`
+    );
+  } else if (
+    contexto.tempoRealMedioMinutos > 0 &&
+    contexto.tempoRealMedioMinutos < contexto.tempoMedioMinutos * 0.85
+  ) {
+    recomendacoes.push(
+      `Rever as estimativas de tempo (atualmente conservadoras) para otimizar o agendamento e a utilização da equipa.`
+    );
+  }
+
+  if (contexto.porStaff.length > 1) {
+    recomendacoes.push(
+      `Avaliar redistribuição de carga entre staff: equilibrar tarefas por capacidade e experiência, garantindo cobertura adequada das propriedades com maior volume.`
+    );
+  }
+
+  if (contexto.porPropriedade.length > 0) {
+    const topProp = [...contexto.porPropriedade].sort(
+      (a, b) => b.total - a.total
+    )[0];
+    recomendacoes.push(
+      `Focar otimização na propriedade "${topProp.nome}" (maior volume: ${topProp.total} tarefas) — padronizar checklist e antecedar agendamentos.`
+    );
+  }
+
+  // Limita a 4 recomendações.
+  const recFinal = recomendacoes.slice(0, 4);
+
+  return [
+    '## Visão Geral',
+    visaoGeral,
+    '',
+    '## Tendências',
+    tendencias.join('\n'),
+    '',
+    '## Recomendações',
+    recFinal.map((r) => `- ${r}`).join('\n'),
+  ].join('\n');
+}

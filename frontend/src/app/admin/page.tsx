@@ -16,6 +16,7 @@ import {
   Settings,
   Trash2,
   AlertTriangle,
+  RotateCcw,
 } from "lucide-react";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -25,6 +26,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   Dialog,
   DialogHeader,
@@ -49,6 +51,8 @@ interface EmpresaDTO {
   plano_ativo: boolean;
   // Prompt 116 — campo ativa (controlo operacional SaaS).
   ativa?: boolean;
+  // Prompt 122 — soft delete (lixeira).
+  apagada?: boolean;
   createdAt: string;
   gestor: { id: string; nome: string; email: string } | null;
   num_propriedades?: number;
@@ -100,6 +104,8 @@ export default function SuperAdminPage() {
   const [togglingEmpresaId, setTogglingEmpresaId] = useState<string | null>(null);
   const [apagarEmpresaId, setApagarEmpresaId] = useState<string | null>(null);
   const [apagarLoading, setApagarLoading] = useState(false);
+  // Prompt 122 — Restaurar empresa (soft delete undo).
+  const [restaurandoId, setRestaurandoId] = useState<string | null>(null);
 
   const carregar = useCallback(async () => {
     setLoading(true);
@@ -241,6 +247,26 @@ export default function SuperAdminPage() {
     }
   }
 
+  /** Prompt 122 — Restaurar empresa da reciclagem (soft delete undo). */
+  async function handleRestaurar(emp: EmpresaDTO) {
+    setRestaurandoId(emp._id);
+    setToast(null);
+    try {
+      const res = await fetch(`/api/admin/empresas/${emp._id}/restaurar`, {
+        method: "PATCH",
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.erro || `Erro ${res.status}`);
+      setToast({ tipo: "sucesso", msg: data.message || "Empresa restaurada." });
+      await carregar();
+    } catch (e) {
+      setToast({ tipo: "erro", msg: e instanceof Error ? e.message : "Erro ao restaurar empresa." });
+    } finally {
+      setRestaurandoId(null);
+    }
+  }
+
   /** Prompt 101 — Abre o modal "Gerir Utilizadores" de uma empresa. */
   async function abrirModalUtilizadores(emp: EmpresaDTO) {
     setEmpresaModal(emp);
@@ -363,6 +389,10 @@ export default function SuperAdminPage() {
     }
   }
 
+  // Prompt 122 — Separa as empresas em Ativas e Reciclagem (soft delete).
+  const empresasAtivas = empresas.filter((e) => !e.apagada);
+  const empresasApagadas = empresas.filter((e) => e.apagada === true);
+
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
       {/* Cabeçalho */}
@@ -438,7 +468,7 @@ export default function SuperAdminPage() {
         </Card>
       )}
 
-      {/* Lista de empresas */}
+      {/* Prompt 122 — Lista de empresas com Tabs (Ativas / Reciclagem) */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -455,13 +485,26 @@ export default function SuperAdminPage() {
               <Loader2 className="h-5 w-5 animate-spin" />
               A carregar empresas…
             </div>
-          ) : empresas.length === 0 ? (
-            <div className="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">
-              <Building2 className="h-10 w-10 opacity-40" />
-              <p className="text-sm">Sem empresas registadas.</p>
-            </div>
           ) : (
-            <div className="overflow-x-auto">
+            <Tabs defaultValue="ativas" className="w-full">
+              <TabsList className="mx-4 mt-2">
+                <TabsTrigger value="ativas">
+                  Ativas / Suspensas ({empresasAtivas.length})
+                </TabsTrigger>
+                <TabsTrigger value="reciclagem">
+                  Reciclagem ({empresasApagadas.length})
+                </TabsTrigger>
+              </TabsList>
+
+              {/* ABA: Ativas / Suspensas */}
+              <TabsContent value="ativas" className="mt-0">
+                {empresasAtivas.length === 0 ? (
+                  <div className="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">
+                    <Building2 className="h-10 w-10 opacity-40" />
+                    <p className="text-sm">Sem empresas ativas.</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b bg-muted/40 text-left">
@@ -475,7 +518,7 @@ export default function SuperAdminPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {empresas.map((emp) => (
+                  {empresasAtivas.map((emp) => (
                     <tr key={emp._id} className="hover:bg-muted/30">
                       <td className="px-4 py-3">
                         <div className="font-medium">{emp.nome}</div>
@@ -604,6 +647,71 @@ export default function SuperAdminPage() {
                 </tbody>
               </table>
             </div>
+                )}
+              </TabsContent>
+
+              {/* ABA: Reciclagem (empresas apagadas) */}
+              <TabsContent value="reciclagem" className="mt-0">
+                {empresasApagadas.length === 0 ? (
+                  <div className="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">
+                    <RotateCcw className="h-10 w-10 opacity-40" />
+                    <p className="text-sm">A reciclagem está vazia.</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b bg-muted/40 text-left">
+                          <th className="px-4 py-3 font-medium">Agência</th>
+                          <th className="px-4 py-3 font-medium">Gestor</th>
+                          <th className="px-4 py-3 text-center font-medium">Propriedades</th>
+                          <th className="px-4 py-3 text-center font-medium">Tarefas</th>
+                          <th className="px-4 py-3 text-right font-medium">Ação</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {empresasApagadas.map((emp) => (
+                          <tr key={emp._id} className="opacity-70 hover:bg-muted/30">
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium line-through">{emp.nome}</span>
+                                <Badge variant="destructive">Apagada</Badge>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-muted-foreground">
+                              {emp.gestor?.nome ?? "—"}
+                            </td>
+                            <td className="px-4 py-3 text-center text-muted-foreground">
+                              {emp.num_propriedades ?? 0}
+                            </td>
+                            <td className="px-4 py-3 text-center text-muted-foreground">
+                              {emp.num_tarefas ?? 0}
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleRestaurar(emp)}
+                                disabled={restaurandoId === emp._id}
+                                title="Restaurar empresa (move de volta para Ativas)"
+                                className="text-emerald-600 border-emerald-400 hover:bg-emerald-50"
+                              >
+                                {restaurandoId === emp._id ? (
+                                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+                                )}
+                                Restaurar
+                              </Button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
           )}
         </CardContent>
       </Card>

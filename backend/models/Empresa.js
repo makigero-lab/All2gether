@@ -34,6 +34,16 @@ const empresaSchema = new mongoose.Schema(
       default: true,
       index: true,
     },
+    // Prompt 122 — Soft Delete (Lixeira de Empresas). Quando `true`:
+    //   - a empresa desaparece da aba "Ativas" e aparece na "Reciclagem";
+    //   - `ativa` é forçada para false (bloqueia login + webhooks);
+    //   - pode ser restaurada via PATCH /api/admin/empresas/:id/restaurar.
+    // Não apaga fisicamente — preserva os dados para auditoria/restauro.
+    apagada: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
     // Prompt 109 — API Key do Smoobu por empresa (multi-tenant SaaS).
     // Quando preenchida, as operações de sincronização usam esta chave
     // em vez da variável de ambiente SMOOBU_API_KEY global.

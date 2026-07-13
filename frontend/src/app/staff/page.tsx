@@ -11,6 +11,8 @@ import {
   Loader2,
   AlertTriangle,
   Send,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -183,6 +185,11 @@ export default function StaffPage() {
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  // Prompt 124 — Navegação de dias (1 dia de cada vez).
+  // diaSelecionado é um offset em dias a partir de hoje (0 = hoje, -1 = ontem, 1 = amanhã).
+  const [offsetDia, setOffsetDia] = useState(0);
+
   const hoje = mounted
     ? new Date().toLocaleDateString("pt-PT", {
         weekday: "long",
@@ -191,53 +198,38 @@ export default function StaffPage() {
       })
     : "";
 
-  // Filtra apenas tarefas não concluídas para a lista principal.
-  const tarefasAtivas = tarefas.filter((t) => t.estado !== "concluida");
-  const tarefasConcluidas = tarefas.filter((t) => t.estado === "concluida");
+  // Calcula a data do dia selecionado.
+  const diaSelecionadoDate = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + offsetDia);
+    return d;
+  }, [offsetDia]);
 
-  /**
-   * Prompt 118 — Agrupa as tarefas ativas por dia (YYYY-MM-DD) para mostrar
-   * separadores visuais: "Hoje", "Amanhã", "15 de Outubro".
-   * Devolve um array ordenado de { chave, label, itens }.
-   */
-  const gruposPorDia = useMemo(() => {
-    const hojeStr = new Date().toLocaleDateString("pt-PT", { timeZone: "Europe/Lisbon" });
-    const amanha = new Date();
-    amanha.setDate(amanha.getDate() + 1);
-    const amanhaStr = amanha.toLocaleDateString("pt-PT", { timeZone: "Europe/Lisbon" });
+  const diaSelecionadoStr = diaSelecionadoDate.toLocaleDateString("pt-PT", { timeZone: "Europe/Lisbon" });
 
-    const grupos: Record<string, TarefaReal[]> = {};
-    for (const t of tarefasAtivas) {
-      // Extrai a data de calendário (Lisboa) da tarefa.
+  // Label do dia selecionado: "Hoje" / "Ontem" / "Amanhã" / "15 de Outubro".
+  const diaLabel = useMemo(() => {
+    if (offsetDia === 0) return "Hoje";
+    if (offsetDia === -1) return "Ontem";
+    if (offsetDia === 1) return "Amanhã";
+    return diaSelecionadoDate.toLocaleDateString("pt-PT", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      timeZone: "Europe/Lisbon",
+    });
+  }, [offsetDia, diaSelecionadoDate]);
+
+  // Filtra as tarefas do dia selecionado (ativas + concluídas).
+  const tarefasDoDia = useMemo(() => {
+    return tarefas.filter((t) => {
       const dia = (parsearDataSegura(t.data) ?? new Date()).toLocaleDateString("pt-PT", { timeZone: "Europe/Lisbon" });
-      if (!grupos[dia]) grupos[dia] = [];
-      grupos[dia].push(t);
-    }
+      return dia === diaSelecionadoStr;
+    });
+  }, [tarefas, diaSelecionadoStr]);
 
-    // Converte para array ordenado por data.
-    return Object.entries(grupos)
-      .map(([dia, itens]) => {
-        // Label amigável: "Hoje" / "Amanhã" / "15 de Outubro".
-        let label: string;
-        if (dia === hojeStr) {
-          label = "Hoje";
-        } else if (dia === amanhaStr) {
-          label = "Amanhã";
-        } else {
-          // Parse dd/mm/yyyy → Date para formatar.
-          const [d, m, y] = dia.split("/");
-          const dt = new Date(Number(y), Number(m) - 1, Number(d));
-          label = dt.toLocaleDateString("pt-PT", { day: "numeric", month: "long" });
-        }
-        return { chave: dia, label, itens };
-      })
-      .sort((a, b) => {
-        // Ordena por data (parse dd/mm/yyyy).
-        const [da, ma, ya] = a.chave.split("/").map(Number);
-        const [db, mb, yb] = b.chave.split("/").map(Number);
-        return new Date(ya, ma - 1, da).getTime() - new Date(yb, mb - 1, db).getTime();
-      });
-  }, [tarefasAtivas]);
+  const tarefasAtivasDia = tarefasDoDia.filter((t) => t.estado !== "concluida");
+  const tarefasConcluidasDia = tarefasDoDia.filter((t) => t.estado === "concluida");
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-md flex-col bg-muted/20">
@@ -337,46 +329,74 @@ export default function StaffPage() {
           </div>
         ) : (
           <>
-            {/* Prompt 118 — Tarefas agrupadas por dia com separadores visuais */}
-            {gruposPorDia.map((grupo) => (
-              <div key={grupo.chave} className="space-y-3">
-                <div className="flex items-center gap-3">
-                  <h2 className="text-sm font-bold uppercase tracking-wide text-primary">
-                    {grupo.label}
-                  </h2>
-                  <span className="text-xs text-muted-foreground">
-                    {grupo.itens.length} tarefa(s)
-                  </span>
-                  <div className="h-px flex-1 bg-border" />
-                </div>
-                <div className="space-y-4">
-                  {grupo.itens.map((t) => (
-                    <TaskCard key={t._id} tarefa={adaptarTarefa(t)} />
-                  ))}
-                </div>
+            {/* Prompt 124 — Navegação de dias (1 dia de cada vez) */}
+            <div className="flex items-center justify-between gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setOffsetDia((d) => d - 1)}
+                className="gap-1"
+                title="Dia anterior"
+              >
+                <ChevronLeft className="h-4 w-4" />
+                Anterior
+              </Button>
+              <div className="flex flex-col items-center">
+                <span className={`text-sm font-bold capitalize ${offsetDia === 0 ? "text-primary" : "text-foreground"}`}>
+                  {diaLabel}
+                </span>
+                {offsetDia !== 0 && (
+                  <button
+                    onClick={() => setOffsetDia(0)}
+                    className="text-xs text-primary hover:underline"
+                  >
+                    Voltar a Hoje
+                  </button>
+                )}
               </div>
-            ))}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setOffsetDia((d) => d + 1)}
+                className="gap-1"
+                title="Dia seguinte"
+              >
+                Seguinte
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
 
-            {tarefasConcluidas.length > 0 && (
-              <div className="space-y-3">
+            {/* Tarefas ativas do dia selecionado */}
+            {tarefasAtivasDia.length > 0 && (
+              <div className="space-y-4">
+                {tarefasAtivasDia.map((t) => (
+                  <TaskCard key={t._id} tarefa={adaptarTarefa(t)} />
+                ))}
+              </div>
+            )}
+
+            {/* Tarefas concluídas do dia selecionado */}
+            {tarefasConcluidasDia.length > 0 && (
+              <div className="space-y-4">
                 <div className="flex items-center gap-3 pt-2">
                   <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                    Concluídas ({tarefasConcluidas.length})
+                    Concluídas ({tarefasConcluidasDia.length})
                   </h2>
                   <div className="h-px flex-1 bg-border" />
                 </div>
                 <div className="space-y-4 opacity-60">
-                  {tarefasConcluidas.map((t) => (
+                  {tarefasConcluidasDia.map((t) => (
                     <TaskCard key={t._id} tarefa={adaptarTarefa(t)} />
                   ))}
                 </div>
               </div>
             )}
 
-            {tarefas.length === 0 && (
+            {/* Sem tarefas no dia selecionado */}
+            {tarefasDoDia.length === 0 && (
               <div className="mt-10 flex flex-col items-center gap-2 text-center text-muted-foreground">
                 <ClipboardList className="h-10 w-10 opacity-40" />
-                <p className="text-sm">Sem tarefas atribuídas.</p>
+                <p className="text-sm">Sem tarefas neste dia.</p>
               </div>
             )}
           </>

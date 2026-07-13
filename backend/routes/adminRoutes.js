@@ -312,7 +312,10 @@ router.post('/empresas', async (req, res) => {
   }
 });
 
-// Eliminar Empresa (soft — marca plano_ativo = false).
+// Prompt 122 — Eliminar Empresa (SOFT DELETE).
+// Em vez de apagar fisicamente (findByIdAndDelete), marca apagada: true +
+// ativa: false. A empresa desaparece da aba "Ativas" e aparece na "Reciclagem".
+// Pode ser restaurada via PATCH /api/admin/empresas/:id/restaurar.
 router.delete('/empresas/:id', async (req, res) => {
   try {
     const Empresa = require('../models/Empresa');
@@ -321,13 +324,70 @@ router.delete('/empresas/:id', async (req, res) => {
     if (!mongoose.isValidObjectId(id)) {
       return res.status(400).json({ erro: 'ID inválido.' });
     }
-    const empresa = await Empresa.findByIdAndDelete(id);
+    const empresa = await Empresa.findByIdAndUpdate(
+      id,
+      { $set: { apagada: true, ativa: false } },
+      { new: true }
+    ).select('nome apagada ativa');
     if (!empresa) {
       return res.status(404).json({ erro: 'Empresa não encontrada.' });
     }
-    return res.status(200).json({ message: 'Empresa eliminada com sucesso.' });
+    // Auditoria.
+    const { registarAuditoria } = require('../utils/auditoria');
+    registarAuditoria({
+      utilizador_id: req.user.id,
+      utilizador_nome: req.user.nome || 'Super Admin',
+      empresa_id: id,
+      acao: 'soft-delete',
+      recurso: 'empresa',
+      recurso_id: id,
+      descricao: `Empresa "${empresa.nome}" movida para a reciclagem (apagada: true).`,
+    });
+    return res.status(200).json({
+      message: `Empresa "${empresa.nome}" movida para a reciclagem.`,
+      empresa: { _id: String(empresa._id), apagada: empresa.apagada, ativa: empresa.ativa },
+    });
   } catch (err) {
     return res.status(500).json({ erro: 'Erro ao eliminar empresa.', detalhe: err.message });
+  }
+});
+
+// Prompt 122 — Restaurar Empresa (desfaz o soft delete).
+// Marca apagada: false. Não reativa automaticamente (ativa continua false) —
+// o admin deve carregar em "Ativar" depois de restaurar, para confirmar.
+router.patch('/empresas/:id/restaurar', async (req, res) => {
+  try {
+    const Empresa = require('../models/Empresa');
+    const { id } = req.params;
+    const mongoose = require('mongoose');
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ erro: 'ID inválido.' });
+    }
+    const empresa = await Empresa.findByIdAndUpdate(
+      id,
+      { $set: { apagada: false } },
+      { new: true }
+    ).select('nome apagada ativa');
+    if (!empresa) {
+      return res.status(404).json({ erro: 'Empresa não encontrada.' });
+    }
+    // Auditoria.
+    const { registarAuditoria } = require('../utils/auditoria');
+    registarAuditoria({
+      utilizador_id: req.user.id,
+      utilizador_nome: req.user.nome || 'Super Admin',
+      empresa_id: id,
+      acao: 'restaurar',
+      recurso: 'empresa',
+      recurso_id: id,
+      descricao: `Empresa "${empresa.nome}" restaurada da reciclagem (apagada: false).`,
+    });
+    return res.status(200).json({
+      message: `Empresa "${empresa.nome}" restaurada. Carrega em "Ativar" para reativar o acesso.`,
+      empresa: { _id: String(empresa._id), apagada: empresa.apagada, ativa: empresa.ativa },
+    });
+  } catch (err) {
+    return res.status(500).json({ erro: 'Erro ao restaurar empresa.', detalhe: err.message });
   }
 });
 

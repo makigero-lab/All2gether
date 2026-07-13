@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   BarChart3,
   Loader2,
@@ -12,6 +12,7 @@ import {
   AlertTriangle,
   Timer,
   FileDown,
+  Sparkles,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -39,7 +40,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { adminGet } from "@/lib/api";
+import { adminGet, adminPost } from "@/lib/api";
 
 /* ------------------------------------------------------------------ */
 /* Tipos                                                               */
@@ -167,6 +168,13 @@ export default function RelatoriosPage() {
   const [inicio, setInicio] = useState<string>("");
   const [fim, setFim] = useState<string>("");
 
+  // Prompt 124-Fix1 — Resumo IA + exportação PDF (html2pdf.js)
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiResumo, setAiResumo] = useState<string | null>(null);
+  const [aiErro, setAiErro] = useState<string | null>(null);
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const pdfExportRef = useRef<HTMLDivElement | null>(null);
+
   const carregar = useCallback(async () => {
     setLoading(true);
     setErro(null);
@@ -203,6 +211,71 @@ export default function RelatoriosPage() {
     setFim("");
     setPreset("30");
   };
+
+  // Prompt 124-Fix1 — Gera o Resumo Executivo com IA.
+  const gerarResumoIA = useCallback(async () => {
+    if (!data) return;
+    setAiLoading(true);
+    setAiErro(null);
+    setAiResumo(null);
+    try {
+      const res = await adminPost<{ resumo: string }>(
+        "/api/gestor/relatorios/ai-summary",
+        data
+      );
+      setAiResumo(res.resumo);
+    } catch (e) {
+      setAiErro(e instanceof Error ? e.message : "Erro ao gerar resumo IA.");
+    } finally {
+      setAiLoading(false);
+    }
+  }, [data]);
+
+  // Prompt 124-Fix1 — Exportar PDF com html2pdf.js (A4, inclui resumo IA + tabelas + gráficos).
+  const exportarPDF = useCallback(async () => {
+    if (!data || !pdfExportRef.current) return;
+    setPdfLoading(true);
+    try {
+      // Import dinâmico para evitar problemas de SSR com html2pdf.js.
+      const html2pdf = (await import("html2pdf.js")).default;
+      const el = pdfExportRef.current;
+
+      const filename = `relatorio-autocell-${data.periodo.inicio
+        .slice(0, 10)
+        .replace(/-/g, "")}-${data.periodo.fim.slice(0, 10).replace(/-/g, "")}.pdf`;
+
+      // O conteúdo do div de exportação é construído via React (renderizado
+      // off-screen). Aqui só disparamos o html2pdf sobre esse div.
+      const opt = {
+        margin: [10, 10, 12, 10] as [number, number, number, number],
+        filename,
+        image: { type: "jpeg" as const, quality: 0.96 },
+        html2canvas: {
+          scale: 2,
+          useCORS: true,
+          backgroundColor: "#ffffff",
+          logging: false,
+        },
+        jsPDF: {
+          unit: "mm",
+          format: "a4",
+          orientation: "portrait" as const,
+        },
+        pagebreak: { mode: ["css", "legacy"] as const },
+      };
+
+      await html2pdf().set(opt).from(el).save();
+    } catch (e) {
+      console.error("Erro ao exportar PDF:", e);
+      alert(
+        e instanceof Error
+          ? `Erro ao exportar PDF: ${e.message}`
+          : "Erro ao exportar PDF."
+      );
+    } finally {
+      setPdfLoading(false);
+    }
+  }, [data]);
 
   // Resumo em cartões.
   const stats = useMemo(() => {
@@ -276,8 +349,8 @@ export default function RelatoriosPage() {
 
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
-      {/* Cabeçalho — escondido na impressão (print:hidden) */}
-      <div className="hidden flex-col gap-1 lg:flex print:hidden">
+      {/* Cabeçalho */}
+      <div className="hidden flex-col gap-1 lg:flex">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-bold tracking-tight">Relatórios</h1>
           <Button
@@ -289,15 +362,34 @@ export default function RelatoriosPage() {
           >
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           </Button>
-          {/* Prompt 118 — Exportar PDF (window.print otimizado com @media print) */}
+          {/* Prompt 124-Fix1 — Gerar Relatório Inteligente (Resumo IA) */}
           <Button
-            variant="outline"
-            onClick={() => window.print()}
-            disabled={loading || !data}
-            title="Gera um PDF limpo com os gráficos e métricas (usa a janela de impressão do browser)"
+            variant="default"
+            onClick={gerarResumoIA}
+            disabled={loading || !data || aiLoading}
+            title="Gera um Resumo Executivo com IA a partir dos dados do relatório"
             className="gap-2"
           >
-            <FileDown className="h-4 w-4" />
+            {aiLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Sparkles className="h-4 w-4" />
+            )}
+            Gerar Relatório Inteligente
+          </Button>
+          {/* Prompt 124-Fix1 — Exportar PDF via html2pdf.js (A4, com resumo IA + tabelas + gráficos) */}
+          <Button
+            variant="outline"
+            onClick={exportarPDF}
+            disabled={loading || !data || pdfLoading}
+            title="Gera um PDF A4 com os gráficos, tabelas e resumo IA"
+            className="gap-2"
+          >
+            {pdfLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <FileDown className="h-4 w-4" />
+            )}
             Exportar PDF
           </Button>
         </div>
@@ -306,8 +398,8 @@ export default function RelatoriosPage() {
         </p>
       </div>
 
-      {/* Filtro de período — escondido na impressão */}
-      <Card className="print:hidden">
+      {/* Filtro de período */}
+      <Card>
         <CardContent className="flex flex-wrap items-end gap-3 p-4">
           <div className="flex flex-col gap-1.5">
             <span className="text-xs font-medium text-muted-foreground">Período rápido</span>
@@ -390,18 +482,6 @@ export default function RelatoriosPage() {
         </Card>
       ) : data ? (
         <>
-          {/* Cabeçalho de impressão — só visível no PDF (hidden no ecrã) */}
-          <div className="hidden print:block mb-4">
-            <h1 className="text-xl font-bold">Relatório de Produtividade — Autocell</h1>
-            <p className="text-sm text-muted-foreground">
-              Período: {formatarDataCurta(data.periodo.inicio.slice(0, 10))} a{" "}
-              {formatarDataCurta(data.periodo.fim.slice(0, 10))}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              Gerado em {new Date().toLocaleDateString("pt-PT", { day: "2-digit", month: "long", year: "numeric" })}
-            </p>
-          </div>
-
           {/* Cartões de resumo */}
           <div className="grid gap-4 sm:grid-cols-3 xl:grid-cols-7">
             {stats.map((s) => {
@@ -620,8 +700,491 @@ export default function RelatoriosPage() {
               )}
             </CardContent>
           </Card>
+
+          {/* Prompt 124-Fix1 — Cartão do Resumo Executivo IA */}
+          {(aiLoading || aiResumo || aiErro) && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Sparkles className="h-5 w-5 text-primary" />
+                  Resumo Executivo IA
+                </CardTitle>
+                <CardDescription>
+                  Análise automática focada em gestão — tendências e eficiência.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {aiLoading ? (
+                  <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    A gerar resumo com IA…
+                  </div>
+                ) : aiErro ? (
+                  <div className="flex items-center gap-2 py-4 text-sm text-destructive">
+                    <AlertCircle className="h-4 w-4 shrink-0" />
+                    <span>{aiErro}</span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={gerarResumoIA}
+                      className="ml-auto"
+                    >
+                      Tentar novamente
+                    </Button>
+                  </div>
+                ) : aiResumo ? (
+                  <ResumoIATexto texto={aiResumo} />
+                ) : null}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Prompt 124-Fix1 — Conteúdo oculto usado pelo html2pdf para exportar PDF A4.
+              Renderizado off-screen (position: absolute, left: -99999px) mas visível
+              para o html2canvas conseguir capturá-lo. Inclui resumo IA + tabelas + gráficos. */}
+          {data && (
+            <div
+              ref={pdfExportRef}
+              aria-hidden
+              style={{
+                position: "absolute",
+                left: "-99999px",
+                top: 0,
+                width: "794px", // ~A4 a 96 DPI (210mm)
+                background: "#ffffff",
+                color: "#0f172a",
+                padding: "24px",
+                fontFamily:
+                  "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif",
+                fontSize: "12px",
+                lineHeight: 1.5,
+              }}
+            >
+              <PdfExportContent data={data} stats={stats} aiResumo={aiResumo} />
+            </div>
+          )}
         </>
       ) : null}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Componente auxiliar — renderização do resumo IA (markdown simples)  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Renderiza o resumo IA (texto com markdown leve: ## headings, - bullets,
+ * **bold**) de forma legível, sem bibliotecas externas.
+ */
+function ResumoIATexto({ texto }: { texto: string }) {
+  const linhas = texto.split(/\r?\n/);
+  const blocos: ReactNode[] = [];
+  let bullets: string[] = [];
+
+  const flushBullets = (key: number) => {
+    if (bullets.length === 0) return;
+    blocos.push(
+      <ul key={`bullets-${key}`} className="my-2 ml-1 list-none space-y-1">
+        {bullets.map((b, i) => (
+          <li key={i} className="flex gap-2">
+            <span className="mt-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
+            <span>{renderarInline(b)}</span>
+          </li>
+        ))}
+      </ul>
+    );
+    bullets = [];
+  };
+
+  linhas.forEach((linha, idx) => {
+    const t = linha.trim();
+    if (t.startsWith("## ")) {
+      flushBullets(idx);
+      blocos.push(
+        <h3
+          key={`h-${idx}`}
+          className="mt-4 mb-1 text-sm font-semibold text-primary first:mt-0"
+        >
+          {t.slice(3).trim()}
+        </h3>
+      );
+    } else if (t.startsWith("# ")) {
+      flushBullets(idx);
+      blocos.push(
+        <h3
+          key={`h-${idx}`}
+          className="mt-4 mb-1 text-base font-bold first:mt-0"
+        >
+          {t.slice(2).trim()}
+        </h3>
+      );
+    } else if (t.startsWith("- ") || t.startsWith("* ")) {
+      bullets.push(t.slice(2).trim());
+    } else if (t === "") {
+      flushBullets(idx);
+    } else {
+      flushBullets(idx);
+      blocos.push(
+        <p key={`p-${idx}`} className="my-1 text-sm leading-relaxed">
+          {renderarInline(t)}
+        </p>
+      );
+    }
+  });
+  flushBullets(linhas.length);
+
+  return <div className="space-y-1">{blocos}</div>;
+}
+
+/**
+ * Renderiza **bold** e *itálico* de forma muito simples (regex, sem XSS —
+ * o conteúdo vem do nosso próprio backend / IA, não do utilizador).
+ */
+function renderarInline(texto: string): ReactNode {
+  // Split por **bold** primeiro, depois por *italic*.
+  const partes = texto.split(/(\*\*[^*]+\*\*)/g);
+  return partes.map((p, i) => {
+    if (p.startsWith("**") && p.endsWith("**")) {
+      return (
+        <strong key={i} className="font-semibold">
+          {p.slice(2, -2)}
+        </strong>
+      );
+    }
+    // Itálico simples.
+    const sub = p.split(/(\*[^*]+\*)/g);
+    return sub.map((s, j) => {
+      if (s.startsWith("*") && s.endsWith("*") && s.length > 2) {
+        return (
+          <em key={`${i}-${j}`} className="italic">
+            {s.slice(1, -1)}
+          </em>
+        );
+      }
+      return <span key={`${i}-${j}`}>{s}</span>;
+    });
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Componente auxiliar — conteúdo do PDF (A4, com resumo IA + tabelas) */
+/* ------------------------------------------------------------------ */
+
+interface PdfExportContentProps {
+  data: RelatorioData;
+  stats: { label: string; value: string; sub?: string }[];
+  aiResumo: string | null;
+}
+
+/**
+ * Estrutura HTML usada pelo html2pdf para gerar o PDF A4. Usa estilos
+ * inline (para garantir renderização consistente pelo html2canvas) e
+ * inclui: cabeçalho, período, resumo IA, KPIs, tabelas (staff,
+ * propriedades, estados) e minigráficos de barras horizontais baseados
+ * em divs (sem dependência do recharts no PDF).
+ */
+function PdfExportContent({ data, stats, aiResumo }: PdfExportContentProps) {
+  const periodo = `${formatarDataCurta(data.periodo.inicio.slice(0, 10))} a ${formatarDataCurta(
+    data.periodo.fim.slice(0, 10)
+  )}`;
+  const geradoEm = new Date().toLocaleDateString("pt-PT", {
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+  });
+
+  // Largura máxima de barras (px).
+  const maxBarra = 360;
+  const maxStaffTotal = Math.max(1, ...data.porStaff.map((s) => s.total));
+  const maxPropTotal = Math.max(1, ...data.porPropriedade.map((p) => p.total));
+
+  return (
+    <div>
+      {/* Cabeçalho */}
+      <div style={{ borderBottom: "2px solid #c9a227", paddingBottom: 8, marginBottom: 16 }}>
+        <div style={{ fontSize: 18, fontWeight: 700, color: "#0f172a" }}>
+          Relatório de Produtividade — Autocell
+        </div>
+        <div style={{ fontSize: 12, color: "#475569", marginTop: 2 }}>
+          Período: {periodo}
+        </div>
+        <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>
+          Gerado em {geradoEm}
+        </div>
+      </div>
+
+      {/* Resumo IA */}
+      {aiResumo && (
+        <div style={{ marginBottom: 16, pageBreakInside: "avoid" }}>
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 700,
+              color: "#c9a227",
+              marginBottom: 6,
+            }}
+          >
+            Resumo Executivo IA
+          </div>
+          <div
+            style={{
+              background: "#fffaf0",
+              border: "1px solid #fde68a",
+              borderRadius: 6,
+              padding: 10,
+              fontSize: 11.5,
+              color: "#1f2937",
+              whiteSpace: "pre-wrap",
+            }}
+          >
+            {aiResumo}
+          </div>
+        </div>
+      )}
+
+      {/* KPIs em grelha */}
+      <div style={{ marginBottom: 16, pageBreakInside: "avoid" }}>
+        <div
+          style={{
+            fontSize: 13,
+            fontWeight: 700,
+            color: "#0f172a",
+            marginBottom: 6,
+          }}
+        >
+          Indicadores-chave
+        </div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(4, 1fr)",
+            gap: 8,
+          }}
+        >
+          {stats.map((s) => (
+            <div
+              key={s.label}
+              style={{
+                border: "1px solid #e2e8f0",
+                borderRadius: 6,
+                padding: 8,
+                background: "#f8fafc",
+              }}
+            >
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#0f172a" }}>
+                {s.value}
+              </div>
+              <div style={{ fontSize: 10, color: "#475569", marginTop: 2 }}>
+                {s.label}
+              </div>
+              {s.sub && (
+                <div style={{ fontSize: 10, color: "#64748b", marginTop: 1 }}>
+                  {s.sub}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Tabela — Produtividade por staff + minibarra */}
+      {data.porStaff.length > 0 && (
+        <div style={{ marginBottom: 16, pageBreakInside: "avoid" }}>
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 700,
+              color: "#0f172a",
+              marginBottom: 6,
+            }}
+          >
+            Produtividade por funcionário
+          </div>
+          <table
+            style={{
+              width: "100%",
+              borderCollapse: "collapse",
+              fontSize: 11,
+            }}
+          >
+            <thead>
+              <tr style={{ borderBottom: "2px solid #cbd5e1", textAlign: "left" }}>
+                <th style={{ padding: "4px 6px" }}>Funcionário</th>
+                <th style={{ padding: "4px 6px", textAlign: "right" }}>Total</th>
+                <th style={{ padding: "4px 6px", textAlign: "right" }}>Concl.</th>
+                <th style={{ padding: "4px 6px", textAlign: "right" }}>%</th>
+                <th style={{ padding: "4px 6px" }}>Carga</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.porStaff.map((s, i) => (
+                <tr
+                  key={s.utilizador_id ?? i}
+                  style={{ borderBottom: "1px solid #e2e8f0" }}
+                >
+                  <td style={{ padding: "4px 6px", fontWeight: 600 }}>{s.nome}</td>
+                  <td style={{ padding: "4px 6px", textAlign: "right" }}>{s.total}</td>
+                  <td style={{ padding: "4px 6px", textAlign: "right" }}>{s.concluidas}</td>
+                  <td style={{ padding: "4px 6px", textAlign: "right" }}>
+                    {Math.round(s.taxaConclusao * 100)}%
+                  </td>
+                  <td style={{ padding: "4px 6px" }}>
+                    <div
+                      style={{
+                        height: 8,
+                        width: `${Math.max(
+                          4,
+                          (s.total / maxStaffTotal) * maxBarra
+                        )}px`,
+                        background: "#c9a227",
+                        borderRadius: 4,
+                      }}
+                      title={formatarHoras(s.carga_minutos)}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Tabela — Carga por propriedade + minibarra */}
+      {data.porPropriedade.length > 0 && (
+        <div style={{ marginBottom: 16, pageBreakInside: "avoid" }}>
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 700,
+              color: "#0f172a",
+              marginBottom: 6,
+            }}
+          >
+            Carga por propriedade
+          </div>
+          <table
+            style={{
+              width: "100%",
+              borderCollapse: "collapse",
+              fontSize: 11,
+            }}
+          >
+            <thead>
+              <tr style={{ borderBottom: "2px solid #cbd5e1", textAlign: "left" }}>
+                <th style={{ padding: "4px 6px" }}>Propriedade</th>
+                <th style={{ padding: "4px 6px", textAlign: "right" }}>Tarefas</th>
+                <th style={{ padding: "4px 6px", textAlign: "right" }}>Carga</th>
+                <th style={{ padding: "4px 6px", textAlign: "right" }}>% do total</th>
+                <th style={{ padding: "4px 6px" }}>Distrib.</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.porPropriedade.map((p, i) => {
+                const pct =
+                  data.resumo.totalTarefas > 0
+                    ? (p.total / data.resumo.totalTarefas) * 100
+                    : 0;
+                return (
+                  <tr
+                    key={p.propriedade_id ?? i}
+                    style={{ borderBottom: "1px solid #e2e8f0" }}
+                  >
+                    <td style={{ padding: "4px 6px", fontWeight: 600 }}>{p.nome}</td>
+                    <td style={{ padding: "4px 6px", textAlign: "right" }}>{p.total}</td>
+                    <td style={{ padding: "4px 6px", textAlign: "right" }}>
+                      {formatarHoras(p.carga_minutos)}
+                    </td>
+                    <td style={{ padding: "4px 6px", textAlign: "right" }}>
+                      {Math.round(pct)}%
+                    </td>
+                    <td style={{ padding: "4px 6px" }}>
+                      <div
+                        style={{
+                          height: 8,
+                          width: `${Math.max(
+                            4,
+                            (p.total / maxPropTotal) * maxBarra
+                          )}px`,
+                          background: "#22c55e",
+                          borderRadius: 4,
+                        }}
+                      />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Tabela — Distribuição por estado */}
+      {data.porEstado.length > 0 && (
+        <div style={{ marginBottom: 16, pageBreakInside: "avoid" }}>
+          <div
+            style={{
+              fontSize: 13,
+              fontWeight: 700,
+              color: "#0f172a",
+              marginBottom: 6,
+            }}
+          >
+            Distribuição por estado
+          </div>
+          <table
+            style={{
+              width: "100%",
+              borderCollapse: "collapse",
+              fontSize: 11,
+            }}
+          >
+            <thead>
+              <tr style={{ borderBottom: "2px solid #cbd5e1", textAlign: "left" }}>
+                <th style={{ padding: "4px 6px" }}>Estado</th>
+                <th style={{ padding: "4px 6px", textAlign: "right" }}>Tarefas</th>
+                <th style={{ padding: "4px 6px", textAlign: "right" }}>% do total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.porEstado.map((e, i) => {
+                const pct =
+                  data.resumo.totalTarefas > 0
+                    ? (e.total / data.resumo.totalTarefas) * 100
+                    : 0;
+                return (
+                  <tr
+                    key={e.estado ?? i}
+                    style={{ borderBottom: "1px solid #e2e8f0" }}
+                  >
+                    <td style={{ padding: "4px 6px", fontWeight: 600 }}>
+                      {ESTADO_LABEL[e.estado] ?? e.estado}
+                    </td>
+                    <td style={{ padding: "4px 6px", textAlign: "right" }}>{e.total}</td>
+                    <td style={{ padding: "4px 6px", textAlign: "right" }}>
+                      {Math.round(pct)}%
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Rodapé */}
+      <div
+        style={{
+          marginTop: 24,
+          paddingTop: 8,
+          borderTop: "1px solid #e2e8f0",
+          fontSize: 10,
+          color: "#94a3b8",
+          textAlign: "center",
+        }}
+      >
+        Autocell — Relatório gerado automaticamente. Dados confidenciais.
+      </div>
     </div>
   );
 }
