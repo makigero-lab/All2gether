@@ -239,71 +239,108 @@ export default function RelatoriosPage() {
     setPdfLoading(true);
     setPdfErro(null);
     try {
-      // Espera que o DOM esteja renderizado.
-      await new Promise(resolve => setTimeout(resolve, 300));
+      const periodo = formatarDataCurta(data.periodo.inicio.slice(0, 10)) + " a " + formatarDataCurta(data.periodo.fim.slice(0, 10));
+      const geradoEm = new Date().toLocaleDateString("pt-PT", { day: "2-digit", month: "long", year: "numeric" });
 
-      if (!pdfExportRef.current) {
-        throw new Error('Não foi possível preparar o documento para exportação.');
+      // Pre-computa as secções do relatório (evita nested template literals).
+      const r = data.resumo;
+      const tempoEstimado = r.tempoEstimadoMedioMinutos ?? r.tempoMedioMinutos ?? 0;
+      const tempoReal = r.tempoRealMedioMinutos ?? 0;
+      const diff = tempoReal - tempoEstimado;
+
+      const kpisHtml = [
+        '<div class="kpi"><div class="label">Total Tarefas</div><div class="value">' + (r.totalTarefas ?? 0) + '</div></div>',
+        '<div class="kpi"><div class="label">Concluidas</div><div class="value">' + (r.concluidas ?? 0) + '</div><div class="sub">' + Math.round((r.concluidas / Math.max(1, r.totalTarefas)) * 100) + '%</div></div>',
+        '<div class="kpi"><div class="label">Tempo Medio</div><div class="value">' + (Math.round((tempoEstimado / 60) * 10) / 10) + 'h</div></div>',
+        '<div class="kpi"><div class="label">Diff Real</div><div class="value">' + (diff === 0 ? '—' : (diff > 0 ? '+' : '') + (Math.round(diff / 60 * 10) / 10) + 'h') + '</div></div>',
+      ].join('');
+
+      const maxStaff = Math.max(1, ...data.porStaff.map(x => x.total));
+      const staffHtml = data.porStaff.length > 0
+        ? '<h2>Produtividade por Staff</h2><table><thead><tr><th>Staff</th><th>Total</th><th>Concluidas</th><th>Taxa</th><th>Carga (min)</th><th>Volume</th></tr></thead><tbody>' +
+          data.porStaff.map(s => {
+            const pct = Math.round(s.taxaConclusao * 100);
+            const largura = Math.round((s.total / maxStaff) * 100);
+            return '<tr><td>' + s.nome + '</td><td>' + s.total + '</td><td>' + s.concluidas + '</td><td>' + pct + '%</td><td>' + s.carga_minutos + '</td><td><div class="barra-container"><div class="barra" style="width:' + largura + '%"></div></div></td></tr>';
+          }).join('') + '</tbody></table>'
+        : '';
+
+      const maxProp = Math.max(1, ...data.porPropriedade.map(x => x.total));
+      const propHtml = data.porPropriedade.length > 0
+        ? '<h2>Tarefas por Propriedade</h2><table><thead><tr><th>Propriedade</th><th>Total</th><th>Concluidas</th><th>Volume</th></tr></thead><tbody>' +
+          data.porPropriedade.slice(0, 15).map(p => {
+            const largura = Math.round((p.total / maxProp) * 100);
+            return '<tr><td>' + p.nome + '</td><td>' + p.total + '</td><td>—</td><td><div class="barra-container"><div class="barra" style="width:' + largura + '%"></div></div></td></tr>';
+          }).join('') + '</tbody></table>'
+        : '';
+
+      const totalTarefas = data.resumo.totalTarefas || 1;
+      const estadoHtml = data.porEstado.length > 0
+        ? '<h2>Distribuicao por Estado</h2><table><thead><tr><th>Estado</th><th>Total</th><th>%</th></tr></thead><tbody>' +
+          data.porEstado.map(e => {
+            const pct = Math.round((e.total / totalTarefas) * 100);
+            return '<tr><td>' + e.estado + '</td><td>' + e.total + '</td><td>' + pct + '%</td></tr>';
+          }).join('') + '</tbody></table>'
+        : '';
+
+      const iaHtml = aiResumo
+        ? '<h2>Resumo Executivo IA</h2><div class="ia-box">' + aiResumo.replace(/</g, '&lt;') + '</div>'
+        : '';
+
+      const html = [
+        '<!DOCTYPE html><html lang="pt-PT"><head><meta charset="utf-8">',
+        '<title>Relatorio Autocell - ' + periodo + '</title>',
+        '<style>',
+        '* { box-sizing: border-box; margin: 0; padding: 0; }',
+        'body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color: #0f172a; font-size: 12px; line-height: 1.5; padding: 20px; }',
+        'h1 { font-size: 18px; font-weight: 700; }',
+        'h2 { font-size: 14px; font-weight: 700; margin-top: 16px; margin-bottom: 6px; color: #c9a227; }',
+        '.header { border-bottom: 2px solid #c9a227; padding-bottom: 8px; margin-bottom: 16px; }',
+        '.ia-box { background: #fffaf0; border: 1px solid #fde68a; border-radius: 6px; padding: 10px; font-size: 11.5px; color: #1f2937; white-space: pre-wrap; margin-bottom: 16px; }',
+        '.kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 16px; }',
+        '.kpi { border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px; text-align: center; }',
+        '.kpi .label { font-size: 10px; color: #64748b; text-transform: uppercase; }',
+        '.kpi .value { font-size: 18px; font-weight: 700; color: #0f172a; }',
+        '.kpi .sub { font-size: 10px; color: #64748b; }',
+        'table { width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 11px; }',
+        'th { background: #f1f5f9; padding: 6px 8px; text-align: left; font-weight: 600; border-bottom: 1px solid #e2e8f0; }',
+        'td { padding: 6px 8px; border-bottom: 1px solid #f1f5f9; }',
+        '.barra { height: 12px; border-radius: 3px; background: #c9a227; }',
+        '.barra-container { width: 100%; height: 12px; background: #f1f5f9; border-radius: 3px; overflow: hidden; }',
+        '@media print { body { padding: 0; } }',
+        '</style></head><body>',
+        '<div class="header"><h1>Relatorio de Produtividade - Autocell</h1>',
+        '<div style="font-size:12px;color:#475569;margin-top:2px;">Periodo: ' + periodo + '</div>',
+        '<div style="font-size:11px;color:#64748b;margin-top:2px;">Gerado em ' + geradoEm + '</div></div>',
+        iaHtml,
+        '<h2>KPIs</h2><div class="kpis">' + kpisHtml + '</div>',
+        staffHtml,
+        propHtml,
+        estadoHtml,
+        '</body></html>',
+      ].join('');
+
+      // Abre uma nova janela e escreve o HTML.
+      const printWindow = window.open('', '_blank', 'width=900,height=700');
+      if (!printWindow) {
+        throw new Error('O browser bloqueou a abertura da janela. Permite pop-ups para este site.');
       }
+      printWindow.document.write(html);
+      printWindow.document.close();
 
-      // Se há resumo IA, espera mais 300ms.
-      if (aiResumo) {
-        await new Promise(resolve => setTimeout(resolve, 300));
-      }
-
-      // Import dinâmico para evitar problemas de SSR com html2pdf.js.
-      const html2pdf = (await import("html2pdf.js")).default;
-      const el = pdfExportRef.current;
-
-      // Debug: verifica se o div tem conteúdo.
-      const innerHTML = el.innerHTML;
-      const textLength = el.textContent?.trim().length || 0;
-      console.log('[exportarPDF] Div de exportação:', {
-        exists: !!el,
-        textLength,
-        innerHTMLLength: innerHTML.length,
-        firstChars: innerHTML.slice(0, 100),
-      });
-
-      // Se o div estiver vazio, aborta com erro.
-      if (textLength === 0) {
-        throw new Error('O documento de exportação está vazio. Tenta novamente.');
-      }
-
-      // Se há resumo IA, espera mais 500ms.
-      if (aiResumo) {
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
-
-      const filename = `relatorio-autocell-${data.periodo.inicio
-        .slice(0, 10)
-        .replace(/-/g, "")}-${data.periodo.fim.slice(0, 10).replace(/-/g, "")}.pdf`;
-
-      const opt = {
-        margin: [10, 10, 12, 10] as [number, number, number, number],
-        filename,
-        image: { type: "jpeg" as const, quality: 0.96 },
-        html2canvas: {
-          scale: 2,
-          useCORS: true,
-          backgroundColor: "#ffffff",
-          logging: false,
-        },
-        jsPDF: {
-          unit: "mm",
-          format: "a4",
-          orientation: "portrait" as const,
-        },
-        pagebreak: { mode: ["css", "legacy"] as const },
+      // Espera o conteúdo carregar e abre o diálogo de impressão.
+      printWindow.onload = () => {
+        setTimeout(() => {
+          printWindow.print();
+          setTimeout(() => printWindow.close(), 500);
+        }, 300);
       };
-
-      await html2pdf().set(opt).from(el).save();
     } catch (e) {
       console.error("Erro ao exportar PDF:", e);
       setPdfErro(
         e instanceof Error
-          ? `Erro ao gerar relatório: ${e.message}`
-          : "Erro ao gerar relatório PDF."
+          ? "Erro ao gerar relatorio: " + e.message
+          : "Erro ao gerar relatorio PDF."
       );
       setTimeout(() => setPdfErro(null), 8000);
     } finally {
