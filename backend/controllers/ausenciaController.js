@@ -65,7 +65,8 @@ exports.listarAusencias = async (req, res) => {
     // v1.25.0: filtro por estado (pendente/aprovada/rejeitada) — usado pelo
     // Centro de Aprovações de RH para mostrar só pendentes.
     // v1.26.0: suporta comma-separated (ex: ?estado=pendente,pendente_emergencia)
-    const ESTADOS_VALIDOS = ['pendente', 'pendente_emergencia', 'aprovada', 'rejeitada'];
+    // v1.39.0 (Prompt 131b): adicionado 'cancelada' (soft cancel mantém histórico).
+    const ESTADOS_VALIDOS = ['pendente', 'pendente_emergencia', 'aprovada', 'rejeitada', 'cancelada'];
     if (req.query.estado) {
       const estados = String(req.query.estado)
         .split(',')
@@ -421,6 +422,150 @@ exports.aprovarRejeitarAusencia = async (req, res) => {
     });
   } catch (err) {
     console.error('❌ aprovarRejeitarAusencia:', err.message);
+    return res.status(500).json({ erro: 'Erro interno do servidor.' });
+  }
+};
+
+/* ------------------------------------------------------------------ */
+/* Cancelar ausência (soft cancel — Prompt 131b / v1.39.0)             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * PATCH /api/gestor/ausencias/:id/cancelar
+ *
+ * Soft cancel de uma ausência: NÃO elimina o registo (mantém-se para
+ * auditoria/histórico). Apenas marca o estado como 'cancelada'.
+ *
+ * Regras:
+ *   - Só pode cancelar ausências com estado 'pendente', 'pendente_emergencia'
+ *     ou 'aprovada' (NÃO pode cancelar 'rejeitada' nem 'cancelada').
+ *   - Staff (role 'staff') só pode cancelar as SUAS ausências
+ *     (valida utilizador_id === req.user.id).
+ *   - Gestor/admin pode cancelar qualquer ausência da sua empresa
+ *     (valida empresa_id).
+ *   - Se a ausência estava 'aprovada', as tarefas que foram desatribuídas
+ *     NÃO são automaticamente reatribuídas (apenas log warning — o gestor
+ *     pode reatribuir manualmente ou via "Auto-Atribuir Pendentes").
+ *
+ * Resposta 200: { mensagem, ausencia }
+ *   400 — ID inválido / estado não permite cancelamento
+ *   403 — sem permissão (staff a tentar cancelar ausência de outro)
+ *   404 — ausência não encontrada
+ */
+exports.cancelarAusencia = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ erro: 'ID de ausência inválido.' });
+    }
+
+    // Constrói o filtro consoante o role:
+    //   - Staff: só as suas ausências (utilizador_id = req.user.id).
+    //   - Gestor/admin: qualquer ausência da empresa.
+    const role = req.user && req.user.role;
+    const userId = req.user && req.user.id;
+    const empresaId = req.user && req.user.empresa_id;
+
+    const filtro = { _id: id };
+    if (role === 'staff') {
+      if (!userId) {
+        return res.status(401).json({ erro: 'Não autenticado.' });
+      }
+      filtro.utilizador_id = userId;
+    } else {
+      // gestor/admin — valida empresa_id do token.
+      const { ok, empresaId: empId } = obterEmpresaId(req, res);
+      if (!ok) return;
+      filtro.empresa_id = empId;
+    }
+
+    const ausencia = await Ausencia.findOne(filtro);
+    if (!ausencia) {
+      return res.status(404).json({
+        erro: 'Ausência não encontrada (ou não tens permissão para a cancelar).',
+      });
+    }
+
+    // Só cancela pendentes/aprovadas.
+    const estadosCancelaveis = ['pendente', 'pendente_emergencia', 'aprovada'];
+    if (!estadosCancelaveis.includes(ausencia.estado)) {
+      return res.status(400).json({
+        erro: `Não é possível cancelar uma ausência já ${ausencia.estado}.`,
+      });
+    }
+
+    const estadoAnterior = ausencia.estado;
+    ausencia.estado = 'cancelada';
+    await ausencia.save();
+
+    // Se estava aprovada, avisa que as tarefas desatribuídas não são
+    // automaticamente reatribuídas — o gestor tem de o fazer manualmente.
+    let reatribuicaoAviso = null;
+    if (estadoAnterior === 'aprovada') {
+      reatribuicaoAviso =
+        'A ausência estava aprovada e as tarefas do período foram desatribuídas. ' +
+        'Reatribui manualmente ou usa "Auto-Atribuir Pendentes".';
+      console.log(
+        `⚠️  [cancelarAusencia] Ausência ${ausencia._id} estava aprovada — ` +
+          `tarefas desatribuídas NÃO foram reatribuídas automaticamente.`
+      );
+    }
+
+    // Auditoria.
+    const utilizador = await Utilizador.findById(ausencia.utilizador_id)
+      .select('nome')
+      .lean();
+    registarAuditoria({
+      utilizador_id: userId,
+      utilizador_nome: req.user.nome || (role === 'staff' ? 'Staff' : 'Admin'),
+      empresa_id: ausencia.empresa_id,
+      acao: 'cancelar_ausencia',
+      recurso: 'ausencia',
+      recurso_id: ausencia._id,
+      descricao: `Ausência de "${utilizador?.nome ?? '?'}" cancelada (estado anterior: ${estadoAnterior})`,
+      detalhes: {
+        utilizador_id: String(ausencia.utilizador_id),
+        data_inicio: ausencia.data_inicio,
+        data_fim: ausencia.data_fim,
+        tipo: ausencia.tipo,
+        estado_anterior: estadoAnterior,
+        estado_novo: 'cancelada',
+        cancelado_por_role: role,
+      },
+    });
+
+    // Notificação push ao staff dono da ausência (se não for ele a cancelar).
+    if (role !== 'staff' && String(ausencia.utilizador_id) !== String(userId)) {
+      const { notificarUtilizador } = require('../utils/notificar');
+      const dataInicioFmt = new Date(ausencia.data_inicio).toLocaleDateString('pt-PT');
+      const dataFimFmt = new Date(ausencia.data_fim).toLocaleDateString('pt-PT');
+      notificarUtilizador(
+        String(ausencia.utilizador_id),
+        '🚫 Ausência cancelada',
+        `O teu pedido de ${ausencia.tipo} (${dataInicioFmt} a ${dataFimFmt}) foi cancelado pelo gestor.`,
+        '/staff/ausencias',
+        { criarInApp: true, tipo: 'sistema' }
+      );
+    }
+
+    // Resposta com utilizador populado.
+    const resp = await Ausencia.findById(ausencia._id)
+      .populate({ path: 'utilizador_id', select: 'nome email role' })
+      .lean();
+    const u = resp.utilizador_id;
+    return res.status(200).json({
+      mensagem: 'Ausência cancelada com sucesso.',
+      ausencia: {
+        ...resp,
+        utilizador_id: u ? String(u._id) : null,
+        utilizador: u
+          ? { _id: String(u._id), nome: u.nome, email: u.email, role: u.role }
+          : null,
+      },
+      reatribuicaoAviso,
+    });
+  } catch (err) {
+    console.error('❌ cancelarAusencia:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
   }
 };

@@ -60,9 +60,11 @@ const ausenciaSchema = new mongoose.Schema(
     // v1.26.0: adicionado 'pendente_emergencia' — falta criada pelo próprio
     // funcionário para o dia atual (doença súbita). O admin aprova e dispara
     // a redistribuição imediata das tarefas do dia.
+    // v1.39.0 (Prompt 131b): adicionado 'cancelada' — soft cancel mantém o
+    // histórico para auditoria (em vez de DELETE que apaga o registo).
     estado: {
       type: String,
-      enum: ['pendente', 'pendente_emergencia', 'aprovada', 'rejeitada'],
+      enum: ['pendente', 'pendente_emergencia', 'aprovada', 'rejeitada', 'cancelada'],
       default: 'pendente',
       required: true,
       index: true,

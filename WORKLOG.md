@@ -520,3 +520,109 @@ Stage Summary:
 - **Separação ABSOLUTA:** `GestorSidebar` e `AdminSidebar` são componentes totalmente separados, sem código partilhado, sem `mode` prop. O gestor vê SÓ operações (8 items); o admin vê SÓ gestão (3 items).
 - **Loop 401 resolvido definitivamente:** RouteGuard faz `fazerLogout()` (redirect HARD via `window.location.href`) em vez de `router.replace` (soft). O estado do cliente é reiniciado — não há re-mount, não há loop.
 - Lint + tsc + build ✓. Commit `368dd94` pushed para `dev`.
+
+---
+
+Task ID: A18 (Prompts 115-131)
+Agent: Z.ai Code
+Task: Atualização consolidada de documentação — Prompts 115 a 131 (~20 prompts). Esta entrada resume a evolução técnica desde o Prompt 114 (última vez que os docs foram atualizados). Não houve trabalho de código nesta task; é um registo retroativo baseado no `git log` e no conteúdo dos commits.
+
+Work Log:
+
+### Prompt 115 — Separação ABSOLUTA de menus/layouts + fix loop 401
+- `GestorSidebar` (`components/gestor/gestor-sidebar.tsx`) reescrito como componente **dedicado** (8 items operacionais, sem links de admin); `AdminSidebar` reescrito **sem `mode` prop** e sem `gestorNavItems` partilhado (3 items: Empresas, Sistema/Webhooks, Webhooks). Layouts isolados (`admin/layout.tsx` usa `<AdminSidebar />`, `gestor/layout.tsx` usa `<GestorSidebar />`).
+- `route-guard.tsx` reescrito: em 401 faz `limparCacheAuth()` + `fazerLogout()` (POST `/api/auth/logout` que limpa cookie httpOnly) + `window.location.href = "/login"` (redirect HARD), em vez de `router.replace` (soft). Elimina re-mount/re-fetch em cascata. Sem retry em 401. Role errado → redirect HARD para o painel certo.
+- Validação: lint ✓ · tsc ✓ · build ✓ (middleware 26.8kB). Commit `368dd94`.
+
+### Prompt 116 — Fundação SaaS, Notificações e Lógica de Negócio
+- **Multi-tenant SaaS:** modelo `Empresa` ganhou campo `ativa` (boolean) + índice. Novos endpoints de Super Admin: `PATCH /api/admin/empresas/:id/toggle-status` (ativa/suspende empresa), `POST /api/admin/empresas/:id/hard-reset` (scoped à empresa — apaga Propriedades + Tarefas + Ausências + Webhooks + Notificações dessa empresa, sem tocar noutras). `getEquipa` passou a filtrar `ativo === true` e excluir `role === 'admin'`.
+- **Lógica de ausências e tarefas:** sobreposição de ausências passou a **excluir ausências rejeitadas** (só `aprovada`/`pendente` bloqueiam). `criarTarefa` alargado para aceitar `hora`, `check_in`, `check_out` e `hospedes` (detalhes de reserva manuais). Modelo `Notificacao` ganhou `tarefa_id` (referência à tarefa geradora). Modelo `Propriedade` ganhou `observacoes` (texto livre).
+- Frontend: `/admin` ganhou gestões de empresa (criar, ativar/suspender); isolamento visual admin vs gestor consolidado. Commit `5d56679`.
+
+### Prompt 117 — Remodelar UI/UX: isolar Super Admin do Gestor
+- Nova **gaveta da empresa** em `/admin/empresas/[id]` — página de gestão dedicada por empresa com botões **Apagar**, **Suspender/Ativar** e **Gerir Config** (nome, NIF, API key Smoobu).
+- **Geocoding warning inline** — ao criar/editar propriedade, se o Nominatim falhar, mostra aviso âmbar inline no formulário (em vez de toast solto) a aconselhar simplificar a morada.
+- **Nova Tarefa com hora/hóspedes** — modal de criação de tarefa (`/gestor/tarefas` + `/gestor/calendario`) alargado com campos de hora (check-in/out) e nome/nº de hóspedes (popula `detalhes_reserva`). Commit `f03a205`.
+
+### Prompt 118 — UX Staff, Notificações e Exportação PDF
+- **Staff dashboard agrupado por dia** — `/staff` reorganizado: tarefas agrupadas por data (hoje, amanhã, ...) em vez de lista única; labels passaram a **"Nº Hóspedes"** e **"Nome Hóspede"**; **Data da Limpeza** destacada no topo de cada cartão.
+- `NotificationBell` com `max-h-[80vh]` e scroll interno (lista longa de notificações deixou de estourar o viewport). Push notifications passaram a mostrar **feedback de sucesso/erro** ao subscreber.
+- **Exportar PDF** — novo botão "Exportar PDF" no `/staff` e no relatório do gestor que usa `window.print()` (estilos `@media print` dedicados) para gerar PDF via o diálogo de impressão do browser. Commit `f84a8d0`.
+
+### Prompt Extra — Vacina Anti-Safari (parsing de datas iOS/Safari)
+- Novos helpers em `lib/utils.ts`: **`parsearDataSegura(valor)`** (aceita `YYYY-MM-DD`, `DD/MM/YYYY`, ISO com/sem timezone; devolve `Date` válido ou `null` — robusto ao parser do Safari que devolve `Invalid Date` em formatos não-ISO) e **`extrairHoraISO(iso)`** (extrai `HH:mm` de uma string ISO sem depender de `new Date()` — evita o shift de fuso do Safari).
+- Substituídas todas as construções `new Date("YYYY-MM-DD")` e formatações baseadas em `Date` nos componentes de staff/gestor pelos helpers seguros. Resolveu datas a aparecer como `Invalid Date` / `NaN/NaN/NaN` no iOS Safari. Commit `2e70a52`.
+
+### Prompt 119 — Resiliência PWA (Service Worker)
+- `next-pwa` configurado com `skipWaiting: true` + `clientsClaim: true` — nova versão do SW assume o controlo imediatamente (sem precisar de fechar todos os separadores).
+- **Runtime caching** com estratégia `NetworkFirst` para os chunks JS (`/_next/static/chunks/`) — fallback para cache se a rede falhar (mitiga `ChunkLoadError` em ligações instáveis). **Handler global de `ChunkLoadError`** no cliente que faz reload limpo (uma só vez) + limpeza de caches antigos do SW ao ativar.
+- Resolveu ecrã branco em produção após deploy quando o browser tinha chunks obsoletos em cache. Commit `f3c0884`.
+
+### Prompt 120 — Remover loop de reload + fix hidratação de datas
+- **Remoção do Script agressivo** — o handler de `ChunkLoadError` do Prompt 119 estava a entrar em loop de reload (recarregava indefinidamente se o chunk continuasse a falhar). Substituído por um guard com `sessionStorage` (só tenta reload 1x por sessão) e remoção do `window.location.reload` em cascata.
+- **`mounted` guard na staff page** — `/staff/page.tsx` passou a verificar se o componente ainda está montado (`isMountedRef`) antes de fazer `setState` após fetch assíncrono (evita warnings de hidratação e updates em componentes desmontados). Fix de datas que apareciam trocadas na hidratação inicial (server vs client). Commit `ef90a3e`.
+
+### Prompt 121 — Reposição de fábrica do layout + next.config minimalista
+- **Reposição de fábrica do layout** — revertidos overrides CSS agressivos que causavam inconsistências visuais (reset do `globals.css` ao estado base do Tailwind/shadcn). Removidos estilos experimentais que se tinham acumulado.
+- `next.config.mjs` **minimalista** — removidas configurações experimentais de PWA/webpack que conflituavam com o `next-pwa`; mantido apenas o estritamente necessário (`next-pwa` wrapper + `reactStrictMode`). Estabilizou o build em produção. Commit `49d3585`.
+
+### Prompt 122 — Limpeza Admin + Soft Delete (Lixeira de Empresas)
+- **Soft delete de empresas:** modelo `Empresa` ganhou campo `apagada` (boolean, default `false`). `GET /api/admin/empresas` passou a suportar query `?inclui_apagadas=` e por defeito **exclui** empresas `apagada: true`. Novo `DELETE /api/admin/empresas/:id` (soft delete — marca `apagada: true, ativa: false`) e `PATCH /api/admin/empresas/:id/restaurar` (desfaz — `apagada: false`).
+- Frontend `/admin` ganhou **Tabs "Ativas" / "Reciclagem"** — a tab Reciclagem lista empresas eliminadas com botão "Restaurar". `AdminSidebar` simplificado para mostrar **só Empresas** (Webhooks passou para dentro da gaveta da empresa).
+- Auditoria registada em ambos os movimentos (soft-delete + restaurar). Commit `aa40992`.
+
+### Prompt 123 — Correções de lógica (soft delete, conflito horário, ausências, tempo viagem)
+- **Soft block de conflitos:** `criarTarefa`/`atribuirTarefa`/`reatribuirTarefa` deixaram de devolver `409` quando há sobreposição horária do staff; agora devolvem `200` com flag `warning` (não bloqueia — o gestor pode forçar). Mensagem de warning inclui o **tempo de viagem** estimado entre a tarefa anterior e a nova (via Haversine + velocidade média).
+- **Gemini SDK** introduzido (`@google/generative-ai`) para o resumo de relatório IA (substitui fetch manual). Ausências rejeitadas passam a ser excluídas da redistribuição de tarefas (só `aprovada` contam para reatribuição). `Propriedade.observacoes` exposto no detalhe de tarefa.
+- Validação de sobreposição robusta a fusos (usa data de calendário de Lisboa). Commit `b02b63e`.
+
+### Prompt 124 — Interface móvel, navegação dias, relatório IA, CSS sino
+- **Staff navegação por dias** — `/staff` ganhou setas ‹ › para navegar entre dias (hoje ←/→ amanhã, ontem, etc.) em vez de mostrar só o dia atual. **IA resumo** do relatório de produtividade exportável como **PDF** via `html2pdf.js` (botão "Exportar PDF" no `/gestor/relatorios`).
+- **CSS sino mobile** — `NotificationBell` redesenhado para mobile (dropdown full-width, posicionamento fixo, z-index corrigido para não ficar por baixo de modais). **Task-card morada** — cartões de tarefa do staff passaram a mostrar a morada da propriedade (antes só o nome).
+- Commit `5af5370`.
+
+### Prompt 125 — Gemini SDK, fuso manutenção local, soft block, observacoes Propriedade
+- **Gemini SDK `@google/generative-ai`** consolidado no `relatorioController.getResumoIA` (gera resumo em linguagem natural do relatório de produtividade). Fallback gracioso se a API key estiver em falta (devolve mensagem padrão em vez de crashar).
+- **Fuso de manutenção local** — tarefas de manutenção geradas pelo sistema passam a ser criadas com instante local (não UTC midnight) para alinhar com o dia de calendário real. **Soft block** de conflitos mantido (warning não-bloqueante). `Propriedade.observacoes` passível de edição no `/gestor/propriedades`.
+- Commit `c3393ae`.
+
+### Prompt 126 — UX logística, PDF fix, frontend responsivo, notificações
+- **Double-check logístico:** ao criar tarefa sobreposta, modal de confirmação com botão **"Forçar Agendamento"** (ignora o warning de conflito) e **"Confirmar Morada"** (re-confirma a morada antes de agendar — previne tarefas com morada errada). PDF do relatório IA com **delay** para garantir renderização completa do `html2pdf` antes do download.
+- **Logs Smoobu** — `/gestor/webhooks` melhorado (tabela de logs com filtros por status, payload expandível). Nova página **`/gestor/notificacoes`** — vista full-page do centro de notificações (além do sino dropdown).
+- Frontend responsivo: ajustes de breakpoints em tabelas e modais para tablet/mobile. Commit `aaf9a16`.
+
+### Prompt 127 — Fix timezone (time shift), AlertDialog cancelar, loading relatório
+- **Fix timezone (time shift):** `extrairHoraISO` reescrito para **não usar `new Date()`** (que aplicava fuso e deslocava a hora mostrada). Agora faz parse direto da string ISO (`"YYYY-MM-DDTHH:mm"`) — a hora exibida é a armazenada, sem shift. Resolveu tarefas a aparecerem 1h adiantadas/atrasadas.
+- **AlertDialog "Cancelar"** — modais de confirmação (eliminar, suspender) passaram a usar `AlertDialog` (shadcn) com botão explícito "Cancelar" que fecha sem ação (antes um clique fora podia confirmar). **Loading do relatório IA** — spinner visível durante a geração do resumo (impede duplo-click).
+- Commit `48dc87b`.
+
+### Prompt 128 — Blindagem backend: fuso Portugal + Gemini nunca crasha
+- **Fuso Portugal:** novo helper de offset que usa `Intl.DateTimeFormat` com `timeZone: 'Europe/Lisboa'` para calcular o offset de Lisboa (incluindo DST) em vez de depender do fuso do servidor (Render pode estar em UTC). Aplicado na normalização de datas de tarefas/ausências.
+- **Gemini nunca crasha:** o `getResumoIA` envolvido em try/catch abrangente — se a chamada ao Gemini falhar (quota, rede, JSON inválido), devolve um **placeholder hardcoded** ("Resumo temporariamente indisponível.") em vez de 500. O relatório de produtividade principal continua a funcionar mesmo com IA em baixo.
+- Commit `23cc959`.
+
+### Prompt 129 — Fix calendário timezone + SW não interceta /api/
+- **Calendário timezone:** eventos do FullCalendar passam a ser construídos com **strings locais sem sufixo `Z`** (`"YYYY-MM-DDTHH:mm:ss"`) em vez de ISO UTC (`...Z`) — o calendar interpreta como hora local e não aplica conversão de fuso. Resolveu eventos a aparecerem no dia/hora errada em fusos não-UTC.
+- **SW `publicExcludes /api/`:** o Service Worker (runtime caching) configurado para **não interceta** pedidos a `/api/` (passa sempre à rede). Antes, o `NetworkFirst` podia servir respostas cached obsoletas da API (ex.: notificações, tarefas). Garantia de dados sempre frescos do backend.
+- Commit `42c5536`.
+
+### Prompt 130 — Fix definitivo ausências: staffController filtra estado
+- **`staffController.criarAusencia`:** passou a filtrar por `estado` ao verificar sobreposição de ausências (antes considerava TODAS as ausências do staff, incluindo rejeitadas, e bloqueava a criação com 409). Agora só `aprovada`/`pendente` contam para sobreposição. **`faltaHoje`** recebeu o mesmo fix (filtro de estado na verificação de ausência existente).
+- **Root cause do 409 persistente:** identificado que existia um **índice único MongoDB** legado (`utilizador_id_1_data_1`) que continuava ativo em produção e rejeitava ausências legítimas. O arranque do servidor passou a **remover o índice único** automaticamente (sem eliminar ausências existentes). Investigação detalhada via logs de debug no `criarAusencia`.
+- Commits `55a7f00`, `48a985c`, `9afe73e`, `34a60c8`, `d8b395f`, `1a483f9` (root cause final — índice era `utilizador_id_1_data_1` sobre o campo `data`, não `data_inicio`).
+
+### Prompt 131 — Staff notificacoes + nome_hospede + dias anteriores + ausencias
+- **Página de notificações do staff** — novo `/staff/notificacoes` (vista full-page, além do sino). **`nome_hospede`** passou a ser exibido nos cartões e detalhes de tarefa do staff (populado a partir de `detalhes_reserva.nome_hospede`).
+- **Dias anteriores (30 dias)** — `/staff` passou a permitir navegar não só para a frente mas também **até 30 dias para trás** (histórico de tarefas concluídas), além dos dias futuros. Útil para o staff consultar tarefas passadas.
+- **Índice único MongoDB removido definitivamente** no arranque do backend (script de migração que identifica e elimina o índice `utilizador_id_1_data_1` se existir). Commit `4f65c0a`.
+
+Stage Summary:
+- **SaaS multi-tenant consolidado:** `Empresa` com `ativa` + `apagada`, endpoints de Super Admin (toggle-status, hard-reset scoped, soft-delete + restaurar, config, sincronizar-propriedades/reservas, registrar-webhooks), Lixeira de Empresas no `/admin`.
+- **Notificações In-App amadurecidas:** `Notificacao.tarefa_id`, sino com scroll/max-height, página full-page `/gestor/notificacoes` e `/staff/notificacoes`, polling 30s.
+- **Timezone blindado:** helpers `parsearDataSegura` + `extrairHoraISO` (sem `new Date()`), fuso Portugal via `Intl` offset, calendário com strings locais sem `Z`, SW não interceta `/api/`. Resolveu shifts de hora/dia em produção (especialmente iOS Safari e servidores Render em UTC).
+- **Soft block de conflitos:** sobreposição horária passou a warning não-bloqueante (200 com `warning` + tempo de viagem) com modal "Forçar Agendamento" / "Confirmar Morada".
+- **Resumo IA (Gemini):** SDK `@google/generative-ai`, nunca crasha (placeholder hardcoded), exportável em PDF via `html2pdf`.
+- **PWA resiliente:** `skipWaiting` + `clientsClaim` + runtime caching `NetworkFirst` em chunks + handler de `ChunkLoadError` com guard anti-loop.
+- **Lixeira / soft delete:** empresas eliminadas vão para Reciclagem (restauráveis); índice único MongoDB legado removido no arranque.
+- **Staff UX:** navegação por dias (±30 dias), tarefas agrupadas por dia, morada no cartão, `nome_hospede`, Exportar PDF (`window.print`).
+- Documentação (`README.md`, `docs/BACKEND.md`, `docs/FRONTEND.md`, este `WORKLOG.md`) atualizada retroativamente para cobrir os Prompts 115-131.

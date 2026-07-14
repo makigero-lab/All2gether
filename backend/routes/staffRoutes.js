@@ -28,6 +28,7 @@ const {
   minhasAusencias,
   criarAusencia,
   cancelarAusencia,
+  cancelarAusenciaSoft,
   faltaHoje,
   concluirTarefa,
   reportarAvaria,
@@ -37,6 +38,8 @@ const {
 router.get('/ausencias', auth, minhasAusencias);
 router.post('/ausencias', auth, criarAusencia);
 router.delete('/ausencias/:id', auth, cancelarAusencia);
+// Prompt 132 — Soft cancel (mantém histórico)
+router.patch('/ausencias/:id/cancelar', auth, cancelarAusenciaSoft);
 router.post('/falta-hoje', auth, faltaHoje);
 router.patch('/tarefas/:id/concluir', auth, concluirTarefa);
 router.post('/tarefas/:id/avaria', auth, reportarAvaria);
