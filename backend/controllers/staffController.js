@@ -176,17 +176,76 @@ exports.criarAusencia = async (req, res) => {
 };
 
 /* ------------------------------------------------------------------ */
-/* DELETE /api/staff/ausencias/:id — cancelar pedido pendente         */
+/* DELETE /api/staff/ausencias/:id — cancelar (hard delete, legacy)    */
+/* PATCH  /api/staff/ausencias/:id/cancelar — cancelar (soft, Prompt 132) */
 /* ------------------------------------------------------------------ */
 
 /**
- * Cancela (elimina) um pedido de ausência do próprio utilizador.
+ * PATCH /api/staff/ausencias/:id/cancelar
  *
- * Regras:
- *   - Só pode cancelar PEDIDOS PENDENTES (aprovações/rejeições são finais).
- *   - Só pode cancelar as SUAS ausências (valida utilizador_id).
+ * Soft cancel — marca estado='cancelada' (mantém histórico).
+ * O staff só pode cancelar as SUAS ausências, e só se estiverem
+ * 'pendente', 'pendente_emergencia' ou 'aprovada'.
  *
- * Resposta 200: { mensagem, ausencia_id }
+ * Se a ausência estava 'aprovada', as tarefas desatribuídas no período
+ * ficam disponíveis para reatribuição (o gestor pode usar "Auto-Atribuir").
+ *
+ * Resposta 200: { mensagem, ausencia }
+ */
+exports.cancelarAusenciaSoft = async (req, res) => {
+  try {
+    const utilizadorId = req.user && req.user.id;
+    if (!utilizadorId) {
+      return res.status(401).json({ erro: 'Não autenticado.' });
+    }
+
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ erro: 'ID de ausência inválido.' });
+    }
+
+    const ausencia = await Ausencia.findOne({
+      _id: id,
+      utilizador_id: utilizadorId,
+    });
+
+    if (!ausencia) {
+      return res.status(404).json({
+        erro: 'Ausência não encontrada (ou não te pertence).',
+      });
+    }
+
+    const estadosCancelaveis = ['pendente', 'pendente_emergencia', 'aprovada'];
+    if (!estadosCancelaveis.includes(ausencia.estado)) {
+      return res.status(400).json({
+        erro: `Não é possível cancelar uma ausência já ${ausencia.estado}.`,
+      });
+    }
+
+    const estadoAnterior = ausencia.estado;
+    ausencia.estado = 'cancelada';
+    await ausencia.save();
+
+    console.log(
+      `[cancelarAusenciaSoft] Ausência ${ausencia._id} cancelada por staff ${utilizadorId} ` +
+      `(estado anterior: ${estadoAnterior}).`
+    );
+
+    return res.status(200).json({
+      mensagem: 'Ausência cancelada com sucesso.',
+      ausencia,
+    });
+  } catch (err) {
+    console.error('❌ cancelarAusenciaSoft:', err.message);
+    return res.status(500).json({ erro: 'Erro interno do servidor.' });
+  }
+};
+
+/**
+ * DELETE /api/staff/ausencias/:id — hard delete (legacy, mantido para compat).
+ *
+ * O frontend foi atualizado para usar PATCH /cancelar (soft).
+ * Este DELETE é mantido para retrocompatibilidade.
  */
 exports.cancelarAusencia = async (req, res) => {
   try {
