@@ -255,11 +255,23 @@ export default function RelatoriosPage() {
       const html2pdf = (await import("html2pdf.js")).default;
       const el = pdfExportRef.current;
 
-      // Prompt 131b — Verificação extra: se aiResumo existe, confirma que
-      // o texto foi mesmo renderizado no div de exportação antes de capturar.
-      // Isto evita PDFs em branco quando o React ainda não atualizou o div.
-      if (aiResumo && el && !el.textContent?.includes(aiResumo.slice(0, 30))) {
-        // Espera mais 500ms e volta a verificar.
+      // Debug: verifica se o div tem conteúdo.
+      const innerHTML = el.innerHTML;
+      const textLength = el.textContent?.trim().length || 0;
+      console.log('[exportarPDF] Div de exportação:', {
+        exists: !!el,
+        textLength,
+        innerHTMLLength: innerHTML.length,
+        firstChars: innerHTML.slice(0, 100),
+      });
+
+      // Se o div estiver vazio, aborta com erro.
+      if (textLength === 0) {
+        throw new Error('O documento de exportação está vazio. Tenta novamente.');
+      }
+
+      // Se há resumo IA, espera mais 500ms.
+      if (aiResumo) {
         await new Promise(resolve => setTimeout(resolve, 500));
       }
 
@@ -267,9 +279,6 @@ export default function RelatoriosPage() {
         .slice(0, 10)
         .replace(/-/g, "")}-${data.periodo.fim.slice(0, 10).replace(/-/g, "")}.pdf`;
 
-      // O conteúdo do div de exportação é construído via React (renderizado
-      // off-screen). Aqui só disparamos o html2pdf sobre esse div.
-      // Prompt 131b — Mesmo sem aiResumo, o PDF é gerado com tabelas/gráficos.
       const opt = {
         margin: [10, 10, 12, 10] as [number, number, number, number],
         filename,
@@ -796,10 +805,10 @@ export default function RelatoriosPage() {
               ref={pdfExportRef}
               aria-hidden
               style={{
-                position: "absolute",
-                left: "-9999px",
+                position: "fixed",
+                left: 0,
                 top: 0,
-                zIndex: 0,
+                zIndex: 99998,
                 opacity: 1,
                 pointerEvents: "none",
                 width: "794px",
