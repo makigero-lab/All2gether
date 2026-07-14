@@ -279,21 +279,20 @@ exports.criarTarefa = async (req, res) => {
       });
     }
 
-    // Prompt 116 — Constrói a data/hora da tarefa no FUSO LOCAL correto.
+    // Prompt 128 — Persistência de Hora Exata (Fuso de Portugal).
     //
-    //   `data` pode vir como:
-    //     - "2026-07-15" (date-only) → se `hora` vier, combina; senão meia-noite local.
-    //     - "2026-07-15T14:30" (com hora) → já tem hora local; ignora `hora`.
-    //     - ISO completo com Z → instante absoluto.
+    //   O problema: `new Date("2026-07-15T11:00")` (sem Z) é interpretado como
+    //   LOCAL do servidor. Se o servidor estiver em UTC (Render/Vercel), 11:00
+    //   local = 11:00 UTC. Mas o frontend em Lisboa (UTC+1) converte para 12:00.
     //
-    //   Para garantir que a hora é interpretada como LOCAL (Lisboa) e não UTC,
-    //   usamos `new Date("YYYY-MM-DDTHH:mm")` (sem Z) quando a data é date-only
-    //   + hora separada. Isto evita o bug de gravar às 00:00 UTC (que em
-    //   Lisboa aparece como 01:00).
+    //   Solução: convertemos a data+hora para um instante UTC que corresponda
+    //   à hora de Portugal. Usamos a API Intl para determinar o offset de
+    //   Europe/Lisbon no momento da data (+l1h no verão, +0h no inverno) e
+    //   subtraímos esse offset para obter o instante UTC correto.
     //
-    //   A função verificarDisponibilidadeUtilizador é robusta a offset
-    //   (compara pela data de Lisboa), pelo que a validação de férias/ausências
-    //   continua a funcionar qualquer que seja a representação.
+    //   Assim, "11:00" em Portugal é gravada como 10:00 UTC (verão) ou
+    //   11:00 UTC (inverno). Quando o frontend lê e converte para Lisboa,
+    //   volta a mostrar 11:00 — exato.
     let dataNormalizada;
     const dataStr = String(data).trim();
     if (/^\d{4}-\d{2}-\d{2}$/.test(dataStr)) {
@@ -301,10 +300,31 @@ exports.criarTarefa = async (req, res) => {
       const horaStr = hora && /^\d{1,2}:\d{2}$/.test(String(hora).trim())
         ? String(hora).trim().padStart(5, '0')
         : '00:00';
-      // `new Date("YYYY-MM-DDTHH:mm")` (sem Z) = LOCAL (timezone do servidor/Node).
-      dataNormalizada = new Date(`${dataStr}T${horaStr}`);
+
+      // Cria a data como LOCAL do servidor primeiro.
+      const dataLocal = new Date(`${dataStr}T${horaStr}`);
+
+      // Calcula o offset de Europe/Lisbon para esta data (em minutos).
+      // No verão (WEST = UTC+1): offset = -60. No inverno (WET = UTC+0): offset = 0.
+      // O Intl devolve o offset como "GMT+0100" → extraímos os minutos.
+      const offsetStr = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Europe/Lisbon',
+        timeZoneName: 'shortOffset',
+      }).formatToParts(dataLocal).find((p) => p.type === 'timeZoneName')?.value || 'GMT+0';
+
+      // Parse do offset (ex: "GMT+1" → +60 min, "GMT+0" → 0 min, "GMT-1" → -60 min).
+      const offsetMatch = offsetStr.match(/GMT([+-])(\d+)/);
+      const offsetMin = offsetMatch
+        ? (offsetMatch[1] === '+' ? 1 : -1) * parseInt(offsetMatch[2], 10) * 60
+        : 0;
+
+      // Ajusta: subtrai o offset de Lisboa para obter o instante UTC que
+      // corresponde à hora pretendida em Portugal.
+      // Ex: 11:00 LOCAL servidor (UTC) → 11:00 UTC. Lisboa = UTC+1 → 12:00.
+      //     Subtraímos 60min → 10:00 UTC. Lisboa = UTC+1 → 11:00. ✅
+      dataNormalizada = new Date(dataLocal.getTime() - offsetMin * 60 * 1000);
     } else {
-      // Já vem com hora ou ISO — usa diretamente.
+      // Já vem com hora ou ISO — usa diretamente (assume que já está correto).
       dataNormalizada = new Date(dataStr);
     }
     if (isNaN(dataNormalizada.getTime())) {

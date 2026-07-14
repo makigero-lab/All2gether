@@ -323,13 +323,18 @@ exports.getResumoIA = async (req, res) => {
     return res.status(200).json({ resumo });
   } catch (err) {
     console.error('❌ getResumoIA:', err.message);
-    // Em caso de erro inesperado, devolve ainda um placeholder para
-    // garantir que o frontend recebe sempre um resumo utilizável.
+    // Prompt 128 — Em caso de erro inesperado, devolve SEMPRE 200 OK com
+    // um placeholder utilizável. Nunca devolve 500 — o frontend precisa de
+    // um resumo para gerar o PDF, mesmo que seja o placeholder.
     try {
       const contexto = construirContexto(req.body || {});
       return res.status(200).json({ resumo: gerarPlaceholder(contexto) });
-    } catch {
-      return res.status(500).json({ erro: 'Erro interno do servidor.' });
+    } catch (err2) {
+      // Último recurso: placeholder hardcoded (não depende de construirContexto).
+      console.error('❌ getResumoIA fallback também falhou:', err2.message);
+      return res.status(200).json({
+        resumo: '## Visão Geral\n\nNão foi possível gerar o resumo executivo automaticamente. Consulte as métricas detalhadas abaixo para análise manual.\n\n## Recomendações\n\n- Verifique a configuração das chaves de API (GEMINI_API_KEY ou OPENAI_API_KEY).\n- Tente novamente mais tarde.',
+      });
     }
   }
 };
