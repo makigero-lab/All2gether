@@ -154,8 +154,31 @@ module.exports = app;
 if (require.main === module) {
   mongoose
     .connect(process.env.MONGODB_URI)
-    .then(() => {
+    .then(async () => {
       console.log('✅ Ligado ao MongoDB com sucesso.');
+
+      // Prompt 131 — Remove o índice único antigo { utilizador_id, data_inicio }
+      // da coleção Ausencia. Este índice foi removido do schema Mongoose no
+      // Prompt 116, mas índices MongoDB NÃO são auto-removidos. Sem isto,
+      // o MongoDB bloqueia a criação de uma nova ausência com a mesma
+      // data_inicio de uma rejeitada (duplicate key error 11000).
+      // O histórico de ausências (aprovadas/rejeitadas/pendentes) é mantido.
+      try {
+        const Ausencia = require('./models/Ausencia');
+        const indexes = await Ausencia.collection.listIndexes().toArray();
+        for (const idx of indexes) {
+          // Procura índices que sejam únicos e contenham utilizador_id + data_inicio
+          if (idx.unique && idx.key && idx.key.utilizador_id && idx.key.data_inicio) {
+            console.log(`🔧 A remover índice único antigo: ${idx.name}`);
+            await Ausencia.collection.dropIndex(idx.name);
+            console.log(`✅ Índice único ${idx.name} removido. Ausências rejeitadas já não bloqueiam novas.`);
+          }
+        }
+      } catch (idxErr) {
+        // Não bloqueia o arranque se falhar (ex: BD sem permissões).
+        console.warn('⚠️  Não foi possível verificar/remover índices únicos:', idxErr.message);
+      }
+
       app.listen(PORT, () => {
         console.log(`🚀 Servidor a correr na porta ${PORT}.`);
       });
