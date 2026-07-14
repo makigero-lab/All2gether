@@ -9,8 +9,8 @@ import {
   Loader2,
   AlertCircle,
   CheckCircle2,
-  Trash2,
   Send,
+  X,
 } from "lucide-react";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -30,13 +30,15 @@ import {
   DialogContent,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { adminPatch } from "@/lib/api";
 import { formatarDataSegura } from "@/lib/utils";
 
 /* ------------------------------------------------------------------ */
 /* Tipos                                                               */
 /* ------------------------------------------------------------------ */
 
-type EstadoAusencia = "pendente" | "aprovada" | "rejeitada";
+// Prompt 131b — adicionado "cancelada" (soft cancel mantém histórico).
+type EstadoAusencia = "pendente" | "aprovada" | "rejeitada" | "cancelada";
 type TipoAusencia = "ferias" | "doenca" | "outro";
 
 interface AusenciaDTO {
@@ -66,6 +68,7 @@ const ESTADO_CONFIG: Record<
   pendente: { label: "Pendente", variant: "secondary" },
   aprovada: { label: "Aprovada", variant: "default" },
   rejeitada: { label: "Rejeitada", variant: "destructive" },
+  cancelada: { label: "Cancelada", variant: "outline" },
 };
 
 /* ------------------------------------------------------------------ */
@@ -142,8 +145,9 @@ export default function StaffAusenciasPage() {
   // v1.56.0 (Prompt 78) — Modal de confirmação antes de submeter.
   const [mostrarConfirmacao, setMostrarConfirmacao] = useState(false);
 
-  // Cancelar pedido.
-  const [cancelando, setCancelando] = useState<string | null>(null);
+  // Cancelar pedido (Prompt 131b — soft cancel via PATCH /api/gestor/ausencias/:id/cancelar).
+  const [aCancelar, setACancelar] = useState<AusenciaDTO | null>(null);
+  const [cancelando, setCancelando] = useState(false);
 
   /** Carrega o histórico de ausências do staff. */
   const carregar = useCallback(async () => {
@@ -213,19 +217,25 @@ export default function StaffAusenciasPage() {
     }
   }
 
-  /** Cancela (elimina) um pedido pendente. */
-  async function handleCancelar(id: string) {
-    setCancelando(id);
+  /**
+   * Prompt 131b — Cancela (soft cancel) um pedido pendente ou aprovado.
+   * Usa PATCH /api/gestor/ausencias/:id/cancelar (mantém o registo para
+   * histórico, ao contrário do DELETE que apagava o registo).
+   * O endpoint aceita staff (só as suas ausências) e gestor/admin.
+   */
+  async function handleCancelar() {
+    if (!aCancelar) return;
+    setCancelando(true);
     try {
-      await staffFetch(`/api/staff/ausencias/${id}`, {
-        method: "DELETE",
-      });
+      await adminPatch(`/api/gestor/ausencias/${aCancelar._id}/cancelar`);
       setSucesso("Pedido cancelado.");
+      setACancelar(null);
       await carregar();
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Erro ao cancelar pedido.");
+      setACancelar(null);
     } finally {
-      setCancelando(null);
+      setCancelando(false);
     }
   }
 
@@ -347,21 +357,18 @@ export default function StaffAusenciasPage() {
                           Pedido em {formatarData(a.createdAt)}
                         </p>
                       </div>
-                      {a.estado === "pendente" && (
+                      {/* Prompt 131b — Botão Cancelar (soft cancel) visível
+                          para pendentes E aprovadas (não rejeitadas/canceladas). */}
+                      {(a.estado === "pendente" || a.estado === "aprovada") && (
                         <Button
                           variant="ghost"
                           size="icon"
                           className="h-8 w-8 shrink-0 text-destructive hover:text-destructive"
-                          onClick={() => handleCancelar(a._id)}
-                          disabled={cancelando === a._id}
+                          onClick={() => setACancelar(a)}
                           aria-label="Cancelar pedido"
                           title="Cancelar pedido"
                         >
-                          {cancelando === a._id ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Trash2 className="h-4 w-4" />
-                          )}
+                          <X className="h-4 w-4" />
                         </Button>
                       )}
                     </div>
@@ -550,6 +557,88 @@ export default function StaffAusenciasPage() {
               <>
                 <Send className="mr-2 h-4 w-4" />
                 Confirmar Envio
+              </>
+            )}
+          </Button>
+        </DialogFooter>
+      </Dialog>
+
+      {/* ---------------------------------------------------------------
+          Prompt 131b — Modal de Confirmação de Cancelamento (soft cancel)
+          Pede confirmação antes de marcar a ausência como 'cancelada'.
+          --------------------------------------------------------------- */}
+      <Dialog open={aCancelar !== null} onOpenChange={(o) => !o && !cancelando && setACancelar(null)}>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <X className="h-5 w-5 text-destructive" />
+            Cancelar Pedido de Ausência
+          </DialogTitle>
+          <DialogDescription>
+            Tens a certeza que queres cancelar este pedido? O registo fica
+            marcado como <strong>cancelado</strong> (mantém-se no histórico).
+          </DialogDescription>
+          <DialogClose onClick={() => !cancelando && setACancelar(null)} />
+        </DialogHeader>
+        <DialogContent className="space-y-3">
+          {aCancelar && (
+            <div className="rounded-lg border bg-muted/30 p-4 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm text-muted-foreground">Tipo</span>
+                <span className="text-sm font-semibold">
+                  {TIPO_LABEL[aCancelar.tipo]}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm text-muted-foreground">Estado atual</span>
+                <Badge variant={ESTADO_CONFIG[aCancelar.estado].variant}>
+                  {ESTADO_CONFIG[aCancelar.estado].label}
+                </Badge>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm text-muted-foreground">Data de Início</span>
+                <span className="text-sm font-semibold tabular-nums">
+                  {formatarData(aCancelar.data_inicio)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm text-muted-foreground">Data de Fim</span>
+                <span className="text-sm font-semibold tabular-nums">
+                  {formatarData(aCancelar.data_fim)}
+                </span>
+              </div>
+              {aCancelar.notas && (
+                <div className="border-t pt-2">
+                  <span className="text-xs text-muted-foreground">Notas:</span>
+                  <p className="mt-0.5 text-sm">{aCancelar.notas}</p>
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setACancelar(null)}
+            disabled={cancelando}
+          >
+            Voltar
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            onClick={handleCancelar}
+            disabled={cancelando}
+          >
+            {cancelando ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                A cancelar…
+              </>
+            ) : (
+              <>
+                <X className="mr-2 h-4 w-4" />
+                Cancelar Pedido
               </>
             )}
           </Button>

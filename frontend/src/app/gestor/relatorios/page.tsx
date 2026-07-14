@@ -242,11 +242,24 @@ export default function RelatoriosPage() {
       // renderizar o resumo IA (e restante conteúdo) no div de exportação
       // antes de o html2canvas o capturar. Sem isto, em pedidos rápidos o
       // PDF sai em branco (o conteúdo ainda não estava no DOM).
-      await new Promise(resolve => setTimeout(resolve, 500));
+      // Prompt 131b — Aumentado para 1000ms: o html2canvas precisa de mais
+      // tempo para garantir que TODOS os elementos (incluindo o resumo IA,
+      // se existir) estão renderizados no DOM. Sem isto, em máquinas mais
+      // lentas o PDF sai em branco (especialmente quando o aiResumo acabou
+      // de ser gerado).
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
       // Import dinâmico para evitar problemas de SSR com html2pdf.js.
       const html2pdf = (await import("html2pdf.js")).default;
       const el = pdfExportRef.current;
+
+      // Prompt 131b — Verificação extra: se aiResumo existe, confirma que
+      // o texto foi mesmo renderizado no div de exportação antes de capturar.
+      // Isto evita PDFs em branco quando o React ainda não atualizou o div.
+      if (aiResumo && el && !el.textContent?.includes(aiResumo.slice(0, 30))) {
+        // Espera mais 500ms e volta a verificar.
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
 
       const filename = `relatorio-autocell-${data.periodo.inicio
         .slice(0, 10)
@@ -254,6 +267,7 @@ export default function RelatoriosPage() {
 
       // O conteúdo do div de exportação é construído via React (renderizado
       // off-screen). Aqui só disparamos o html2pdf sobre esse div.
+      // Prompt 131b — Mesmo sem aiResumo, o PDF é gerado com tabelas/gráficos.
       const opt = {
         margin: [10, 10, 12, 10] as [number, number, number, number],
         filename,
@@ -285,7 +299,7 @@ export default function RelatoriosPage() {
     } finally {
       setPdfLoading(false);
     }
-  }, [data]);
+  }, [data, aiResumo]);
 
   // Resumo em cartões.
   const stats = useMemo(() => {
@@ -371,21 +385,6 @@ export default function RelatoriosPage() {
             aria-label="Atualizar"
           >
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-          </Button>
-          {/* Prompt 124-Fix1 — Gerar Relatório Inteligente (Resumo IA) */}
-          <Button
-            variant="default"
-            onClick={gerarResumoIA}
-            disabled={loading || !data || aiLoading}
-            title="Gera um Resumo Executivo com IA a partir dos dados do relatório"
-            className="gap-2"
-          >
-            {aiLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Sparkles className="h-4 w-4" />
-            )}
-            Gerar Relatório Inteligente
           </Button>
           {/* Prompt 124-Fix1 — Exportar PDF via html2pdf.js (A4, com resumo IA + tabelas + gráficos) */}
           <Button
@@ -722,55 +721,86 @@ export default function RelatoriosPage() {
             </Card>
           )}
 
-          {/* Prompt 124-Fix1 — Cartão do Resumo Executivo IA */}
-          {(aiLoading || aiResumo || aiErro) && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Sparkles className="h-5 w-5 text-primary" />
-                  Resumo Executivo IA
-                </CardTitle>
-                <CardDescription>
-                  Análise automática focada em gestão — tendências e eficiência.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {aiLoading ? (
-                  <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
+          {/* Prompt 124-Fix1 — Cartão do Resumo Executivo IA.
+              Prompt 131b — O card está SEMPRE visível (não só quando aiLoading/aiResumo/aiErro),
+              para que o utilizador possa clicar no botão "Gerar Relatório Inteligente" e disparar
+              a geração do resumo. O botão foi movido do cabeçalho para dentro do CardHeader. */}
+          <Card>
+            <CardHeader>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="space-y-1">
+                  <CardTitle className="flex items-center gap-2">
+                    <Sparkles className="h-5 w-5 text-primary" />
+                    Resumo Executivo IA
+                  </CardTitle>
+                  <CardDescription>
+                    Análise automática focada em gestão — tendências e eficiência.
+                  </CardDescription>
+                </div>
+                {/* Botão "Gerar Relatório Inteligente" movido para dentro do card. */}
+                <Button
+                  variant="default"
+                  onClick={gerarResumoIA}
+                  disabled={loading || !data || aiLoading}
+                  title="Gera um Resumo Executivo com IA a partir dos dados do relatório"
+                  className="gap-2"
+                >
+                  {aiLoading ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    A gerar resumo com IA…
-                  </div>
-                ) : aiErro ? (
-                  <div className="flex items-center gap-2 py-4 text-sm text-destructive">
-                    <AlertCircle className="h-4 w-4 shrink-0" />
-                    <span>{aiErro}</span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={gerarResumoIA}
-                      className="ml-auto"
-                    >
-                      Tentar novamente
-                    </Button>
-                  </div>
-                ) : aiResumo ? (
-                  <ResumoIATexto texto={aiResumo} />
-                ) : null}
-              </CardContent>
-            </Card>
-          )}
+                  ) : (
+                    <Sparkles className="h-4 w-4" />
+                  )}
+                  Gerar Relatório Inteligente
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {aiLoading ? (
+                <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  A gerar resumo com IA…
+                </div>
+              ) : aiErro ? (
+                <div className="flex items-center gap-2 py-4 text-sm text-destructive">
+                  <AlertCircle className="h-4 w-4 shrink-0" />
+                  <span>{aiErro}</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={gerarResumoIA}
+                    className="ml-auto"
+                  >
+                    Tentar novamente
+                  </Button>
+                </div>
+              ) : aiResumo ? (
+                <ResumoIATexto texto={aiResumo} />
+              ) : (
+                <p className="py-4 text-sm text-muted-foreground">
+                  Clica em <strong>“Gerar Relatório Inteligente”</strong> para
+                  obteres uma análise automática dos dados do período.
+                </p>
+              )}
+            </CardContent>
+          </Card>
 
           {/* Prompt 124-Fix1 — Conteúdo oculto usado pelo html2pdf para exportar PDF A4.
-              Renderizado off-screen (position: absolute, left: -99999px) mas visível
-              para o html2canvas conseguir capturá-lo. Inclui resumo IA + tabelas + gráficos. */}
+              Prompt 131b — Em vez de position: absolute; left: -99999px (que em alguns
+              browsers faz o html2canvas capturar um div vazio), usamos position: fixed;
+              left: 0; top: 0; z-index: -1; opacity: 0; pointer-events: none. Isto mantém
+              o div dentro do viewport (html2canvas consegue capturá-lo) mas invisível ao
+              utilizador. Inclui resumo IA + tabelas + gráficos. */}
           {data && (
             <div
               ref={pdfExportRef}
               aria-hidden
               style={{
-                position: "absolute",
-                left: "-99999px",
+                position: "fixed",
+                left: 0,
                 top: 0,
+                zIndex: -1,
+                opacity: 0,
+                pointerEvents: "none",
                 width: "794px", // ~A4 a 96 DPI (210mm)
                 background: "#ffffff",
                 color: "#0f172a",

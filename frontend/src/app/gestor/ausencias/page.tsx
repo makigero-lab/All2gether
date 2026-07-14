@@ -81,6 +81,8 @@ const ESTADO_LABEL: Record<string, string> = {
   pendente_emergencia: "Emergência",
   aprovada: "Aprovada",
   rejeitada: "Rejeitada",
+  // Prompt 131b — soft cancel mantém histórico.
+  cancelada: "Cancelada",
 };
 
 const ESTADO_VARIANT: Record<
@@ -91,6 +93,7 @@ const ESTADO_VARIANT: Record<
   pendente_emergencia: "destructive",
   aprovada: "success",
   rejeitada: "secondary",
+  cancelada: "outline",
 };
 
 function formatarData(iso: string): string {
@@ -121,6 +124,10 @@ export default function AusenciasPage() {
   // Modal de confirmação de eliminação.
   const [aEliminar, setAEliminar] = useState<AusenciaAmp | null>(null);
   const [eliminando, setEliminando] = useState(false);
+
+  // Prompt 131b — Modal de confirmação de cancelamento (soft cancel).
+  const [aCancelar, setACancelar] = useState<AusenciaAmp | null>(null);
+  const [cancelando, setCancelando] = useState(false);
 
   const carregar = useCallback(async () => {
     setLoading(true);
@@ -171,6 +178,33 @@ export default function AusenciasPage() {
       // Reverte em caso de erro.
       await carregar();
       setErro(e instanceof Error ? e.message : `Erro ao ${novoEstado === "aprovada" ? "aprovar" : "rejeitar"} ausência.`);
+    }
+  }
+
+  /**
+   * Prompt 131b — Cancela (soft cancel) uma ausência pendente ou aprovada.
+   * Usa PATCH /api/gestor/ausencias/:id/cancelar (mantém o registo para
+   * histórico, ao contrário do DELETE que apaga o registo).
+   */
+  async function handleCancelar() {
+    if (!aCancelar) return;
+    setCancelando(true);
+    try {
+      // Otimismo: atualiza a UI imediatamente.
+      setAusencias((prev) =>
+        prev.map((x) =>
+          x._id === aCancelar._id ? { ...x, estado: "cancelada" } : x
+        )
+      );
+      await adminPatch(`/api/gestor/ausencias/${aCancelar._id}/cancelar`);
+      setACancelar(null);
+    } catch (e) {
+      // Reverte em caso de erro.
+      await carregar();
+      setErro(e instanceof Error ? e.message : "Erro ao cancelar ausência.");
+      setACancelar(null);
+    } finally {
+      setCancelando(false);
     }
   }
 
@@ -304,14 +338,29 @@ export default function AusenciasPage() {
                                 </Button>
                               </>
                             )}
-                            {/* Eliminar */}
+                            {/* Prompt 131b — Cancelar (soft cancel).
+                                Só para pendentes ou aprovadas (não rejeitadas/canceladas).
+                                Usa X icon com cor âmbar para distinguir do Rejeitar (vermelho). */}
+                            {(a.estado === "pendente" || a.estado === "aprovada") && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-amber-600 hover:text-amber-700 hover:bg-amber-50"
+                                onClick={() => setACancelar(a)}
+                                aria-label="Cancelar ausência"
+                                title="Cancelar (mantém no histórico)"
+                              >
+                                <X className="h-4 w-4" />
+                              </Button>
+                            )}
+                            {/* Eliminar (hard delete) */}
                             <Button
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8 text-destructive hover:text-destructive"
                               onClick={() => setAEliminar(a)}
                               aria-label="Eliminar ausência"
-                              title="Eliminar"
+                              title="Eliminar (apaga definitivamente)"
                             >
                               <Trash2 className="h-4 w-4" />
                             </Button>
@@ -391,6 +440,83 @@ export default function AusenciasPage() {
               <>
                 <Trash2 className="mr-2 h-4 w-4" />
                 Eliminar
+              </>
+            )}
+          </Button>
+        </DialogFooter>
+      </Dialog>
+
+      {/* Prompt 131b — Modal de confirmação de cancelamento (soft cancel).
+          Mantém o registo no histórico (apenas marca estado='cancelada'). */}
+      <Dialog
+        open={aCancelar !== null}
+        onOpenChange={(o) => !o && !cancelando && setACancelar(null)}
+      >
+        <DialogHeader>
+          <div>
+            <DialogTitle className="flex items-center gap-2">
+              <X className="h-5 w-5 text-amber-600" />
+              Cancelar Ausência
+            </DialogTitle>
+            <DialogDescription>
+              Vais cancelar esta ausência. O registo fica marcado como
+              <strong> cancelada</strong> (mantém-se no histórico para
+              auditoria). Se a ausência estava aprovada, as tarefas
+              desatribuídas terão de ser reatribuídas manualmente.
+            </DialogDescription>
+          </div>
+          <DialogClose onClick={() => !cancelando && setACancelar(null)} />
+        </DialogHeader>
+        <DialogContent className="space-y-3">
+          {aCancelar && (
+            <div className="rounded-md bg-muted/50 p-3 text-sm">
+              <p>
+                <strong>Funcionário:</strong>{" "}
+                {aCancelar.utilizador?.nome ?? "—"}
+              </p>
+              <p>
+                <strong>Tipo:</strong> {TIPO_LABEL[aCancelar.tipo] ?? aCancelar.tipo}
+              </p>
+              <p>
+                <strong>Período:</strong>{" "}
+                {formatarPeriodo(aCancelar.data_inicio, aCancelar.data_fim)}
+              </p>
+              <p>
+                <strong>Estado atual:</strong>{" "}
+                {ESTADO_LABEL[aCancelar.estado ?? ""] ?? aCancelar.estado ?? "—"}
+              </p>
+              {aCancelar.notas && (
+                <p>
+                  <strong>Notas:</strong> {aCancelar.notas}
+                </p>
+              )}
+            </div>
+          )}
+        </DialogContent>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setACancelar(null)}
+            disabled={cancelando}
+          >
+            Voltar
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            onClick={handleCancelar}
+            disabled={cancelando}
+          >
+            {cancelando ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                A cancelar…
+              </>
+            ) : (
+              <>
+                <X className="mr-2 h-4 w-4" />
+                Cancelar Ausência
               </>
             )}
           </Button>
