@@ -227,62 +227,12 @@ exports.registarAusencia = async (req, res) => {
   } catch (err) {
     console.error('❌ registarAusencia:', err.message);
 
-    // Prompt 130 — Erro de duplicate key (índice único antigo na BD de produção).
-    // Se a ausência existente estiver 'rejeitada', eliminamo-la e recriamos.
+    // Prompt 131 — Erro de duplicate key (índice único antigo na BD).
+    // O índice único é removido no arranque do servidor. NÃO elimina ausências.
     if (err.code === 11000) {
-      console.log('[registarAusencia] Duplicate key detetada. A verificar se a ausência existente está rejeitada...');
-
-      // Re-extrai de req porque as const do try block NÃO são acessíveis no catch.
-      const body = req.body || {};
-      const userIdCatch = body.utilizador_id;
-      const inicioCatch = normalizarDia(body.data_inicio);
-      const fimCatch = normalizarDia(body.data_fim);
-      const tipoCatch = body.tipo || 'ferias';
-      const notasCatch = body.notas ? String(body.notas).trim() : '';
-      const empIdCatch = req.user && req.user.empresa_id;
-
-      const existente = await Ausencia.findOne({
-        utilizador_id: userIdCatch,
-        data_inicio: inicioCatch,
-      }).lean();
-
-      if (existente && existente.estado === 'rejeitada') {
-        console.log(`[registarAusencia] Ausência rejeitada ${existente._id} encontrada. A eliminar e recriar...`);
-        await Ausencia.deleteOne({ _id: existente._id });
-
-        try {
-          const nova = await Ausencia.create({
-            utilizador_id: userIdCatch,
-            empresa_id: empIdCatch,
-            data_inicio: inicioCatch,
-            data_fim: fimCatch,
-            tipo: tipoCatch,
-            estado: 'aprovada',
-            notas: notasCatch,
-          });
-          const desatribuicao = await desatribuirTarefasPeriodo(userIdCatch, inicioCatch, fimCatch);
-          const resp = await Ausencia.findById(nova._id)
-            .populate({ path: 'utilizador_id', select: 'nome email role' })
-            .lean();
-          const u = resp.utilizador_id;
-          return res.status(201).json({
-            ausencia: {
-              ...resp,
-              utilizador_id: u ? String(u._id) : null,
-              utilizador: u ? { _id: String(u._id), nome: u.nome, email: u.email, role: u.role } : null,
-            },
-            desatribuicao,
-          });
-        } catch (err2) {
-          console.error('❌ registarAusencia: falha ao recriar após eliminar rejeitada:', err2.message);
-          return res.status(409).json({
-            erro: 'Não foi possível criar a ausência. Tenta com uma data de início diferente.',
-          });
-        }
-      }
-
+      console.error('[registarAusencia] Erro 11000 (duplicate key). O índice único antigo pode ainda existir na BD.');
       return res.status(409).json({
-        erro: 'Já existe uma ausência pendente ou aprovada com esta data de início.',
+        erro: 'Já existe uma ausência com esta data de início. O índice único será removido no próximo arranque do servidor.',
       });
     }
 

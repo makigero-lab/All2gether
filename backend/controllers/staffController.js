@@ -138,54 +138,14 @@ exports.criarAusencia = async (req, res) => {
   } catch (err) {
     console.error('❌ criarAusencia:', err.message);
 
-    // Prompt 130 — Erro de duplicate key (índice único { utilizador_id, data_inicio }).
-    // Pode acontecer se a BD de produção ainda tiver o índice único antigo
-    // (removido do schema no Prompt 116, mas índices MongoDB não são auto-removidos).
-    // Se a ausência existente estiver 'rejeitada', eliminamo-la e recriamos.
+    // Prompt 131 — Erro de duplicate key (índice único antigo na BD).
+    // O índice único { utilizador_id, data_inicio } é removido automaticamente
+    // no arranque do servidor (server.js). Se ainda existir, devolve 409
+    // com mensagem clara. NÃO elimina ausências — o histórico é mantido.
     if (err.code === 11000) {
-      console.log('[criarAusencia] Duplicate key detetada. A verificar se a ausência existente está rejeitada...');
-
-      // Prompt 130 fix — Re-extrai os valores de req porque as variáveis
-      // do try block (const) NÃO são acessíveis no catch (block scoping).
-      const userId = req.user && req.user.id;
-      const empId = req.user && req.user.empresa_id;
-      const body = req.body || {};
-      const inicioCatch = normalizarDia(body.data_inicio);
-      const fimCatch = normalizarDia(body.data_fim);
-      const tipoCatch = body.tipo || 'ferias';
-
-      // Procura a ausência existente com esta data_inicio.
-      const existente = await Ausencia.findOne({
-        utilizador_id: userId,
-        data_inicio: inicioCatch,
-      }).lean();
-
-      if (existente && existente.estado === 'rejeitada') {
-        console.log(`[criarAusencia] Ausência rejeitada ${existente._id} encontrada. A eliminar e recriar...`);
-        await Ausencia.deleteOne({ _id: existente._id });
-
-        try {
-          const nova = await Ausencia.create({
-            utilizador_id: userId,
-            empresa_id: empId,
-            data_inicio: inicioCatch,
-            data_fim: fimCatch,
-            tipo: tipoCatch,
-            estado: 'pendente',
-            notas: body.notas ? String(body.notas).trim() : '',
-          });
-          console.log(`[criarAusencia] Ausência ${nova._id} criada com sucesso (após eliminar rejeitada).`);
-          return res.status(201).json({ ausencia: nova });
-        } catch (err2) {
-          console.error('❌ criarAusencia: falha ao recriar após eliminar rejeitada:', err2.message);
-          return res.status(409).json({
-            erro: 'Não foi possível criar a ausência. Tenta com uma data de início diferente.',
-          });
-        }
-      }
-
+      console.error('[criarAusencia] Erro 11000 (duplicate key). O índice único antigo pode ainda existir na BD.');
       return res.status(409).json({
-        erro: 'Já existe uma ausência pendente ou aprovada com esta data de início.',
+        erro: 'Já existe uma ausência com esta data de início. O índice único será removido no próximo arranque do servidor.',
       });
     }
 
