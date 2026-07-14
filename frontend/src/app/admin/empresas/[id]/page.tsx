@@ -16,6 +16,7 @@ import {
   Calendar,
   Settings,
   Power,
+  ListChecks,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -418,6 +419,29 @@ export default function EmpresaGavetaPage() {
           <CardContent className="space-y-3">
             <p className="text-sm text-muted-foreground">Envia uma notificação push de teste para o teu dispositivo.</p>
             <ActionButton nome="Push de Teste" icon={Bell} label="Enviar Push de Teste" url="/api/admin/push-teste" />
+          </CardContent>
+        </Card>
+
+        {/* Prompt 135 — Seed de Checklists */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <ListChecks className="h-5 w-5 text-primary" />
+              Checklists Padrão
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Cria 2 modelos de checklist (&ldquo;Limpeza Standard&rdquo; e &ldquo;Limpeza Detalhada V2&rdquo;)
+              e associa o modelo Standard a todas as propriedades desta empresa.
+              Idempotente — pode ser corrido múltiplas vezes.
+            </p>
+            <ActionButton
+              nome="Seed Checklists"
+              icon={ListChecks}
+              label="Criar Checklists Padrão"
+              url={`/api/admin/seed-checklists?empresa_id=${empresaId}`}
+            />
           </CardContent>
         </Card>
 
