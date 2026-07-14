@@ -186,6 +186,7 @@ export default function AdminTarefasPage() {
     check_in: "",
     check_out: "",
     hospedes: "",
+    nome_hospede: "",
     tempo_limpeza_minutos: "45",
     tipo: "limpeza",
   });
@@ -301,6 +302,7 @@ export default function AdminTarefasPage() {
           check_in: form.check_in || undefined,
           check_out: form.check_out || undefined,
           hospedes: form.hospedes ? Number(form.hospedes) : undefined,
+          nome_hospede: form.nome_hospede || undefined,
           tempo_limpeza_minutos: Number(form.tempo_limpeza_minutos) || 45,
           tipo: form.tipo,
           forcar: conflitoForcar || undefined,
@@ -339,6 +341,7 @@ export default function AdminTarefasPage() {
         check_in: "",
         check_out: "",
         hospedes: "",
+        nome_hospede: "",
         tempo_limpeza_minutos: "45",
         tipo: "limpeza",
       });
@@ -689,6 +692,11 @@ export default function AdminTarefasPage() {
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium">Nº de Hóspedes</label>
                   <Input type="number" min={0} value={form.hospedes} onChange={(e) => setForm((f) => ({ ...f, hospedes: e.target.value }))} placeholder="0" />
+                </div>
+                {/* Task 131 — Nome do Hóspede */}
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">Nome do Hóspede</label>
+                  <Input type="text" value={form.nome_hospede} onChange={(e) => setForm((f) => ({ ...f, nome_hospede: e.target.value }))} placeholder="Ex.: João Silva" />
                 </div>
               </div>
               {formErro && (

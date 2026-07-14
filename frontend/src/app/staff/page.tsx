@@ -8,6 +8,7 @@ import {
   LogOut,
   CalendarDays,
   CalendarOff,
+  Bell,
   Loader2,
   AlertTriangle,
   Send,
@@ -319,6 +320,14 @@ export default function StaffPage() {
           <Button variant="outline" className="w-full justify-center gap-2">
             <CalendarOff className="h-4 w-4" />
             Pedidos de Ausência
+          </Button>
+        </Link>
+
+        {/* Task 131 — Botão Histórico de Notificações */}
+        <Link href="/staff/notificacoes" prefetch>
+          <Button variant="outline" className="w-full justify-center gap-2">
+            <Bell className="h-4 w-4" />
+            Histórico de Notificações
           </Button>
         </Link>
 
