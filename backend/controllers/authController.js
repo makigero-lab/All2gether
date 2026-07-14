@@ -261,11 +261,44 @@ exports.minhaTarefaDetalhe = async (req, res) => {
       utilizador_id: req.user.id,
     })
       // Prompt 114 — Inclui capacidade_hospedes para destaque no detalhe.
-      .populate({ path: 'propriedade_id', select: 'nome morada coordenadas checklist capacidade_hospedes' })
+      // Prompt 133 — Inclui modelo_checklist_id e observacoes.
+      .populate({ path: 'propriedade_id', select: 'nome morada coordenadas checklist capacidade_hospedes observacoes modelo_checklist_id' })
       .lean();
 
     if (!tarefa) {
       return res.status(404).json({ erro: 'Tarefa não encontrada.' });
+    }
+
+    // Prompt 135 — Se a tarefa não tem checklist_dinamica mas a propriedade
+    // tem modelo_checklist_id, injeta o snapshot on-the-fly. Isto garante que
+    // tarefas criadas antes de o modelo ser associado também mostram a
+    // checklist dinâmica. O snapshot é guardado na tarefa para persistência.
+    if (
+      (!tarefa.checklist_dinamica || tarefa.checklist_dinamica.length === 0) &&
+      tarefa.propriedade_id?.modelo_checklist_id
+    ) {
+      try {
+        const ModeloChecklist = require('../models/ModeloChecklist');
+        const modelo = await ModeloChecklist.findById(tarefa.propriedade_id.modelo_checklist_id).lean();
+        if (modelo && Array.isArray(modelo.seccoes) && modelo.seccoes.length > 0) {
+          tarefa.checklist_dinamica = modelo.seccoes.map((sec) => ({
+            nome: sec.nome,
+            items: (sec.items || []).map((item) => ({
+              texto: item,
+              concluido: false,
+            })),
+          }));
+          // Persiste o snapshot na tarefa (para futuras visualizações não
+          // precisarem de voltar a procurar o modelo).
+          await Tarefa.updateOne(
+            { _id: tarefa._id },
+            { $set: { checklist_dinamica: tarefa.checklist_dinamica } }
+          );
+          console.log(`[minhaTarefaDetalhe] Checklist dinâmica injetada na tarefa ${tarefa._id} a partir do modelo ${modelo._id}.`);
+        }
+      } catch (chkErr) {
+        console.error('⚠️  minhaTarefaDetalhe: erro ao injetar checklist dinâmica:', chkErr.message);
+      }
     }
 
     return res.status(200).json({ tarefa });

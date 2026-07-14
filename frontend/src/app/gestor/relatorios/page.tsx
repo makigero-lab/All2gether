@@ -239,21 +239,28 @@ export default function RelatoriosPage() {
     setPdfLoading(true);
     setPdfErro(null);
     try {
-      // Força re-render do pdfExportRef (se ainda não estiver montado).
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      // Verifica se o ref tem conteúdo (pode não estar montado se data mudou).
-      if (!pdfExportRef.current) {
-        // Tenta novamente após mais 500ms.
-        await new Promise(resolve => setTimeout(resolve, 500));
-        if (!pdfExportRef.current) {
-          throw new Error('Não foi possível preparar o documento para exportação.');
-        }
+      // Torna o div de exportação VISÍVEL temporariamente para o html2canvas
+      // conseguir capturá-lo. O problema: opacity:0.01 e zIndex:-50 fazem
+      // com que o html2canvas capture um div vazio em alguns browsers.
+      // Solução: tornar visível, capturar, depois voltar a esconder.
+      if (pdfExportRef.current) {
+        pdfExportRef.current.style.opacity = "1";
+        pdfExportRef.current.style.zIndex = "9999";
+        pdfExportRef.current.style.left = "0";
+        pdfExportRef.current.style.top = "0";
       }
 
-      // Se há resumo IA, espera mais 500ms para garantir que está renderizado.
+      // Espera que o DOM atualize.
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      // Verifica se o ref tem conteúdo.
+      if (!pdfExportRef.current) {
+        throw new Error('Não foi possível preparar o documento para exportação.');
+      }
+
+      // Se há resumo IA, espera mais 300ms.
       if (aiResumo) {
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await new Promise(resolve => setTimeout(resolve, 300));
       }
 
       // Import dinâmico para evitar problemas de SSR com html2pdf.js.
@@ -294,9 +301,19 @@ export default function RelatoriosPage() {
       };
 
       await html2pdf().set(opt).from(el).save();
+
+      // Restaura o estado oculto do div de exportação.
+      if (pdfExportRef.current) {
+        pdfExportRef.current.style.opacity = "0.01";
+        pdfExportRef.current.style.zIndex = "-50";
+      }
     } catch (e) {
       console.error("Erro ao exportar PDF:", e);
-      // Prompt 127 — Toast visual em vez de alert().
+      // Restaura o estado oculto mesmo em caso de erro.
+      if (pdfExportRef.current) {
+        pdfExportRef.current.style.opacity = "0.01";
+        pdfExportRef.current.style.zIndex = "-50";
+      }
       setPdfErro(
         e instanceof Error
           ? `Erro ao gerar relatório: ${e.message}`
