@@ -48,7 +48,7 @@ import {
 } from "@/lib/api";
 import { PaginationBar } from "@/components/admin/pagination-bar";
 import { DetalheTarefaModal } from "@/components/gestor/detalhe-tarefa-modal";
-import { parsearDataSegura } from "@/lib/utils";
+import { parsearDataSegura, extrairHoraISO } from "@/lib/utils";
 
 interface TarefaAdmin {
   _id: string;
@@ -104,6 +104,7 @@ function formatarData(iso: string): string {
 /**
  * v1.68.0 (Prompt 91) — Formata data + hora (ex: "06/07/2026 - 14:30").
  * Se a data for meia-noite exata (sem hora definida), mostra só a data.
+ * Prompt 127 — Usa extrairHoraISO para evitar time shift do browser.
  */
 function formatarDataHora(iso: string): string {
   const d = parsearDataSegura(iso);
@@ -114,14 +115,9 @@ function formatarDataHora(iso: string): string {
       month: "2-digit",
       year: "numeric",
     });
-    // Se for meia-noite exata (00:00), não mostra hora.
-    if (d.getHours() === 0 && d.getMinutes() === 0) {
-      return data;
-    }
-    const hora = d.toLocaleTimeString("pt-PT", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    // Prompt 127 — Extrai a hora da string ISO sem converter fuso.
+    const hora = extrairHoraISO(iso);
+    if (hora === "—") return data;
     return `${data} - ${hora}`;
   } catch {
     return iso;
@@ -375,12 +371,25 @@ export default function AdminTarefasPage() {
     }
   }
 
+  // Prompt 127 — Modal de confirmação para cancelar tarefa.
+  const [cancelarTarget, setCancelarTarget] = useState<TarefaAdmin | null>(null);
+  const [cancelarLoading, setCancelarLoading] = useState(false);
+
   async function handleCancelar(t: TarefaAdmin) {
+    setCancelarTarget(t);
+  }
+
+  async function confirmarCancelamento() {
+    if (!cancelarTarget) return;
+    setCancelarLoading(true);
     try {
-      await adminPatch(`/api/gestor/tarefas/${t._id}/estado`, { estado: "cancelada" });
+      await adminPatch(`/api/gestor/tarefas/${cancelarTarget._id}/estado`, { estado: "cancelada" });
+      setCancelarTarget(null);
       await carregar();
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Erro ao cancelar tarefa.");
+    } finally {
+      setCancelarLoading(false);
     }
   }
 
@@ -1101,6 +1110,42 @@ export default function AdminTarefasPage() {
         open={detalheTarefa !== null}
         onOpenChange={(o) => !o && setDetalheTarefa(null)}
       />
+
+      {/* Prompt 127 — Dialog de confirmação para Cancelar Tarefa */}
+      <Dialog open={cancelarTarget !== null} onOpenChange={(o) => !o && setCancelarTarget(null)}>
+        <DialogHeader>
+          <div>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertCircle className="h-5 w-5" />
+              Cancelar Tarefa
+            </DialogTitle>
+            <DialogDescription>
+              Tens a certeza que queres cancelar a tarefa de{" "}
+              <strong>{cancelarTarget?.propriedade_id?.nome ?? "Propriedade"}</strong>?
+              Esta ação não pode ser desfeita.
+            </DialogDescription>
+          </div>
+          <DialogClose onClick={() => setCancelarTarget(null)} />
+        </DialogHeader>
+        <DialogContent>
+          <p className="text-sm text-muted-foreground">
+            A tarefa será marcada como <strong>cancelada</strong> e deixará de
+            aparecer no calendário. O staff atribuído será notificado.
+          </p>
+        </DialogContent>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => setCancelarTarget(null)} disabled={cancelarLoading}>
+            Manter Tarefa
+          </Button>
+          <Button type="button" variant="destructive" onClick={confirmarCancelamento} disabled={cancelarLoading}>
+            {cancelarLoading ? (
+              <><Loader2 className="mr-2 h-4 w-4 animate-spin" />A cancelar…</>
+            ) : (
+              <><AlertCircle className="mr-2 h-4 w-4" />Sim, Cancelar Tarefa</>
+            )}
+          </Button>
+        </DialogFooter>
+      </Dialog>
     </div>
   );
 }

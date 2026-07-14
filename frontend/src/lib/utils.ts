@@ -123,3 +123,58 @@ export function formatarDataSegura(
     return fallback;
   }
 }
+
+/**
+ * Prompt 127 — Extrai a hora (HH:mm) diretamente da string ISO sem aplicar
+ * a conversão de fuso horário local do browser.
+ *
+ * O problema: `new Date(iso).getHours()` usa a timezone do BROWSER (Lisboa
+ * UTC+1 no verão). Se o backend gravou a tarefa como `new Date("2026-07-15T11:00")`
+ * (LOCAL do servidor), o ISO enviado é "2026-07-15T10:00:00.000Z" (UTC). O
+ * browser converte de UTC para local (+1h) e mostra 12:00 em vez de 11:00.
+ *
+ * Esta função faz parse MANUAL da string ISO, extraindo a hora diretamente
+ * do texto (não converte para Date). Assim, "2026-07-15T11:00:00.000Z" → "11:00",
+ * independentemente do fuso do browser.
+ *
+ * Se a string não tiver componente de tempo, devolve "—".
+ */
+export function extrairHoraISO(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const str = String(iso).trim();
+
+  // Tenta extrair HH:mm da string ISO (após o "T").
+  // Formatos suportados: "2026-07-15T11:00:00.000Z", "2026-07-15T11:00",
+  // "2026-07-15 11:00:00" (Safari fallback).
+  const match = str.match(/T(\d{2}):(\d{2})/) || str.match(/\s(\d{2}):(\d{2})/);
+  if (!match) return "—";
+
+  const horas = parseInt(match[1], 10);
+  const minutos = parseInt(match[2], 10);
+  if (Number.isNaN(horas) || Number.isNaN(minutos)) return "—";
+
+  // Se for 00:00 (meia-noite), considera "sem hora real" → devolve "—".
+  if (horas === 0 && minutos === 0) return "—";
+
+  return `${String(horas).padStart(2, "0")}:${String(minutos).padStart(2, "0")}`;
+}
+
+/**
+ * Prompt 127 — Calcula a hora de fim (início + minutos) sem converter fuso.
+ * Usa extrairHoraISO para obter o início e soma os minutos matematicamente.
+ */
+export function calcularHoraFimISO(iso: string | null | undefined, minutos: number): string {
+  const inicio = extrairHoraISO(iso);
+  if (inicio === "—") return "—";
+
+  const [h, m] = inicio.split(":").map(Number);
+  if (Number.isNaN(h) || Number.isNaN(m)) return "—";
+
+  let totalMin = h * 60 + m + (minutos || 0);
+  // Wrap around 24h (se passar da meia-noite, mostra a hora do dia seguinte).
+  totalMin = totalMin % (24 * 60);
+
+  const fimH = Math.floor(totalMin / 60);
+  const fimM = totalMin % 60;
+  return `${String(fimH).padStart(2, "0")}:${String(fimM).padStart(2, "0")}`;
+}
