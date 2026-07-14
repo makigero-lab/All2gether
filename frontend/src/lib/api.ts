@@ -134,6 +134,8 @@ export interface TarefaMock {
   detalhes_reserva?: DetalhesReservaDTO | null;
   // Prompt 114 — Lotação máxima da propriedade (para destaque no detalhe).
   capacidade_hospedes?: number | null;
+  // Prompt 126 — Observações/notes internas da propriedade (ex.: regras de acesso).
+  observacoes_propriedade?: string | null;
 }
 
 /** Prompt 95 — Detalhes da reserva Smoobu associada a uma tarefa. */

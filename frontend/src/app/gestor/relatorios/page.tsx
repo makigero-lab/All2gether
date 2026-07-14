@@ -173,6 +173,8 @@ export default function RelatoriosPage() {
   const [aiResumo, setAiResumo] = useState<string | null>(null);
   const [aiErro, setAiErro] = useState<string | null>(null);
   const [pdfLoading, setPdfLoading] = useState(false);
+  // Prompt 127 — Toast visual para erros de PDF.
+  const [pdfErro, setPdfErro] = useState<string | null>(null);
   const pdfExportRef = useRef<HTMLDivElement | null>(null);
 
   const carregar = useCallback(async () => {
@@ -236,6 +238,12 @@ export default function RelatoriosPage() {
     if (!data || !pdfExportRef.current) return;
     setPdfLoading(true);
     try {
+      // Prompt 126 — Espera 500ms para garantir que o React acabou de
+      // renderizar o resumo IA (e restante conteúdo) no div de exportação
+      // antes de o html2canvas o capturar. Sem isto, em pedidos rápidos o
+      // PDF sai em branco (o conteúdo ainda não estava no DOM).
+      await new Promise(resolve => setTimeout(resolve, 500));
+
       // Import dinâmico para evitar problemas de SSR com html2pdf.js.
       const html2pdf = (await import("html2pdf.js")).default;
       const el = pdfExportRef.current;
@@ -267,11 +275,13 @@ export default function RelatoriosPage() {
       await html2pdf().set(opt).from(el).save();
     } catch (e) {
       console.error("Erro ao exportar PDF:", e);
-      alert(
+      // Prompt 127 — Toast visual em vez de alert().
+      setPdfErro(
         e instanceof Error
-          ? `Erro ao exportar PDF: ${e.message}`
-          : "Erro ao exportar PDF."
+          ? `Erro ao gerar relatório: ${e.message}`
+          : "Erro ao gerar relatório PDF."
       );
+      setTimeout(() => setPdfErro(null), 8000);
     } finally {
       setPdfLoading(false);
     }
@@ -700,6 +710,17 @@ export default function RelatoriosPage() {
               )}
             </CardContent>
           </Card>
+
+          {/* Prompt 127 — Toast de erro do PDF */}
+          {pdfErro && (
+            <Card className="border-destructive/50 bg-destructive/5">
+              <CardContent className="flex items-center gap-3 p-4 text-sm text-destructive">
+                <AlertCircle className="h-5 w-5 shrink-0" />
+                <span className="flex-1">{pdfErro}</span>
+                <Button variant="ghost" size="sm" onClick={() => setPdfErro(null)}>Fechar</Button>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Prompt 124-Fix1 — Cartão do Resumo Executivo IA */}
           {(aiLoading || aiResumo || aiErro) && (

@@ -15,6 +15,7 @@ import {
   X,
   Sparkles,
   LogOut,
+  Bell,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -54,6 +55,7 @@ const gestorNavItems: NavItem[] = [
   { label: "Equipa", href: "/gestor/equipa", icon: Users },
   { label: "Ausências / Férias", href: "/gestor/ausencias", icon: CalendarOff },
   { label: "Relatórios", href: "/gestor/relatorios", icon: BarChart3 },
+  { label: "Notificações", href: "/gestor/notificacoes", icon: Bell },
 ];
 
 /**

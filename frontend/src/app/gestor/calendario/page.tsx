@@ -18,7 +18,7 @@ import {
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 // Prompt Extra — parsearDataSegura para compatibilidade Safari/iOS.
-import { parsearDataSegura, formatarDataSegura } from "@/lib/utils";
+import { parsearDataSegura, formatarDataSegura, extrairHoraISO, calcularHoraFimISO } from "@/lib/utils";
 
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
@@ -167,29 +167,16 @@ function horaTarefa(dataISO: string): string {
   // Prompt 113 — Tarefas sem hora real (meia-noite local / UTC midnight antigo)
   // não mostram hora, só a data.
   if (!temHoraReal(dataISO)) return "—";
-  try {
-    // Prompt Extra — parsearDataSegura para compatibilidade Safari/iOS.
-    const d = parsearDataSegura(dataISO);
-    if (!d) return "—";
-    return format(d, "HH:mm");
-  } catch {
-    return "—";
-  }
+  // Prompt 127 — Extrai a hora diretamente da string ISO sem converter fuso.
+  return extrairHoraISO(dataISO);
 }
 
 /** Calcula a hora de fim estimada (início + tempo_limpeza_minutos). */
 function horaFimTarefa(dataISO: string, minutos: number): string {
   if (!dataISO || !dataISO.includes("T")) return "—";
   if (!temHoraReal(dataISO)) return "—";
-  try {
-    // Prompt Extra — parsearDataSegura para compatibilidade Safari/iOS.
-    const inicio = parsearDataSegura(dataISO);
-    if (!inicio) return "—";
-    const fim = new Date(inicio.getTime() + (minutos || 0) * 60000);
-    return format(fim, "HH:mm");
-  } catch {
-    return "—";
-  }
+  // Prompt 127 — Calcula a hora de fim sem converter fuso.
+  return calcularHoraFimISO(dataISO, minutos || 0);
 }
 
 /* ------------------------------------------------------------------ */

@@ -48,7 +48,7 @@ import {
 } from "@/lib/api";
 import { PaginationBar } from "@/components/admin/pagination-bar";
 import { DetalheTarefaModal } from "@/components/gestor/detalhe-tarefa-modal";
-import { parsearDataSegura } from "@/lib/utils";
+import { parsearDataSegura, extrairHoraISO } from "@/lib/utils";
 
 interface TarefaAdmin {
   _id: string;
@@ -104,6 +104,7 @@ function formatarData(iso: string): string {
 /**
  * v1.68.0 (Prompt 91) — Formata data + hora (ex: "06/07/2026 - 14:30").
  * Se a data for meia-noite exata (sem hora definida), mostra só a data.
+ * Prompt 127 — Usa extrairHoraISO para evitar time shift do browser.
  */
 function formatarDataHora(iso: string): string {
   const d = parsearDataSegura(iso);
@@ -114,14 +115,9 @@ function formatarDataHora(iso: string): string {
       month: "2-digit",
       year: "numeric",
     });
-    // Se for meia-noite exata (00:00), não mostra hora.
-    if (d.getHours() === 0 && d.getMinutes() === 0) {
-      return data;
-    }
-    const hora = d.toLocaleTimeString("pt-PT", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    // Prompt 127 — Extrai a hora da string ISO sem converter fuso.
+    const hora = extrairHoraISO(iso);
+    if (hora === "—") return data;
     return `${data} - ${hora}`;
   } catch {
     return iso;
@@ -195,6 +191,10 @@ export default function AdminTarefasPage() {
   });
   const [submitting, setSubmitting] = useState(false);
   const [formErro, setFormErro] = useState<string | null>(null);
+  // Prompt 126 — Conflito de horário (soft block): o backend cria a tarefa e
+  // devolve um warning com a palavra "horário". Em vez de fechar o form,
+  // mostramos um aviso inline e pedimos um 2º clique ("Forçar Agendamento").
+  const [conflitoForcar, setConflitoForcar] = useState(false);
 
   // Modal de atribuição
   const [atribuindo, setAtribuindo] = useState<TarefaAdmin | null>(null);
@@ -289,6 +289,8 @@ export default function AdminTarefasPage() {
       // A combinação data + hora é enviada como "YYYY-MM-DD" + "HH:mm"
       // separados — o backend combina como LOCAL (new Date("YYYY-MM-DDTHH:mm")
       // sem Z) para não gravar às 00:00 UTC.
+      // Prompt 126 — Se conflitoForcar=true (2º clique), envia flag para o
+      // backend ignorar o conflito de horário.
       const res = await adminPost<{ tarefa: TarefaAdmin; warning?: string }>(
         "/api/gestor/tarefas",
         {
@@ -301,9 +303,34 @@ export default function AdminTarefasPage() {
           hospedes: form.hospedes ? Number(form.hospedes) : undefined,
           tempo_limpeza_minutos: Number(form.tempo_limpeza_minutos) || 45,
           tipo: form.tipo,
+          forcar: conflitoForcar || undefined,
         }
       );
-      if (res.warning) setWarningToast(res.warning);
+
+      // Prompt 126 — Conflito de horário: o warning contém a palavra "horário".
+      // No 1º clique (conflitoForcar=false), mostra o aviso inline e NÃO fecha
+      // o form. No 2º clique (conflitoForcar=true), o utilizador já confirmou —
+      // fecha o form normalmente.
+      const temConflitoHorario =
+        !!res.warning && res.warning.toLowerCase().includes("horário");
+
+      if (temConflitoHorario && !conflitoForcar) {
+        // 1º clique com conflito: ativa o modo "Forçar Agendamento".
+        setConflitoForcar(true);
+        // Não mostra como toast global — o aviso aparece inline acima do botão.
+        setSubmitting(false);
+        return;
+      }
+
+      // 2º clique (conflito confirmado) ou sem conflito: fluxo normal.
+      // Reset do flag de conflito.
+      setConflitoForcar(false);
+
+      // Warning logístico (distância > 15km) — mostra como toast.
+      if (res.warning && !temConflitoHorario) {
+        setWarningToast(res.warning);
+      }
+
       setForm({
         propriedade_id: "",
         utilizador_id: "",
@@ -344,12 +371,25 @@ export default function AdminTarefasPage() {
     }
   }
 
+  // Prompt 127 — Modal de confirmação para cancelar tarefa.
+  const [cancelarTarget, setCancelarTarget] = useState<TarefaAdmin | null>(null);
+  const [cancelarLoading, setCancelarLoading] = useState(false);
+
   async function handleCancelar(t: TarefaAdmin) {
+    setCancelarTarget(t);
+  }
+
+  async function confirmarCancelamento() {
+    if (!cancelarTarget) return;
+    setCancelarLoading(true);
     try {
-      await adminPatch(`/api/gestor/tarefas/${t._id}/estado`, { estado: "cancelada" });
+      await adminPatch(`/api/gestor/tarefas/${cancelarTarget._id}/estado`, { estado: "cancelada" });
+      setCancelarTarget(null);
       await carregar();
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Erro ao cancelar tarefa.");
+    } finally {
+      setCancelarLoading(false);
     }
   }
 
@@ -539,7 +579,10 @@ export default function AdminTarefasPage() {
               {autoAtribuindo ? "A atribuir…" : "Auto-Atribuir Pendentes"}
             </span>
           </Button>
-          <Button onClick={() => setMostrarForm((v) => !v)}>
+          <Button onClick={() => {
+            setMostrarForm((v) => !v);
+            setConflitoForcar(false);
+          }}>
             <Plus className="h-4 w-4" />
             Nova Tarefa
           </Button>
@@ -653,11 +696,39 @@ export default function AdminTarefasPage() {
                   <AlertCircle className="h-4 w-4" />{formErro}
                 </p>
               )}
+              {/* Prompt 126 — Aviso inline de conflito de horário (não toast). */}
+              {conflitoForcar && (
+                <p className="flex items-center gap-2 rounded-md border border-amber-500/50 bg-amber-50 dark:bg-amber-950/20 px-3 py-2 text-sm font-medium text-amber-700 dark:text-amber-300">
+                  <AlertCircle className="h-4 w-4 shrink-0" />
+                  ⚠️ Conflito de horário detetado. Confirma o agendamento?
+                </p>
+              )}
               <div className="flex items-center gap-2">
-                <Button type="submit" disabled={submitting}>
-                  {submitting ? <><Loader2 className="h-4 w-4 animate-spin" />A guardar…</> : "Criar Tarefa"}
+                <Button
+                  type="submit"
+                  disabled={submitting}
+                  variant={conflitoForcar ? "outline" : "default"}
+                  className={conflitoForcar ? "border-destructive/50 text-destructive hover:bg-destructive/10 dark:text-amber-400 dark:border-amber-500/50 dark:hover:bg-amber-500/10" : ""}
+                >
+                  {submitting ? (
+                    <><Loader2 className="h-4 w-4 animate-spin" />A guardar…</>
+                  ) : conflitoForcar ? (
+                    "Forçar Agendamento"
+                  ) : (
+                    "Criar Tarefa"
+                  )}
                 </Button>
-                <Button type="button" variant="outline" onClick={() => setMostrarForm(false)} disabled={submitting}>Cancelar</Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setMostrarForm(false);
+                    setConflitoForcar(false);
+                  }}
+                  disabled={submitting}
+                >
+                  Cancelar
+                </Button>
               </div>
             </form>
           </CardContent>
@@ -1039,6 +1110,42 @@ export default function AdminTarefasPage() {
         open={detalheTarefa !== null}
         onOpenChange={(o) => !o && setDetalheTarefa(null)}
       />
+
+      {/* Prompt 127 — Dialog de confirmação para Cancelar Tarefa */}
+      <Dialog open={cancelarTarget !== null} onOpenChange={(o) => !o && setCancelarTarget(null)}>
+        <DialogHeader>
+          <div>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertCircle className="h-5 w-5" />
+              Cancelar Tarefa
+            </DialogTitle>
+            <DialogDescription>
+              Tens a certeza que queres cancelar a tarefa de{" "}
+              <strong>{cancelarTarget?.propriedade_id?.nome ?? "Propriedade"}</strong>?
+              Esta ação não pode ser desfeita.
+            </DialogDescription>
+          </div>
+          <DialogClose onClick={() => setCancelarTarget(null)} />
+        </DialogHeader>
+        <DialogContent>
+          <p className="text-sm text-muted-foreground">
+            A tarefa será marcada como <strong>cancelada</strong> e deixará de
+            aparecer no calendário. O staff atribuído será notificado.
+          </p>
+        </DialogContent>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => setCancelarTarget(null)} disabled={cancelarLoading}>
+            Manter Tarefa
+          </Button>
+          <Button type="button" variant="destructive" onClick={confirmarCancelamento} disabled={cancelarLoading}>
+            {cancelarLoading ? (
+              <><Loader2 className="mr-2 h-4 w-4 animate-spin" />A cancelar…</>
+            ) : (
+              <><AlertCircle className="mr-2 h-4 w-4" />Sim, Cancelar Tarefa</>
+            )}
+          </Button>
+        </DialogFooter>
+      </Dialog>
     </div>
   );
 }

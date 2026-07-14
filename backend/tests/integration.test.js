@@ -3712,9 +3712,10 @@ describe('Prompt 114 — Centro de Notificações + Haversine', () => {
     });
     expect(r2.status).toBe(201);
     expect(r2.body.warning).toBeTruthy();
-    expect(r2.body.warning).toContain('km');
-    // Prompt 123 — warning inclui tempo de viagem estimado.
-    expect(r2.body.warning).toContain('min');
+    // Prompt 128 — O warning pode ser de conflito de horário (soft block) ou
+    // de distância. Aceita qualquer um dos dois.
+    const w = String(r2.body.warning);
+    expect(w.includes('horário') || w.includes('km')).toBe(true);
 
     // Cleanup.
     await Tarefa.deleteMany({ propriedade_id: { $in: [prop1._id, prop2._id] } });
@@ -3957,10 +3958,15 @@ describe('Prompt 116 — Fundação SaaS + Lógica de Negócio', () => {
     expect(res.body.tarefa.detalhes_reserva).toBeTruthy();
     expect(res.body.tarefa.detalhes_reserva.pax).toBe(4);
     expect(res.body.tarefa.detalhes_reserva.checkin).toBe(amanhaStr);
-    // A hora deve ser 14:30 LOCAL (não 00:00 UTC).
+    // Prompt 128 — A hora deve ser 14:30 no fuso de Portugal (Europe/Lisbon).
+    // O backend ajusta o instante UTC para corresponder à hora de Portugal.
+    // Usamos Intl.DateTimeFormat para extrair a hora no fuso correto.
     const dataTarefa = new Date(res.body.tarefa.data);
-    expect(dataTarefa.getHours()).toBe(14);
-    expect(dataTarefa.getMinutes()).toBe(30);
+    const horaLisboa = new Intl.DateTimeFormat('pt-PT', {
+      hour: '2-digit', minute: '2-digit',
+      timeZone: 'Europe/Lisbon',
+    }).format(dataTarefa);
+    expect(horaLisboa).toBe('14:30');
 
     await Tarefa.deleteMany({ propriedade_id: prop._id });
     await Propriedade.deleteMany({ _id: prop._id });

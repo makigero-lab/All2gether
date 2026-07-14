@@ -66,6 +66,8 @@ export default function DetalheTarefaPage({
     detalhes_reserva: tarefa.detalhes_reserva ?? null,
     // Prompt 114 — Lotação máxima da propriedade (para destaque no detalhe).
     capacidade_hospedes: tarefa.propriedade_id?.capacidade_hospedes ?? null,
+    // Prompt 126 — Observações/notas internas da propriedade (regras de acesso, etc.).
+    observacoes_propriedade: tarefa.propriedade_id?.observacoes ?? null,
   };
 
   // Usa a checklist real da propriedade (vinda do populate do backend).

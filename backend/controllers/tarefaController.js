@@ -279,21 +279,20 @@ exports.criarTarefa = async (req, res) => {
       });
     }
 
-    // Prompt 116 — Constrói a data/hora da tarefa no FUSO LOCAL correto.
+    // Prompt 128 — Persistência de Hora Exata (Fuso de Portugal).
     //
-    //   `data` pode vir como:
-    //     - "2026-07-15" (date-only) → se `hora` vier, combina; senão meia-noite local.
-    //     - "2026-07-15T14:30" (com hora) → já tem hora local; ignora `hora`.
-    //     - ISO completo com Z → instante absoluto.
+    //   O problema: `new Date("2026-07-15T11:00")` (sem Z) é interpretado como
+    //   LOCAL do servidor. Se o servidor estiver em UTC (Render/Vercel), 11:00
+    //   local = 11:00 UTC. Mas o frontend em Lisboa (UTC+1) converte para 12:00.
     //
-    //   Para garantir que a hora é interpretada como LOCAL (Lisboa) e não UTC,
-    //   usamos `new Date("YYYY-MM-DDTHH:mm")` (sem Z) quando a data é date-only
-    //   + hora separada. Isto evita o bug de gravar às 00:00 UTC (que em
-    //   Lisboa aparece como 01:00).
+    //   Solução: convertemos a data+hora para um instante UTC que corresponda
+    //   à hora de Portugal. Usamos a API Intl para determinar o offset de
+    //   Europe/Lisbon no momento da data (+l1h no verão, +0h no inverno) e
+    //   subtraímos esse offset para obter o instante UTC correto.
     //
-    //   A função verificarDisponibilidadeUtilizador é robusta a offset
-    //   (compara pela data de Lisboa), pelo que a validação de férias/ausências
-    //   continua a funcionar qualquer que seja a representação.
+    //   Assim, "11:00" em Portugal é gravada como 10:00 UTC (verão) ou
+    //   11:00 UTC (inverno). Quando o frontend lê e converte para Lisboa,
+    //   volta a mostrar 11:00 — exato.
     let dataNormalizada;
     const dataStr = String(data).trim();
     if (/^\d{4}-\d{2}-\d{2}$/.test(dataStr)) {
@@ -301,10 +300,31 @@ exports.criarTarefa = async (req, res) => {
       const horaStr = hora && /^\d{1,2}:\d{2}$/.test(String(hora).trim())
         ? String(hora).trim().padStart(5, '0')
         : '00:00';
-      // `new Date("YYYY-MM-DDTHH:mm")` (sem Z) = LOCAL (timezone do servidor/Node).
-      dataNormalizada = new Date(`${dataStr}T${horaStr}`);
+
+      // Cria a data como LOCAL do servidor primeiro.
+      const dataLocal = new Date(`${dataStr}T${horaStr}`);
+
+      // Calcula o offset de Europe/Lisbon para esta data (em minutos).
+      // No verão (WEST = UTC+1): offset = -60. No inverno (WET = UTC+0): offset = 0.
+      // O Intl devolve o offset como "GMT+0100" → extraímos os minutos.
+      const offsetStr = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Europe/Lisbon',
+        timeZoneName: 'shortOffset',
+      }).formatToParts(dataLocal).find((p) => p.type === 'timeZoneName')?.value || 'GMT+0';
+
+      // Parse do offset (ex: "GMT+1" → +60 min, "GMT+0" → 0 min, "GMT-1" → -60 min).
+      const offsetMatch = offsetStr.match(/GMT([+-])(\d+)/);
+      const offsetMin = offsetMatch
+        ? (offsetMatch[1] === '+' ? 1 : -1) * parseInt(offsetMatch[2], 10) * 60
+        : 0;
+
+      // Ajusta: subtrai o offset de Lisboa para obter o instante UTC que
+      // corresponde à hora pretendida em Portugal.
+      // Ex: 11:00 LOCAL servidor (UTC) → 11:00 UTC. Lisboa = UTC+1 → 12:00.
+      //     Subtraímos 60min → 10:00 UTC. Lisboa = UTC+1 → 11:00. ✅
+      dataNormalizada = new Date(dataLocal.getTime() - offsetMin * 60 * 1000);
     } else {
-      // Já vem com hora ou ISO — usa diretamente.
+      // Já vem com hora ou ISO — usa diretamente (assume que já está correto).
       dataNormalizada = new Date(dataStr);
     }
     if (isNaN(dataNormalizada.getTime())) {
@@ -328,6 +348,8 @@ exports.criarTarefa = async (req, res) => {
 
     // Valida utilizador_id se vier.
     let utilizadorValidado = null;
+    // Prompt 125 — Soft block: warning de conflito de horário (em vez de 409).
+    let conflitoWarning = null;
     if (utilizador_id) {
       if (!mongoose.isValidObjectId(utilizador_id)) {
         return res.status(400).json({ erro: 'utilizador_id inválido.' });
@@ -358,9 +380,14 @@ exports.criarTarefa = async (req, res) => {
 
       // Prompt 123 — Validação de Conflito de Horário.
       // Verifica se o staff já tem uma tarefa cuja hora de início ou fim
-      // se sobrepõe à hora que estamos a tentar marcar. Se sim, 409.
+      // se sobrepõe à hora que estamos a tentar marcar.
       // SÓ aplica quando a tarefa tem hora real (>= 08:00) — tarefas sem
       // hora (00:00) são "all-day" e ainda não estão agendadas.
+      //
+      // Prompt 125 — Soft block: em vez de rejeitar com 409, definimos um
+      // `conflitoWarning` e deixamos a tarefa ser criada. O warning é
+      // incluído na resposta (201) para o gestor ser avisado. O conflito
+      // tem prioridade sobre o warning logístico (distância entre tarefas).
       const tempoMinutos = Number(tempo_limpeza_minutos) || propriedade.tempo_limpeza_minutos || 45;
       const horaLocal = dataNormalizada.getHours();
       if (horaLocal >= 8) {
@@ -391,10 +418,8 @@ exports.criarTarefa = async (req, res) => {
             const horaExist = new Date(tExist.data).toLocaleTimeString('pt-PT', {
               hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Lisbon',
             });
-            return res.status(409).json({
-              erro: `O funcionário já tem uma tarefa agendada neste horário (${horaExist} — ${tExist.propriedade_id?.nome ?? 'Propriedade'}).`,
-              codigo: 'CONFLITO_HORARIO',
-            });
+            conflitoWarning = `O funcionário já tem uma tarefa agendada neste horário (${horaExist} — ${tExist.propriedade_id?.nome ?? 'Propriedade'}).`;
+            break; // não bloqueia — só regista o warning
           }
         }
       }
@@ -447,8 +472,11 @@ exports.criarTarefa = async (req, res) => {
       );
     }
 
+    // Prompt 125 — Soft block de conflitos: o warning de conflito (se houver)
+    // tem prioridade sobre o warning logístico (distância).
     const resposta = { tarefa: nova };
     if (warning) resposta.warning = warning;
+    if (conflitoWarning) resposta.warning = conflitoWarning;
     return res.status(201).json(resposta);
   } catch (err) {
     console.error('❌ criarTarefa:', err.message);

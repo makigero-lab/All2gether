@@ -427,10 +427,10 @@ exports.reportarAvaria = async (req, res) => {
 
     // Cria uma NOVA tarefa de manutenção para a mesma propriedade,
     // para o gestor atribuir a alguém (ex: reparador).
+    // Prompt 125 — usa meia-noite LOCAL (00:00 no fuso do servidor) e não
+    // UTC midnight, que em Lisboa (UTC+1) apareceria como 01:00.
     const hoje = new Date();
-    const hojeMeiaNoite = new Date(
-      Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth(), hoje.getUTCDate())
-    );
+    const hojeMeiaNoite = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
 
     const novaTarefaManutencao = await Tarefa.create({
       empresa_id: tarefa.empresa_id,

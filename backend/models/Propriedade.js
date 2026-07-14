@@ -56,6 +56,12 @@ const propriedadeSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
+    // Prompt 125 — Observações livres da propriedade (notas internas do gestor).
+    observacoes: {
+      type: String,
+      default: '',
+      trim: true,
+    },
     // v1.61.0 (Prompt 84) — Capacidade máxima de hóspedes (vinda do Smoobu:
     // apt.rooms.maxOccupancy ou apt.maxOccupancy). Usada para estimar tempo
     // de limpeza e para display no gestor.
