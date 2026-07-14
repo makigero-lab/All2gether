@@ -5,6 +5,7 @@ import {
   CalendarRange,
   Loader2,
   AlertCircle,
+  AlertTriangle,
   RefreshCw,
   MapPin,
   Clock,
@@ -310,6 +311,9 @@ export default function CalendarioOperacionalPage() {
   const [erro, setErro] = useState<string | null>(null);
   // Prompt 114 — Toast de warning (ex.: distância entre tarefas do mesmo dia).
   const [warningToast, setWarningToast] = useState<string | null>(null);
+  // Prompt 135 — Conflito de horário (soft block): modal de confirmação.
+  const [conflitoModal, setConflitoModal] = useState<{ warning: string; tarefaCriada?: TarefaCalendario } | null>(null);
+  const [conflitoForcar, setConflitoForcar] = useState(false);
 
   // SSR-safe mount: FullCalendar só pode ser renderizado no cliente.
   const [mounted, setMounted] = useState(false);
@@ -473,16 +477,20 @@ export default function CalendarioOperacionalPage() {
       const startLocal = `${dataStr}T${String(hIni).padStart(2, "0")}:${String(mIni).padStart(2, "0")}:00`;
       const endLocal = `${dataStr}T${String(hFim).padStart(2, "0")}:${String(mFim).padStart(2, "0")}:00`;
 
+      // Prompt 135 — Se a tarefa tem um warning de conflito (criada em sobreposição),
+      // usa borda âmbar para alertar visualmente.
+      const temConflito = !!(t as TarefaCalendario & { _conflito?: boolean })._conflito;
+
       return {
         id: t._id,
         title: t.propriedade_id?.nome ?? "—",
         start: startLocal,
         end: endLocal,
-        backgroundColor: paleta.bg,
-        borderColor: paleta.border,
-        textColor: paleta.text,
+        backgroundColor: temConflito ? "#fef3c7" : paleta.bg,
+        borderColor: temConflito ? "#f59e0b" : paleta.border,
+        textColor: temConflito ? "#92400e" : paleta.text,
         extendedProps: t,
-        classNames,
+        classNames: temConflito ? [...classNames, "fc-evt-conflito"] : classNames,
       } as EventInput;
     });
   }, [tarefas]);
@@ -750,7 +758,37 @@ export default function CalendarioOperacionalPage() {
           tipo: novaForm.tipo,
         }
       );
-      if (res.warning) setWarningToast(res.warning);
+      if (res.warning) {
+        const temConflito = res.warning.toLowerCase().includes("horário");
+        if (temConflito && !conflitoForcar) {
+          // 1º clique com conflito: abre modal de confirmação.
+          // A tarefa JÁ FOI CRIADA pelo backend (soft block). Mostramos o
+          // modal para o gestor confirmar que quer manter a tarefa duplicada.
+          setConflitoModal({
+            warning: res.warning,
+            tarefaCriada: res.tarefa,
+          });
+          setNovaForm({
+            propriedade_id: "",
+            utilizador_id: "",
+            data: "",
+            hora: "",
+            check_in: "",
+            check_out: "",
+            hospedes: "",
+            nome_hospede: "",
+            tempo_limpeza_minutos: "45",
+            tipo: "limpeza",
+          });
+          setMostrarNovaTarefa(false);
+          await carregarTarefas();
+          setNovaTarefaLoading(false);
+          return;
+        }
+        // 2º clique (conflitoForcar=true) ou warning de distância: mostra toast.
+        setWarningToast(res.warning);
+      }
+      setConflitoForcar(false);
       setNovaForm({
         propriedade_id: "",
         utilizador_id: "",
@@ -1656,6 +1694,60 @@ export default function CalendarioOperacionalPage() {
                 Criar Tarefa
               </>
             )}
+          </Button>
+        </DialogFooter>
+      </Dialog>
+
+      {/* Prompt 135 — Modal de Confirmação de Conflito de Horário */}
+      <Dialog open={conflitoModal !== null} onOpenChange={(o) => !o && setConflitoModal(null)}>
+        <DialogHeader>
+          <div>
+            <DialogTitle className="flex items-center gap-2 text-amber-600">
+              <AlertTriangle className="h-5 w-5" />
+              Conflito de Horário Detetado
+            </DialogTitle>
+            <DialogDescription>
+              {conflitoModal?.warning || "O funcionário já tem uma tarefa agendada neste horário."}
+              <br />
+              A tarefa foi criada, mas fica marcada com cor de alerta.
+              Queres mantê-la ou voltar atrás?
+            </DialogDescription>
+          </div>
+          <DialogClose onClick={() => setConflitoModal(null)} />
+        </DialogHeader>
+        <DialogContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Se mantiveres a tarefa, ela aparecerá no calendário com uma{" "}
+            <strong className="text-amber-600">borda âmbar</strong> para alertar
+            do sobre-agendamento. Podes cancelá-la depois se necessário.
+          </p>
+        </DialogContent>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="destructive"
+            onClick={async () => {
+              // Cancela a tarefa criada em conflito.
+              if (conflitoModal?.tarefaCriada?._id) {
+                try {
+                  await adminPatch(`/api/gestor/tarefas/${conflitoModal.tarefaCriada._id}/estado`, { estado: "cancelada" });
+                  await carregarTarefas();
+                } catch (e) {
+                  setErro("Não foi possível cancelar a tarefa em conflito.");
+                }
+              }
+              setConflitoModal(null);
+            }}
+          >
+            Voltar Atrás (Cancelar Tarefa)
+          </Button>
+          <Button
+            type="button"
+            variant="default"
+            className="bg-amber-600 hover:bg-amber-700"
+            onClick={() => setConflitoModal(null)}
+          >
+            Manter Tarefa
           </Button>
         </DialogFooter>
       </Dialog>
