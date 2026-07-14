@@ -756,3 +756,88 @@ exports.reportarAtraso = async (req, res) => {
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
   }
 };
+
+/* ------------------------------------------------------------------ */
+/* PATCH /api/staff/tarefas/:id/checklist/:seccaoIndex/item/:itemIndex */
+/* Prompt 133 — Toggle item da checklist dinâmica                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Marca/desmarca um item específico da checklist_dinamica de uma tarefa.
+ * O staff só pode alterar as SUAS tarefas. Se a tarefa estiver concluída,
+ * não permite alterar (checklist bloqueada).
+ *
+ * Body: { concluido: boolean } (opcional — se não vier, alterna)
+ *
+ * Resposta 200: { tarefa, item }
+ */
+exports.toggleChecklistItem = async (req, res) => {
+  try {
+    const utilizadorId = req.user && req.user.id;
+    if (!utilizadorId) {
+      return res.status(401).json({ erro: 'Não autenticado.' });
+    }
+
+    const { id, seccaoIndex, itemIndex } = req.params;
+
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ erro: 'ID de tarefa inválido.' });
+    }
+
+    const secIdx = parseInt(seccaoIndex, 10);
+    const itemIdx = parseInt(itemIndex, 10);
+
+    if (Number.isNaN(secIdx) || Number.isNaN(itemIdx) || secIdx < 0 || itemIdx < 0) {
+      return res.status(400).json({ erro: 'Índices inválidos.' });
+    }
+
+    // Busca a tarefa — só do próprio utilizador.
+    const tarefa = await Tarefa.findOne({
+      _id: id,
+      utilizador_id: utilizadorId,
+    });
+
+    if (!tarefa) {
+      return res.status(404).json({ erro: 'Tarefa não encontrada.' });
+    }
+
+    if (tarefa.estado === 'concluida') {
+      return res.status(400).json({ erro: 'Não podes alterar a checklist de uma tarefa concluída.' });
+    }
+
+    // Valida índices.
+    if (!tarefa.checklist_dinamica || !tarefa.checklist_dinamica[secIdx]) {
+      return res.status(400).json({ erro: 'Secção não encontrada na checklist.' });
+    }
+
+    const sec = tarefa.checklist_dinamica[secIdx];
+    if (!sec.items || !sec.items[itemIdx]) {
+      return res.status(400).json({ erro: 'Item não encontrado na checklist.' });
+    }
+
+    // Toggle (ou usa o valor do body).
+    const novoValor = typeof req.body?.concluido === 'boolean'
+      ? req.body.concluido
+      : !sec.items[itemIdx].concluido;
+
+    // Atualiza diretamente no array (positional operator).
+    tarefa.checklist_dinamica[secIdx].items[itemIdx].concluido = novoValor;
+    await tarefa.save();
+
+    console.log(
+      `[toggleChecklistItem] Tarefa ${tarefa._id} secção ${secIdx} item ${itemIdx} → ${novoValor}`
+    );
+
+    return res.status(200).json({
+      tarefa,
+      item: {
+        seccao: sec.nome,
+        texto: sec.items[itemIdx].texto,
+        concluido: novoValor,
+      },
+    });
+  } catch (err) {
+    console.error('❌ toggleChecklistItem:', err.message);
+    return res.status(500).json({ erro: 'Erro interno do servidor.' });
+  }
+};

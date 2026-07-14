@@ -33,6 +33,7 @@ const {
   concluirTarefa,
   reportarAvaria,
   reportarAtraso,
+  toggleChecklistItem,
 } = require('../controllers/staffController');
 
 router.get('/ausencias', auth, minhasAusencias);
@@ -44,5 +45,7 @@ router.post('/falta-hoje', auth, faltaHoje);
 router.patch('/tarefas/:id/concluir', auth, concluirTarefa);
 router.post('/tarefas/:id/avaria', auth, reportarAvaria);
 router.post('/tarefas/:id/atraso', auth, reportarAtraso);
+// Prompt 133 — Toggle item da checklist dinâmica
+router.patch('/tarefas/:id/checklist/:seccaoIndex/item/:itemIndex', auth, toggleChecklistItem);
 
 module.exports = router;

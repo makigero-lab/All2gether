@@ -136,6 +136,30 @@ export interface TarefaMock {
   capacidade_hospedes?: number | null;
   // Prompt 126 — Observações/notes internas da propriedade (ex.: regras de acesso).
   observacoes_propriedade?: string | null;
+  // Prompt 133 — Checklist dinâmica (snapshot do ModeloChecklist associado à
+  // propriedade no momento da criação da tarefa). Quando existe, o detalhe do
+  // staff renderiza secções + items em vez da checklist flat (array de strings).
+  checklist_dinamica?: Array<{
+    nome: string;
+    items: Array<{ texto: string; concluido: boolean }>;
+  }>;
+}
+
+/**
+ * Prompt 133 — Modelo de Checklist (template gerido pelo gestor).
+ * Cada modelo pertence a uma empresa e tem secções com items.
+ */
+export interface ModeloChecklistDTO {
+  _id: string;
+  empresa_id: string;
+  nome: string;
+  descricao?: string;
+  seccoes: Array<{
+    nome: string;
+    items: string[];
+  }>;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 /** Prompt 95 — Detalhes da reserva Smoobu associada a uma tarefa. */
@@ -160,6 +184,8 @@ export interface PropriedadeDTO {
   capacidade_hospedes?: number | null;
   // Prompt 92 (Fase 1.5) — Funcionário preferencial (Algoritmo VIP).
   funcionario_preferencial_id?: string | null;
+  // Prompt 133 — Referência ao ModeloChecklist (template dinâmico).
+  modelo_checklist_id?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }

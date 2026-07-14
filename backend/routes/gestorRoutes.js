@@ -49,6 +49,8 @@ const {
 } = require('../controllers/gestorController');
 const { reportarAtrasoTarefa, criarTarefa, atribuirTarefa, reatribuirTarefa, atualizarEstadoTarefa, apagarTarefasFuturas, listarIndisponiveisData, autoAtribuirTarefas } = require('../controllers/tarefaController');
 const { sincronizarReservas, getPropriedadesSmoobu, sincronizarPropriedades, importarPropriedades } = require('../controllers/smoobuController');
+// Prompt 133 — CRUD de Modelos de Checklist
+const { listarModelos, criarModelo, obterModelo, atualizarModelo, apagarModelo } = require('../controllers/checklistController');
 
 // Bootstrap do ambiente de testes — Cliente Zero. PÚBLICO (sem auth).
 router.get('/setup', setupClienteZero);
@@ -139,6 +141,13 @@ router.post('/equipa/:id/falta-subita', auth, isGestor, reportarFaltaSubita);
 
 // Baixa prolongada / férias — redistribuição de tarefas futuras.
 router.post('/equipa/:id/baixa', auth, isGestor, registarBaixaProlongada);
+
+// Prompt 133 — CRUD de Modelos de Checklist
+router.get('/checklists', auth, isGestor, listarModelos);
+router.post('/checklists', auth, isGestor, criarModelo);
+router.get('/checklists/:id', auth, isGestor, obterModelo);
+router.put('/checklists/:id', auth, isGestor, atualizarModelo);
+router.delete('/checklists/:id', auth, isGestor, apagarModelo);
 
 // Auditoria.
 router.get('/auditoria', auth, isGestor, getAuditoria);

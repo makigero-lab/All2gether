@@ -68,6 +68,13 @@ export default function DetalheTarefaPage({
     capacidade_hospedes: tarefa.propriedade_id?.capacidade_hospedes ?? null,
     // Prompt 126 — Observações/notas internas da propriedade (regras de acesso, etc.).
     observacoes_propriedade: tarefa.propriedade_id?.observacoes ?? null,
+    // Prompt 133 — Checklist dinâmica (snapshot do ModeloChecklist).
+    // Se a tarefa tem snapshot, o detalhe do staff renderiza secções em vez
+    // da checklist flat. Caso contrário (checklist_dinamica vazia ou null),
+    // cai no fallback do array de strings do propriedade_id.checklist.
+    checklist_dinamica: Array.isArray(tarefa.checklist_dinamica)
+      ? tarefa.checklist_dinamica
+      : undefined,
   };
 
   // Usa a checklist real da propriedade (vinda do populate do backend).

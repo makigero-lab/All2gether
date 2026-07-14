@@ -88,6 +88,21 @@ const tarefaSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
+    // Prompt 133 — Checklist Dinâmica (snapshot de ModeloChecklist).
+    // Estrutura: [{ nome: "Quartos", items: [{ texto: "Trocar roupa", concluido: false }] }]
+    // Copiada do ModeloChecklist da propriedade no momento da criação da tarefa.
+    // O staff marca/desmarca items individuais via PATCH.
+    checklist_dinamica: [
+      {
+        nome: { type: String, required: true, trim: true },
+        items: [
+          {
+            texto: { type: String, required: true, trim: true },
+            concluido: { type: Boolean, default: false },
+          },
+        ],
+      },
+    ],
     // Prompt 92 (Fase 1.5) — Detalhes da reserva Smoobu associada à tarefa.
     // Snapshot dos dados da reserva no momento da criação/atualização da
     // tarefa, para auditoria e display (cartão da tarefa, detalhe do staff,

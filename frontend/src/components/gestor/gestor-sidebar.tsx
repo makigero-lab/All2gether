@@ -16,6 +16,7 @@ import {
   Sparkles,
   LogOut,
   Bell,
+  ListChecks,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -56,6 +57,8 @@ const gestorNavItems: NavItem[] = [
   { label: "Ausências / Férias", href: "/gestor/ausencias", icon: CalendarOff },
   { label: "Relatórios", href: "/gestor/relatorios", icon: BarChart3 },
   { label: "Notificações", href: "/gestor/notificacoes", icon: Bell },
+  // Prompt 134 — Modelos de Checklist (configuração).
+  { label: "Checklists", href: "/gestor/configuracoes/checklists", icon: ListChecks },
 ];
 
 /**

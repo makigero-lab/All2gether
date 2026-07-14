@@ -56,6 +56,15 @@ const propriedadeSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
+    // Prompt 133 — Referência ao ModeloChecklist (template dinâmico).
+    // Se definido, as novas tarefas de limpeza copiam as secções/items
+    // deste modelo para checklist_dinamica na Tarefa (snapshot).
+    modelo_checklist_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ModeloChecklist',
+      default: null,
+      index: true,
+    },
     // Prompt 125 — Observações livres da propriedade (notas internas do gestor).
     observacoes: {
       type: String,
