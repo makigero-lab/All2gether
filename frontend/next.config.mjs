@@ -6,25 +6,14 @@ const nextConfig = {
 };
 
 /**
- * Configuração PWA — versão standard segura (Prompt 121).
+ * Configuração PWA — Prompt 129.
  *
- * Prompt 121 — Revertida para a configuração minimalista. O runtimeCaching
- * experimental com NetworkFirst para /_next/static/chunks/ foi REMOVIDO
- * porque podia estar a bloquear o build silenciosamente (o Workbox gerava
- * SW com referências a caches que não existiam, causando ecrã branco).
+ * Prompt 129 — Adicionado publicExcludes para /api/ e /gestor/relatorios
+ * para o Service Worker NÃO intercetar chamadas de API dinâmicas. Sem isto,
+ * o Workbox interceta POST /api/gestor/relatorios e devolve "no-response"
+ * porque não tem cache para POST e falha o fetch.
  *
- * Mantemos apenas:
- *   - dest: "public" (gera o SW na pasta public)
- *   - register: true (auto-regista o SW)
- *   - skipWaiting + clientsClaim (SW novo assume controlo imediatamente)
- *   - disable em desenvolvimento (evita cache stale)
- *   - customWorkerSrc: "worker" (Web Push notifications)
- *
- * A resiliência a ChunkLoadError fica a cargo do skipWaiting+clientsClaim,
- * que fazem o SW novo substituir o antigo sem precisar de runtimeCaching
- * customizado. Os chunks do Next.js já têm hashes no nome — quando o SW
- * faz skipWaiting, o browser vai buscar os chunks novos ao servidor na
- * próxima navegação, sem precisar de NetworkFirst forçado.
+ * Mantém skipWaiting + clientsClaim do Prompt 121.
  */
 const withPWA = withPWAInit({
   dest: "public",
@@ -33,6 +22,15 @@ const withPWA = withPWAInit({
   clientsClaim: true,
   disable: process.env.NODE_ENV === "development",
   customWorkerSrc: "worker",
+  // Prompt 129 — Exclui rotas dinâmicas de API da intercetação do SW.
+  // O SW não deve cachear nem intercetar chamadas a /api/ (são dinâmicas,
+  // requerem cookies de auth, e POST não pode ser cached). Sem isto, o
+  // Workbox gera "FetchEvent resulted in a network error" + "no-response".
+  publicExcludes: [
+    "/api/*",
+    "/gestor/relatorios/*",
+    "/_next/data/*",
+  ],
 });
 
 export default withPWA(nextConfig);

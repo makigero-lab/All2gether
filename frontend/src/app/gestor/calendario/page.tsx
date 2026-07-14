@@ -429,16 +429,14 @@ export default function CalendarioOperacionalPage() {
         } as EventInput;
       }
 
+      // Prompt 129 — Extrai a hora diretamente da string ISO sem converter fuso.
+      // O FullCalendar com timeZone: "local" aplica o offset do browser aos
+      // ISO strings com Z. Para evitar o time shift (11:00 → 12:00), usamos
+      // extrairHoraISO que faz parse manual da string. Depois construímos
+      // uma string LOCAL (sem Z) para o FullCalendar não converter.
       const inicio = parsearDataSegura(t.data) ?? new Date();
-      // Prompt 113 — Tarefas sem hora real de trabalho (criadas só com data,
-      // ainda não atribuídas pelo load balancer) são renderizadas como
-      // "todo o dia" (all-day). Isto garante que aparecem nas Vistas Semanal
-      // e Diária (na faixa de all-day no topo) em vez de ficarem invisíveis
-      // abaixo do slotMinTime 08:00.
       const semHoraReal = !temHoraReal(t.data);
-      // Prompt 74, ponto 5 — cores pastel por estado
       const paleta = paletaPorEstado(t.estado);
-      // Prompt 80, ponto 1 — classe extra para destaque forte de por_atribuir.
       const classNames =
         t.estado === "por_atribuir" ? ["fc-evt-por-atribuir"] : [];
 
@@ -457,12 +455,29 @@ export default function CalendarioOperacionalPage() {
         } as EventInput;
       }
 
-      const fim = new Date(inicio.getTime() + (t.tempo_limpeza_minutos || 45) * 60000);
+      // Prompt 129 — Constrói a data/hora como string LOCAL (sem Z) para o
+      // FullCalendar não aplicar offset. extrairHoraISO devolve "HH:mm" do
+      // ISO sem conversão de fuso. Combinamos com a data YYYY-MM-DD.
+      const dataStr = t.data.slice(0, 10); // YYYY-MM-DD do ISO
+      const horaInicio = extrairHoraISO(t.data); // "HH:mm" sem conversão
+      const [hIni, mIni] = horaInicio !== "—" ? horaInicio.split(":").map(Number) : [0, 0];
+
+      // Calcula a hora de fim (início + tempo_limpeza) matematicamente.
+      const tempoMin = t.tempo_limpeza_minutos || 45;
+      let totalFim = hIni * 60 + mIni + tempoMin;
+      totalFim = totalFim % (24 * 60);
+      const hFim = Math.floor(totalFim / 60);
+      const mFim = totalFim % 60;
+
+      // Strings LOCAIS (sem Z) — o FullCalendar não converte fuso.
+      const startLocal = `${dataStr}T${String(hIni).padStart(2, "0")}:${String(mIni).padStart(2, "0")}:00`;
+      const endLocal = `${dataStr}T${String(hFim).padStart(2, "0")}:${String(mFim).padStart(2, "0")}:00`;
+
       return {
         id: t._id,
         title: t.propriedade_id?.nome ?? "—",
-        start: inicio.toISOString(),
-        end: fim.toISOString(),
+        start: startLocal,
+        end: endLocal,
         backgroundColor: paleta.bg,
         borderColor: paleta.border,
         textColor: paleta.text,

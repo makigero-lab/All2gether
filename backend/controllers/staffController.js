@@ -109,12 +109,16 @@ exports.criarAusencia = async (req, res) => {
     }
 
     // Valida sobreposição.
+    // Prompt 130 — SÓ bloqueia se houver ausência com estado 'pendente' ou
+    // 'aprovada'. 'rejeitada' e 'pendente_emergencia' NÃO bloqueiam.
     const sobreposta = await Ausencia.findOne({
       utilizador_id: utilizadorId,
       data_inicio: { $lte: fim },
       data_fim: { $gte: inicio },
+      estado: { $in: ['pendente', 'aprovada'] },
     });
     if (sobreposta) {
+      console.log(`[criarAusencia] Conflito detetado: ausência ${sobreposta._id} estado=${sobreposta.estado} início=${sobreposta.data_inicio} fim=${sobreposta.data_fim}`);
       return res.status(409).json({
         erro: 'Já existe uma ausência registada que se sobrepõe a este período.',
       });
@@ -226,12 +230,16 @@ exports.faltaHoje = async (req, res) => {
     );
 
     // Valida sobreposição: não pode haver outra ausência que cubra hoje.
+    // Prompt 130 — SÓ bloqueia se houver ausência com estado 'pendente' ou
+    // 'aprovada' (ou 'pendente_emergencia' para faltas súbitas). 'rejeitada' NÃO.
     const sobreposta = await Ausencia.findOne({
       utilizador_id: utilizadorId,
       data_inicio: { $lte: hoje },
       data_fim: { $gte: hoje },
+      estado: { $ne: 'rejeitada' },
     });
     if (sobreposta) {
+      console.log(`[faltaHoje] Conflito detetado: ausência ${sobreposta._id} estado=${sobreposta.estado}`);
       return res.status(409).json({
         erro: `Já tens uma ausência registada para hoje (estado: ${sobreposta.estado}).`,
       });
