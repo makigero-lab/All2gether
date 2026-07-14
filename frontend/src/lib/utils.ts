@@ -125,38 +125,44 @@ export function formatarDataSegura(
 }
 
 /**
- * Prompt 127 — Extrai a hora (HH:mm) diretamente da string ISO sem aplicar
- * a conversão de fuso horário local do browser.
+ * Prompt 127/132 — Extrai a hora (HH:mm) de uma string ISO, convertendo
+ * de UTC para o fuso de Portugal (Europe/Lisbon).
  *
- * O problema: `new Date(iso).getHours()` usa a timezone do BROWSER (Lisboa
- * UTC+1 no verão). Se o backend gravou a tarefa como `new Date("2026-07-15T11:00")`
- * (LOCAL do servidor), o ISO enviado é "2026-07-15T10:00:00.000Z" (UTC). O
- * browser converte de UTC para local (+1h) e mostra 12:00 em vez de 11:00.
+ * O backend (Prompt 128) grava a hora de Portugal como UTC ajustado:
+ * se o gestor envia "11:00", o backend grava como "10:00:00.000Z" (verão UTC+1).
  *
- * Esta função faz parse MANUAL da string ISO, extraindo a hora diretamente
- * do texto (não converte para Date). Assim, "2026-07-15T11:00:00.000Z" → "11:00",
- * independentemente do fuso do browser.
+ * Esta função converte o instante UTC de volta para a hora de Portugal
+ * usando Intl.DateTimeFormat com timeZone: 'Europe/Lisbon'. Assim,
+ * "2026-07-15T10:00:00.000Z" → "11:00" (verão) ✅
  *
  * Se a string não tiver componente de tempo, devolve "—".
+ * Se for 00:00 (meia-noite em Portugal), devolve "—" (sem hora real).
  */
 export function extrairHoraISO(iso: string | null | undefined): string {
   if (!iso) return "—";
   const str = String(iso).trim();
 
-  // Tenta extrair HH:mm da string ISO (após o "T").
-  // Formatos suportados: "2026-07-15T11:00:00.000Z", "2026-07-15T11:00",
-  // "2026-07-15 11:00:00" (Safari fallback).
-  const match = str.match(/T(\d{2}):(\d{2})/) || str.match(/\s(\d{2}):(\d{2})/);
-  if (!match) return "—";
+  // Se não tem componente de tempo, não há hora.
+  if (!str.includes("T") && !str.match(/\s\d{2}:\d{2}/)) return "—";
 
-  const horas = parseInt(match[1], 10);
-  const minutos = parseInt(match[2], 10);
-  if (Number.isNaN(horas) || Number.isNaN(minutos)) return "—";
+  try {
+    const d = parsearDataSegura(str);
+    if (!d) return "—";
 
-  // Se for 00:00 (meia-noite), considera "sem hora real" → devolve "—".
-  if (horas === 0 && minutos === 0) return "—";
+    // Converte para hora de Portugal usando Intl.
+    const horaPT = new Intl.DateTimeFormat("pt-PT", {
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: "Europe/Lisbon",
+    }).format(d);
 
-  return `${String(horas).padStart(2, "0")}:${String(minutos).padStart(2, "0")}`;
+    // Se for "00:00" (meia-noite em Portugal), considera sem hora real.
+    if (horaPT === "00:00") return "—";
+
+    return horaPT;
+  } catch {
+    return "—";
+  }
 }
 
 /**

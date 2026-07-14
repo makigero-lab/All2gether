@@ -235,19 +235,26 @@ export default function RelatoriosPage() {
 
   // Prompt 124-Fix1 — Exportar PDF com html2pdf.js (A4, inclui resumo IA + tabelas + gráficos).
   const exportarPDF = useCallback(async () => {
-    if (!data || !pdfExportRef.current) return;
+    if (!data) return;
     setPdfLoading(true);
+    setPdfErro(null);
     try {
-      // Prompt 126 — Espera 500ms para garantir que o React acabou de
-      // renderizar o resumo IA (e restante conteúdo) no div de exportação
-      // antes de o html2canvas o capturar. Sem isto, em pedidos rápidos o
-      // PDF sai em branco (o conteúdo ainda não estava no DOM).
-      // Prompt 131b — Aumentado para 1000ms: o html2canvas precisa de mais
-      // tempo para garantir que TODOS os elementos (incluindo o resumo IA,
-      // se existir) estão renderizados no DOM. Sem isto, em máquinas mais
-      // lentas o PDF sai em branco (especialmente quando o aiResumo acabou
-      // de ser gerado).
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Força re-render do pdfExportRef (se ainda não estiver montado).
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Verifica se o ref tem conteúdo (pode não estar montado se data mudou).
+      if (!pdfExportRef.current) {
+        // Tenta novamente após mais 500ms.
+        await new Promise(resolve => setTimeout(resolve, 500));
+        if (!pdfExportRef.current) {
+          throw new Error('Não foi possível preparar o documento para exportação.');
+        }
+      }
+
+      // Se há resumo IA, espera mais 500ms para garantir que está renderizado.
+      if (aiResumo) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
 
       // Import dinâmico para evitar problemas de SSR com html2pdf.js.
       const html2pdf = (await import("html2pdf.js")).default;
@@ -798,10 +805,10 @@ export default function RelatoriosPage() {
                 position: "fixed",
                 left: 0,
                 top: 0,
-                zIndex: -1,
-                opacity: 0,
+                zIndex: -50,
+                opacity: 0.01,
                 pointerEvents: "none",
-                width: "794px", // ~A4 a 96 DPI (210mm)
+                width: "794px",
                 background: "#ffffff",
                 color: "#0f172a",
                 padding: "24px",

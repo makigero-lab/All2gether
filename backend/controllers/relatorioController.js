@@ -492,7 +492,9 @@ async function chamarGemini(contexto) {
   const prompt = construirPrompt(contexto);
 
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  // Gemini 2.0 Flash (free tier, disponível em todas as contas).
+  // gemini-1.5-flash foi descontinuado — retorna 404.
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
   const result = await model.generateContent({
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
