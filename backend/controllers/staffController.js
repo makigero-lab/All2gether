@@ -124,6 +124,19 @@ exports.criarAusencia = async (req, res) => {
       });
     }
 
+    // Prompt 131 — Remove o índice único antigo antes de tentar criar.
+    try {
+      const indexes = await Ausencia.collection.listIndexes().toArray();
+      for (const idx of indexes) {
+        if (idx.unique && idx.key && idx.key.utilizador_id && idx.key.data_inicio) {
+          console.log(`[criarAusencia] A remover índice único antigo: ${idx.name}`);
+          await Ausencia.collection.dropIndex(idx.name);
+        }
+      }
+    } catch (idxErr) {
+      // Não bloqueia se falhar.
+    }
+
     const nova = await Ausencia.create({
       utilizador_id: utilizadorId,
       empresa_id: empresaId,
@@ -252,6 +265,21 @@ exports.faltaHoje = async (req, res) => {
       });
     }
 
+    // Prompt 131 — Remove o índice único antigo antes de tentar criar.
+    // Garante que o erro 11000 não ocorre mesmo se o arranque do servidor
+    // ainda não tiver removido o índice.
+    try {
+      const indexes = await Ausencia.collection.listIndexes().toArray();
+      for (const idx of indexes) {
+        if (idx.unique && idx.key && idx.key.utilizador_id && idx.key.data_inicio) {
+          console.log(`[faltaHoje] A remover índice único antigo: ${idx.name}`);
+          await Ausencia.collection.dropIndex(idx.name);
+        }
+      }
+    } catch (idxErr) {
+      // Não bloqueia se falhar.
+    }
+
     const nova = await Ausencia.create({
       utilizador_id: utilizadorId,
       empresa_id: empresaId,
@@ -298,6 +326,35 @@ exports.faltaHoje = async (req, res) => {
     return res.status(201).json({ ausencia: nova });
   } catch (err) {
     console.error('❌ faltaHoje:', err.message);
+    // Prompt 131 — Tratamento do erro 11000 (índice único antigo).
+    if (err.code === 11000) {
+      console.error('[faltaHoje] Erro 11000 (duplicate key). Índice único antigo ainda existe.');
+      // Tenta remover o índice e recriar.
+      try {
+        const indexes = await Ausencia.collection.listIndexes().toArray();
+        for (const idx of indexes) {
+          if (idx.unique && idx.key && idx.key.utilizador_id && idx.key.data_inicio) {
+            await Ausencia.collection.dropIndex(idx.name);
+            console.log(`[faltaHoje] Índice ${idx.name} removido. A tentar novamente...`);
+          }
+        }
+        // Re-tenta criar.
+        const nova = await Ausencia.create({
+          utilizador_id: req.user.id,
+          empresa_id: req.user.empresa_id,
+          data_inicio: new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate())),
+          data_fim: new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate())),
+          tipo: 'doenca',
+          estado: 'pendente_emergencia',
+          justificacao: (req.body && req.body.justificacao) ? String(req.body.justificacao).trim() : '',
+        });
+        return res.status(201).json({ ausencia: nova });
+      } catch (err2) {
+        return res.status(409).json({
+          erro: 'Já existe uma ausência para hoje. O índice único será removido no próximo arranque.',
+        });
+      }
+    }
     if (err.name === 'ValidationError') {
       return res.status(400).json({ erro: err.message });
     }

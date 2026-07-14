@@ -185,6 +185,19 @@ exports.registarAusencia = async (req, res) => {
       });
     }
 
+    // Prompt 131 — Remove o índice único antigo antes de tentar criar.
+    try {
+      const indexes = await Ausencia.collection.listIndexes().toArray();
+      for (const idx of indexes) {
+        if (idx.unique && idx.key && idx.key.utilizador_id && idx.key.data_inicio) {
+          console.log(`[registarAusencia] A remover índice único antigo: ${idx.name}`);
+          await Ausencia.collection.dropIndex(idx.name);
+        }
+      }
+    } catch (idxErr) {
+      // Não bloqueia se falhar.
+    }
+
     // v1.24.0: admin a criar ausência diretamente → estado 'aprovada'
     // (o fluxo de aprovação só se aplica aos pedidos do staff via /api/auth/me/ausencias).
     const nova = await Ausencia.create({
