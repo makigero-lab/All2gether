@@ -28,6 +28,7 @@ import {
   adminPut,
   type PropriedadeDTO,
   type UtilizadorDTO,
+  type ModeloChecklistDTO,
 } from "@/lib/api";
 
 /**
@@ -268,9 +269,29 @@ export default function PropriedadesPage() {
     tempo_limpeza_minutos: "45",
     checklist: "",
     funcionario_preferencial_id: "",
+    modelo_checklist_id: "",
   });
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editErro, setEditErro] = useState<string | null>(null);
+
+  // Prompt 134 — Lista de Modelos de Checklist da empresa (para o select no
+  // modal de edição). Carregada quando o modal abre.
+  const [modelosChecklist, setModelosChecklist] = useState<ModeloChecklistDTO[]>([]);
+  const [modelosChecklistLoading, setModelosChecklistLoading] = useState(false);
+
+  const carregarModelosChecklist = useCallback(async () => {
+    setModelosChecklistLoading(true);
+    try {
+      const data = await adminGet<{ modelos: ModeloChecklistDTO[] }>(
+        "/api/gestor/checklists"
+      );
+      setModelosChecklist(data.modelos ?? []);
+    } catch {
+      // Silencioso — o select aparece vazio mas não bloqueia a edição.
+    } finally {
+      setModelosChecklistLoading(false);
+    }
+  }, []);
 
   // Prompt 113 — Aplicar checklist padrão a todas as propriedades.
   const [checklistLoading, setChecklistLoading] = useState(false);
@@ -335,11 +356,15 @@ export default function PropriedadesPage() {
       tempo_limpeza_minutos: String(p.tempo_limpeza_minutos ?? 45),
       checklist: (p.checklist ?? []).join("\n"),
       funcionario_preferencial_id: p.funcionario_preferencial_id ?? "",
+      // Prompt 134 — Modelo de Checklist associado (string vazia = Nenhum).
+      modelo_checklist_id: p.modelo_checklist_id ?? "",
     });
     setEditErro(null);
     // Prompt 126 — Reset dos avisos de morada ao abrir o modal.
     setEditMoradaWarning(null);
     setEditMoradaConfirmada(false);
+    // Prompt 134 — Carrega os modelos de checklist para o select.
+    carregarModelosChecklist();
   }
 
   /** Submete a edição da propriedade. */
@@ -384,6 +409,10 @@ export default function PropriedadesPage() {
           // → null no backend (remove o preferencial).
           funcionario_preferencial_id:
             editForm.funcionario_preferencial_id.trim() || null,
+          // Prompt 134 — Modelo de Checklist associado. String vazia → null
+          // (sem modelo / usa checklist flat antigo).
+          modelo_checklist_id:
+            editForm.modelo_checklist_id.trim() || null,
           forcar_morada: editMoradaConfirmada || undefined,
         }
       );
@@ -941,6 +970,40 @@ export default function PropriedadesPage() {
                 Quando definido, o motor de atribuição dá prioridade a este
                 funcionário para limpezas desta propriedade (se estiver
                 disponível e dentro do limite de 8h/dia).
+              </p>
+            </div>
+
+            {/* Prompt 134 — Modelo de Checklist (template dinâmico) */}
+            <div className="space-y-1.5">
+              <label
+                htmlFor="edit-modelo-checklist"
+                className="text-sm font-medium"
+              >
+                Modelo de Checklist
+              </label>
+              <select
+                id="edit-modelo-checklist"
+                value={editForm.modelo_checklist_id}
+                onChange={(e) =>
+                  setEditForm((f) => ({
+                    ...f,
+                    modelo_checklist_id: e.target.value,
+                  }))
+                }
+                disabled={modelosChecklistLoading}
+                className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-60"
+              >
+                <option value="">Nenhum (usar checklist simples abaixo)</option>
+                {modelosChecklist.map((m) => (
+                  <option key={m._id} value={m._id}>
+                    {m.nome}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-muted-foreground">
+                {modelosChecklistLoading
+                  ? "A carregar modelos…"
+                  : "Quando definido, as novas tarefas de limpeza usam as secções e itens do modelo (snapshot). Gerir modelos em Checklists."}
               </p>
             </div>
 

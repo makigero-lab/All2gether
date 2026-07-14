@@ -21,6 +21,7 @@ import {
   Users,
   CalendarRange,
   ClipboardList,
+  Folder,
 } from "lucide-react";
 
 import { cn, parsearDataSegura } from "@/lib/utils";
@@ -97,6 +98,27 @@ export function DetalheTarefaClient({
   // Avaria. Mostra o estado final sem permitir editar.
   const jaConcluida = tarefa.estado === "concluida";
 
+  // Prompt 133 — Checklist dinâmica (snapshot do ModeloChecklist).
+  // Se existir e tiver pelo menos 1 item, renderiza secções em vez da
+  // checklist flat. Caso contrário, cai no comportamento antigo (array de
+  // strings do propriedade_id.checklist).
+  const seccoesDinamicas = (tarefa.checklist_dinamica ?? []).filter(
+    (s) => Array.isArray(s.items) && s.items.length > 0
+  );
+  const temChecklistDinamica = seccoesDinamicas.length > 0;
+
+  // Estado da checklist dinâmica — clona o snapshot para podermos fazer toggle
+  // local (optimistic) sem mutar o prop. Cada item mantém o seu concluido.
+  const [dinamica, setDinamica] = useState(() =>
+    seccoesDinamicas.map((s) => ({
+      nome: s.nome,
+      items: s.items.map((it) => ({
+        texto: it.texto,
+        concluido: jaConcluida ? true : it.concluido,
+      })),
+    }))
+  );
+
   const [itensMarcados, setItensMarcados] = useState<boolean[]>(
     // Se já estiver concluída, pré-marca todos os itens (reflete o final).
     () => checklist.map(() => jaConcluida)
@@ -119,11 +141,19 @@ export function DetalheTarefaClient({
   const [avariaResultado, setAvariaResultado] = useState<string | null>(null);
 
   // Número de itens concluídos e total — para o contador e a regra do botão.
-  const totalItens = checklist.length;
-  const itensConcluidos = useMemo(
-    () => itensMarcados.filter(Boolean).length,
-    [itensMarcados]
-  );
+  // Prompt 133 — Quando há checklist dinâmica, conta itens das secções.
+  const totalItens = temChecklistDinamica
+    ? dinamica.reduce((acc, s) => acc + s.items.length, 0)
+    : checklist.length;
+  const itensConcluidos = useMemo(() => {
+    if (temChecklistDinamica) {
+      return dinamica.reduce(
+        (acc, s) => acc + s.items.filter((i) => i.concluido).length,
+        0
+      );
+    }
+    return itensMarcados.filter(Boolean).length;
+  }, [temChecklistDinamica, dinamica, itensMarcados]);
   // Se a checklist estiver vazia, o botão fica sempre ativo (não há itens para marcar).
   const todasMarcadas = totalItens === 0 || itensConcluidos === totalItens;
 
@@ -133,6 +163,50 @@ export function DetalheTarefaClient({
       next[index] = value;
       return next;
     });
+  };
+
+  // Prompt 133 — Toggle de item da checklist dinâmica.
+  // Faz PATCH ao endpoint do staff passando seccaoIndex/itemIndex e atualiza
+  // o estado local OTIMISTICAMENTE. Em caso de erro, reverte.
+  const toggleItemDinamico = async (
+    seccaoIndex: number,
+    itemIndex: number,
+    novoValor: boolean
+  ) => {
+    // Snapshot do estado atual (para reverter se falhar).
+    const estadoAnterior = dinamica;
+
+    // Optimistic: atualiza local imediatamente.
+    setDinamica((prev) =>
+      prev.map((s, si) =>
+        si === seccaoIndex
+          ? {
+              ...s,
+              items: s.items.map((it, ii) =>
+                ii === itemIndex ? { ...it, concluido: novoValor } : it
+              ),
+            }
+          : s
+      )
+    );
+
+    try {
+      await adminPatch(
+        `/api/staff/tarefas/${tarefa.id}/checklist/${seccaoIndex}/item/${itemIndex}`,
+        { concluido: novoValor }
+      );
+      // Sucesso — mantém o estado optimistic.
+    } catch (e) {
+      // Erro — reverte ao estado anterior.
+      setDinamica(estadoAnterior);
+      setErroConcluir(
+        e instanceof Error
+          ? `Não foi possível atualizar o item: ${e.message}`
+          : "Erro ao atualizar item da checklist."
+      );
+      // Limpa a mensagem após 4s.
+      setTimeout(() => setErroConcluir(null), 4000);
+    }
   };
 
   const handleConcluir = async () => {
@@ -347,37 +421,103 @@ export function DetalheTarefaClient({
             </div>
           </CardHeader>
           <CardContent className="pt-0">
-            <ul className="space-y-1">
-              {checklist.map((item, index) => {
-                const checked = itensMarcados[index];
-                const checkboxId = `tarefa-${tarefa.id}-item-${index}`;
-                return (
-                  <li
-                    key={`${item}-${index}`}
-                    className={cn(
-                      "flex items-center gap-3 rounded-md px-3 py-3 transition-colors",
-                      checked ? "bg-emerald-50 dark:bg-emerald-950/30" : "hover:bg-accent"
-                    )}
-                  >
-                    <Checkbox
-                      id={checkboxId}
-                      checked={checked}
-                      onCheckedChange={(v) => toggleItem(index, v)}
-                      disabled={jaConcluida}
-                    />
-                    <label
-                      htmlFor={checkboxId}
+            {/* Prompt 133 — Checklist dinâmica (secções + items). */}
+            {temChecklistDinamica ? (
+              <div className="space-y-4">
+                {dinamica.map((sec, secIdx) => {
+                  const secTotal = sec.items.length;
+                  const secConcluidos = sec.items.filter((i) => i.concluido).length;
+                  return (
+                    <div key={`sec-${secIdx}`} className="space-y-1">
+                      {/* Sub-header da secção */}
+                      <div className="flex items-center justify-between gap-2 rounded-md bg-muted/60 px-3 py-2">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <Folder className="h-4 w-4 shrink-0 text-primary" />
+                          <span className="truncate text-sm font-semibold text-foreground">
+                            {sec.nome || "Secção"}
+                          </span>
+                        </div>
+                        <Badge
+                          variant={secConcluidos === secTotal ? "success" : "outline"}
+                          className="shrink-0 text-[10px]"
+                        >
+                          {secConcluidos}/{secTotal}
+                        </Badge>
+                      </div>
+                      {/* Items da secção */}
+                      <ul className="space-y-1">
+                        {sec.items.map((item, itemIdx) => {
+                          const checked = item.concluido;
+                          const checkboxId = `tarefa-${tarefa.id}-sec-${secIdx}-item-${itemIdx}`;
+                          return (
+                            <li
+                              key={`${secIdx}-${itemIdx}-${item.texto}`}
+                              className={cn(
+                                "flex items-center gap-3 rounded-md px-3 py-3 transition-colors",
+                                checked
+                                  ? "bg-emerald-50 dark:bg-emerald-950/30"
+                                  : "hover:bg-accent"
+                              )}
+                            >
+                              <Checkbox
+                                id={checkboxId}
+                                checked={checked}
+                                onCheckedChange={(v) =>
+                                  toggleItemDinamico(secIdx, itemIdx, v)
+                                }
+                                disabled={jaConcluida}
+                              />
+                              <label
+                                htmlFor={checkboxId}
+                                className={cn(
+                                  "flex-1 cursor-pointer text-sm transition-colors",
+                                  checked && "text-muted-foreground line-through"
+                                )}
+                              >
+                                {item.texto}
+                              </label>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              /* Fallback — Checklist flat antiga (array de strings). */
+              <ul className="space-y-1">
+                {checklist.map((item, index) => {
+                  const checked = itensMarcados[index];
+                  const checkboxId = `tarefa-${tarefa.id}-item-${index}`;
+                  return (
+                    <li
+                      key={`${item}-${index}`}
                       className={cn(
-                        "flex-1 cursor-pointer text-sm transition-colors",
-                        checked && "text-muted-foreground line-through"
+                        "flex items-center gap-3 rounded-md px-3 py-3 transition-colors",
+                        checked ? "bg-emerald-50 dark:bg-emerald-950/30" : "hover:bg-accent"
                       )}
                     >
-                      {item}
-                    </label>
-                  </li>
-                );
-              })}
-            </ul>
+                      <Checkbox
+                        id={checkboxId}
+                        checked={checked}
+                        onCheckedChange={(v) => toggleItem(index, v)}
+                        disabled={jaConcluida}
+                      />
+                      <label
+                        htmlFor={checkboxId}
+                        className={cn(
+                          "flex-1 cursor-pointer text-sm transition-colors",
+                          checked && "text-muted-foreground line-through"
+                        )}
+                      >
+                        {item}
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
 
             {/* Barra de progresso visual */}
             <div className="mt-4 h-1.5 w-full overflow-hidden rounded-full bg-muted">

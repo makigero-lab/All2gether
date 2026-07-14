@@ -759,7 +759,7 @@ exports.atualizarPropriedade = async (req, res) => {
       });
     }
 
-    const { nome, smoobu_id, morada, tempo_limpeza_minutos, funcionario_preferencial_id } = req.body || {};
+    const { nome, smoobu_id, morada, tempo_limpeza_minutos, funcionario_preferencial_id, modelo_checklist_id } = req.body || {};
 
     // Tem de haver pelo menos um campo para atualizar.
     if (
@@ -768,10 +768,11 @@ exports.atualizarPropriedade = async (req, res) => {
       morada === undefined &&
       tempo_limpeza_minutos === undefined &&
       funcionario_preferencial_id === undefined &&
+      modelo_checklist_id === undefined &&
       req.body?.checklist === undefined
     ) {
       return res.status(400).json({
-        erro: 'Nenhum campo para atualizar. Envie nome, smoobu_id, morada, tempo_limpeza_minutos, checklist ou funcionario_preferencial_id.',
+        erro: 'Nenhum campo para atualizar. Envie nome, smoobu_id, morada, tempo_limpeza_minutos, checklist, funcionario_preferencial_id ou modelo_checklist_id.',
       });
     }
 
@@ -875,6 +876,31 @@ exports.atualizarPropriedade = async (req, res) => {
         }
       }
       propriedade.funcionario_preferencial_id = valor;
+    }
+
+    // Prompt 133/134 — Modelo de Checklist associado à propriedade.
+    // Aceita null/empty para remover; caso contrário valida que é um
+    // ModeloChecklist da mesma empresa.
+    if (modelo_checklist_id !== undefined) {
+      const valor = modelo_checklist_id === null || modelo_checklist_id === ''
+        ? null
+        : String(modelo_checklist_id).trim();
+      if (valor !== null) {
+        if (!mongoose.isValidObjectId(valor)) {
+          return res.status(400).json({ erro: 'modelo_checklist_id inválido.' });
+        }
+        const ModeloChecklist = require('../models/ModeloChecklist');
+        const modelo = await ModeloChecklist.findOne({
+          _id: valor,
+          empresa_id: empresaId,
+        }).lean();
+        if (!modelo) {
+          return res.status(400).json({
+            erro: 'Modelo de checklist não encontrado (não pertence a esta empresa).',
+          });
+        }
+      }
+      propriedade.modelo_checklist_id = valor;
     }
 
     await propriedade.save();
