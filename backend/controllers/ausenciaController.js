@@ -232,9 +232,18 @@ exports.registarAusencia = async (req, res) => {
     if (err.code === 11000) {
       console.log('[registarAusencia] Duplicate key detetada. A verificar se a ausência existente está rejeitada...');
 
+      // Re-extrai de req porque as const do try block NÃO são acessíveis no catch.
+      const body = req.body || {};
+      const userIdCatch = body.utilizador_id;
+      const inicioCatch = normalizarDia(body.data_inicio);
+      const fimCatch = normalizarDia(body.data_fim);
+      const tipoCatch = body.tipo || 'ferias';
+      const notasCatch = body.notas ? String(body.notas).trim() : '';
+      const empIdCatch = req.user && req.user.empresa_id;
+
       const existente = await Ausencia.findOne({
-        utilizador_id,
-        data_inicio: inicio,
+        utilizador_id: userIdCatch,
+        data_inicio: inicioCatch,
       }).lean();
 
       if (existente && existente.estado === 'rejeitada') {
@@ -243,15 +252,15 @@ exports.registarAusencia = async (req, res) => {
 
         try {
           const nova = await Ausencia.create({
-            utilizador_id,
-            empresa_id: empresaId,
-            data_inicio: inicio,
-            data_fim: fim,
-            tipo: tipoFinal,
+            utilizador_id: userIdCatch,
+            empresa_id: empIdCatch,
+            data_inicio: inicioCatch,
+            data_fim: fimCatch,
+            tipo: tipoCatch,
             estado: 'aprovada',
-            notas: notas ? String(notas).trim() : '',
+            notas: notasCatch,
           });
-          const desatribuicao = await desatribuirTarefasPeriodo(utilizador_id, inicio, fim);
+          const desatribuicao = await desatribuirTarefasPeriodo(userIdCatch, inicioCatch, fimCatch);
           const resp = await Ausencia.findById(nova._id)
             .populate({ path: 'utilizador_id', select: 'nome email role' })
             .lean();

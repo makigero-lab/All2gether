@@ -145,27 +145,34 @@ exports.criarAusencia = async (req, res) => {
     if (err.code === 11000) {
       console.log('[criarAusencia] Duplicate key detetada. A verificar se a ausência existente está rejeitada...');
 
+      // Prompt 130 fix — Re-extrai os valores de req porque as variáveis
+      // do try block (const) NÃO são acessíveis no catch (block scoping).
+      const userId = req.user && req.user.id;
+      const empId = req.user && req.user.empresa_id;
+      const body = req.body || {};
+      const inicioCatch = normalizarDia(body.data_inicio);
+      const fimCatch = normalizarDia(body.data_fim);
+      const tipoCatch = body.tipo || 'ferias';
+
       // Procura a ausência existente com esta data_inicio.
       const existente = await Ausencia.findOne({
-        utilizador_id: utilizadorId,
-        data_inicio: inicio,
+        utilizador_id: userId,
+        data_inicio: inicioCatch,
       }).lean();
 
       if (existente && existente.estado === 'rejeitada') {
         console.log(`[criarAusencia] Ausência rejeitada ${existente._id} encontrada. A eliminar e recriar...`);
-        // Elimina a ausência rejeitada antiga.
         await Ausencia.deleteOne({ _id: existente._id });
 
-        // Tenta criar novamente.
         try {
           const nova = await Ausencia.create({
-            utilizador_id: utilizadorId,
-            empresa_id: empresaId,
-            data_inicio: inicio,
-            data_fim: fim,
-            tipo: tipoFinal,
+            utilizador_id: userId,
+            empresa_id: empId,
+            data_inicio: inicioCatch,
+            data_fim: fimCatch,
+            tipo: tipoCatch,
             estado: 'pendente',
-            notas: notas ? String(notas).trim() : '',
+            notas: body.notas ? String(body.notas).trim() : '',
           });
           console.log(`[criarAusencia] Ausência ${nova._id} criada com sucesso (após eliminar rejeitada).`);
           return res.status(201).json({ ausencia: nova });
@@ -177,7 +184,6 @@ exports.criarAusencia = async (req, res) => {
         }
       }
 
-      // Se a ausência existente NÃO está rejeitada (pendente/aprovada), bloqueia.
       return res.status(409).json({
         erro: 'Já existe uma ausência pendente ou aprovada com esta data de início.',
       });
