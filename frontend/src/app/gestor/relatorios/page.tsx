@@ -239,21 +239,9 @@ export default function RelatoriosPage() {
     setPdfLoading(true);
     setPdfErro(null);
     try {
-      // Torna o div de exportação VISÍVEL temporariamente para o html2canvas
-      // conseguir capturá-lo. O problema: opacity:0.01 e zIndex:-50 fazem
-      // com que o html2canvas capture um div vazio em alguns browsers.
-      // Solução: tornar visível, capturar, depois voltar a esconder.
-      if (pdfExportRef.current) {
-        pdfExportRef.current.style.opacity = "1";
-        pdfExportRef.current.style.zIndex = "9999";
-        pdfExportRef.current.style.left = "0";
-        pdfExportRef.current.style.top = "0";
-      }
-
-      // Espera que o DOM atualize.
+      // Espera que o DOM esteja renderizado.
       await new Promise(resolve => setTimeout(resolve, 300));
 
-      // Verifica se o ref tem conteúdo.
       if (!pdfExportRef.current) {
         throw new Error('Não foi possível preparar o documento para exportação.');
       }
@@ -301,19 +289,8 @@ export default function RelatoriosPage() {
       };
 
       await html2pdf().set(opt).from(el).save();
-
-      // Restaura o estado oculto do div de exportação.
-      if (pdfExportRef.current) {
-        pdfExportRef.current.style.opacity = "0.01";
-        pdfExportRef.current.style.zIndex = "-50";
-      }
     } catch (e) {
       console.error("Erro ao exportar PDF:", e);
-      // Restaura o estado oculto mesmo em caso de erro.
-      if (pdfExportRef.current) {
-        pdfExportRef.current.style.opacity = "0.01";
-        pdfExportRef.current.style.zIndex = "-50";
-      }
       setPdfErro(
         e instanceof Error
           ? `Erro ao gerar relatório: ${e.message}`
@@ -819,11 +796,11 @@ export default function RelatoriosPage() {
               ref={pdfExportRef}
               aria-hidden
               style={{
-                position: "fixed",
-                left: 0,
+                position: "absolute",
+                left: "-9999px",
                 top: 0,
-                zIndex: -50,
-                opacity: 0.01,
+                zIndex: 0,
+                opacity: 1,
                 pointerEvents: "none",
                 width: "794px",
                 background: "#ffffff",
