@@ -123,6 +123,16 @@ A API arranca na porta definida em `PORT` (por defeito **5000**).
 | `GET`  | `/api/admin/empresas/:empresaId/utilizadores` | Lista todos os utilizadores (gestores + staff) de uma empresa terceira. **Auth:** JWT + `isAdmin`. |
 | `POST` | `/api/admin/empresas/:empresaId/utilizadores` | Cria um gestor/staff numa empresa terceira (empresa_id vem do URL). Body: `nome`, `email`, `password`, `role?`. **Auth:** JWT + `isAdmin`. |
 | `PATCH`| `/api/admin/empresas/:empresaId/utilizadores/:utilizadorId/estado` | Alterna ativo/inativo de um utilizador de uma empresa terceira. Body (opcional): `{ ativo: boolean }`. **Auth:** JWT + `isAdmin`. |
+| `PATCH`| `/api/admin/empresas/:id/toggle-status` | Ativa/suspende uma empresa (`ativa: true/false`). Empresas suspensas ficam bloqueadas para o gestor/staff. **Auth:** JWT + `isAdmin`. (Prompt 116) |
+| `POST` | `/api/admin/empresas/:id/hard-reset` | Hard reset **scoped à empresa** — apaga Propriedades + Tarefas + Ausências + Webhooks + Notificações dessa empresa (sem tocar noutras). Substitui o `DELETE /api/admin/hard-reset` global. **Auth:** JWT + `isAdmin`. (Prompt 116) |
+| `DELETE`| `/api/admin/empresas/:id` | **Soft delete** de empresa — marca `apagada: true, ativa: false` (vai para a Reciclagem). Auditoria registada. **Auth:** JWT + `isAdmin`. (Prompt 122) |
+| `PATCH`| `/api/admin/empresas/:id/restaurar` | Restaura empresa da Reciclagem (`apagada: false`). `ativa` mantém-se `false` — o admin deve reativar manualmente. **Auth:** JWT + `isAdmin`. (Prompt 122) |
+| `GET`  | `/api/admin/empresas/:id/config` | Lê a configuração de uma empresa (nome, NIF, API key Smoobu). **Auth:** JWT + `isAdmin`. (Prompt 117) |
+| `PUT`  | `/api/admin/empresas/:id/config` | Atualiza a configuração de uma empresa (nome, NIF, API key Smoobu). **Auth:** JWT + `isAdmin`. (Prompt 117) |
+| `POST` | `/api/admin/empresas/:id/sincronizar-propriedades` | Importa apartamentos do Smoobu em massa para a empresa (re-geocoding + atualização de morada/capacidade). Requer `SMOOBU_API_KEY` na config da empresa. **Auth:** JWT + `isAdmin`. (Prompt 117) |
+| `POST` | `/api/admin/empresas/:id/sincronizar-reservas` | Sincroniza reservas futuras do Smoobu para a empresa (pull REST API, idempotente). Requer `SMOOBU_API_KEY`. **Auth:** JWT + `isAdmin`. (Prompt 117) |
+| `POST` | `/api/admin/empresas/:id/registrar-webhooks` | Regista os webhooks do Smoobu para a empresa. Requer `SMOOBU_API_KEY`. **Auth:** JWT + `isAdmin`. (Prompt 117) |
+| `POST` | `/api/gestor/relatorios/ai-summary` | Gera um **resumo em linguagem natural** do relatório de produtividade via Gemini SDK (`@google/generative-ai`). Nunca crasha — devolve placeholder se a IA falhar. **Auth:** JWT + `isGestor`. (Prompt 123) |
 
 > Detalhes completos da lógica de atribuição (regras de negócio) em [`docs/BACKEND.md`](docs/BACKEND.md#32-lógica-central--atribuição-de-tarefas-webhook-smoobu).
 
