@@ -216,13 +216,16 @@ exports.minhasTarefas = async (req, res) => {
       Date.UTC(agora.getUTCFullYear(), agora.getUTCMonth(), agora.getUTCDate())
     );
 
-    // Tarefas do utilizador a partir de hoje (hoje + futuras, não canceladas).
+    // Prompt 131 — Inclui tarefas dos últimos 30 dias + futuras, para o staff
+    // poder navegar para dias anteriores e rever tarefas concluídas.
+    const limitePassado = new Date(hoje.getTime() - 30 * 24 * 60 * 60 * 1000);
+
     const tarefas = await Tarefa.find({
       utilizador_id: req.user.id,
-      data: { $gte: hoje },
+      data: { $gte: limitePassado },
       estado: { $ne: 'cancelada' },
     })
-      .populate({ path: 'propriedade_id', select: 'nome morada coordenadas checklist' })
+      .populate({ path: 'propriedade_id', select: 'nome morada coordenadas checklist capacidade_hospedes observacoes' })
       .sort({ data: 1 })
       .lean();
 

@@ -235,10 +235,11 @@ exports.criarTarefa = async (req, res) => {
     const { ok, empresaId } = obterEmpresaId(req, res);
     if (!ok) return;
 
-    // Prompt 116 — aceita novos campos opcionais: hora, check_in, check_out, hospedes.
+    // Prompt 116 — aceita novos campos opcionais: hora, check_in, check_out, hospedes, nome_hospede.
     //   - hora: "HH:mm" (combina com `data` para definir a hora local da tarefa)
     //   - check_in / check_out: strings (datas/horas da reserva Smoobu)
     //   - hospedes: número de hóspedes (vai para detalhes_reserva.pax)
+    //   - nome_hospede: nome do hóspede principal (vai para detalhes_reserva.nome_hospede)
     const {
       propriedade_id,
       utilizador_id,
@@ -247,6 +248,7 @@ exports.criarTarefa = async (req, res) => {
       check_in,
       check_out,
       hospedes,
+      nome_hospede,
       tempo_limpeza_minutos,
       tipo,
     } = req.body || {};
@@ -344,6 +346,10 @@ exports.criarTarefa = async (req, res) => {
       if (!Number.isNaN(paxNum) && paxNum >= 0) {
         detalhesReserva.pax = paxNum;
       }
+    }
+    // Prompt 131 — nome_hospede (nome do hóspede principal da reserva).
+    if (nome_hospede !== undefined && nome_hospede !== null && String(nome_hospede).trim()) {
+      detalhesReserva.nome_hospede = String(nome_hospede).trim();
     }
 
     // Valida utilizador_id se vier.

@@ -718,6 +718,7 @@ export default function CalendarioOperacionalPage() {
     check_in: "",
     check_out: "",
     hospedes: "",
+    nome_hospede: "",
     tempo_limpeza_minutos: "45",
     tipo: "limpeza",
   });
@@ -744,6 +745,7 @@ export default function CalendarioOperacionalPage() {
           check_in: novaForm.check_in || undefined,
           check_out: novaForm.check_out || undefined,
           hospedes: novaForm.hospedes ? Number(novaForm.hospedes) : undefined,
+          nome_hospede: novaForm.nome_hospede || undefined,
           tempo_limpeza_minutos: Number(novaForm.tempo_limpeza_minutos) || 45,
           tipo: novaForm.tipo,
         }
@@ -757,6 +759,7 @@ export default function CalendarioOperacionalPage() {
         check_in: "",
         check_out: "",
         hospedes: "",
+        nome_hospede: "",
         tempo_limpeza_minutos: "45",
         tipo: "limpeza",
       });
@@ -1557,6 +1560,17 @@ export default function CalendarioOperacionalPage() {
                   value={novaForm.hospedes}
                   onChange={(e) => setNovaForm((f) => ({ ...f, hospedes: e.target.value }))}
                   placeholder="0"
+                />
+              </div>
+              {/* Task 131 — Nome do Hóspede */}
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium" htmlFor="nt-nome-hospede">Nome do Hóspede</label>
+                <Input
+                  id="nt-nome-hospede"
+                  type="text"
+                  value={novaForm.nome_hospede}
+                  onChange={(e) => setNovaForm((f) => ({ ...f, nome_hospede: e.target.value }))}
+                  placeholder="Ex.: João Silva"
                 />
               </div>
               <div className="space-y-1.5">
