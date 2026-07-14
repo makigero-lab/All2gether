@@ -137,11 +137,52 @@ exports.criarAusencia = async (req, res) => {
     return res.status(201).json({ ausencia: nova });
   } catch (err) {
     console.error('❌ criarAusencia:', err.message);
+
+    // Prompt 130 — Erro de duplicate key (índice único { utilizador_id, data_inicio }).
+    // Pode acontecer se a BD de produção ainda tiver o índice único antigo
+    // (removido do schema no Prompt 116, mas índices MongoDB não são auto-removidos).
+    // Se a ausência existente estiver 'rejeitada', eliminamo-la e recriamos.
     if (err.code === 11000) {
+      console.log('[criarAusencia] Duplicate key detetada. A verificar se a ausência existente está rejeitada...');
+
+      // Procura a ausência existente com esta data_inicio.
+      const existente = await Ausencia.findOne({
+        utilizador_id: utilizadorId,
+        data_inicio: inicio,
+      }).lean();
+
+      if (existente && existente.estado === 'rejeitada') {
+        console.log(`[criarAusencia] Ausência rejeitada ${existente._id} encontrada. A eliminar e recriar...`);
+        // Elimina a ausência rejeitada antiga.
+        await Ausencia.deleteOne({ _id: existente._id });
+
+        // Tenta criar novamente.
+        try {
+          const nova = await Ausencia.create({
+            utilizador_id: utilizadorId,
+            empresa_id: empresaId,
+            data_inicio: inicio,
+            data_fim: fim,
+            tipo: tipoFinal,
+            estado: 'pendente',
+            notas: notas ? String(notas).trim() : '',
+          });
+          console.log(`[criarAusencia] Ausência ${nova._id} criada com sucesso (após eliminar rejeitada).`);
+          return res.status(201).json({ ausencia: nova });
+        } catch (err2) {
+          console.error('❌ criarAusencia: falha ao recriar após eliminar rejeitada:', err2.message);
+          return res.status(409).json({
+            erro: 'Não foi possível criar a ausência. Tenta com uma data de início diferente.',
+          });
+        }
+      }
+
+      // Se a ausência existente NÃO está rejeitada (pendente/aprovada), bloqueia.
       return res.status(409).json({
-        erro: 'Já existe uma ausência com este data_inicio para este utilizador.',
+        erro: 'Já existe uma ausência pendente ou aprovada com esta data de início.',
       });
     }
+
     if (err.name === 'ValidationError') {
       return res.status(400).json({ erro: err.message });
     }

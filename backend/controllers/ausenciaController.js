@@ -226,11 +226,57 @@ exports.registarAusencia = async (req, res) => {
     });
   } catch (err) {
     console.error('❌ registarAusencia:', err.message);
+
+    // Prompt 130 — Erro de duplicate key (índice único antigo na BD de produção).
+    // Se a ausência existente estiver 'rejeitada', eliminamo-la e recriamos.
     if (err.code === 11000) {
+      console.log('[registarAusencia] Duplicate key detetada. A verificar se a ausência existente está rejeitada...');
+
+      const existente = await Ausencia.findOne({
+        utilizador_id,
+        data_inicio: inicio,
+      }).lean();
+
+      if (existente && existente.estado === 'rejeitada') {
+        console.log(`[registarAusencia] Ausência rejeitada ${existente._id} encontrada. A eliminar e recriar...`);
+        await Ausencia.deleteOne({ _id: existente._id });
+
+        try {
+          const nova = await Ausencia.create({
+            utilizador_id,
+            empresa_id: empresaId,
+            data_inicio: inicio,
+            data_fim: fim,
+            tipo: tipoFinal,
+            estado: 'aprovada',
+            notas: notas ? String(notas).trim() : '',
+          });
+          const desatribuicao = await desatribuirTarefasPeriodo(utilizador_id, inicio, fim);
+          const resp = await Ausencia.findById(nova._id)
+            .populate({ path: 'utilizador_id', select: 'nome email role' })
+            .lean();
+          const u = resp.utilizador_id;
+          return res.status(201).json({
+            ausencia: {
+              ...resp,
+              utilizador_id: u ? String(u._id) : null,
+              utilizador: u ? { _id: String(u._id), nome: u.nome, email: u.email, role: u.role } : null,
+            },
+            desatribuicao,
+          });
+        } catch (err2) {
+          console.error('❌ registarAusencia: falha ao recriar após eliminar rejeitada:', err2.message);
+          return res.status(409).json({
+            erro: 'Não foi possível criar a ausência. Tenta com uma data de início diferente.',
+          });
+        }
+      }
+
       return res.status(409).json({
-        erro: 'Já existe uma ausência com este data_inicio para este utilizador.',
+        erro: 'Já existe uma ausência pendente ou aprovada com esta data de início.',
       });
     }
+
     if (err.name === 'ValidationError') {
       return res.status(400).json({ erro: err.message });
     }
