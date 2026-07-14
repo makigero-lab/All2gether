@@ -770,6 +770,26 @@ async function criarTarefaPorReserva(reservaId, smoobuPropId, dataTarefaRaw, det
     dataAgendada.setUTCHours(10, 0, 0, 0); // 11:00 local (UTC+1) = 10:00 UTC
   }
 
+  // Prompt 133 — Injeção de Checklist Dinâmica (snapshot do ModeloChecklist).
+  let checklistDinamicaWebhook = [];
+  if (propriedade.modelo_checklist_id) {
+    try {
+      const ModeloChecklist = require('../models/ModeloChecklist');
+      const modeloChk = await ModeloChecklist.findById(propriedade.modelo_checklist_id).lean();
+      if (modeloChk && Array.isArray(modeloChk.seccoes)) {
+        checklistDinamicaWebhook = modeloChk.seccoes.map((sec) => ({
+          nome: sec.nome,
+          items: (sec.items || []).map((item) => ({
+            texto: item,
+            concluido: false,
+          })),
+        }));
+      }
+    } catch (chkErr) {
+      console.error('⚠️  webhook: erro ao injetar checklist dinâmica:', chkErr.message);
+    }
+  }
+
   const novaTarefa = await Tarefa.create({
     empresa_id: empresaId,
     propriedade_id: propriedade._id,
@@ -782,6 +802,8 @@ async function criarTarefaPorReserva(reservaId, smoobuPropId, dataTarefaRaw, det
     // v1.55.0 (Prompt 77) — Snapshot da checklist da propriedade no momento
     // da criação. Sem isto, as tarefas nasciam sem itens para o staff picar.
     checklist: propriedade.checklist || [],
+    // Prompt 133 — Snapshot da checklist dinâmica (se existir modelo).
+    ...(checklistDinamicaWebhook.length > 0 ? { checklist_dinamica: checklistDinamicaWebhook } : {}),
     // Prompt 93 (Fase 1.5) — Detalhes da reserva Smoobu (checkin, checkout,
     // pax, nome_hospede) para auditoria e display.
     detalhes_reserva: detalhesReserva || undefined,

@@ -431,16 +431,41 @@ exports.criarTarefa = async (req, res) => {
       }
     }
 
+    // Prompt 133 — Injeção de Checklist Dinâmica.
+    // Se a propriedade tem modelo_checklist_id, copia as secções/items
+    // para o campo checklist_dinamica da nova tarefa (snapshot).
+    let checklistDinamica = [];
+    const tipoFinal = tipo || 'limpeza';
+    if (tipoFinal === 'limpeza' && propriedade.modelo_checklist_id) {
+      try {
+        const ModeloChecklist = require('../models/ModeloChecklist');
+        const modelo = await ModeloChecklist.findById(propriedade.modelo_checklist_id).lean();
+        if (modelo && Array.isArray(modelo.seccoes)) {
+          checklistDinamica = modelo.seccoes.map((sec) => ({
+            nome: sec.nome,
+            items: (sec.items || []).map((item) => ({
+              texto: item,
+              concluido: false,
+            })),
+          }));
+        }
+      } catch (chkErr) {
+        console.error('⚠️  criarTarefa: erro ao injetar checklist dinâmica:', chkErr.message);
+      }
+    }
+
     const nova = await Tarefa.create({
       empresa_id: empresaId,
       propriedade_id,
       utilizador_id: utilizadorValidado,
       data: dataNormalizada,
       tempo_limpeza_minutos: Number(tempo_limpeza_minutos) || propriedade.tempo_limpeza_minutos || 45,
-      tipo: tipo || 'limpeza',
+      tipo: tipoFinal,
       estado: utilizadorValidado ? 'atribuida' : 'por_atribuir',
       // Prompt 116 — só guarda detalhes_reserva se houver algum campo preenchido.
       ...(Object.keys(detalhesReserva).length > 0 ? { detalhes_reserva: detalhesReserva } : {}),
+      // Prompt 133 — Snapshot da checklist dinâmica (se existir modelo).
+      ...(checklistDinamica.length > 0 ? { checklist_dinamica: checklistDinamica } : {}),
     });
 
     // v1.65.0 (Prompt 88) — Notifica o staff se a tarefa foi criada já atribuída.
