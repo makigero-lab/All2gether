@@ -189,7 +189,7 @@ exports.registarAusencia = async (req, res) => {
     try {
       const indexes = await Ausencia.collection.listIndexes().toArray();
       for (const idx of indexes) {
-        if (idx.unique && idx.key && idx.key.utilizador_id && idx.key.data_inicio) {
+        if (idx.unique && idx.key && idx.key.utilizador_id) {
           console.log(`[registarAusencia] A remover índice único antigo: ${idx.name}`);
           await Ausencia.collection.dropIndex(idx.name);
         }

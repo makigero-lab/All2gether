@@ -137,7 +137,7 @@ exports.criarAusencia = async (req, res) => {
     try {
       const indexes = await Ausencia.collection.listIndexes().toArray();
       for (const idx of indexes) {
-        if (idx.unique && idx.key && idx.key.utilizador_id && idx.key.data_inicio) {
+        if (idx.unique && idx.key && idx.key.utilizador_id) {
           console.log(`[criarAusencia] A remover índice único antigo: ${idx.name}`);
           await Ausencia.collection.dropIndex(idx.name);
         }
@@ -277,7 +277,7 @@ exports.faltaHoje = async (req, res) => {
     try {
       const indexes = await Ausencia.collection.listIndexes().toArray();
       for (const idx of indexes) {
-        if (idx.unique && idx.key && idx.key.utilizador_id && idx.key.data_inicio) {
+        if (idx.unique && idx.key && idx.key.utilizador_id) {
           console.log(`[faltaHoje] A remover índice único antigo: ${idx.name}`);
           await Ausencia.collection.dropIndex(idx.name);
         }
@@ -339,7 +339,7 @@ exports.faltaHoje = async (req, res) => {
       try {
         const indexes = await Ausencia.collection.listIndexes().toArray();
         for (const idx of indexes) {
-          if (idx.unique && idx.key && idx.key.utilizador_id && idx.key.data_inicio) {
+          if (idx.unique && idx.key && idx.key.utilizador_id) {
             await Ausencia.collection.dropIndex(idx.name);
             console.log(`[faltaHoje] Índice ${idx.name} removido. A tentar novamente...`);
           }

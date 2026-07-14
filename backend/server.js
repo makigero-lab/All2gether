@@ -168,7 +168,7 @@ if (require.main === module) {
         const indexes = await Ausencia.collection.listIndexes().toArray();
         for (const idx of indexes) {
           // Procura índices que sejam únicos e contenham utilizador_id + data_inicio
-          if (idx.unique && idx.key && idx.key.utilizador_id && idx.key.data_inicio) {
+          if (idx.unique && idx.key && idx.key.utilizador_id) {
             console.log(`🔧 A remover índice único antigo: ${idx.name}`);
             await Ausencia.collection.dropIndex(idx.name);
             console.log(`✅ Índice único ${idx.name} removido. Ausências rejeitadas já não bloqueiam novas.`);
