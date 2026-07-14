@@ -118,11 +118,20 @@ exports.criarAusencia = async (req, res) => {
       estado: { $in: ['pendente', 'aprovada'] },
     });
     if (sobreposta) {
-      console.log(`[criarAusencia] Conflito detetado: ausência ${sobreposta._id} estado=${sobreposta.estado} início=${sobreposta.data_inicio} fim=${sobreposta.data_fim}`);
+      console.log(`[criarAusencia] BLOQUEIO (sobreposição): ausência ${sobreposta._id} estado=${sobreposta.estado} início=${sobreposta.data_inicio} fim=${sobreposta.data_fim} | pedido: inicio=${inicio} fim=${fim}`);
       return res.status(409).json({
         erro: 'Já existe uma ausência registada que se sobrepõe a este período.',
       });
     }
+
+    // Debug: lista TODAS as ausências deste utilizador que se sobrepõem
+    // (qualquer estado) para entender o que está na BD.
+    const todasSobrepostas = await Ausencia.find({
+      utilizador_id: utilizadorId,
+      data_inicio: { $lte: fim },
+      data_fim: { $gte: inicio },
+    }).select('estado data_inicio data_fim').lean();
+    console.log(`[criarAusencia] DEBUG: ${todasSobrepostas.length} ausência(s) sobreposta(s) na BD (qualquer estado):`, JSON.stringify(todasSobrepostas));
 
     // Prompt 131 — Remove o índice único antigo antes de tentar criar.
     try {
@@ -152,13 +161,10 @@ exports.criarAusencia = async (req, res) => {
     console.error('❌ criarAusencia:', err.message);
 
     // Prompt 131 — Erro de duplicate key (índice único antigo na BD).
-    // O índice único { utilizador_id, data_inicio } é removido automaticamente
-    // no arranque do servidor (server.js). Se ainda existir, devolve 409
-    // com mensagem clara. NÃO elimina ausências — o histórico é mantido.
     if (err.code === 11000) {
-      console.error('[criarAusencia] Erro 11000 (duplicate key). O índice único antigo pode ainda existir na BD.');
+      console.error('[criarAusencia] BLOQUEIO (11000 duplicate key). Índice único ainda existe. err:', JSON.stringify(err.keyValue || err.message));
       return res.status(409).json({
-        erro: 'Já existe uma ausência com esta data de início. O índice único será removido no próximo arranque do servidor.',
+        erro: 'Já existe uma ausência com esta data de início (erro de índice único).',
       });
     }
 
