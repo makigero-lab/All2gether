@@ -1211,6 +1211,8 @@ describe('POST /api/gestor/smoobu/sincronizar', () => {
     const amanha = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
 
     // Mocka o fetch global para devolver 2 reservas com paginação (page_count: 1).
+    // Prompt 137b — Inclui guestName para evitar que o processarReservaSmoobu
+    // faça fetch extra de enriquecimento (que quebraria a asserção de 1 chamada).
     const mockFetch = jest.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -1221,12 +1223,14 @@ describe('POST /api/gestor/smoobu/sincronizar', () => {
             arrival: amanha,
             departure: amanha,
             apartment: { id: 200, name: 'Apartamento Teste' },
+            guestName: 'João Silva',
           },
           {
             id: 2002,
             arrival: amanha,
             departure: amanha,
             apartment: { id: 200, name: 'Apartamento Teste' },
+            guestName: 'Maria Santos',
           },
         ],
         page_count: 1,
@@ -1256,6 +1260,7 @@ describe('POST /api/gestor/smoobu/sincronizar', () => {
     process.env.SMOOBU_API_KEY = 'test-key-123';
     const amanha = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
 
+    // Prompt 137b — Inclui guestName para evitar fetch extra de enriquecimento.
     const mockFetch = jest.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -1265,6 +1270,7 @@ describe('POST /api/gestor/smoobu/sincronizar', () => {
             id: 3001,
             arrival: amanha,
             apartment: { id: 200, name: 'X' },
+            guestName: 'Hóspede Teste',
           },
         ],
         page_count: 1,
@@ -1312,6 +1318,7 @@ describe('POST /api/gestor/smoobu/sincronizar', () => {
     process.env.SMOOBU_API_KEY = 'test-key-123';
     const amanha = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
 
+    // Prompt 137b — Inclui guestName para evitar fetch extra de enriquecimento.
     const mockFetch = jest.fn().mockResolvedValue({
       ok: true,
       status: 200,
@@ -1321,11 +1328,13 @@ describe('POST /api/gestor/smoobu/sincronizar', () => {
             id: 4001,
             arrival: amanha,
             apartment: { id: 999999, name: 'Inexistente' }, // prop não existe
+            guestName: 'Hóspede Inexistente',
           },
           {
             id: 4002,
             arrival: amanha,
             apartment: { id: 200, name: 'Existe' },
+            guestName: 'Hóspede Válido',
           },
         ],
         page_count: 1,
