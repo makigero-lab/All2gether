@@ -454,6 +454,9 @@ exports.criarTarefa = async (req, res) => {
       }
     }
 
+    // Prompt 137 — Debug log para confirmar que nome_hospede chega e é guardado.
+    console.log('📋 criarTarefa — detalhes_reserva a guardar:', JSON.stringify(detalhesReserva));
+
     const nova = await Tarefa.create({
       empresa_id: empresaId,
       propriedade_id,
@@ -508,6 +511,10 @@ exports.criarTarefa = async (req, res) => {
     const resposta = { tarefa: nova };
     if (warning) resposta.warning = warning;
     if (conflitoWarning) resposta.warning = conflitoWarning;
+
+    // Prompt 137 — Debug log para confirmar que a tarefa guardada tem nome_hospede.
+    console.log('📋 criarTarefa — tarefa criada detalhes_reserva:', JSON.stringify(nova.detalhes_reserva));
+
     return res.status(201).json(resposta);
   } catch (err) {
     console.error('❌ criarTarefa:', err.message);

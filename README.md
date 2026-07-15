@@ -133,6 +133,7 @@ A API arranca na porta definida em `PORT` (por defeito **5000**).
 | `POST` | `/api/admin/empresas/:id/sincronizar-reservas` | Sincroniza reservas futuras do Smoobu para a empresa (pull REST API, idempotente). Requer `SMOOBU_API_KEY`. **Auth:** JWT + `isAdmin`. (Prompt 117) |
 | `POST` | `/api/admin/empresas/:id/registrar-webhooks` | Regista os webhooks do Smoobu para a empresa. Requer `SMOOBU_API_KEY`. **Auth:** JWT + `isAdmin`. (Prompt 117) |
 | `POST` | `/api/gestor/relatorios/ai-summary` | Gera um **resumo em linguagem natural** do relatório de produtividade via Gemini SDK (`@google/generative-ai`). Nunca crasha — devolve placeholder se a IA falhar. **Auth:** JWT + `isGestor`. (Prompt 123) |
+| `POST` | `/api/admin/backfill-nomes-hospedes` | **Backfill de nomes de hóspedes** — percorre as tarefas com `smoobu_reserva_id` mas sem `nome_hospede` e busca o nome via REST API do Smoobu. Body opcional: `{ empresa_id }`. Requer `SMOOBU_API_KEY`. **Auth:** JWT + `isAdmin`. (Prompt 137) |
 
 > Detalhes completos da lógica de atribuição (regras de negócio) em [`docs/BACKEND.md`](docs/BACKEND.md#32-lógica-central--atribuição-de-tarefas-webhook-smoobu).
 

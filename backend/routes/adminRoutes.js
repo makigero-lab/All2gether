@@ -761,4 +761,64 @@ router.delete('/webhook-logs/limpar', async (req, res) => {
   }
 });
 
+// Prompt 137 — POST /api/admin/backfill-nomes-hospedes
+// Re-enriquece as tarefas com smoobu_reserva_id mas sem nome_hospede,
+// buscando o nome do hóspede via REST API do Smoobu. Útil para preencher
+// o nome em tarefas antigas criadas antes do fix do enriquecimento.
+router.post('/backfill-nomes-hospedes', async (req, res) => {
+  try {
+    const Tarefa = require('../models/Tarefa');
+    const { enriquecerReservaSmoobu } = require('../controllers/webhookController');
+
+    // Determina o empresa_id: do body, ou do token, ou todas.
+    const empresaId = req.body?.empresa_id || (req.user && req.user.empresa_id) || null;
+    const filtro = {
+      'detalhes_reserva.smoobu_reserva_id': { $ne: null, $exists: true },
+      $or: [
+        { 'detalhes_reserva.nome_hospede': null },
+        { 'detalhes_reserva.nome_hospede': { $exists: false } },
+        { 'detalhes_reserva.nome_hospede': '' },
+      ],
+    };
+    if (empresaId) filtro.empresa_id = empresaId;
+
+    const tarefas = await Tarefa.find(filtro).lean();
+    console.log(`📋 backfill-nomes-hospedes: ${tarefas.length} tarefas para enriquecer.`);
+
+    let atualizadas = 0;
+    let falhadas = 0;
+    for (const t of tarefas) {
+      const reservaId = t.detalhes_reserva?.smoobu_reserva_id;
+      if (!reservaId) continue;
+      try {
+        const enriched = await enriquecerReservaSmoobu(String(reservaId));
+        if (enriched && enriched.nome_hospede) {
+          await Tarefa.updateOne(
+            { _id: t._id },
+            { $set: { 'detalhes_reserva.nome_hospede': enriched.nome_hospede } }
+          );
+          atualizadas++;
+          console.log(`✅ backfill: tarefa ${t._id} → nome_hospede="${enriched.nome_hospede}"`);
+        } else {
+          falhadas++;
+          console.log(`⚠️  backfill: tarefa ${t._id} (reserva ${reservaId}) — sem nome_hospede no Smoobu.`);
+        }
+      } catch (e) {
+        falhadas++;
+        console.error(`❌ backfill: erro na tarefa ${t._id}:`, e.message);
+      }
+    }
+
+    return res.status(200).json({
+      message: 'Backfill concluído.',
+      totalTarefas: tarefas.length,
+      atualizadas,
+      falhadas,
+    });
+  } catch (err) {
+    console.error('❌ backfill-nomes-hospedes:', err.message);
+    return res.status(500).json({ erro: 'Erro ao executar backfill.', detalhe: err.message });
+  }
+});
+
 module.exports = router;
