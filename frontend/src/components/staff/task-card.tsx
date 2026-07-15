@@ -8,6 +8,7 @@ import {
   LogOut,
   Wrench,
   ChevronRight,
+  User,
 } from "lucide-react";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -74,6 +75,8 @@ export function TaskCard({ tarefa }: { tarefa: TarefaMock }) {
   const Icon = tipoIcon[tarefa.tipo];
   const porAtribuir = tarefa.estado === "por_atribuir";
   const hora = horaInicio(tarefa.data);
+  // Prompt 136 — nome do hóspede (se existir na reserva).
+  const nomeHospede = tarefa.detalhes_reserva?.nome_hospede;
 
   return (
     <Link href={`/staff/tarefas/${tarefa.id}`} prefetch className="block">
@@ -137,6 +140,16 @@ export function TaskCard({ tarefa }: { tarefa: TarefaMock }) {
             <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
               <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               <span className="whitespace-normal break-words">{tarefa.endereco}</span>
+            </p>
+          )}
+
+          {/* Prompt 136 — Nome do hóspede (se existir na reserva Smoobu ou
+              preenchido manualmente pelo gestor). Destacado para o staff saber
+              a quem vai receber. */}
+          {nomeHospede && (
+            <p className="flex items-center gap-1.5 rounded-md bg-primary/5 px-2 py-1.5 text-xs">
+              <User className="h-3.5 w-3.5 shrink-0 text-primary" />
+              <span className="font-medium text-foreground">{nomeHospede}</span>
             </p>
           )}
 

@@ -848,6 +848,8 @@ export default function AdminTarefasPage() {
                   <tr className="border-b bg-muted/40 text-left">
                     <th className="px-4 py-3 font-medium">Data</th>
                     <th className="px-4 py-3 font-medium">Propriedade</th>
+                    {/* Prompt 136 — Coluna Hóspede (nome_hospede da reserva). */}
+                    <th className="px-4 py-3 font-medium">Hóspede</th>
                     <th className="px-4 py-3 font-medium">Funcionário</th>
                     <th className="px-4 py-3 font-medium">Estado</th>
                     {/* v1.68.0 (Prompt 91) — Coluna Observações / Avaria */}
@@ -876,6 +878,10 @@ export default function AdminTarefasPage() {
                             </Badge>
                           )}
                         </div>
+                      </td>
+                      {/* Prompt 136 — Nome do hóspede (da reserva Smoobu ou manual). */}
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {t.detalhes_reserva?.nome_hospede ?? "—"}
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">{t.utilizador_id?.nome ?? "—"}</td>
                       <td className="px-4 py-3">

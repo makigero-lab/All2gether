@@ -616,6 +616,40 @@ Work Log:
 - **Dias anteriores (30 dias)** — `/staff` passou a permitir navegar não só para a frente mas também **até 30 dias para trás** (histórico de tarefas concluídas), além dos dias futuros. Útil para o staff consultar tarefas passadas.
 - **Índice único MongoDB removido definitivamente** no arranque do backend (script de migração que identifica e elimina o índice `utilizador_id_1_data_1` se existir). Commit `4f65c0a`.
 
+### Prompt 132 — Cancelamento de ausências (soft cancel)
+- **`cancelarAusencia`** (PATCH `/api/staff/ausencias/:id/cancelar`) — em vez de `DELETE` (que apagava o registo), passou a fazer soft cancel: marca `estado: 'cancelada'` e mantém o histórico. A ausência cancelada deixa de contar para sobreposição, mas o registo fica visível para auditoria. Commit associado.
+
+### Prompt 133 — Arquitetura de checklists dinâmicas (backend)
+- **Modelo `ModeloChecklist`** — template com `empresa_id`, `nome`, `descricao`, `seccoes[{nome, items[]}]`. Permite criar modelos reutilizáveis por empresa.
+- **`Propriedade.modelo_checklist_id`** — associação de um modelo a cada propriedade.
+- **`Tarefa.checklist_dinamica`** — snapshot da checklist no momento da criação da tarefa (para histórico imutável). Injeção on-the-fly no `minhaTarefaDetalhe` se a tarefa não tem snapshot mas a propriedade tem modelo associado.
+
+### Prompt 134 — Ecrãs de configuração e interface do staff (frontend)
+- **`/gestor/configuracoes/checklists`** — CRUD completo de modelos de checklist (criar/editar/eliminar, secções e items dinâmicos).
+- **Select `modelo_checklist_id`** no formulário de `/gestor/propriedades`.
+- **`detalhe-tarefa-client.tsx`** — renderiza `checklist_dinamica` por secções; botão "Concluir" bloqueado até 100% dos items marcados; `jaConcluida` desativa inputs.
+
+### Prompt 135 — Injeção das checklists (seed de base de dados)
+- **Script `seedChecklists.js`** — cria 2 modelos base (Limpeza Standard + Detalhada V2) e associa-os às propriedades existentes.
+- **Botão "Correr Seed de Checklists"** na gaveta da empresa (`/admin/empresas/[id]`) → `POST /api/admin/empresas/:id/seed-checklists`.
+
+### Prompt 136 — Fix PDF sempre visível + abandono do html2pdf.js
+- **PDF em branco resolvido** — o `exportarPDF` do `/gestor/relatorios` passou a usar **`window.open()` + `document.write()` + `printWindow.print()`** (diálogo de impressão nativo do browser) em vez do `html2pdf.js` (que produzia PDFs de 3KB completamente vazios, mesmo com o div de exportação a ter conteúdo confirmado por debug log). O HTML do relatório é gerado numa nova janela com estilos inline A4 (cabeçalho dourado, KPIs em grelha 4-col, tabelas de staff/propriedades/estados com minibarras, resumo IA em caixa âmbar).
+- **Relatório sempre visível resolvido** — removido o componente `PdfExportContent` e o div de exportação residual (`position: fixed; left: 0; top: 0; zIndex: 99998; opacity: 1`) que, após a mudança para `window.print()`, já não era usado pelo export mas continuava renderizado por cima da página, tornando o relatório sempre visível. Removido também o `useRef` (já não há `pdfExportRef`). Comentários actualizados de "html2pdf.js" → "window.print()".
+
+Stage Summary (Prompt 136):
+- **Export PDF do relatório de produtividade funcional** via diálogo de impressão nativo do browser (A4, com resumo IA + KPIs + tabelas). Sem dependência de bibliotecas externas de captura (html2pdf.js/html2canvas).
+- **Página de relatórios limpa** — o conteúdo do PDF só aparece na janela de impressão, não na página principal. Removidos ~320 linhas de código morto (`PdfExportContent` + div de exportação).
+- Documentação (`docs/FRONTEND.md` + este `WORKLOG.md`) actualizada com os Prompts 132-136.
+
+### Prompt 137 — Fix nome_hospede não aparecia nos cartões do staff
+- **Root cause** — o backend (`criarTarefa` + webhook Smoobu) já gravava `detalhes_reserva.nome_hospede` corretamente, e o detalhe da tarefa (`DetalhesReservaCard`) já o mostrava. Mas a **lista de tarefas do staff** (`/staff`) não o exibia porque:
+  1. `adaptarTarefa()` em `/staff/page.tsx` não repassava `detalhes_reserva` ao `TaskCard` (o campo era descartado no mapeamento).
+  2. `TaskCard` (`components/staff/task-card.tsx`) não tinha renderização nenhuma do `nome_hospede`.
+- **Fix 1** — `adaptarTarefa()` agora inclui `detalhes_reserva: t.detalhes_reserva ?? null` no objeto adaptado. Interface `TarefaReal` actualizada com o campo.
+- **Fix 2** — `TaskCard` agora mostra uma linha destacada (ícone `User` + fundo dourado claro `bg-primary/5`) com o `nome_hospede` quando este existe, entre a morada e o botão "Ver detalhes".
+- **Fix 3** — tabela de `/gestor/tarefas` ganhou uma coluna **"Hóspede"** (entre Propriedade e Funcionário) que mostra `t.detalhes_reserva?.nome_hospede ?? "—"`.
+
 Stage Summary:
 - **SaaS multi-tenant consolidado:** `Empresa` com `ativa` + `apagada`, endpoints de Super Admin (toggle-status, hard-reset scoped, soft-delete + restaurar, config, sincronizar-propriedades/reservas, registrar-webhooks), Lixeira de Empresas no `/admin`.
 - **Notificações In-App amadurecidas:** `Notificacao.tarefa_id`, sino com scroll/max-height, página full-page `/gestor/notificacoes` e `/staff/notificacoes`, polling 30s.

@@ -45,6 +45,13 @@ interface TarefaReal {
   tipo: string;
   estado: string;
   tempo_limpeza_minutos: number;
+  // Prompt 136 — detalhes_reserva (para mostrar nome_hospede no cartão).
+  detalhes_reserva?: {
+    checkin?: string | null;
+    checkout?: string | null;
+    pax?: number | null;
+    nome_hospede?: string | null;
+  } | null;
 }
 
 /**
@@ -62,6 +69,9 @@ function adaptarTarefa(t: TarefaReal) {
     endereco: t.propriedade_id?.morada,
     // v1.56.0 (Prompt 78) — data ISO real para extrair hora de início no TaskCard.
     data: t.data,
+    // Prompt 136 — repassa detalhes_reserva para o TaskCard poder mostrar
+    // o nome do hóspede na lista de tarefas do staff.
+    detalhes_reserva: t.detalhes_reserva ?? null,
   };
 }
 
