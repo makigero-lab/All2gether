@@ -143,6 +143,10 @@ export interface TarefaMock {
     nome: string;
     items: Array<{ texto: string; concluido: boolean }>;
   }>;
+  // Prompt 138 (136 V2) — Tempo de viagem (em minutos) entre a tarefa
+  // anterior do staff e esta. Guardado pelo scheduler para o frontend
+  // poder desenhar rotas e mostrar o itinerário.
+  tempo_viagem_minutos?: number | null;
 }
 
 /**

@@ -112,6 +112,8 @@ const ESTADO_LABEL: Record<string, string> = {
   em_curso: "Em curso",
   concluida: "Concluída",
   cancelada: "Cancelada",
+  // Prompt 138 (136 V2) — SLA excedido.
+  nao_atribuida: "Não atribuída (SLA)",
 };
 
 const ESTADO_COR: Record<string, string> = {
@@ -120,6 +122,8 @@ const ESTADO_COR: Record<string, string> = {
   em_curso: CORES.amber,
   por_atribuir: CORES.muted,
   cancelada: CORES.vermelho,
+  // Prompt 138 (136 V2) — vermelho (urgente).
+  nao_atribuida: CORES.vermelho,
 };
 
 const PRESETS = [

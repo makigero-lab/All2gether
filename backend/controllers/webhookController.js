@@ -354,14 +354,17 @@ async function determinarUtilizadorAtribuido(empresaId, range, coordenadasNovaPr
       if (vip) {
         // O preferencial está disponível (passou os filtros de ausência +
         // folga). Falta validar o SLA de capacidade (8h/dia).
-        const cargaLimpezaVIP = await calcularCargaLimpezaDia(empresaId, vip._id, range);
+        // Prompt 138 (136 V2) — Number() em tudo para evitar concatenação.
+        const cargaLimpezaVIP = Number(await calcularCargaLimpezaDia(empresaId, vip._id, range)) || 0;
         const cargaTotalVIP = cargaLimpezaVIP + Number(tempoNovaTarefa);
         if (cargaTotalVIP <= CAPACIDADE_MAXIMA_MINUTOS) {
           console.log(
             `⭐ Algoritmo VIP: tarefa atribuída ao funcionário preferencial ${vipIdStr} ` +
               `(carga ${cargaTotalVIP}min ≤ ${CAPACIDADE_MAXIMA_MINUTOS}min).`
           );
-          return vip._id;
+          // Devolve também o tempo de viagem 0 (VIP não tem cálculo de
+          // viagem no SLA — só conta a carga de limpeza).
+          return { utilizadorId: vip._id, tempoViagem: 0 };
         }
         console.log(
           `⭐ Algoritmo VIP: preferencial ${vipIdStr} excede SLA ` +
@@ -414,6 +417,9 @@ async function determinarUtilizadorAtribuido(empresaId, range, coordenadasNovaPr
   // precisamos de populate('propriedade_id', 'coordenadas').
   let melhorUtilizador = null;
   let menorCargaTotal = Infinity;
+  // Prompt 138 (136 V2) — guarda o tempo de viagem do melhor staff para
+  // persistir na tarefa (campo tempo_viagem_minutos).
+  let melhorTempoViagem = 0;
 
   for (const u of disponiveis) {
     // Tempo de limpeza acumulado.
@@ -439,20 +445,44 @@ async function determinarUtilizadorAtribuido(empresaId, range, coordenadasNovaPr
     // Carga total = limpeza acumulada + viagem + tempo da nova tarefa.
     // v1.15.0: inclui o tempo_limpeza_minutos da NOVA tarefa que está a
     // ser atribuída (recebido como parâmetro adicional).
-    const cargaTotal = cargaLimpeza + tempoViagem + tempoNovaTarefa;
+    //
+    // Prompt 138 (136 V2) — Fix Matemática SLA:
+    //   O cálculo estava com bugs de concatenação de strings (o aggregate
+    //   do MongoDB pode devolver Number ou string consoante o tipo no schema).
+    //   Envolve-se tudo em Number(...) para garantir aritmética correcta.
+    const cargaTotal =
+      Number(cargaLimpeza) + Number(tempoViagem) + Number(tempoNovaTarefa);
+
+    // Validação: se algum componente for NaN, skipa este utilizador.
+    if (!Number.isFinite(cargaTotal)) {
+      console.warn(`⚠️  determinarUtilizadorAtribuido: cargaTotal=NaN para staff ${u._id} (cargaLimpeza=${cargaLimpeza}, tempoViagem=${tempoViagem}, tempoNovaTarefa=${tempoNovaTarefa})`);
+      continue;
+    }
 
     // SLA: se a carga total exceder a capacidade máxima, ignora este utilizador.
     if (cargaTotal > CAPACIDADE_MAXIMA_MINUTOS) {
+      console.log(`⚠️  SLA: staff ${u._id} excede 480min (cargaTotal=${cargaTotal}min) — excluído do load balancer.`);
       continue;
     }
 
     if (cargaTotal < menorCargaTotal) {
       menorCargaTotal = cargaTotal;
       melhorUtilizador = u;
+      // Guarda o tempo de viagem do melhor utilizador para persistir na tarefa.
+      melhorTempoViagem = tempoViagem;
     }
   }
 
-  return melhorUtilizador ? melhorUtilizador._id : null;
+  // Prompt 138 (136 V2) — Se TODOS os staff disponíveis excederam o SLA de
+  // 480 min, devolve um marcador especial para o caller saber que deve criar
+  // a tarefa com estado 'nao_atribuida' (em vez de 'por_atribuir'). Isto
+  // distingue "ainda não tentámos atribuir" de "tentámos mas não coube em
+  // nenhum staff — requer intervenção do gestor".
+  if (!melhorUtilizador) {
+    console.log(`⚠️  determinarUtilizadorAtribuido: nenhum staff disponível coube no SLA de ${CAPACIDADE_MAXIMA_MINUTOS}min — tarefa será 'nao_atribuida'.`);
+  }
+
+  return melhorUtilizador ? { utilizadorId: melhorUtilizador._id, tempoViagem: melhorTempoViagem } : null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -753,22 +783,34 @@ async function criarTarefaPorReserva(reservaId, smoobuPropId, dataTarefaRaw, det
 
   // Load balancer (best-effort: se falhar, cria sem atribuição).
   // Prompt 93: passa o propriedade._id para o Algoritmo VIP (preferencial).
-  let utilizadorAtribuido = null;
+  // Prompt 138 (136 V2) — determinarUtilizadorAtribuido agora devolve
+  // { utilizadorId, tempoViagem } ou null. Se null, todos os staff excederam
+  // o SLA de 480 min → tarefa fica 'nao_atribuida' (requer intervenção).
+  let resultadoLoadBalancer = null;
+  let tentouAtribuir = false;
   try {
-    utilizadorAtribuido = await determinarUtilizadorAtribuido(
+    resultadoLoadBalancer = await determinarUtilizadorAtribuido(
       empresaId,
       range,
       propriedade.coordenadas,
       tempoLimpeza,
       propriedade._id
     );
+    tentouAtribuir = true;
   } catch (err) {
     console.error(
       '⚠️  Erro ao determinar utilizador (tarefa será criada sem atribuição):',
       err.message
     );
-    utilizadorAtribuido = null;
+    resultadoLoadBalancer = null;
   }
+
+  const utilizadorAtribuido = resultadoLoadBalancer?.utilizadorId ?? null;
+  // Prompt 138 (136 V2) — tempo de viagem do staff escolhido (para persistir).
+  const tempoViagemMinutos = Number(resultadoLoadBalancer?.tempoViagem) || 0;
+  // Se tentámos atribuir mas não encaixou em nenhum staff (SLA excedido),
+  // marca como 'nao_atribuida'. Se não tentámos (erro), fica 'por_atribuir'.
+  const slaExcedido = tentouAtribuir && !utilizadorAtribuido;
 
   // v1.49.0 — Scheduler Sequencial: calcula a hora exata de início da
   // tarefa em vez de usar meia-noite (range.start). As limpezas começam
@@ -778,6 +820,7 @@ async function criarTarefaPorReserva(reservaId, smoobuPropId, dataTarefaRaw, det
   // v1.53.0 — Lógica extraída para backend/utils/scheduler.js (partilhada
   // com a reatribuição inteligente do tarefaController).
   let dataAgendada;
+  let tempoViagemScheduler = 0;
   if (utilizadorAtribuido) {
     try {
       const resultadoScheduler = await calcularInicioTarefaUtilizador(
@@ -787,6 +830,11 @@ async function criarTarefaPorReserva(reservaId, smoobuPropId, dataTarefaRaw, det
         Number(tempoLimpeza) || 45
       );
       dataAgendada = resultadoScheduler.data;
+      // O scheduler calcula o tempo de viagem novamente (entre a última
+      // tarefa do staff e a nova). Usamos esse valor se for > 0 (mais
+      // preciso que o do load balancer, que é entre a última tarefa
+      // cronológica e a nova).
+      tempoViagemScheduler = Number(resultadoScheduler.tempoViagem) || 0;
     } catch (err) {
       console.error('⚠️  Scheduler sequencial falhou (usa 11:00 padrão):', err.message);
       dataAgendada = new Date(range.start);
@@ -797,6 +845,10 @@ async function criarTarefaPorReserva(reservaId, smoobuPropId, dataTarefaRaw, det
     dataAgendada = new Date(range.start);
     dataAgendada.setUTCHours(10, 0, 0, 0); // 11:00 local (UTC+1) = 10:00 UTC
   }
+
+  // Prompt 138 (136 V2) — tempo de viagem final a guardar na tarefa.
+  // Prefere o valor do scheduler (mais preciso) se disponível.
+  const tempoViagemFinal = tempoViagemScheduler > 0 ? tempoViagemScheduler : tempoViagemMinutos;
 
   // Prompt 133 — Injeção de Checklist Dinâmica (snapshot do ModeloChecklist).
   let checklistDinamicaWebhook = [];
@@ -818,6 +870,15 @@ async function criarTarefaPorReserva(reservaId, smoobuPropId, dataTarefaRaw, det
     }
   }
 
+  // Prompt 138 (136 V2) — estado: se o SLA foi excedido (tentou atribuir mas
+  // nenhum staff coube), marca 'nao_atribuida'. Se atribuiu, 'atribuida'.
+  // Caso contrário (erro no load balancer), 'por_atribuir'.
+  const estadoInicial = utilizadorAtribuido
+    ? 'atribuida'
+    : slaExcedido
+    ? 'nao_atribuida'
+    : 'por_atribuir';
+
   const novaTarefa = await Tarefa.create({
     empresa_id: empresaId,
     propriedade_id: propriedade._id,
@@ -825,8 +886,11 @@ async function criarTarefaPorReserva(reservaId, smoobuPropId, dataTarefaRaw, det
     utilizador_id: utilizadorAtribuido,
     data: dataAgendada,
     tempo_limpeza_minutos: Number(tempoLimpeza) || 45,
+    // Prompt 138 (136 V2) — tempo de viagem guardado na BD (para o frontend
+    // desenhar rotas e para auditoria do load balancer).
+    tempo_viagem_minutos: tempoViagemFinal,
     tipo: 'limpeza',
-    estado: utilizadorAtribuido ? 'atribuida' : 'por_atribuir',
+    estado: estadoInicial,
     // v1.55.0 (Prompt 77) — Snapshot da checklist da propriedade no momento
     // da criação. Sem isto, as tarefas nasciam sem itens para o staff picar.
     checklist: propriedade.checklist || [],
@@ -839,7 +903,7 @@ async function criarTarefaPorReserva(reservaId, smoobuPropId, dataTarefaRaw, det
 
   if (utilizadorAtribuido) {
     console.log(
-      `✅ Tarefa ${novaTarefa._id} atribuída ao utilizador ${utilizadorAtribuido} (carga do dia calculada).`
+      `✅ Tarefa ${novaTarefa._id} atribuída ao utilizador ${utilizadorAtribuido} (carga do dia calculada, viagem: ${tempoViagemFinal}min).`
     );
 
     // v1.37.0 — Notificação push ao staff (se tiver subscrição ativa).
@@ -855,8 +919,11 @@ async function criarTarefaPorReserva(reservaId, smoobuPropId, dataTarefaRaw, det
       { tipo: 'tarefa_atribuida', empresa_id: String(empresaId) }
     );
   } else {
+    // Prompt 138 (136 V2) — distingue "sem staff disponível" de "SLA excedido".
     console.log(
-      `✅ Tarefa ${novaTarefa._id} criada SEM atribuição (sem Staff disponível ou erro).`
+      slaExcedido
+        ? `⚠️  Tarefa ${novaTarefa._id} criada como 'nao_atribuida' (todos os staff excedem SLA de ${CAPACIDADE_MAXIMA_MINUTOS}min).`
+        : `✅ Tarefa ${novaTarefa._id} criada SEM atribuição (sem Staff disponível ou erro).`
     );
   }
 

@@ -126,6 +126,9 @@ function paletaPorEstado(estado: string): PaletaEvento {
     case "por_atribuir":
       // Vermelho suave
       return { bg: "#fee2e2", border: "#fca5a5", text: "#991b1b", dot: "#ef4444" };
+    case "nao_atribuida":
+      // Prompt 138 (136 V2) — vermelho escuro (SLA excedido, mais urgente).
+      return { bg: "#fecaca", border: "#f87171", text: "#7f1d1d", dot: "#dc2626" };
     case "cancelada":
       // Cinza suave
       return { bg: "#f1f5f9", border: "#cbd5e1", text: "#475569", dot: "#94a3b8" };
@@ -190,6 +193,8 @@ const ESTADO_LABEL_TAB: Record<string, string> = {
   em_curso: "Em Curso",
   concluida: "Concluída",
   cancelada: "Cancelada",
+  // Prompt 138 (136 V2) — SLA excedido.
+  nao_atribuida: "Não Atribuída (SLA)",
 };
 
 const ESTADO_VARIANT_TAB: Record<
@@ -201,6 +206,8 @@ const ESTADO_VARIANT_TAB: Record<
   em_curso: "warning",
   concluida: "success",
   cancelada: "outline",
+  // Prompt 138 (136 V2) — vermelho (mais urgente que por_atribuir).
+  nao_atribuida: "destructive",
 };
 
 /**
@@ -442,7 +449,9 @@ export default function CalendarioOperacionalPage() {
       const semHoraReal = !temHoraReal(t.data);
       const paleta = paletaPorEstado(t.estado);
       const classNames =
-        t.estado === "por_atribuir" ? ["fc-evt-por-atribuir"] : [];
+        t.estado === "por_atribuir" || t.estado === "nao_atribuida"
+          ? ["fc-evt-por-atribuir"]
+          : [];
 
       if (semHoraReal) {
         // Evento all-day: só precisa da data (YYYY-MM-DD).

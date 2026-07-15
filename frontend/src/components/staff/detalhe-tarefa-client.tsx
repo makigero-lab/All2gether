@@ -329,6 +329,13 @@ export function DetalheTarefaClient({
             <Timer className="h-3.5 w-3.5" />
             {formatarMinutos(tarefa.tempo_estimado_minutos)}
           </span>
+          {/* Prompt 138 (136 V2) — Tempo de viagem entre a tarefa anterior e esta. */}
+          {tarefa.tempo_viagem_minutos != null && tarefa.tempo_viagem_minutos > 0 && (
+            <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
+              <MapPin className="h-3.5 w-3.5" />
+              +{formatarMinutos(tarefa.tempo_viagem_minutos)} viagem
+            </span>
+          )}
           {tarefa.endereco && (
             <span className="flex min-w-0 items-center gap-1">
               <MapPin className="h-3.5 w-3.5 shrink-0" />

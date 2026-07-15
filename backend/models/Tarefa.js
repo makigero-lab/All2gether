@@ -44,6 +44,15 @@ const tarefaSchema = new mongoose.Schema(
       default: 45,
       min: 0,
     },
+    // Prompt 138 (136 V2) — Tempo de viagem (em minutos) entre a tarefa
+    // anterior do staff e esta. Calculado pelo scheduler (Haversine + 30km/h,
+    // capped a 60min). Guardado na BD para o frontend poder desenhar as rotas
+    // e para auditoria do load balancer.
+    tempo_viagem_minutos: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
     tipo: {
       type: String,
       enum: ['limpeza', 'check_in', 'check_out', 'manutencao', 'outro'],
@@ -51,7 +60,11 @@ const tarefaSchema = new mongoose.Schema(
     },
     estado: {
       type: String,
-      enum: ['por_atribuir', 'atribuida', 'em_curso', 'concluida', 'cancelada'],
+      // Prompt 138 (136 V2) — 'nao_atribuida' é usado quando TODOS os staff
+      // excedem o SLA de 480 min. Diferente de 'por_atribuir' (que significa
+      // "ainda não foi tentada a atribuição"). 'nao_atribuida' = "tentou-se
+      // atribuir mas não coube em nenhum staff — requer intervenção do gestor".
+      enum: ['por_atribuir', 'atribuida', 'em_curso', 'concluida', 'cancelada', 'nao_atribuida'],
       default: 'por_atribuir',
     },
     // Observações gerais (gestor/admin).

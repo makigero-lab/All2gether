@@ -661,6 +661,36 @@ Stage Summary (Prompt 136):
 - **Debug logs** — adicionados logs em `criarTarefa`, `minhaTarefaDetalhe` e `enriquecerReservaSmoobu` para diagnosticar futuros problemas com o `nome_hospede`.
 - **Testes** — os testes do webhook (incluindo `Prompt 93 — guarda detalhes_reserva`) continuam a passar. 2 testes pre-existing (`POST com smoobu_id duplicado → 409` e `com API key + fetch mockado → 200 + contadores`) já falhavam antes das alterações por problemas de setup não relacionados.
 
+### Prompt 138 (136 V2) — Cérebro do Scheduler e Gravação da Viagem
+
+- **Fix 1 — Matemática SLA (480 min):** o cálculo da `carga_total` (tempos tarefas + viagem + nova limpeza) estava com bugs de concatenação de strings (o aggregate do MongoDB podia devolver strings). Tudo envolvido em `Number(...)` com validação `Number.isFinite()`. Se a `carga_total` de TODOS os funcionários disponíveis exceder 480 min, o sistema NÃO força a atribuição — grava com `utilizador_id: null` e `estado: 'nao_atribuida'` (novo estado, distinto de `por_atribuir` = "ainda não tentámos").
+  - `determinarUtilizadorAtribuido` agora devolve `{ utilizadorId, tempoViagem }` em vez de apenas o `_id` (para o caller poder persistir o tempo de viagem).
+  - `reatribuirTarefa` também com `Number()` no cálculo de `novaCarga`.
+  - Algoritmo VIP também com `Number()` no cálculo de `cargaTotalVIP`.
+
+- **Fix 2 — Cap de GPS (Teto Máximo):** o motor de geocoding estava a devolver viagens de 5h (300 min). `calcularTempoViagem` agora impõe `tempoViagem = Math.min(tempoCalculado, 60)` — teto máximo de 60 min (1h). Se der erro (coordenadas inválidas/NaN), assume 30 min (antes devolvia 0, o que subestimava a carga e fazia atribuições impossíveis).
+
+- **Fix 3 — Gravar Tempo de Viagem na BD:** novo campo `tempo_viagem_minutos: { type: Number, default: 0, min: 0 }` no modelo `Tarefa`. O Scheduler guarda o tempo exato da deslocação neste campo ao criar (webhook) e ao reatribuir/auto-atribuir tarefas.
+  - `webhookController.criarTarefaPorReserva` — guarda `tempo_viagem_minutos` (prefere o valor do scheduler, fallback para o do load balancer).
+  - `tarefaController.reatribuirTarefa` — guarda `tempo_viagem_minutos` do scheduler.
+  - `tarefaController.autoAtribuirTarefas` — guarda `tempo_viagem_minutos` em cada tarefa reatribuída.
+  - `jobs/caoGuarda.js` (Fail-Safe) — guarda `tempo_viagem_minutos` nas atribuições noturnas.
+
+- **Frontend — exibição do tempo de viagem:**
+  - `TarefaMock` (api.ts) ganhou `tempo_viagem_minutos?: number | null`.
+  - `detalhe-tarefa-client.tsx` — mostra "+Xmin viagem" (âmbar) nos metadados do detalhe da tarefa.
+  - `/staff/tarefas/[id]/page.tsx` — `adaptarTarefa` repassa `tempo_viagem_minutos`.
+
+- **Frontend — novo estado `nao_atribuida`:**
+  - Labels: "Não atribuída (SLA)" (tarefas, detalhe modal, calendário, relatórios).
+  - Cores: vermelho `destructive` (mais urgente que `por_atribuir` que é âmbar).
+  - Calendário: paleta vermelho escuro para eventos `nao_atribuida`.
+  - Tab "Por atribuir" do `/gestor/tarefas` inclui `nao_atribuida`.
+  - Enum `estadosValidos` do `atualizarEstadoTarefa` inclui `nao_atribuida`.
+  - Queries `$ne: 'cancelada'` já incluem `nao_atribuida` (visível na lista do gestor).
+
+- **Testes** — 151/151 ✓ (a mudança de retorno de `determinarUtilizadorAtribuido` de `_id` para `{ utilizadorId, tempoViagem }` não quebrou testes porque os testes do webhook mockam o load balancer).
+
 Stage Summary:
 - **SaaS multi-tenant consolidado:** `Empresa` com `ativa` + `apagada`, endpoints de Super Admin (toggle-status, hard-reset scoped, soft-delete + restaurar, config, sincronizar-propriedades/reservas, registrar-webhooks), Lixeira de Empresas no `/admin`.
 - **Notificações In-App amadurecidas:** `Notificacao.tarefa_id`, sino com scroll/max-height, página full-page `/gestor/notificacoes` e `/staff/notificacoes`, polling 30s.

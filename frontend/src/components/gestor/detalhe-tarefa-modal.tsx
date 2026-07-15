@@ -76,17 +76,21 @@ const ESTADO_LABEL: Record<string, string> = {
   em_curso: "Em curso",
   concluida: "Concluída",
   cancelada: "Cancelada",
+  // Prompt 138 (136 V2) — SLA excedido.
+  nao_atribuida: "Não atribuída (SLA)",
 };
 
 const ESTADO_VARIANT: Record<
   string,
-  "default" | "secondary" | "success" | "warning" | "outline"
+  "default" | "secondary" | "success" | "warning" | "outline" | "destructive"
 > = {
   por_atribuir: "warning",
   atribuida: "default",
   em_curso: "secondary",
   concluida: "success",
   cancelada: "outline",
+  // Prompt 138 (136 V2) — vermelho para destacar que requer intervenção.
+  nao_atribuida: "destructive",
 };
 
 function formatarDataHora(iso: string): string {

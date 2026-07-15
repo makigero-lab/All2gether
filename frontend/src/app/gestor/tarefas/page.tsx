@@ -77,14 +77,18 @@ const ESTADO_LABEL: Record<string, string> = {
   em_curso: "Em curso",
   concluida: "Concluída",
   cancelada: "Cancelada",
+  // Prompt 138 (136 V2) — SLA excedido (todos os staff > 480 min).
+  nao_atribuida: "Não atribuída (SLA)",
 };
 
-const ESTADO_VARIANT: Record<string, "default" | "secondary" | "success" | "warning" | "outline"> = {
+const ESTADO_VARIANT: Record<string, "default" | "secondary" | "success" | "warning" | "outline" | "destructive"> = {
   por_atribuir: "warning",
   atribuida: "default",
   em_curso: "secondary",
   concluida: "success",
   cancelada: "outline",
+  // Prompt 138 (136 V2) — vermelho para destacar que requer intervenção.
+  nao_atribuida: "destructive",
 };
 
 function formatarData(iso: string): string {
@@ -150,7 +154,8 @@ export default function AdminTarefasPage() {
     // Filtro da aba de estado.
     switch (abaEstado) {
       case "por_atribuir":
-        return t.estado === "por_atribuir";
+        // Prompt 138 (136 V2) — inclui 'nao_atribuida' (SLA excedido).
+        return t.estado === "por_atribuir" || t.estado === "nao_atribuida";
       case "pendentes":
         // Pendentes = atribuídas/em_curso (ainda não concluídas nem canceladas).
         return t.estado === "atribuida" || t.estado === "em_curso";
