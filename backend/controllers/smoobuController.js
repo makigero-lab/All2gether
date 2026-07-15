@@ -236,15 +236,14 @@ exports.sincronizarReservas = async (req, res) => {
       // O processador espera: { action, data: { id, arrival, departure,
       // apartment: { id, name }, guests, guestName, ... } }
       //
-      // Prompt 137 — Cobertura exaustiva do nome do hóspede no formato REST
+      // Prompt 139b — Cobertura exaustiva do nome do hóspede no formato REST
       // API do Smoobu. O Smoobu pode devolver: guestName, guest_name,
-      // guest.name, guest.firstName + guest.lastName, firstName + lastName,
-      // customerName, customer.name, bookedForName, name. Se não extrairmos
-      // o nome aqui, o processarReservaSmoobu vai fazer um fetch extra por
-      // reserva para enriquecer (lento e desnecessário se o REST API já tem
-      // o nome).
+      // guest-name (kebab-case), guest.name, guest.firstName + guest.lastName,
+      // firstName + lastName, customerName, customer.name, bookedForName, name.
+      // Se não extrairmos o nome aqui, o processarReservaSmoobu vai fazer um
+      // fetch extra por reserva para enriquecer (lento e desnecessário).
       const hospedeNomeSmoobu =
-        reserva.guestName ?? reserva.guest_name ??
+        reserva.guestName ?? reserva.guest_name ?? reserva['guest-name'] ??
         reserva.guest?.name ??
         (reserva.guest?.firstName || reserva.guest?.lastName
           ? [reserva.guest?.firstName, reserva.guest?.lastName].filter(Boolean).join(' ')

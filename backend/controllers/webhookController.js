@@ -177,19 +177,26 @@ function extrairDadosReserva(payload) {
     null;
   const pax = paxRaw != null ? Number(paxRaw) : null;
 
-  // nome_hospede — nome do hóspede principal. Variantes: guestName,
-  // firstName + lastName, guest.firstName, name.
+  // nome_hospede — nome do hóspede principal.
+  // Prompt 139b — O Smoobu usa 'guest-name' (kebab-case) em alguns endpoints.
+  // Variantes cobertas: guestName, guest_name, guest-name, guest.name,
+  // guest.firstName + guest.lastName, firstName + lastName, name.
   const nomeHospede =
     data?.guestName ??
     data?.guest_name ??
+    data?.['guest-name'] ??
     data?.guest?.name ??
     data?.guest?.firstName ??
+    (data?.guest?.firstName || data?.guest?.lastName
+      ? [data?.guest?.firstName, data?.guest?.lastName].filter(Boolean).join(' ')
+      : null) ??
     (data?.firstName || data?.lastName
       ? [data?.firstName, data?.lastName].filter(Boolean).join(' ')
       : null) ??
     data?.name ??
     content.guestName ??
     content.guest_name ??
+    content['guest-name'] ??
     content.guest?.name ??
     (content?.firstName || content?.lastName
       ? [content?.firstName, content?.lastName].filter(Boolean).join(' ')
@@ -650,13 +657,14 @@ async function enriquecerReservaSmoobu(reservaId) {
     const departure = r?.departure ?? r?.end_date ?? r?.endDate ?? null;
     const paxRaw = r?.guests ?? r?.numPeople ?? r?.numberOfGuests ?? null;
     const pax = paxRaw != null ? Number(paxRaw) : null;
-    // Prompt 137 — Cobertura exaustiva das variantes do nome do hóspede no Smoobu.
-    // O Smoobu REST API pode devolver: guestName, guest_name, guest.name,
-    // guest.firstName + guest.lastName, firstName + lastName, customerName,
-    // customer.name, bookedForName, name.
+    // Prompt 139b — Cobertura exaustiva das variantes do nome do hóspede no Smoobu.
+    // O Smoobu REST API pode devolver: guestName, guest_name, guest-name,
+    // guest.name, guest.firstName + guest.lastName, firstName + lastName,
+    // customerName, customer.name, bookedForName, name.
     const nome_hospede =
       r?.guestName ??
       r?.guest_name ??
+      r?.['guest-name'] ??
       r?.guest?.name ??
       r?.guest?.firstName ??
       (r?.guest?.firstName || r?.guest?.lastName

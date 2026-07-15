@@ -720,6 +720,15 @@ Stage Summary (Prompt 136):
 - **Fix 5 — Endpoint `POST /api/admin/backfill-tempos-viagem`**: percorre todas as tarefas atribuídas sem `tempo_viagem_minutos` e guarda o valor calculado na BD (para persistência — evita recalcular a cada pedido). Botão **"Calcular Tempos de Viagem"** adicionado na gaveta da empresa (`/admin/empresas/[id]`).
 - **Testes** — 151/151 ✓. Lint ✓.
 
+### Prompt 139c — Fix nome_hospede: Smoobu usa `guest-name` (kebab-case)
+
+- **Root cause** — o Smoobu devolve o nome do hóspede como `guest-name` (kebab-case) em alguns endpoints, mas o código só procurava `guestName` (camelCase) e `guest_name` (snake_case). Por isso o nome ficava sempre `null`.
+- **Fix** — adicionada a variante `guest-name` (acesso via bracket notation `['guest-name']`) em **3 sítios**:
+  1. `extrairDadosReserva` (webhookController) — extração do payload do webhook.
+  2. `enriquecerReservaSmoobu` (webhookController) — extração da resposta da REST API.
+  3. `sincronizarReservas` (smoobuController) — extração do payload REST API antes de mapear para o formato webhook.
+- **Testes** — 151/151 ✓.
+
 Stage Summary:
 - **SaaS multi-tenant consolidado:** `Empresa` com `ativa` + `apagada`, endpoints de Super Admin (toggle-status, hard-reset scoped, soft-delete + restaurar, config, sincronizar-propriedades/reservas, registrar-webhooks), Lixeira de Empresas no `/admin`.
 - **Notificações In-App amadurecidas:** `Notificacao.tarefa_id`, sino com scroll/max-height, página full-page `/gestor/notificacoes` e `/staff/notificacoes`, polling 30s.
