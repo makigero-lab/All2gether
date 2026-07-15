@@ -464,3 +464,73 @@
   border-radius: calc(var(--radius) - 1px);
   margin-top: 1px;
 }
+
+/* --------------------------------------------------------------------------
+   Prompt 137 — Blocos de Viagem (cinzento + tracejado)
+   Distintos das tarefas reais para não confundir o gestor. Aparecem ANTES
+   da tarefa de limpeza (início = hora_tarefa - tempo_viagem, fim = hora_tarefa).
+   -------------------------------------------------------------------------- */
+
+.fc-evt-viagem {
+  /* Borda tracejada + fundo cinzento claro + opacidade reduzida. */
+  border: 1px dashed #94a3b8 !important;
+  background-color: #f1f5f9 !important;
+  opacity: 0.85;
+}
+
+.fc-evt-viagem:hover {
+  opacity: 1;
+}
+
+/* Variante viagem na vista mensal — compacto, cinzento, itálico. */
+.fc-evt-month--viagem {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+  width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  background-color: #f1f5f9 !important;
+  border-left: 3px dashed #94a3b8 !important;
+  padding: 1px 4px !important;
+  border-radius: calc(var(--radius) - 1px);
+  font-style: italic;
+  font-weight: 500;
+  color: #64748b !important;
+}
+
+.fc-evt-month--viagem .fc-evt-month__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.7rem;
+  color: #64748b;
+}
+
+/* Variante viagem nas vistas semanal/diária — bloco com borda tracejada. */
+.fc-evt-block--viagem {
+  border: 1px dashed #94a3b8 !important;
+  background-color: #f1f5f9 !important;
+  border-radius: calc(var(--radius) - 1px);
+  padding: 2px 6px;
+}
+
+.fc-evt-block--viagem .fc-evt-block__title {
+  font-style: italic;
+  font-weight: 500;
+  color: #475569;
+  font-size: 0.7rem;
+}
+
+.fc-evt-block--viagem .fc-evt-block__time {
+  color: #94a3b8;
+  font-size: 0.65rem;
+}
+
+.fc-evt-block--viagem .fc-evt-block__subtitle {
+  color: #94a3b8;
+  font-size: 0.6rem;
+}

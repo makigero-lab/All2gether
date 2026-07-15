@@ -691,6 +691,25 @@ Stage Summary (Prompt 136):
 
 - **Testes** — 151/151 ✓ (a mudança de retorno de `determinarUtilizadorAtribuido` de `_id` para `{ utilizadorId, tempoViagem }` não quebrou testes porque os testes do webhook mockam o load balancer).
 
+### Prompt 137 — O Calendário Visual (Mostrar as Viagens)
+
+- **Blocos de Viagem no Calendário (`/gestor/calendario/page.tsx`):** quando uma tarefa tem `tempo_viagem_minutos > 0`, o calendário agora cria **DOIS eventos** em vez de um:
+  - **Evento A (A Viagem):** título `🚗 Viagem (Xm)`, início = `hora_tarefa - tempo_viagem`, fim = `hora_tarefa`. Cor cinzenta + borda tracejada (classe CSS `fc-evt-viagem`) para distinguir da tarefa real. ID com sufixo `-viagem` para não colidir.
+  - **Evento B (A Limpeza):** a tarefa normal com a cor da propriedade/estado.
+  - `tarefas.map` trocado por `tarefas.flatMap` para suportar 1 ou 2 eventos por tarefa.
+  - `renderEventContent` detecta a flag `_isViagem` no `extendedProps` e renderiza o bloco de viagem com estilo próprio (cinzento + itálico + ícone 🚗).
+  - Clicar no bloco de viagem abre o detalhe da tarefa associada (o `extendedProps` tem todos os campos da tarefa).
+  - CSS adicionado ao `globals.css`: `.fc-evt-viagem` (borda tracejada), `.fc-evt-month--viagem` (vista mensal), `.fc-evt-block--viagem` (vista semanal/diária).
+
+- **UI dos Detalhes da Tarefa — badge de tempo de viagem:**
+  - `detalhe-tarefa-modal.tsx` (gestor): badge âmbar "🚗 Tempo de Viagem estimado: X min" entre os metadados e a lotação máxima. Interface `TarefaDetalheGestor` actualizada com `tempo_viagem_minutos`.
+  - `task-card.tsx` (staff): badge âmbar "🚗 Tempo de Viagem: X min" entre o nome do hóspede e o botão "Ver detalhes".
+  - `detalhe-tarefa-client.tsx` (staff, detalhe): já tinha "+Xmin viagem" nos metadados (Prompt 138).
+  - `adaptarTarefa` em `/staff/page.tsx` e `/staff/tarefas/[id]/page.tsx` repassam `tempo_viagem_minutos`.
+  - Interface `TarefaReal` e `TarefaCalendario` actualizadas com `tempo_viagem_minutos`.
+
+- **Testes** — 151/151 ✓ (sem alterações de backend). Lint frontend ✓.
+
 Stage Summary:
 - **SaaS multi-tenant consolidado:** `Empresa` com `ativa` + `apagada`, endpoints de Super Admin (toggle-status, hard-reset scoped, soft-delete + restaurar, config, sincronizar-propriedades/reservas, registrar-webhooks), Lixeira de Empresas no `/admin`.
 - **Notificações In-App amadurecidas:** `Notificacao.tarefa_id`, sino com scroll/max-height, página full-page `/gestor/notificacoes` e `/staff/notificacoes`, polling 30s.

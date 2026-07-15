@@ -63,6 +63,8 @@ interface TarefaCalendario {
     pax?: number | null;
     nome_hospede?: string | null;
   } | null;
+  // Prompt 137 — Tempo de viagem (para criar bloco de viagem no calendário).
+  tempo_viagem_minutos?: number | null;
   // v1.57.0 (Prompt 79) — Campos extras para eventos de ausência (FullCalendar allDay multi-dia).
   title?: string;
   start?: string;
@@ -403,14 +405,17 @@ export default function CalendarioOperacionalPage() {
   }, [carregarTarefas, periodo]);
 
   /* --- Mapear tarefas → eventos do FullCalendar --- */
+  // Prompt 137 — Se a tarefa tem tempo_viagem_minutos > 0, cria DOIS eventos:
+  //   Evento A (Viagem): cinzento/tracejado, início = hora_tarefa - viagem, fim = hora_tarefa.
+  //   Evento B (Limpeza): a tarefa normal com a cor da propriedade/estado.
   const eventos = useMemo<EventInput[]>(() => {
-    return tarefas.map((t) => {
+    return tarefas.flatMap((t) => {
       // Ausência aprovada (férias/doença) — banner horizontal contínuo
       // cinzento/roxo pastel atravessando os dias (Prompt 80, ponto 2).
       if (t.tipo === "ausencia") {
         // O backend já envia start/end/allDay/title. Usamos esses campos
         // e aplicamos uma classe CSS para o estilo de banner.
-        return {
+        return [{
           id: t._id,
           title: t.title ?? `Ausência: ${t.utilizador_id?.nome ?? "Staff"}`,
           start: t.start ?? t.data,
@@ -423,12 +428,12 @@ export default function CalendarioOperacionalPage() {
           extendedProps: t,
           // Flag custom para o eventContent aplicar a classe de banner.
           classNames: ["fc-evt-ausencia"],
-        } as EventInput;
+        } as EventInput];
       }
 
       // Folga fixa semanal — bloco cinzento claro, todo o dia.
       if (t.tipo === "folga_fixa") {
-        return {
+        return [{
           id: t._id,
           title: `Folga - ${t.utilizador_id?.nome ?? "Staff"}`,
           start: t.data,
@@ -437,7 +442,7 @@ export default function CalendarioOperacionalPage() {
           borderColor: "#cbd5e1",
           textColor: "#475569",
           extendedProps: t,
-        } as EventInput;
+        } as EventInput];
       }
 
       // Prompt 129 — Extrai a hora diretamente da string ISO sem converter fuso.
@@ -455,7 +460,7 @@ export default function CalendarioOperacionalPage() {
 
       if (semHoraReal) {
         // Evento all-day: só precisa da data (YYYY-MM-DD).
-        return {
+        return [{
           id: t._id,
           title: t.propriedade_id?.nome ?? "—",
           start: inicio.toISOString().slice(0, 10),
@@ -465,7 +470,7 @@ export default function CalendarioOperacionalPage() {
           textColor: paleta.text,
           extendedProps: t,
           classNames,
-        } as EventInput;
+        } as EventInput];
       }
 
       // Prompt 129 — Constrói a data/hora como string LOCAL (sem Z) para o
@@ -490,7 +495,8 @@ export default function CalendarioOperacionalPage() {
       // usa borda âmbar para alertar visualmente.
       const temConflito = !!(t as TarefaCalendario & { _conflito?: boolean })._conflito;
 
-      return {
+      // Evento B (A Limpeza) — a tarefa normal.
+      const eventoLimpeza: EventInput = {
         id: t._id,
         title: t.propriedade_id?.nome ?? "—",
         start: startLocal,
@@ -500,14 +506,51 @@ export default function CalendarioOperacionalPage() {
         textColor: temConflito ? "#92400e" : paleta.text,
         extendedProps: t,
         classNames: temConflito ? [...classNames, "fc-evt-conflito"] : classNames,
-      } as EventInput;
+      };
+
+      // Prompt 137 — Evento A (A Viagem): só cria se tempo_viagem_minutos > 0.
+      // O bloco de viagem aparece ANTES da tarefa (início = hora_tarefa - viagem,
+      // fim = hora_tarefa). Cor cinzenta + borda tracejada para distinguir da
+      // tarefa real.
+      const tempoViagem = Number(t.tempo_viagem_minutos) || 0;
+      const eventos: EventInput[] = [eventoLimpeza];
+
+      if (tempoViagem > 0) {
+        // Calcula o início da viagem (hora_tarefa - tempo_viagem) matematicamente.
+        let totalViagemInicio = hIni * 60 + mIni - tempoViagem;
+        // Se a viagem começar antes da meia-noite, clampar a 00:00 (não
+        // suportamos viagens que cruzam a meia-noite no calendário).
+        if (totalViagemInicio < 0) totalViagemInicio = 0;
+        const hViagem = Math.floor(totalViagemInicio / 60);
+        const mViagem = totalViagemInicio % 60;
+        const startViagemLocal = `${dataStr}T${String(hViagem).padStart(2, "0")}:${String(mViagem).padStart(2, "0")}:00`;
+
+        const eventoViagem: EventInput = {
+          // ID único com sufixo "-viagem" para não colidir com o evento da limpeza.
+          id: `${t._id}-viagem`,
+          title: `🚗 Viagem (${tempoViagem}m)`,
+          start: startViagemLocal,
+          end: startLocal,
+          // Cinzento suave + borda tracejada (classe CSS fc-evt-viagem).
+          backgroundColor: "#f1f5f9",
+          borderColor: "#94a3b8",
+          textColor: "#475569",
+          extendedProps: { ...t, _isViagem: true },
+          classNames: ["fc-evt-viagem"],
+        };
+        // A viagem aparece ANTES da limpeza no calendário.
+        eventos.unshift(eventoViagem);
+      }
+
+      return eventos;
     });
   }, [tarefas]);
 
   /* --- Renderização customizada do bloco de evento (Prompt 74, ponto 4) --- */
   /* --- Prompt 80: destaque por_atribuir + banner ausência --- */
+  /* --- Prompt 137: bloco de viagem (cinzento + tracejado) --- */
   const renderEventContent = useCallback((arg: EventContentArg) => {
-    const t = arg.event.extendedProps as TarefaCalendario;
+    const t = arg.event.extendedProps as TarefaCalendario & { _isViagem?: boolean };
     const isMonthView = arg.view.type === "dayGridMonth";
     const paleta = paletaPorEstado(t.estado);
     const emoji = emojiPorTipo(t.tipo);
@@ -516,6 +559,34 @@ export default function CalendarioOperacionalPage() {
     const isFolga = t.tipo === "folga_fixa";
     const isAusencia = t.tipo === "ausencia";
     const isPorAtribuir = t.estado === "por_atribuir";
+    const isViagem = !!t._isViagem;
+
+    // --- Bloco de Viagem (Prompt 137) — cinzento + tracejado + ícone 🚗 ---
+    if (isViagem) {
+      const tituloViagem = arg.event.title ?? "🚗 Viagem";
+      if (isMonthView) {
+        return (
+          <div className="fc-evt-month fc-evt-month--viagem" title={tituloViagem}>
+            <span className="fc-evt-month__title">{tituloViagem}</span>
+          </div>
+        );
+      }
+      return (
+        <div className="fc-evt-block fc-evt-block--viagem" title={tituloViagem}>
+          <div className="fc-evt-block__header">
+            <span className="fc-evt-block__emoji" aria-hidden>🚗</span>
+            <span className="fc-evt-block__time">{arg.timeText}</span>
+          </div>
+          <div className="fc-evt-block__title">{tituloViagem}</div>
+          {staff && (
+            <div className="fc-evt-block__subtitle">
+              <User className="fc-evt-block__icon" />
+              <span>{primeiroNome(staff)}</span>
+            </div>
+          )}
+        </div>
+      );
+    }
 
     // --- Ausência: banner contínuo (não tem propriedade, só staff) ---
     // Renderiza um conteúdo minimalista — o título já vem do backend
