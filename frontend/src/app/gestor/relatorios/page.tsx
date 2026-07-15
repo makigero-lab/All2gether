@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   BarChart3,
   Loader2,
@@ -168,14 +168,13 @@ export default function RelatoriosPage() {
   const [inicio, setInicio] = useState<string>("");
   const [fim, setFim] = useState<string>("");
 
-  // Prompt 124-Fix1 — Resumo IA + exportação PDF (html2pdf.js)
+  // Prompt 136 — Resumo IA + exportação PDF via window.print() (nova janela A4)
   const [aiLoading, setAiLoading] = useState(false);
   const [aiResumo, setAiResumo] = useState<string | null>(null);
   const [aiErro, setAiErro] = useState<string | null>(null);
   const [pdfLoading, setPdfLoading] = useState(false);
   // Prompt 127 — Toast visual para erros de PDF.
   const [pdfErro, setPdfErro] = useState<string | null>(null);
-  const pdfExportRef = useRef<HTMLDivElement | null>(null);
 
   const carregar = useCallback(async () => {
     setLoading(true);
@@ -233,7 +232,7 @@ export default function RelatoriosPage() {
     }
   }, [data]);
 
-  // Prompt 124-Fix1 — Exportar PDF com html2pdf.js (A4, inclui resumo IA + tabelas + gráficos).
+  // Prompt 136 — Exportar PDF via window.open() + print() (A4, inclui resumo IA + tabelas).
   const exportarPDF = useCallback(async () => {
     if (!data) return;
     setPdfLoading(true);
@@ -433,7 +432,7 @@ export default function RelatoriosPage() {
           >
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           </Button>
-          {/* Prompt 124-Fix1 — Exportar PDF via html2pdf.js (A4, com resumo IA + tabelas + gráficos) */}
+          {/* Prompt 136 — Exportar PDF via window.print() (nova janela A4) */}
           <Button
             variant="outline"
             onClick={exportarPDF}
@@ -831,36 +830,6 @@ export default function RelatoriosPage() {
             </CardContent>
           </Card>
 
-          {/* Prompt 124-Fix1 — Conteúdo oculto usado pelo html2pdf para exportar PDF A4.
-              Prompt 131b — Em vez de position: absolute; left: -99999px (que em alguns
-              browsers faz o html2canvas capturar um div vazio), usamos position: fixed;
-              left: 0; top: 0; z-index: -1; opacity: 0; pointer-events: none. Isto mantém
-              o div dentro do viewport (html2canvas consegue capturá-lo) mas invisível ao
-              utilizador. Inclui resumo IA + tabelas + gráficos. */}
-          {data && (
-            <div
-              ref={pdfExportRef}
-              aria-hidden
-              style={{
-                position: "fixed",
-                left: 0,
-                top: 0,
-                zIndex: 99998,
-                opacity: 1,
-                pointerEvents: "none",
-                width: "794px",
-                background: "#ffffff",
-                color: "#0f172a",
-                padding: "24px",
-                fontFamily:
-                  "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif",
-                fontSize: "12px",
-                lineHeight: 1.5,
-              }}
-            >
-              <PdfExportContent data={data} stats={stats} aiResumo={aiResumo} />
-            </div>
-          )}
         </>
       ) : null}
     </div>
@@ -965,324 +934,3 @@ function renderarInline(texto: string): ReactNode {
   });
 }
 
-/* ------------------------------------------------------------------ */
-/* Componente auxiliar — conteúdo do PDF (A4, com resumo IA + tabelas) */
-/* ------------------------------------------------------------------ */
-
-interface PdfExportContentProps {
-  data: RelatorioData;
-  stats: { label: string; value: string; sub?: string }[];
-  aiResumo: string | null;
-}
-
-/**
- * Estrutura HTML usada pelo html2pdf para gerar o PDF A4. Usa estilos
- * inline (para garantir renderização consistente pelo html2canvas) e
- * inclui: cabeçalho, período, resumo IA, KPIs, tabelas (staff,
- * propriedades, estados) e minigráficos de barras horizontais baseados
- * em divs (sem dependência do recharts no PDF).
- */
-function PdfExportContent({ data, stats, aiResumo }: PdfExportContentProps) {
-  const periodo = `${formatarDataCurta(data.periodo.inicio.slice(0, 10))} a ${formatarDataCurta(
-    data.periodo.fim.slice(0, 10)
-  )}`;
-  const geradoEm = new Date().toLocaleDateString("pt-PT", {
-    day: "2-digit",
-    month: "long",
-    year: "numeric",
-  });
-
-  // Largura máxima de barras (px).
-  const maxBarra = 360;
-  const maxStaffTotal = Math.max(1, ...data.porStaff.map((s) => s.total));
-  const maxPropTotal = Math.max(1, ...data.porPropriedade.map((p) => p.total));
-
-  return (
-    <div>
-      {/* Cabeçalho */}
-      <div style={{ borderBottom: "2px solid #c9a227", paddingBottom: 8, marginBottom: 16 }}>
-        <div style={{ fontSize: 18, fontWeight: 700, color: "#0f172a" }}>
-          Relatório de Produtividade — Autocell
-        </div>
-        <div style={{ fontSize: 12, color: "#475569", marginTop: 2 }}>
-          Período: {periodo}
-        </div>
-        <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>
-          Gerado em {geradoEm}
-        </div>
-      </div>
-
-      {/* Resumo IA */}
-      {aiResumo && (
-        <div style={{ marginBottom: 16, pageBreakInside: "avoid" }}>
-          <div
-            style={{
-              fontSize: 13,
-              fontWeight: 700,
-              color: "#c9a227",
-              marginBottom: 6,
-            }}
-          >
-            Resumo Executivo IA
-          </div>
-          <div
-            style={{
-              background: "#fffaf0",
-              border: "1px solid #fde68a",
-              borderRadius: 6,
-              padding: 10,
-              fontSize: 11.5,
-              color: "#1f2937",
-              whiteSpace: "pre-wrap",
-            }}
-          >
-            {aiResumo}
-          </div>
-        </div>
-      )}
-
-      {/* KPIs em grelha */}
-      <div style={{ marginBottom: 16, pageBreakInside: "avoid" }}>
-        <div
-          style={{
-            fontSize: 13,
-            fontWeight: 700,
-            color: "#0f172a",
-            marginBottom: 6,
-          }}
-        >
-          Indicadores-chave
-        </div>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(4, 1fr)",
-            gap: 8,
-          }}
-        >
-          {stats.map((s) => (
-            <div
-              key={s.label}
-              style={{
-                border: "1px solid #e2e8f0",
-                borderRadius: 6,
-                padding: 8,
-                background: "#f8fafc",
-              }}
-            >
-              <div style={{ fontSize: 16, fontWeight: 700, color: "#0f172a" }}>
-                {s.value}
-              </div>
-              <div style={{ fontSize: 10, color: "#475569", marginTop: 2 }}>
-                {s.label}
-              </div>
-              {s.sub && (
-                <div style={{ fontSize: 10, color: "#64748b", marginTop: 1 }}>
-                  {s.sub}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Tabela — Produtividade por staff + minibarra */}
-      {data.porStaff.length > 0 && (
-        <div style={{ marginBottom: 16, pageBreakInside: "avoid" }}>
-          <div
-            style={{
-              fontSize: 13,
-              fontWeight: 700,
-              color: "#0f172a",
-              marginBottom: 6,
-            }}
-          >
-            Produtividade por funcionário
-          </div>
-          <table
-            style={{
-              width: "100%",
-              borderCollapse: "collapse",
-              fontSize: 11,
-            }}
-          >
-            <thead>
-              <tr style={{ borderBottom: "2px solid #cbd5e1", textAlign: "left" }}>
-                <th style={{ padding: "4px 6px" }}>Funcionário</th>
-                <th style={{ padding: "4px 6px", textAlign: "right" }}>Total</th>
-                <th style={{ padding: "4px 6px", textAlign: "right" }}>Concl.</th>
-                <th style={{ padding: "4px 6px", textAlign: "right" }}>%</th>
-                <th style={{ padding: "4px 6px" }}>Carga</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.porStaff.map((s, i) => (
-                <tr
-                  key={s.utilizador_id ?? i}
-                  style={{ borderBottom: "1px solid #e2e8f0" }}
-                >
-                  <td style={{ padding: "4px 6px", fontWeight: 600 }}>{s.nome}</td>
-                  <td style={{ padding: "4px 6px", textAlign: "right" }}>{s.total}</td>
-                  <td style={{ padding: "4px 6px", textAlign: "right" }}>{s.concluidas}</td>
-                  <td style={{ padding: "4px 6px", textAlign: "right" }}>
-                    {Math.round(s.taxaConclusao * 100)}%
-                  </td>
-                  <td style={{ padding: "4px 6px" }}>
-                    <div
-                      style={{
-                        height: 8,
-                        width: `${Math.max(
-                          4,
-                          (s.total / maxStaffTotal) * maxBarra
-                        )}px`,
-                        background: "#c9a227",
-                        borderRadius: 4,
-                      }}
-                      title={formatarHoras(s.carga_minutos)}
-                    />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* Tabela — Carga por propriedade + minibarra */}
-      {data.porPropriedade.length > 0 && (
-        <div style={{ marginBottom: 16, pageBreakInside: "avoid" }}>
-          <div
-            style={{
-              fontSize: 13,
-              fontWeight: 700,
-              color: "#0f172a",
-              marginBottom: 6,
-            }}
-          >
-            Carga por propriedade
-          </div>
-          <table
-            style={{
-              width: "100%",
-              borderCollapse: "collapse",
-              fontSize: 11,
-            }}
-          >
-            <thead>
-              <tr style={{ borderBottom: "2px solid #cbd5e1", textAlign: "left" }}>
-                <th style={{ padding: "4px 6px" }}>Propriedade</th>
-                <th style={{ padding: "4px 6px", textAlign: "right" }}>Tarefas</th>
-                <th style={{ padding: "4px 6px", textAlign: "right" }}>Carga</th>
-                <th style={{ padding: "4px 6px", textAlign: "right" }}>% do total</th>
-                <th style={{ padding: "4px 6px" }}>Distrib.</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.porPropriedade.map((p, i) => {
-                const pct =
-                  data.resumo.totalTarefas > 0
-                    ? (p.total / data.resumo.totalTarefas) * 100
-                    : 0;
-                return (
-                  <tr
-                    key={p.propriedade_id ?? i}
-                    style={{ borderBottom: "1px solid #e2e8f0" }}
-                  >
-                    <td style={{ padding: "4px 6px", fontWeight: 600 }}>{p.nome}</td>
-                    <td style={{ padding: "4px 6px", textAlign: "right" }}>{p.total}</td>
-                    <td style={{ padding: "4px 6px", textAlign: "right" }}>
-                      {formatarHoras(p.carga_minutos)}
-                    </td>
-                    <td style={{ padding: "4px 6px", textAlign: "right" }}>
-                      {Math.round(pct)}%
-                    </td>
-                    <td style={{ padding: "4px 6px" }}>
-                      <div
-                        style={{
-                          height: 8,
-                          width: `${Math.max(
-                            4,
-                            (p.total / maxPropTotal) * maxBarra
-                          )}px`,
-                          background: "#22c55e",
-                          borderRadius: 4,
-                        }}
-                      />
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* Tabela — Distribuição por estado */}
-      {data.porEstado.length > 0 && (
-        <div style={{ marginBottom: 16, pageBreakInside: "avoid" }}>
-          <div
-            style={{
-              fontSize: 13,
-              fontWeight: 700,
-              color: "#0f172a",
-              marginBottom: 6,
-            }}
-          >
-            Distribuição por estado
-          </div>
-          <table
-            style={{
-              width: "100%",
-              borderCollapse: "collapse",
-              fontSize: 11,
-            }}
-          >
-            <thead>
-              <tr style={{ borderBottom: "2px solid #cbd5e1", textAlign: "left" }}>
-                <th style={{ padding: "4px 6px" }}>Estado</th>
-                <th style={{ padding: "4px 6px", textAlign: "right" }}>Tarefas</th>
-                <th style={{ padding: "4px 6px", textAlign: "right" }}>% do total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.porEstado.map((e, i) => {
-                const pct =
-                  data.resumo.totalTarefas > 0
-                    ? (e.total / data.resumo.totalTarefas) * 100
-                    : 0;
-                return (
-                  <tr
-                    key={e.estado ?? i}
-                    style={{ borderBottom: "1px solid #e2e8f0" }}
-                  >
-                    <td style={{ padding: "4px 6px", fontWeight: 600 }}>
-                      {ESTADO_LABEL[e.estado] ?? e.estado}
-                    </td>
-                    <td style={{ padding: "4px 6px", textAlign: "right" }}>{e.total}</td>
-                    <td style={{ padding: "4px 6px", textAlign: "right" }}>
-                      {Math.round(pct)}%
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* Rodapé */}
-      <div
-        style={{
-          marginTop: 24,
-          paddingTop: 8,
-          borderTop: "1px solid #e2e8f0",
-          fontSize: 10,
-          color: "#94a3b8",
-          textAlign: "center",
-        }}
-      >
-        Autocell — Relatório gerado automaticamente. Dados confidenciais.
-      </div>
-    </div>
-  );
-}
