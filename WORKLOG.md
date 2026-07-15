@@ -729,6 +729,21 @@ Stage Summary (Prompt 136):
   3. `sincronizarReservas` (smoobuController) — extração do payload REST API antes de mapear para o formato webhook.
 - **Testes** — 151/151 ✓.
 
+### Prompt 140 — Caixa Negra de Webhooks na gaveta da empresa
+
+- **Modelo `WebhookLog`** ganhou campo `empresa_id` (ObjectId ref Empresa, default null, indexado). Permite filtrar logs por empresa.
+- **`webhookController.webhookSmoobu`** — resolve o `empresa_id` a partir do payload (extrai `smoobuPropId`, procura a propriedade, obtém `empresa_id`) antes de criar o log. Best-effort: se falhar, fica null.
+- **`GET /api/admin/webhook-logs`** — aceita query `?empresa_id=` para filtrar logs por empresa.
+- **Novo componente `WebhookLogsCard`** (`components/admin/webhook-logs-card.tsx`) — card completo que mostra os logs de webhooks filtrados por empresa. Inclui:
+  - Tabela com data/hora, evento, estado (Badge), erro.
+  - Filtros por estado (Todos / Sucesso / Falhas / Pendentes).
+  - **Linha expansível** — click na linha expande o payload completo (JSON formatado) para auditoria.
+  - Botão "Limpar Antigos" (apaga logs > 30 dias).
+  - Scroll interno (`max-h-96 overflow-y-auto`) para não esticar a página.
+- **Gaveta da empresa** (`/admin/empresas/[id]`) — `WebhookLogsCard` adicionado antes da Zona de Perigo, com `md:col-span-2` (ocupa toda a largura).
+- **AdminSidebar** mantém só "Empresas" (não foi adicionado link global — o utilizador pediu que ficasse dentro da configuração da empresa).
+- **Testes** — 151/151 ✓. Lint ✓.
+
 Stage Summary:
 - **SaaS multi-tenant consolidado:** `Empresa` com `ativa` + `apagada`, endpoints de Super Admin (toggle-status, hard-reset scoped, soft-delete + restaurar, config, sincronizar-propriedades/reservas, registrar-webhooks), Lixeira de Empresas no `/admin`.
 - **Notificações In-App amadurecidas:** `Notificacao.tarefa_id`, sino com scroll/max-height, página full-page `/gestor/notificacoes` e `/staff/notificacoes`, polling 30s.

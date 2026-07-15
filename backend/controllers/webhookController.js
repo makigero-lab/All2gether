@@ -1161,11 +1161,25 @@ exports.webhookSmoobu = async (req, res) => {
   // 1) Guarda o payload bruto no WebhookLog com status 'recebido'.
   //    Fazemos isto ANTES de devolver o 200 para garantir que o payload
   //    nunca se perde, mesmo que o processamento assíncrono falhe.
+  //    Prompt 140 — Tenta resolver empresa_id a partir do payload (best-effort).
   let webhookLog = null;
+  let empresaIdLog = null;
+  try {
+    // Extrai o smoobuPropId do payload (mesma lógica do extrairDadosReserva).
+    const dados = extrairDadosReserva(req.body);
+    if (dados.smoobuPropId) {
+      const Propriedade = require('../models/Propriedade');
+      const prop = await Propriedade.findOne({ smoobu_id: String(dados.smoobuPropId) }).select('empresa_id').lean();
+      if (prop) empresaIdLog = prop.empresa_id;
+    }
+  } catch (e) {
+    // Best-effort — se falhar, o log fica sem empresa_id (null).
+  }
   try {
     webhookLog = await WebhookLog.create({
       payload: req.body,
       status: 'recebido',
+      empresa_id: empresaIdLog,
     });
   } catch (err) {
     console.error('⚠️  Erro ao guardar WebhookLog (payload será perdido):', err.message);
@@ -1183,11 +1197,14 @@ exports.webhookSmoobu = async (req, res) => {
 
       // Sucesso → atualiza log para 'processado'.
       // (inclui o caso de webhook duplicado ou action ignorada — não é erro)
+      // Prompt 140 — Se a empresa não foi resolvida antes, tenta novamente
+      // a partir do resultado (que pode ter a propriedade populada).
       if (webhookLog) {
-        await WebhookLog.findByIdAndUpdate(webhookLog._id, {
-          status: 'processado',
-          erro_msg: null,
-        });
+        const updateLog = { status: 'processado', erro_msg: null };
+        if (!empresaIdLog && resultado?.empresa_id) {
+          updateLog.empresa_id = resultado.empresa_id;
+        }
+        await WebhookLog.findByIdAndUpdate(webhookLog._id, updateLog);
       }
       // resultado pode ser null (action ignorada) ou a tarefa (criada/existente)
       return resultado;

@@ -22,6 +22,14 @@ const webhookLogSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.Mixed,
       required: true,
     },
+    // Prompt 140 — Empresa associada ao webhook (resolvida a partir da
+    // propriedade Smoobu no payload). Null se não foi possível resolver.
+    empresa_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Empresa',
+      default: null,
+      index: true,
+    },
     // Estado do processamento.
     status: {
       type: String,

@@ -35,6 +35,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { lerUtilizador } from "@/lib/auth";
+import { WebhookLogsCard } from "@/components/admin/webhook-logs-card";
 
 type Toast = { tipo: "sucesso" | "erro"; msg: string } | null;
 
@@ -551,6 +552,9 @@ export default function EmpresaGavetaPage() {
             </Button>
           </CardContent>
         </Card>
+
+        {/* Prompt 140 — Caixa Negra de Webhooks (filtrada por empresa) */}
+        {empresaId && <WebhookLogsCard empresaId={empresaId} />}
 
         {/* Zona de Perigo (Hard Reset scoped) */}
         <Card className="border-destructive/50 md:col-span-2">

@@ -725,10 +725,14 @@ router.post('/seed-checklists', async (req, res) => {
 router.get('/webhook-logs', async (req, res) => {
   try {
     const WebhookLog = require('../models/WebhookLog');
-    const { status, limit } = req.query;
+    const { status, limit, empresa_id } = req.query;
     const filtro = {};
     if (status && ['recebido', 'processado', 'erro'].includes(status)) {
       filtro.status = status;
+    }
+    // Prompt 140 — Filtro por empresa (para a gaveta da empresa mostrar só os seus webhooks).
+    if (empresa_id) {
+      filtro.empresa_id = empresa_id;
     }
     const maxLimit = Math.min(Number(limit) || 100, 500);
     const logs = await WebhookLog.find(filtro)
