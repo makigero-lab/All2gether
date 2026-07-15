@@ -642,6 +642,14 @@ Stage Summary (Prompt 136):
 - **Página de relatórios limpa** — o conteúdo do PDF só aparece na janela de impressão, não na página principal. Removidos ~320 linhas de código morto (`PdfExportContent` + div de exportação).
 - Documentação (`docs/FRONTEND.md` + este `WORKLOG.md`) actualizada com os Prompts 132-136.
 
+### Prompt 137 — Fix nome_hospede não aparecia nos cartões do staff
+- **Root cause** — o backend (`criarTarefa` + webhook Smoobu) já gravava `detalhes_reserva.nome_hospede` corretamente, e o detalhe da tarefa (`DetalhesReservaCard`) já o mostrava. Mas a **lista de tarefas do staff** (`/staff`) não o exibia porque:
+  1. `adaptarTarefa()` em `/staff/page.tsx` não repassava `detalhes_reserva` ao `TaskCard` (o campo era descartado no mapeamento).
+  2. `TaskCard` (`components/staff/task-card.tsx`) não tinha renderização nenhuma do `nome_hospede`.
+- **Fix 1** — `adaptarTarefa()` agora inclui `detalhes_reserva: t.detalhes_reserva ?? null` no objeto adaptado. Interface `TarefaReal` actualizada com o campo.
+- **Fix 2** — `TaskCard` agora mostra uma linha destacada (ícone `User` + fundo dourado claro `bg-primary/5`) com o `nome_hospede` quando este existe, entre a morada e o botão "Ver detalhes".
+- **Fix 3** — tabela de `/gestor/tarefas` ganhou uma coluna **"Hóspede"** (entre Propriedade e Funcionário) que mostra `t.detalhes_reserva?.nome_hospede ?? "—"`.
+
 Stage Summary:
 - **SaaS multi-tenant consolidado:** `Empresa` com `ativa` + `apagada`, endpoints de Super Admin (toggle-status, hard-reset scoped, soft-delete + restaurar, config, sincronizar-propriedades/reservas, registrar-webhooks), Lixeira de Empresas no `/admin`.
 - **Notificações In-App amadurecidas:** `Notificacao.tarefa_id`, sino com scroll/max-height, página full-page `/gestor/notificacoes` e `/staff/notificacoes`, polling 30s.
