@@ -50,6 +50,8 @@ export interface TarefaDetalheGestor {
     pax?: number | null;
     nome_hospede?: string | null;
   } | null;
+  // Prompt 137 — Tempo de viagem (para mostrar badge no detalhe).
+  tempo_viagem_minutos?: number | null;
   propriedade_id?: { nome: string; morada?: string; capacidade_hospedes?: number | null } | null;
   utilizador_id?: { nome: string } | null;
 }
@@ -76,17 +78,21 @@ const ESTADO_LABEL: Record<string, string> = {
   em_curso: "Em curso",
   concluida: "Concluída",
   cancelada: "Cancelada",
+  // Prompt 138 (136 V2) — SLA excedido.
+  nao_atribuida: "Não atribuída (SLA)",
 };
 
 const ESTADO_VARIANT: Record<
   string,
-  "default" | "secondary" | "success" | "warning" | "outline"
+  "default" | "secondary" | "success" | "warning" | "outline" | "destructive"
 > = {
   por_atribuir: "warning",
   atribuida: "default",
   em_curso: "secondary",
   concluida: "success",
   cancelada: "outline",
+  // Prompt 138 (136 V2) — vermelho para destacar que requer intervenção.
+  nao_atribuida: "destructive",
 };
 
 function formatarDataHora(iso: string): string {
@@ -186,6 +192,20 @@ export function DetalheTarefaModal({
                 </span>
               )}
             </div>
+
+            {/* Prompt 137 — Badge de tempo de viagem estimado.
+                Mostra se tempo_viagem_minutos > 0 (calculado pelo scheduler
+                Haversine, capped a 60min). Destaque âmbar para o gestor perceber
+                que há deslocação antes da tarefa. */}
+            {tarefa.tempo_viagem_minutos != null && tarefa.tempo_viagem_minutos > 0 && (
+              <div className="flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-50 px-3 py-2 text-sm dark:bg-amber-950/20">
+                <Clock className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                <span className="text-amber-900 dark:text-amber-100">
+                  🚗 <strong>Tempo de Viagem estimado:</strong>{" "}
+                  {tarefa.tempo_viagem_minutos} min
+                </span>
+              </div>
+            )}
 
             {/* Prompt 114 — Lotação/Capacidade Máxima destacada */}
             {tarefa.propriedade_id?.capacidade_hospedes != null &&

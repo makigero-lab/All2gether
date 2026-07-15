@@ -77,6 +77,8 @@ export function TaskCard({ tarefa }: { tarefa: TarefaMock }) {
   const hora = horaInicio(tarefa.data);
   // Prompt 136 — nome do hóspede (se existir na reserva).
   const nomeHospede = tarefa.detalhes_reserva?.nome_hospede;
+  // Prompt 137 — tempo de viagem estimado (para badge no cartão).
+  const tempoViagem = Number(tarefa.tempo_viagem_minutos) || 0;
 
   return (
     <Link href={`/staff/tarefas/${tarefa.id}`} prefetch className="block">
@@ -150,6 +152,18 @@ export function TaskCard({ tarefa }: { tarefa: TarefaMock }) {
             <p className="flex items-center gap-1.5 rounded-md bg-primary/5 px-2 py-1.5 text-xs">
               <User className="h-3.5 w-3.5 shrink-0 text-primary" />
               <span className="font-medium text-foreground">{nomeHospede}</span>
+            </p>
+          )}
+
+          {/* Prompt 137 — Badge de tempo de viagem estimado.
+              Mostra se tempo_viagem_minutos > 0 (calculado pelo scheduler).
+              Cor âmbar para o staff saber que precisa de deslocação antes. */}
+          {tempoViagem > 0 && (
+            <p className="flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-50 px-2 py-1.5 text-xs dark:bg-amber-950/20">
+              <Clock className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+              <span className="font-medium text-amber-900 dark:text-amber-100">
+                🚗 Tempo de Viagem: {tempoViagem} min
+              </span>
             </p>
           )}
 

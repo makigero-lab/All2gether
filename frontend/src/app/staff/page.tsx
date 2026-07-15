@@ -52,6 +52,8 @@ interface TarefaReal {
     pax?: number | null;
     nome_hospede?: string | null;
   } | null;
+  // Prompt 137 — tempo de viagem (para badge no cartão).
+  tempo_viagem_minutos?: number | null;
 }
 
 /**
@@ -72,6 +74,8 @@ function adaptarTarefa(t: TarefaReal) {
     // Prompt 136 — repassa detalhes_reserva para o TaskCard poder mostrar
     // o nome do hóspede na lista de tarefas do staff.
     detalhes_reserva: t.detalhes_reserva ?? null,
+    // Prompt 137 — repassa tempo_viagem_minutos para o badge no cartão.
+    tempo_viagem_minutos: t.tempo_viagem_minutos ?? null,
   };
 }
 

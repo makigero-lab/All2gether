@@ -27,14 +27,30 @@ const CAPACIDADE_MAXIMA_MINUTOS = 480;
  * Haversine (distância em linha reta) e uma velocidade média urbana de
  * 30 km/h.
  *
+ * Prompt 138 (136 V2) — Cap de GPS:
+ *   O motor de geocoding estava a devolver viagens de 5h (300 min) quando
+ *   as coordenadas estavam erradas ou as propriedades ficavam muito longe.
+ *   Impõe-se um teto máximo de 60 minutos (1h) — tempoViagem = Math.min(tempo, 60).
+ *   Se o cálculo der erro (coordenadas inválidas/NaN), assume 30 min como
+ *   fallback razoável (tempo médio de deslocação urbana).
+ *
  * @param {{ lat: number, lng: number } | null} coordA
  * @param {{ lat: number, lng: number } | null} coordB
- * @returns {number} tempo de viagem em minutos (0 se coordenadas inválidas)
+ * @returns {number} tempo de viagem em minutos (capped a 60, fallback 30)
  */
 function calcularTempoViagem(coordA, coordB) {
+  // Prompt 138 (136 V2) — Se alguma coordenada for inválida, assume 30 min
+  // (fallback razoável para deslocação urbana). Antes devolvia 0, o que
+  // fazia o scheduler subestimar a carga e atribuir tarefas impossíveis.
   if (!coordA || !coordB || coordA.lat == null || coordA.lng == null ||
       coordB.lat == null || coordB.lng == null) {
-    return 0;
+    return 30;
+  }
+
+  // Validação de NaN (coordenadas corrompidas).
+  if (Number.isNaN(coordA.lat) || Number.isNaN(coordA.lng) ||
+      Number.isNaN(coordB.lat) || Number.isNaN(coordB.lng)) {
+    return 30;
   }
 
   const R = 6371; // raio da Terra em km
@@ -52,7 +68,16 @@ function calcularTempoViagem(coordA, coordB) {
   // Velocidade média urbana: 30 km/h → tempo em minutos.
   const velocidadeKmh = 30;
   const tempoHoras = distanciaKm / velocidadeKmh;
-  const tempoMinutos = Math.round(tempoHoras * 60);
+  let tempoMinutos = Math.round(tempoHoras * 60);
+
+  // Prompt 138 (136 V2) — Cap de GPS: teto máximo de 60 min (1h).
+  // Evita viagens absurdas de 5h causadas por coordenadas erradas.
+  tempoMinutos = Math.min(tempoMinutos, 60);
+
+  // Garante que é um número finito válido (fallback 30).
+  if (!Number.isFinite(tempoMinutos) || tempoMinutos < 0) {
+    return 30;
+  }
 
   return tempoMinutos;
 }

@@ -647,7 +647,8 @@ exports.atualizarEstadoTarefa = async (req, res) => {
     }
 
     const { estado } = req.body || {};
-    const estadosValidos = ['por_atribuir', 'atribuida', 'em_curso', 'concluida', 'cancelada'];
+    // Prompt 138 (136 V2) — inclui 'nao_atribuida' (SLA excedido).
+    const estadosValidos = ['por_atribuir', 'atribuida', 'em_curso', 'concluida', 'cancelada', 'nao_atribuida'];
     if (!estadosValidos.includes(estado)) {
       return res.status(400).json({ erro: 'Estado inválido.' });
     }
@@ -768,13 +769,14 @@ exports.reatribuirTarefa = async (req, res) => {
     }
 
     // 4. Verifica capacidade do novo utilizador no dia.
-    const cargaAtual = await calcularCargaDiaUtilizador(
+    // Prompt 138 (136 V2) — Number() em tudo para evitar concatenação de strings.
+    const cargaAtual = Number(await calcularCargaDiaUtilizador(
       utilizador_id,
       tarefa.data,
       tarefa._id
-    );
-    const novaCarga = cargaAtual + (tarefa.tempo_limpeza_minutos || 45);
-    if (novaCarga > CAPACIDADE_MAXIMA_MINUTOS) {
+    )) || 0;
+    const novaCarga = cargaAtual + Number(tarefa.tempo_limpeza_minutos || 45);
+    if (!Number.isFinite(novaCarga) || novaCarga > CAPACIDADE_MAXIMA_MINUTOS) {
       return res.status(409).json({
         erro: `Capacidade excedida para ${novoUser.nome} neste dia ` +
           `(${novaCarga} min > ${CAPACIDADE_MAXIMA_MINUTOS} min).`,
@@ -805,9 +807,11 @@ exports.reatribuirTarefa = async (req, res) => {
     );
 
     // 8. Guarda a tarefa com o novo utilizador + nova data.
+    // Prompt 138 (136 V2) — guarda o tempo de viagem calculado pelo scheduler.
     tarefa.utilizador_id = novoUser._id;
     tarefa.data = resultadoScheduler.data;
     tarefa.estado = 'atribuida';
+    tarefa.tempo_viagem_minutos = Number(resultadoScheduler.tempoViagem) || 0;
     await tarefa.save();
 
     console.log(
@@ -1042,7 +1046,8 @@ exports.autoAtribuirTarefas = async (req, res) => {
         const propriedadeId = tarefa.propriedade_id?._id ?? null;
 
         // Invoca o load balancer partilhado.
-        const utilizadorAtribuido = await determinarUtilizadorAtribuido(
+        // Prompt 138 (136 V2) — agora devolve { utilizadorId, tempoViagem } ou null.
+        const resultadoLB = await determinarUtilizadorAtribuido(
           empresaId,
           range,
           coordenadas,
@@ -1050,10 +1055,14 @@ exports.autoAtribuirTarefas = async (req, res) => {
           propriedadeId
         );
 
+        const utilizadorAtribuido = resultadoLB?.utilizadorId ?? null;
+        const tempoViagemLB = Number(resultadoLB?.tempoViagem) || 0;
+
         if (utilizadorAtribuido) {
           // Encontrou staff: recalcula hora de início via scheduler sequencial
           // (respeita viagem Haversine + almoço 13h-14h) e atualiza a tarefa.
           let novaData = tarefa.data;
+          let tempoViagemScheduler = 0;
           try {
             const resultadoScheduler = await calcularInicioTarefaUtilizador(
               utilizadorAtribuido,
@@ -1062,12 +1071,16 @@ exports.autoAtribuirTarefas = async (req, res) => {
               tempoNovaTarefa
             );
             novaData = resultadoScheduler.data;
+            tempoViagemScheduler = Number(resultadoScheduler.tempoViagem) || 0;
           } catch (errScheduler) {
             console.warn(
               `⚠️  auto-atribuir: scheduler falhou para tarefa ${tarefa._id} (mantém data original):`,
               errScheduler.message
             );
           }
+
+          // Prompt 138 (136 V2) — tempo de viagem final (scheduler > LB).
+          const tempoViagemFinal = tempoViagemScheduler > 0 ? tempoViagemScheduler : tempoViagemLB;
 
           await Tarefa.updateOne(
             { _id: tarefa._id },
@@ -1076,6 +1089,7 @@ exports.autoAtribuirTarefas = async (req, res) => {
                 utilizador_id: utilizadorAtribuido,
                 estado: 'atribuida',
                 data: novaData,
+                tempo_viagem_minutos: tempoViagemFinal,
               },
             }
           );
@@ -1086,6 +1100,7 @@ exports.autoAtribuirTarefas = async (req, res) => {
             propriedade: tarefa.propriedade_id?.nome ?? '—',
             utilizador_id: String(utilizadorAtribuido),
             novo_inicio: novaData,
+            tempo_viagem_minutos: tempoViagemFinal,
             status: 'atribuida',
           });
 
@@ -1102,13 +1117,38 @@ exports.autoAtribuirTarefas = async (req, res) => {
             // Fire-and-forget: não bloqueia.
           }
         } else {
-          // Não há staff disponível: mantém por_atribuir.
+          // Prompt 138 (136 V2) — Se o load balancer devolveu null, pode ser
+          // "sem staff disponível" (ausências/folgas) ou "SLA excedido" (todos
+          // > 480 min). Se for SLA, marca 'nao_atribuida' para o gestor ver.
+          // Distingue pela presença de staff ativo na empresa.
+          let slaExcedido = false;
+          try {
+            const Utilizador = require('../models/Utilizador');
+            const temStaffAtivo = await Utilizador.exists({
+              empresa_id: empresaId,
+              role: 'staff',
+              ativo: true,
+              eliminado_em: null,
+            });
+            // Se há staff ativo mas o load balancer não atribuiu → SLA excedido.
+            slaExcedido = !!temStaffAtivo;
+          } catch (e) {
+            // Se falha a verificação, mantém por_atribuir (seguro).
+          }
+
+          if (slaExcedido) {
+            await Tarefa.updateOne(
+              { _id: tarefa._id },
+              { $set: { estado: 'nao_atribuida', tempo_viagem_minutos: 0 } }
+            );
+          }
+
           orfas++;
           detalhe.push({
             tarefa_id: String(tarefa._id),
             propriedade: tarefa.propriedade_id?.nome ?? '—',
             utilizador_id: null,
-            status: 'orfa',
+            status: slaExcedido ? 'nao_atribuida' : 'orfa',
           });
         }
       } catch (errTarefa) {

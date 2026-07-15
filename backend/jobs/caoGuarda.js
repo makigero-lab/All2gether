@@ -91,7 +91,8 @@ async function autoAtribuicaoEmergencia() {
       const propriedadeId = tarefa.propriedade_id?._id ?? null;
 
       // Invoca o load balancer (Algoritmo VIP + Haversine + SLA 8h).
-      const utilizadorAtribuido = await determinarUtilizadorAtribuido(
+      // Prompt 138 (136 V2) — agora devolve { utilizadorId, tempoViagem } ou null.
+      const resultadoLB = await determinarUtilizadorAtribuido(
         empresaId,
         range,
         coordenadas,
@@ -99,11 +100,15 @@ async function autoAtribuicaoEmergencia() {
         propriedadeId
       );
 
+      const utilizadorAtribuido = resultadoLB?.utilizadorId ?? null;
+      const tempoViagemLB = Number(resultadoLB?.tempoViagem) || 0;
+
       if (utilizadorAtribuido) {
         // Recalcula a hora de início via scheduler sequencial (respeita
         // viagem Haversine + almoço 13h-14h). Best-effort: se falhar,
         // mantém a data original.
         let novaData = tarefa.data;
+        let tempoViagemScheduler = 0;
         try {
           const resultadoScheduler = await calcularInicioTarefaUtilizador(
             utilizadorAtribuido,
@@ -112,12 +117,16 @@ async function autoAtribuicaoEmergencia() {
             tempoNovaTarefa
           );
           novaData = resultadoScheduler.data;
+          tempoViagemScheduler = Number(resultadoScheduler.tempoViagem) || 0;
         } catch (errScheduler) {
           console.warn(
             `⚠️  [Fail-Safe] scheduler falhou para tarefa ${tarefa._id} (mantém data original):`,
             errScheduler.message
           );
         }
+
+        // Prompt 138 (136 V2) — tempo de viagem final (scheduler > LB).
+        const tempoViagemFinal = tempoViagemScheduler > 0 ? tempoViagemScheduler : tempoViagemLB;
 
         await Tarefa.updateOne(
           { _id: tarefa._id },
@@ -126,6 +135,7 @@ async function autoAtribuicaoEmergencia() {
               utilizador_id: utilizadorAtribuido,
               estado: 'atribuida',
               data: novaData,
+              tempo_viagem_minutos: tempoViagemFinal,
             },
           }
         );
@@ -145,7 +155,25 @@ async function autoAtribuicaoEmergencia() {
           // Fire-and-forget: não bloqueia.
         }
       } else {
-        // Não há staff disponível: mantém por_atribuir.
+        // Prompt 138 (136 V2) — Se há staff ativo mas não atribuiu, é SLA.
+        // Marca 'nao_atribuida' para o gestor ver no painel.
+        try {
+          const Utilizador = require('../models/Utilizador');
+          const temStaffAtivo = await Utilizador.exists({
+            empresa_id: empresaId,
+            role: 'staff',
+            ativo: true,
+            eliminado_em: null,
+          });
+          if (temStaffAtivo) {
+            await Tarefa.updateOne(
+              { _id: tarefa._id },
+              { $set: { estado: 'nao_atribuida' } }
+            );
+          }
+        } catch (e) {
+          // Best-effort: se falhar, mantém por_atribuir.
+        }
         orfas++;
       }
     } catch (errTarefa) {

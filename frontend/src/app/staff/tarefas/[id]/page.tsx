@@ -75,6 +75,8 @@ export default function DetalheTarefaPage({
     checklist_dinamica: Array.isArray(tarefa.checklist_dinamica)
       ? tarefa.checklist_dinamica
       : undefined,
+    // Prompt 138 (136 V2) — Tempo de viagem (para mostrar no detalhe).
+    tempo_viagem_minutos: tarefa.tempo_viagem_minutos ?? null,
   };
 
   // Usa a checklist real da propriedade (vinda do populate do backend).
