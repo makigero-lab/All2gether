@@ -725,10 +725,14 @@ router.post('/seed-checklists', async (req, res) => {
 router.get('/webhook-logs', async (req, res) => {
   try {
     const WebhookLog = require('../models/WebhookLog');
-    const { status, limit } = req.query;
+    const { status, limit, empresa_id } = req.query;
     const filtro = {};
     if (status && ['recebido', 'processado', 'erro'].includes(status)) {
       filtro.status = status;
+    }
+    // Prompt 140 — Filtro por empresa (para a gaveta da empresa mostrar só os seus webhooks).
+    if (empresa_id) {
+      filtro.empresa_id = empresa_id;
     }
     const maxLimit = Math.min(Number(limit) || 100, 500);
     const logs = await WebhookLog.find(filtro)
@@ -817,6 +821,90 @@ router.post('/backfill-nomes-hospedes', async (req, res) => {
     });
   } catch (err) {
     console.error('❌ backfill-nomes-hospedes:', err.message);
+    return res.status(500).json({ erro: 'Erro ao executar backfill.', detalhe: err.message });
+  }
+});
+
+// Prompt 139 — POST /api/admin/backfill-tempos-viagem
+// Percorre as tarefas atribuídas que não têm tempo_viagem_minutos preenchido,
+// calcula o tempo de viagem (Haversine, capped 60min) com base na tarefa
+// anterior do mesmo staff no mesmo dia, e guarda o valor na BD.
+// Útil para preencher viagens em tarefas antigas criadas antes do Prompt 138.
+router.post('/backfill-tempos-viagem', async (req, res) => {
+  try {
+    const Tarefa = require('../models/Tarefa');
+    const { calcularTempoViagem, obterRangeDia } = require('../utils/scheduler');
+
+    // Determina o empresa_id: do body, ou do token, ou todas.
+    const empresaId = req.body?.empresa_id || (req.user && req.user.empresa_id) || null;
+    const filtro = {
+      utilizador_id: { $ne: null },
+      $or: [
+        { tempo_viagem_minutos: { $exists: false } },
+        { tempo_viagem_minutos: 0 },
+        { tempo_viagem_minutos: null },
+      ],
+    };
+    if (empresaId) filtro.empresa_id = empresaId;
+
+    const tarefas = await Tarefa.find(filtro)
+      .populate({ path: 'propriedade_id', select: 'coordenadas nome' })
+      .sort({ data: 1 })
+      .lean();
+
+    console.log(`🚗 backfill-tempos-viagem: ${tarefas.length} tarefas para processar.`);
+
+    let atualizadas = 0;
+    let semViagem = 0; // primeira tarefa do dia ou sem coordenadas
+    let erros = 0;
+
+    for (const t of tarefas) {
+      try {
+        if (!t.propriedade_id?.coordenadas) {
+          semViagem++;
+          // Guarda 0 para não voltar a processar.
+          await Tarefa.updateOne({ _id: t._id }, { $set: { tempo_viagem_minutos: 0 } });
+          continue;
+        }
+
+        // Procura a tarefa anterior do mesmo staff no mesmo dia.
+        const range = obterRangeDia(new Date(t.data));
+        const tarefaAnterior = await Tarefa.findOne({
+          utilizador_id: t.utilizador_id,
+          data: { $gte: range.start, $lt: t.data },
+          estado: { $nin: ['cancelada'] },
+        })
+          .populate({ path: 'propriedade_id', select: 'coordenadas' })
+          .sort({ data: -1 })
+          .lean();
+
+        if (tarefaAnterior && tarefaAnterior.propriedade_id?.coordenadas) {
+          const viagem = calcularTempoViagem(
+            tarefaAnterior.propriedade_id.coordenadas,
+            t.propriedade_id.coordenadas
+          );
+          await Tarefa.updateOne({ _id: t._id }, { $set: { tempo_viagem_minutos: viagem } });
+          atualizadas++;
+        } else {
+          // Primeira tarefa do dia → sem viagem.
+          await Tarefa.updateOne({ _id: t._id }, { $set: { tempo_viagem_minutos: 0 } });
+          semViagem++;
+        }
+      } catch (e) {
+        erros++;
+        console.error(`❌ backfill-viagem: erro na tarefa ${t._id}:`, e.message);
+      }
+    }
+
+    return res.status(200).json({
+      message: 'Backfill de tempos de viagem concluído.',
+      totalTarefas: tarefas.length,
+      atualizadas,
+      semViagem,
+      erros,
+    });
+  } catch (err) {
+    console.error('❌ backfill-tempos-viagem:', err.message);
     return res.status(500).json({ erro: 'Erro ao executar backfill.', detalhe: err.message });
   }
 });

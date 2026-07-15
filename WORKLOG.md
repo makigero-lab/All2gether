@@ -710,6 +710,40 @@ Stage Summary (Prompt 136):
 
 - **Testes** — 151/151 ✓ (sem alterações de backend). Lint frontend ✓.
 
+### Prompt 139b — Fix viagens não apareciam (cálculo on-the-fly + backfill)
+
+- **Root cause** — as tarefas existentes foram criadas antes do Prompt 138 (que adicionou `tempo_viagem_minutos` ao schema e o guardou no scheduler). Por isso têm `tempo_viagem_minutos: 0` ou `undefined`, e os blocos de viagem não apareciam no calendário (a condição `tempoViagem > 0` era sempre falsa).
+- **Fix 1 — Cálculo on-the-fly no `getDadosCalendario`** (gestorController): depois de obter as tarefas, percorre-as e para cada tarefa atribuída sem `tempo_viagem_minutos`, procura a tarefa anterior do mesmo staff no mesmo dia (no próprio array de tarefas) e calcula a viagem Haversine. Isto garante que os blocos aparecem **imediatamente** sem precisar de backfill.
+- **Fix 2 — Cálculo on-the-fly no `minhasTarefas`** (authController): mesma lógica para a lista de tarefas do staff (cartões).
+- **Fix 3 — Cálculo on-the-fly no `getTarefas`** (gestorController): mesma lógica para a tabela de tarefas do gestor. Populate de `propriedade_id` agora inclui `coordenadas`.
+- **Fix 4 — Cálculo on-the-fly no `minhaTarefaDetalhe`** (authController): para o detalhe da tarefa do staff, faz uma query à tarefa anterior do mesmo staff no mesmo dia e calcula a viagem.
+- **Fix 5 — Endpoint `POST /api/admin/backfill-tempos-viagem`**: percorre todas as tarefas atribuídas sem `tempo_viagem_minutos` e guarda o valor calculado na BD (para persistência — evita recalcular a cada pedido). Botão **"Calcular Tempos de Viagem"** adicionado na gaveta da empresa (`/admin/empresas/[id]`).
+- **Testes** — 151/151 ✓. Lint ✓.
+
+### Prompt 139c — Fix nome_hospede: Smoobu usa `guest-name` (kebab-case)
+
+- **Root cause** — o Smoobu devolve o nome do hóspede como `guest-name` (kebab-case) em alguns endpoints, mas o código só procurava `guestName` (camelCase) e `guest_name` (snake_case). Por isso o nome ficava sempre `null`.
+- **Fix** — adicionada a variante `guest-name` (acesso via bracket notation `['guest-name']`) em **3 sítios**:
+  1. `extrairDadosReserva` (webhookController) — extração do payload do webhook.
+  2. `enriquecerReservaSmoobu` (webhookController) — extração da resposta da REST API.
+  3. `sincronizarReservas` (smoobuController) — extração do payload REST API antes de mapear para o formato webhook.
+- **Testes** — 151/151 ✓.
+
+### Prompt 140 — Caixa Negra de Webhooks na gaveta da empresa
+
+- **Modelo `WebhookLog`** ganhou campo `empresa_id` (ObjectId ref Empresa, default null, indexado). Permite filtrar logs por empresa.
+- **`webhookController.webhookSmoobu`** — resolve o `empresa_id` a partir do payload (extrai `smoobuPropId`, procura a propriedade, obtém `empresa_id`) antes de criar o log. Best-effort: se falhar, fica null.
+- **`GET /api/admin/webhook-logs`** — aceita query `?empresa_id=` para filtrar logs por empresa.
+- **Novo componente `WebhookLogsCard`** (`components/admin/webhook-logs-card.tsx`) — card completo que mostra os logs de webhooks filtrados por empresa. Inclui:
+  - Tabela com data/hora, evento, estado (Badge), erro.
+  - Filtros por estado (Todos / Sucesso / Falhas / Pendentes).
+  - **Linha expansível** — click na linha expande o payload completo (JSON formatado) para auditoria.
+  - Botão "Limpar Antigos" (apaga logs > 30 dias).
+  - Scroll interno (`max-h-96 overflow-y-auto`) para não esticar a página.
+- **Gaveta da empresa** (`/admin/empresas/[id]`) — `WebhookLogsCard` adicionado antes da Zona de Perigo, com `md:col-span-2` (ocupa toda a largura).
+- **AdminSidebar** mantém só "Empresas" (não foi adicionado link global — o utilizador pediu que ficasse dentro da configuração da empresa).
+- **Testes** — 151/151 ✓. Lint ✓.
+
 Stage Summary:
 - **SaaS multi-tenant consolidado:** `Empresa` com `ativa` + `apagada`, endpoints de Super Admin (toggle-status, hard-reset scoped, soft-delete + restaurar, config, sincronizar-propriedades/reservas, registrar-webhooks), Lixeira de Empresas no `/admin`.
 - **Notificações In-App amadurecidas:** `Notificacao.tarefa_id`, sino com scroll/max-height, página full-page `/gestor/notificacoes` e `/staff/notificacoes`, polling 30s.
