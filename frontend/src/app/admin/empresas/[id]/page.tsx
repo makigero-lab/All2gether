@@ -18,6 +18,7 @@ import {
   Power,
   ListChecks,
   UserSearch,
+  Route,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -494,6 +495,59 @@ export default function EmpresaGavetaPage() {
                 <UserSearch className="h-4 w-4" />
               )}
               {loading === "Backfill Nomes" ? "A executar…" : "Preencher Nomes em Falta"}
+            </Button>
+          </CardContent>
+        </Card>
+
+        {/* Prompt 139 — Backfill de Tempos de Viagem */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Route className="h-5 w-5 text-primary" />
+              Tempos de Viagem em Falta
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Percorre as tarefas atribuídas desta empresa sem tempo de viagem
+              calculado e estima a deslocação (Haversine, máx. 60min) com base
+              na tarefa anterior do mesmo funcionário no mesmo dia. Útil para
+              preencher viagens em tarefas antigas criadas antes do Prompt 138.
+              <strong> Não requer API Key</strong> — usa as coordenadas das propriedades.
+            </p>
+            <Button
+              variant="outline"
+              className="w-full gap-2"
+              onClick={async () => {
+                setLoading("Backfill Viagens");
+                setToast(null);
+                try {
+                  const res = await fetch("/api/admin/backfill-tempos-viagem", {
+                    method: "POST",
+                    credentials: "include",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ empresa_id: empresaId }),
+                  });
+                  const data = await res.json().catch(() => ({}));
+                  if (!res.ok) throw new Error(data?.erro || `Erro ${res.status}`);
+                  showToast(
+                    "sucesso",
+                    `Backfill concluído: ${data.atualizadas} de ${data.totalTarefas} tarefas com viagem calculada${data.semViagem ? ` (${data.semViagem} sem viagem — 1ª do dia)` : ""}.`
+                  );
+                } catch (e) {
+                  showToast("erro", e instanceof Error ? e.message : "Erro no backfill.");
+                } finally {
+                  setLoading(null);
+                }
+              }}
+              disabled={loading !== null}
+            >
+              {loading === "Backfill Viagens" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Route className="h-4 w-4" />
+              )}
+              {loading === "Backfill Viagens" ? "A executar…" : "Calcular Tempos de Viagem"}
             </Button>
           </CardContent>
         </Card>

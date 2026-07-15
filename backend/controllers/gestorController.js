@@ -389,12 +389,41 @@ exports.getTarefas = async (req, res) => {
 
     const tarefas = await Tarefa.find(filtro)
       // Prompt 114 — Inclui capacidade_hospedes para destaque no detalhe.
-      .populate({ path: 'propriedade_id', select: 'nome capacidade_hospedes' })
+      // Prompt 139 — Inclui coordenadas para cálculo on-the-fly de tempo_viagem.
+      .populate({ path: 'propriedade_id', select: 'nome capacidade_hospedes coordenadas' })
       .populate({ path: 'utilizador_id', select: 'nome' })
       .sort({ data: 1 })
       .lean();
 
-    return res.status(200).json({ tarefas });
+    // Prompt 139 — Cálculo on-the-fly de tempo_viagem_minutos (best-effort).
+    const { calcularTempoViagem } = require('../utils/scheduler');
+    const tarefasComViagem = tarefas.map((t) => {
+      if (t.tempo_viagem_minutos && Number(t.tempo_viagem_minutos) > 0) {
+        return t;
+      }
+      if (!t.utilizador_id || !t.propriedade_id) {
+        return { ...t, tempo_viagem_minutos: 0 };
+      }
+      const diaTarefa = new Date(t.data);
+      const diaStr = diaTarefa.toISOString().slice(0, 10);
+      const tarefaAnterior = tarefas.find((outra) => {
+        if (String(outra._id) === String(t._id)) return false;
+        if (!outra.utilizador_id || !outra.propriedade_id) return false;
+        if (String(outra.utilizador_id._id) !== String(t.utilizador_id._id)) return false;
+        const diaOutra = new Date(outra.data).toISOString().slice(0, 10);
+        return diaOutra === diaStr && new Date(outra.data).getTime() < diaTarefa.getTime();
+      });
+      if (tarefaAnterior && tarefaAnterior.propriedade_id?.coordenadas && t.propriedade_id?.coordenadas) {
+        const viagem = calcularTempoViagem(
+          tarefaAnterior.propriedade_id.coordenadas,
+          t.propriedade_id.coordenadas
+        );
+        return { ...t, tempo_viagem_minutos: viagem };
+      }
+      return { ...t, tempo_viagem_minutos: 0 };
+    });
+
+    return res.status(200).json({ tarefas: tarefasComViagem });
   } catch (err) {
     console.error('❌ getTarefas:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
@@ -501,6 +530,43 @@ exports.getDadosCalendario = async (req, res) => {
       .populate({ path: 'utilizador_id', select: 'nome' })
       .sort({ data: 1 })
       .lean();
+
+    // Prompt 139 — Cálculo on-the-fly de tempo_viagem_minutos para tarefas
+    // antigas que não têm o campo preenchido (criadas antes do Prompt 138).
+    // Agrupa por utilizador + dia, ordena por data, e calcula a viagem entre
+    // tarefas consecutivas usando Haversine (capped 60min, fallback 30min).
+    // Isto é best-effort: se não houver coordenadas, fica 0.
+    const { calcularTempoViagem } = require('../utils/scheduler');
+    const tarefasComViagem = tarefas.map((t) => {
+      // Já tem tempo_viagem_minutos > 0? Mantém.
+      if (t.tempo_viagem_minutos && Number(t.tempo_viagem_minutos) > 0) {
+        return t;
+      }
+      // Tarefa sem utilizador atribuído → sem viagem.
+      if (!t.utilizador_id || !t.propriedade_id) {
+        return { ...t, tempo_viagem_minutos: 0 };
+      }
+      // Procura a tarefa ANTERIOR do mesmo staff no mesmo dia.
+      const diaTarefa = new Date(t.data);
+      const diaStr = diaTarefa.toISOString().slice(0, 10);
+      const tarefaAnterior = tarefas.find((outra) => {
+        if (String(outra._id) === String(t._id)) return false;
+        if (!outra.utilizador_id || !outra.propriedade_id) return false;
+        if (String(outra.utilizador_id._id) !== String(t.utilizador_id._id)) return false;
+        const diaOutra = new Date(outra.data).toISOString().slice(0, 10);
+        return diaOutra === diaStr && new Date(outra.data).getTime() < diaTarefa.getTime();
+      });
+      // Se há tarefa anterior, calcula a viagem entre as coordenadas.
+      if (tarefaAnterior && tarefaAnterior.propriedade_id?.coordenadas && t.propriedade_id?.coordenadas) {
+        const viagem = calcularTempoViagem(
+          tarefaAnterior.propriedade_id.coordenadas,
+          t.propriedade_id.coordenadas
+        );
+        return { ...t, tempo_viagem_minutos: viagem };
+      }
+      // Sem tarefa anterior → sem viagem (primeira tarefa do dia).
+      return { ...t, tempo_viagem_minutos: 0 };
+    });
 
     // v1.42.0 — Injeta folgas fixas semanais (dias_folga) como objetos virtuais
     // no array de tarefas, para o calendário as mostrar dinamicamente.
@@ -612,14 +678,16 @@ exports.getDadosCalendario = async (req, res) => {
       });
 
       // Junta tarefas + folgas fixas + ausências e ordena por data.
-      const resultado = [...tarefas, ...diasFolga, ...eventosAusencias].sort(
+      // Prompt 139 — usa tarefasComViagem (com tempo_viagem_minutos calculado).
+      const resultado = [...tarefasComViagem, ...diasFolga, ...eventosAusencias].sort(
         (a, b) => new Date(a.data).getTime() - new Date(b.data).getTime()
       );
 
       return res.status(200).json({ tarefas: resultado });
     }
 
-    return res.status(200).json({ tarefas });
+    // Prompt 139 — sem filtro de datas, devolve tarefasComViagem directamente.
+    return res.status(200).json({ tarefas: tarefasComViagem });
   } catch (err) {
     console.error('❌ getDadosCalendario:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });

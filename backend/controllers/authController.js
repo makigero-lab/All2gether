@@ -229,7 +229,36 @@ exports.minhasTarefas = async (req, res) => {
       .sort({ data: 1 })
       .lean();
 
-    return res.status(200).json({ tarefas });
+    // Prompt 139 — Cálculo on-the-fly de tempo_viagem_minutos para tarefas
+    // antigas (mesma lógica do getDadosCalendario).
+    const { calcularTempoViagem } = require('../utils/scheduler');
+    const tarefasComViagem = tarefas.map((t) => {
+      if (t.tempo_viagem_minutos && Number(t.tempo_viagem_minutos) > 0) {
+        return t;
+      }
+      if (!t.utilizador_id || !t.propriedade_id) {
+        return { ...t, tempo_viagem_minutos: 0 };
+      }
+      const diaTarefa = new Date(t.data);
+      const diaStr = diaTarefa.toISOString().slice(0, 10);
+      const tarefaAnterior = tarefas.find((outra) => {
+        if (String(outra._id) === String(t._id)) return false;
+        if (!outra.utilizador_id || !outra.propriedade_id) return false;
+        if (String(outra.utilizador_id) !== String(t.utilizador_id)) return false;
+        const diaOutra = new Date(outra.data).toISOString().slice(0, 10);
+        return diaOutra === diaStr && new Date(outra.data).getTime() < diaTarefa.getTime();
+      });
+      if (tarefaAnterior && tarefaAnterior.propriedade_id?.coordenadas && t.propriedade_id?.coordenadas) {
+        const viagem = calcularTempoViagem(
+          tarefaAnterior.propriedade_id.coordenadas,
+          t.propriedade_id.coordenadas
+        );
+        return { ...t, tempo_viagem_minutos: viagem };
+      }
+      return { ...t, tempo_viagem_minutos: 0 };
+    });
+
+    return res.status(200).json({ tarefas: tarefasComViagem });
   } catch (err) {
     console.error('❌ minhasTarefas:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
@@ -303,6 +332,35 @@ exports.minhaTarefaDetalhe = async (req, res) => {
 
     // Prompt 137 — Debug log para confirmar que detalhes_reserva é devolvido.
     console.log('📋 minhaTarefaDetalhe — tarefa', tarefa._id, 'detalhes_reserva:', JSON.stringify(tarefa.detalhes_reserva));
+
+    // Prompt 139 — Cálculo on-the-fly de tempo_viagem_minutos se a tarefa não
+    // tem o campo preenchido. Procura a tarefa anterior do mesmo staff no
+    // mesmo dia e calcula a viagem Haversine.
+    if ((!tarefa.tempo_viagem_minutos || Number(tarefa.tempo_viagem_minutos) === 0) && tarefa.propriedade_id?.coordenadas) {
+      try {
+        const { calcularTempoViagem, obterRangeDia } = require('../utils/scheduler');
+        const range = obterRangeDia(new Date(tarefa.data));
+        const tarefaAnterior = await Tarefa.findOne({
+          utilizador_id: tarefa.utilizador_id,
+          data: { $gte: range.start, $lt: tarefa.data },
+          estado: { $nin: ['cancelada'] },
+        })
+          .populate({ path: 'propriedade_id', select: 'coordenadas' })
+          .sort({ data: -1 })
+          .lean();
+        if (tarefaAnterior && tarefaAnterior.propriedade_id?.coordenadas) {
+          tarefa.tempo_viagem_minutos = calcularTempoViagem(
+            tarefaAnterior.propriedade_id.coordenadas,
+            tarefa.propriedade_id.coordenadas
+          );
+        } else {
+          tarefa.tempo_viagem_minutos = 0;
+        }
+      } catch (viagemErr) {
+        console.error('⚠️  minhaTarefaDetalhe: erro ao calcular tempo_viagem:', viagemErr.message);
+        tarefa.tempo_viagem_minutos = tarefa.tempo_viagem_minutos || 0;
+      }
+    }
 
     return res.status(200).json({ tarefa });
   } catch (err) {

@@ -710,6 +710,16 @@ Stage Summary (Prompt 136):
 
 - **Testes** — 151/151 ✓ (sem alterações de backend). Lint frontend ✓.
 
+### Prompt 139b — Fix viagens não apareciam (cálculo on-the-fly + backfill)
+
+- **Root cause** — as tarefas existentes foram criadas antes do Prompt 138 (que adicionou `tempo_viagem_minutos` ao schema e o guardou no scheduler). Por isso têm `tempo_viagem_minutos: 0` ou `undefined`, e os blocos de viagem não apareciam no calendário (a condição `tempoViagem > 0` era sempre falsa).
+- **Fix 1 — Cálculo on-the-fly no `getDadosCalendario`** (gestorController): depois de obter as tarefas, percorre-as e para cada tarefa atribuída sem `tempo_viagem_minutos`, procura a tarefa anterior do mesmo staff no mesmo dia (no próprio array de tarefas) e calcula a viagem Haversine. Isto garante que os blocos aparecem **imediatamente** sem precisar de backfill.
+- **Fix 2 — Cálculo on-the-fly no `minhasTarefas`** (authController): mesma lógica para a lista de tarefas do staff (cartões).
+- **Fix 3 — Cálculo on-the-fly no `getTarefas`** (gestorController): mesma lógica para a tabela de tarefas do gestor. Populate de `propriedade_id` agora inclui `coordenadas`.
+- **Fix 4 — Cálculo on-the-fly no `minhaTarefaDetalhe`** (authController): para o detalhe da tarefa do staff, faz uma query à tarefa anterior do mesmo staff no mesmo dia e calcula a viagem.
+- **Fix 5 — Endpoint `POST /api/admin/backfill-tempos-viagem`**: percorre todas as tarefas atribuídas sem `tempo_viagem_minutos` e guarda o valor calculado na BD (para persistência — evita recalcular a cada pedido). Botão **"Calcular Tempos de Viagem"** adicionado na gaveta da empresa (`/admin/empresas/[id]`).
+- **Testes** — 151/151 ✓. Lint ✓.
+
 Stage Summary:
 - **SaaS multi-tenant consolidado:** `Empresa` com `ativa` + `apagada`, endpoints de Super Admin (toggle-status, hard-reset scoped, soft-delete + restaurar, config, sincronizar-propriedades/reservas, registrar-webhooks), Lixeira de Empresas no `/admin`.
 - **Notificações In-App amadurecidas:** `Notificacao.tarefa_id`, sino com scroll/max-height, página full-page `/gestor/notificacoes` e `/staff/notificacoes`, polling 30s.
