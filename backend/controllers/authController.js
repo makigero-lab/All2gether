@@ -301,6 +301,9 @@ exports.minhaTarefaDetalhe = async (req, res) => {
       }
     }
 
+    // Prompt 137 — Debug log para confirmar que detalhes_reserva é devolvido.
+    console.log('📋 minhaTarefaDetalhe — tarefa', tarefa._id, 'detalhes_reserva:', JSON.stringify(tarefa.detalhes_reserva));
+
     return res.status(200).json({ tarefa });
   } catch (err) {
     console.error('❌ minhaTarefaDetalhe:', err.message);

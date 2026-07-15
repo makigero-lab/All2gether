@@ -17,6 +17,7 @@ import {
   Settings,
   Power,
   ListChecks,
+  UserSearch,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -442,6 +443,58 @@ export default function EmpresaGavetaPage() {
               label="Criar Checklists Padrão"
               url={`/api/admin/seed-checklists?empresa_id=${empresaId}`}
             />
+          </CardContent>
+        </Card>
+
+        {/* Prompt 137 — Backfill de Nomes de Hóspedes */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <UserSearch className="h-5 w-5 text-primary" />
+              Nomes de Hóspedes em Falta
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Percorre as tarefas desta empresa com reserva do Smoobu mas sem nome
+              de hóspede e busca o nome via REST API do Smoobu. Útil para preencher
+              nomes em tarefas antigas criadas antes do fix do enriquecimento.
+              Requer <strong>API Key do Smoobu</strong> configurada.
+            </p>
+            <Button
+              variant="outline"
+              className="w-full gap-2"
+              onClick={async () => {
+                setLoading("Backfill Nomes");
+                setToast(null);
+                try {
+                  const res = await fetch("/api/admin/backfill-nomes-hospedes", {
+                    method: "POST",
+                    credentials: "include",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ empresa_id: empresaId }),
+                  });
+                  const data = await res.json().catch(() => ({}));
+                  if (!res.ok) throw new Error(data?.erro || `Erro ${res.status}`);
+                  showToast(
+                    "sucesso",
+                    `Backfill concluído: ${data.atualizadas} de ${data.totalTarefas} tarefas atualizadas${data.falhadas ? ` (${data.falhadas} sem nome no Smoobu)` : ""}.`
+                  );
+                } catch (e) {
+                  showToast("erro", e instanceof Error ? e.message : "Erro no backfill.");
+                } finally {
+                  setLoading(null);
+                }
+              }}
+              disabled={loading !== null}
+            >
+              {loading === "Backfill Nomes" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <UserSearch className="h-4 w-4" />
+              )}
+              {loading === "Backfill Nomes" ? "A executar…" : "Preencher Nomes em Falta"}
+            </Button>
           </CardContent>
         </Card>
 

@@ -235,6 +235,29 @@ exports.sincronizarReservas = async (req, res) => {
       // Mapeia a reserva do formato REST API para o formato do webhook.
       // O processador espera: { action, data: { id, arrival, departure,
       // apartment: { id, name }, guests, guestName, ... } }
+      //
+      // Prompt 137 — Cobertura exaustiva do nome do hóspede no formato REST
+      // API do Smoobu. O Smoobu pode devolver: guestName, guest_name,
+      // guest.name, guest.firstName + guest.lastName, firstName + lastName,
+      // customerName, customer.name, bookedForName, name. Se não extrairmos
+      // o nome aqui, o processarReservaSmoobu vai fazer um fetch extra por
+      // reserva para enriquecer (lento e desnecessário se o REST API já tem
+      // o nome).
+      const hospedeNomeSmoobu =
+        reserva.guestName ?? reserva.guest_name ??
+        reserva.guest?.name ??
+        (reserva.guest?.firstName || reserva.guest?.lastName
+          ? [reserva.guest?.firstName, reserva.guest?.lastName].filter(Boolean).join(' ')
+          : null) ??
+        (reserva.firstName || reserva.lastName
+          ? [reserva.firstName, reserva.lastName].filter(Boolean).join(' ')
+          : null) ??
+        reserva.customerName ??
+        reserva.customer?.name ??
+        reserva.bookedForName ??
+        reserva.name ??
+        null;
+
       const payloadWebhook = {
         action: 'newReservation',
         data: {
@@ -249,7 +272,7 @@ exports.sincronizarReservas = async (req, res) => {
           guests: reserva.guests ?? reserva.numPeople ?? reserva.numberOfGuests ?? undefined,
           adults: reserva.adults,
           children: reserva.children,
-          guestName: reserva.guestName ?? reserva.guest_name ?? undefined,
+          guestName: hospedeNomeSmoobu ?? undefined,
           firstName: reserva.firstName ?? reserva.first_name ?? undefined,
           lastName: reserva.lastName ?? reserva.last_name ?? undefined,
         },

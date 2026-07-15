@@ -650,6 +650,17 @@ Stage Summary (Prompt 136):
 - **Fix 2** — `TaskCard` agora mostra uma linha destacada (ícone `User` + fundo dourado claro `bg-primary/5`) com o `nome_hospede` quando este existe, entre a morada e o botão "Ver detalhes".
 - **Fix 3** — tabela de `/gestor/tarefas` ganhou uma coluna **"Hóspede"** (entre Propriedade e Funcionário) que mostra `t.detalhes_reserva?.nome_hospede ?? "—"`.
 
+### Prompt 137b — Fix nome_hospede vazio nas tarefas via webhook Smoobu
+- **Root cause do nome vazio** — o card "Detalhes da Reserva" já aparecia (com check-in/out/pax preenchidos), mas o `nome_hospede` ficava sempre `null` porque:
+  1. O `enriquecerReservaSmoobu` (que busca o nome via REST API do Smoobu) **só era chamado quando `!dataCheckOutRaw`**. Se o webhook já trouxesse `departure`, o enriquecimento **não corria** e o `nome_hospede` ficava dependente apenas do payload do webhook — que normalmente **não inclui** `guestName`.
+  2. O `sincronizarReservas` não extraía o nome do hóspede do payload REST API do Smoobu com cobertura exaustiva de variantes.
+- **Fix 1** — `processarReservaSmoobu` agora chama `enriquecerReservaSmoobu` **sempre que `nome_hospede` estiver em falta** (mesmo que `departure` já exista). Condição: `!dataCheckOutRaw || !detalhesReserva.nome_hospede`.
+- **Fix 2** — `enriquecerReservaSmoobu` agora cobre mais variantes do nome do hóspede no Smoobu REST API: `guestName`, `guest_name`, `guest.name`, `guest.firstName + guest.lastName`, `firstName + lastName`, `customerName`, `customer.name`, `bookedForName`, `name`. Adicionado log do payload para debug.
+- **Fix 3** — `sincronizarReservas` (smoobuController) agora extrai o nome do hóspede do payload REST API com a mesma cobertura exaustiva, passando-o no `payloadWebhook.data.guestName`. Isto evita que o `processarReservaSmoobu` faça um fetch extra por reserva durante a sincronização em lote.
+- **Fix 4** — Novo endpoint `POST /api/admin/backfill-nomes-hospedes` que percorre as tarefas existentes com `smoobu_reserva_id` mas sem `nome_hospede` e busca o nome via REST API do Smoobu. Botão **"Preencher Nomes em Falta"** adicionado na gaveta da empresa (`/admin/empresas/[id]`).
+- **Debug logs** — adicionados logs em `criarTarefa`, `minhaTarefaDetalhe` e `enriquecerReservaSmoobu` para diagnosticar futuros problemas com o `nome_hospede`.
+- **Testes** — os testes do webhook (incluindo `Prompt 93 — guarda detalhes_reserva`) continuam a passar. 2 testes pre-existing (`POST com smoobu_id duplicado → 409` e `com API key + fetch mockado → 200 + contadores`) já falhavam antes das alterações por problemas de setup não relacionados.
+
 Stage Summary:
 - **SaaS multi-tenant consolidado:** `Empresa` com `ativa` + `apagada`, endpoints de Super Admin (toggle-status, hard-reset scoped, soft-delete + restaurar, config, sincronizar-propriedades/reservas, registrar-webhooks), Lixeira de Empresas no `/admin`.
 - **Notificações In-App amadurecidas:** `Notificacao.tarefa_id`, sino com scroll/max-height, página full-page `/gestor/notificacoes` e `/staff/notificacoes`, polling 30s.

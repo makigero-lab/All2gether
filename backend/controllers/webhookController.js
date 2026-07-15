@@ -517,10 +517,21 @@ async function processarReservaSmoobu(payload) {
   // Se não tivermos departure, fazemos um pedido à REST API do Smoobu para
   // obter os detalhes completos da reserva (departure, guests, guestName).
   // Isto demora mais tempo mas garante que a tarefa é criada no dia certo.
-  if (!dataCheckOutRaw && reservaId && (ACOES_CRIAR.includes(action) || ACOES_ATUALIZAR.includes(action))) {
+  //
+  // Prompt 137 — Se mesmo com departure, o nome_hospede não vier no payload
+  // do webhook (caso normal), fazemos mesmo assim o enriquecimento para
+  // obter o nome do hóspede. Antes, o enriquecimento só corria quando
+  // !dataCheckOutRaw, o que deixava o nome_hospede sempre vazio nas reservas
+  // cujo webhook já trazia departure.
+  const precisaEnriquecimento =
+    reservaId &&
+    (ACOES_CRIAR.includes(action) || ACOES_ATUALIZAR.includes(action)) &&
+    (!dataCheckOutRaw || !detalhesReserva.nome_hospede);
+
+  if (precisaEnriquecimento) {
     const enriched = await enriquecerReservaSmoobu(reservaId);
     if (enriched) {
-      dataCheckOutRaw = enriched.departure || null;
+      dataCheckOutRaw = enriched.departure || dataCheckOutRaw || null;
       // Atualiza detalhes_reserva com os dados completos da REST API.
       detalhesReserva = {
         ...detalhesReserva,
@@ -602,15 +613,32 @@ async function enriquecerReservaSmoobu(reservaId) {
     // A resposta pode vir em body.data ou diretamente no body.
     const r = body?.data ?? body;
 
+    // Log do payload completo para debug (Prompt 137 — diagnosticar nome_hospede).
+    console.log(`📋 enriquecerReservaSmoobu: payload recebido para reserva ${reservaId}:`, JSON.stringify(r).slice(0, 500));
+
     const arrival = r?.arrival ?? r?.start_date ?? r?.startDate ?? null;
     const departure = r?.departure ?? r?.end_date ?? r?.endDate ?? null;
     const paxRaw = r?.guests ?? r?.numPeople ?? r?.numberOfGuests ?? null;
     const pax = paxRaw != null ? Number(paxRaw) : null;
+    // Prompt 137 — Cobertura exaustiva das variantes do nome do hóspede no Smoobu.
+    // O Smoobu REST API pode devolver: guestName, guest_name, guest.name,
+    // guest.firstName + guest.lastName, firstName + lastName, customerName,
+    // customer.name, bookedForName, name.
     const nome_hospede =
-      r?.guestName ?? r?.guest_name ??
+      r?.guestName ??
+      r?.guest_name ??
+      r?.guest?.name ??
+      r?.guest?.firstName ??
+      (r?.guest?.firstName || r?.guest?.lastName
+        ? [r?.guest?.firstName, r?.guest?.lastName].filter(Boolean).join(' ')
+        : null) ??
       (r?.firstName || r?.lastName
         ? [r?.firstName, r?.lastName].filter(Boolean).join(' ')
         : null) ??
+      r?.customerName ??
+      r?.customer?.name ??
+      r?.bookedForName ??
+      r?.name ??
       null;
 
     console.log(
@@ -1109,3 +1137,7 @@ exports._processarReservaSmoobu = processarReservaSmoobu;
 // v1.63.0 (Prompt 86) — Exporta o load balancer para a auto-atribuição em
 // lote do tarefaController (POST /api/gestor/tarefas/auto-atribuir).
 exports._determinarUtilizadorAtribuido = determinarUtilizadorAtribuido;
+
+// Prompt 137 — Exporta o enriquecimento para o backfill de nomes de hóspedes
+// (POST /api/admin/backfill-nomes-hospedes).
+exports.enriquecerReservaSmoobu = enriquecerReservaSmoobu;
