@@ -1,5 +1,5 @@
 /**
- * Seed de Modelos de Checklist — Autocell
+ * Seed de Modelos de Checklist — FisioCell
  *
  * Prompt 135 — Cria dois ModeloChecklist na BD a partir dos documentos Word:
  *   1. "Limpeza Standard" — checklist básica de checkout

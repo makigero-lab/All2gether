@@ -1,13 +1,13 @@
-# Autocell
+# FisioCell
 
-**SaaS de gestão para Alojamento Local.**
+**SaaS de gestão para Clínicas de Fisioterapia.**
 
-O Autocell é uma aplicação dividida em duas partes:
+O FisioCell é uma aplicação dividida em duas partes:
 
 - **`backend/`** — API REST construída em **Node.js + Express**, com base de dados **MongoDB** (via Mongoose). A API está desenhada para ser alojada no [Render](https://render.com).
 - **`frontend/`** — Interface de utilizador em **Next.js 14 + TypeScript + Tailwind CSS + shadcn/ui**, com duas áreas: Painel de Administração (`/admin`) e Área do Staff (`/staff`). Desenhada para a [Vercel](https://vercel.com), comunica com a API via CORS. *(Fase atual: dados fictícios/mock.)*
 
-> 📌 Repositório: https://github.com/makigero-lab/Autocell
+> 📌 Repositório: https://github.com/makigero-lab/FisioCell
 > 🌿 Branch de desenvolvimento ativa: **`dev`**
 
 ---
@@ -15,13 +15,11 @@ O Autocell é uma aplicação dividida em duas partes:
 ## Estrutura do repositório
 
 ```
-Autocell/
+FisioCell/
 ├── backend/        # API REST (Node.js + Express + MongoDB)
 │   ├── package.json
 │   ├── server.js
-│   ├── controllers/webhookController.js
 │   ├── models/ (Propriedade, Utilizador, Ausencia, Tarefa)
-│   ├── routes/webhookRoutes.js
 │   ├── .env.example
 │   └── .gitignore
 ├── frontend/       # Interface (Next.js 14 + TS + Tailwind + shadcn/ui)
@@ -60,16 +58,15 @@ A API arranca na porta definida em `PORT` (por defeito **5000**).
 
 | Variável      | Descrição                                      | Exemplo                                   |
 |---------------|------------------------------------------------|-------------------------------------------|
-| `MONGODB_URI` | URI de ligação ao MongoDB                       | `mongodb://localhost:27017/autocell`      |
+| `MONGODB_URI` | URI de ligação ao MongoDB                       | `mongodb://localhost:27017/fisiocell`      |
 | `PORT`        | Porta onde a API escuta (no Render é injetada) | `5000`                                    |
 
 ### Endpoints disponíveis
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
-| `GET`  | `/`  | Healthcheck. Devolve `{ "status": "API do Alojamento Local online e ligada à BD!" }` |
+| `GET`  | `/`  | Healthcheck. Devolve `{ "status": "API do FisioCell online e ligada à BD!" }` |
 | `GET`  | `/api/health` | Estado da API + BD (MongoDB) + uptime. Devolve `503` se a BD estiver em baixo. |
-| `POST` | `/webhooks/smoobu` | Webhook do Smoobu (nova reserva). Cria a Tarefa de limpeza aplicando filtro de ausências + folgas fixas + **Algoritmo VIP (funcionário preferencial)** + load balancing (Haversine + SLA 8h/dia). Guarda os `detalhes_reserva` (checkin, checkout, pax, nome_hospede). Responde `200` imediato e processa de forma assíncrona. Propriedades inativas são ignoradas. |
 | `POST` | `/api/auth/login` | **Login** (público, com rate limiting). Body: `{ email, password }`. Devolve `{ token, utilizador }`. |
 | `GET`  | `/api/auth/me` | Dados do utilizador autenticado. **Auth:** JWT. |
 | `GET`  | `/api/auth/me/calendario` | Calendário pessoal (tarefas + ausências). **Auth:** JWT. |
@@ -80,9 +77,9 @@ A API arranca na porta definida em `PORT` (por defeito **5000**).
 | `POST` | `/api/auth/me/push-unsubscribe` | Remove a subscrição push do utilizador. **Auth:** JWT. |
 | `GET`  | `/api/gestor/dashboard` | Estatísticas em tempo real (propriedades, equipa, tarefas hoje, carga por staff). **Auth:** JWT. |
 | `GET`  | `/api/gestor/propriedades` | Lista as propriedades da empresa. **Auth:** JWT. |
-| `POST` | `/api/gestor/propriedades` | Cria propriedade (com geocoding da morada). **Auth:** JWT; **Body:** `smoobu_id`, `nome`, `morada`, `tempo_limpeza_minutos?` |
+| `POST` | `/api/gestor/propriedades` | Cria propriedade (com geocoding da morada). **Auth:** JWT; **Body:** `nome`, `morada`, `tempo_limpeza_minutos?` |
 | `PATCH`| `/api/gestor/propriedades/:id/estado` | Ativa/desativa propriedade (webhook ignora inativas). **Auth:** JWT. |
-| `PUT` | `/api/gestor/propriedades/:id` | Atualiza propriedade (nome, smoobu_id, morada, tempo). Re-faz geocoding se morada mudar. **Auth:** JWT. |
+| `PUT` | `/api/gestor/propriedades/:id` | Atualiza propriedade (nome, morada, tempo). Re-faz geocoding se morada mudar. **Auth:** JWT. |
 | `GET`  | `/api/gestor/tarefas` | Lista tarefas (calendário de operações). Query: `?inicio=&fim=`. **Auth:** JWT. |
 | `GET`  | `/api/gestor/calendario/dados` | Endpoint unificado para Calendário Visual Avançado. Filtros: `?inicio=&fim=&propriedadeId=&utilizadorId=&estado=`. Populate propriedade (nome+morada) + utilizador (nome). **Auth:** JWT. |
 | `GET`  | `/api/gestor/tarefas/export` | Exportação CSV de tarefas. Query: `?inicio=&fim=`. **Auth:** JWT. |
@@ -106,16 +103,11 @@ A API arranca na porta definida em `PORT` (por defeito **5000**).
 | `POST` | `/api/staff/falta-hoje` | Staff reporta falta de emergência para o dia atual (estado 'pendente_emergencia'). Body: `{ justificacao? }`. **Auth:** JWT. |
 | `GET`  | `/api/gestor/auditoria` | Histórico de ações administrativas. Query: `?limit=`. **Auth:** JWT. |
 | `GET`  | `/api/gestor/relatorios/produtividade` | Relatório de produtividade (resumo + por staff/dia/estado/propriedade). Query: `?inicio=&fim=`. **Auth:** JWT. |
-| `GET`  | `/api/gestor/webhooks` | Lista logs de webhooks do Smoobu (status + payload + erro). Query: `?status=&limit=`. **Auth:** JWT. |
-| `POST` | `/api/gestor/webhooks/:id/reprocessar` | Reproccessa webhook que falhou (reutiliza payload guardado, idempotente). **Auth:** JWT. |
-| `POST` | `/api/gestor/smoobu/sincronizar` | Sincroniza reservas futuras do Smoobu via REST API (pull). Idempotente. Requer `SMOOBU_API_KEY`. **Auth:** JWT. |
-| `GET`  | `/api/gestor/smoobu/propriedades` | Lista apartamentos do Smoobu (para dropdown no fluxo de criação). Requer `SMOOBU_API_KEY`. **Auth:** JWT. |
-| `POST` | `/api/gestor/smoobu/sincronizar-propriedades` | Importa apartamentos do Smoobu em massa. Cria os novos e **atualiza sempre** a morada + capacidade_hospedes dos já existentes (com re-geocoding) quando o Smoobu as traz (Prompt 92). Requer `SMOOBU_API_KEY`. **Auth:** JWT. |
 | `GET`  | `/api/gestor/setup` | Bootstrap do "Cliente Zero" (Empresa + Admin + Gestor + Staff + Propriedade de teste). Idempotente. **PÚBLICO.** |
 | `POST` | `/api/gestor/propriedades/default-checklist` | Aplica o checklist padrão (6 itens) a TODAS as propriedades da empresa. Substitui o existente. **Auth:** JWT + `isGestor`. (Prompt 113) |
 | `GET`  | `/api/admin/empresas` | Lista todas as empresas (cross-tenant) com gestor principal. **Auth:** JWT + `isAdmin`. |
 | `POST` | `/api/admin/empresas/:id/impersonar` | Gera token JWT do gestor de uma empresa (impersonation). Se a empresa não tiver gestor ativo, o admin faz override (token com empresa_id alvo + role 'gestor'). Guarda o token de admin num cookie separado para "Voltar a Admin". **Auth:** JWT + `isAdmin`. |
-| `POST` | `/api/auth/exit-impersonation` | Restaura a sessão de Super Admin após impersonação (copia o cookie `autocell_admin_token` de volta para `autocell_token`). **Auth:** implícita (cookie). (Prompt 113) |
+| `POST` | `/api/auth/exit-impersonation` | Restaura a sessão de Super Admin após impersonação (copia o cookie `fisiocell_admin_token` de volta para `fisiocell_token`). **Auth:** implícita (cookie). (Prompt 113) |
 | `GET`  | `/api/auth/me/notificacoes` | Lista notificações in-app do utilizador (query `?lidas=false` para só não-lidas). **Auth:** JWT. (Prompt 114) |
 | `GET`  | `/api/auth/me/notificacoes/contagem` | Contagem de notificações não-lidas (para o badge do sino). **Auth:** JWT. (Prompt 114) |
 | `PATCH`| `/api/auth/me/notificacoes/marcar-lidas` | Marca TODAS as notificações não-lidas como lidas. **Auth:** JWT. (Prompt 114) |
@@ -127,16 +119,11 @@ A API arranca na porta definida em `PORT` (por defeito **5000**).
 | `POST` | `/api/admin/empresas/:id/hard-reset` | Hard reset **scoped à empresa** — apaga Propriedades + Tarefas + Ausências + Webhooks + Notificações dessa empresa (sem tocar noutras). Substitui o `DELETE /api/admin/hard-reset` global. **Auth:** JWT + `isAdmin`. (Prompt 116) |
 | `DELETE`| `/api/admin/empresas/:id` | **Soft delete** de empresa — marca `apagada: true, ativa: false` (vai para a Reciclagem). Auditoria registada. **Auth:** JWT + `isAdmin`. (Prompt 122) |
 | `PATCH`| `/api/admin/empresas/:id/restaurar` | Restaura empresa da Reciclagem (`apagada: false`). `ativa` mantém-se `false` — o admin deve reativar manualmente. **Auth:** JWT + `isAdmin`. (Prompt 122) |
-| `GET`  | `/api/admin/empresas/:id/config` | Lê a configuração de uma empresa (nome, NIF, API key Smoobu). **Auth:** JWT + `isAdmin`. (Prompt 117) |
-| `PUT`  | `/api/admin/empresas/:id/config` | Atualiza a configuração de uma empresa (nome, NIF, API key Smoobu). **Auth:** JWT + `isAdmin`. (Prompt 117) |
-| `POST` | `/api/admin/empresas/:id/sincronizar-propriedades` | Importa apartamentos do Smoobu em massa para a empresa (re-geocoding + atualização de morada/capacidade). Requer `SMOOBU_API_KEY` na config da empresa. **Auth:** JWT + `isAdmin`. (Prompt 117) |
-| `POST` | `/api/admin/empresas/:id/sincronizar-reservas` | Sincroniza reservas futuras do Smoobu para a empresa (pull REST API, idempotente). Requer `SMOOBU_API_KEY`. **Auth:** JWT + `isAdmin`. (Prompt 117) |
-| `POST` | `/api/admin/empresas/:id/registrar-webhooks` | Regista os webhooks do Smoobu para a empresa. Requer `SMOOBU_API_KEY`. **Auth:** JWT + `isAdmin`. (Prompt 117) |
+| `GET`  | `/api/admin/empresas/:id/config` | Lê a configuração de uma empresa (nome, NIF). **Auth:** JWT + `isAdmin`. (Prompt 117) |
+| `PUT`  | `/api/admin/empresas/:id/config` | Atualiza a configuração de uma empresa (nome, NIF). **Auth:** JWT + `isAdmin`. (Prompt 117) |
 | `POST` | `/api/gestor/relatorios/ai-summary` | Gera um **resumo em linguagem natural** do relatório de produtividade via Gemini SDK (`@google/generative-ai`). Nunca crasha — devolve placeholder se a IA falhar. **Auth:** JWT + `isGestor`. (Prompt 123) |
-| `POST` | `/api/admin/backfill-nomes-hospedes` | **Backfill de nomes de hóspedes** — percorre as tarefas com `smoobu_reserva_id` mas sem `nome_hospede` e busca o nome via REST API do Smoobu. Body opcional: `{ empresa_id }`. Requer `SMOOBU_API_KEY`. **Auth:** JWT + `isAdmin`. (Prompt 137) |
-| `POST` | `/api/admin/backfill-tempos-viagem` | **Backfill de tempos de viagem** — percorre as tarefas atribuídas sem `tempo_viagem_minutos` e calcula a viagem (Haversine, máx. 60min) com base na tarefa anterior do mesmo staff no mesmo dia. Body opcional: `{ empresa_id }`. **Auth:** JWT + `isAdmin`. (Prompt 139) |
 
-> Detalhes completos da lógica de atribuição (regras de negócio) em [`docs/BACKEND.md`](docs/BACKEND.md#32-lógica-central--atribuição-de-tarefas-webhook-smoobu).
+> Detalhes completos da lógica de atribuição (regras de negócio) em [`docs/BACKEND.md`](docs/BACKEND.md).
 
 ### Deploy no Render
 1. Cria um novo serviço **Web Service** apontando para a pasta `backend/`.
@@ -181,7 +168,7 @@ Abrir http://localhost:3000 → landing page com links para `/admin` e `/staff`.
 
 | Variável | Descrição | Exemplo |
 |-----------|-----------|---------|
-| `NEXT_PUBLIC_API_URL` | URL base da API backend (Render). Usada na fase de integração. | `https://autocell-backend.onrender.com` |
+| `NEXT_PUBLIC_API_URL` | URL base da API backend (Render). Usada na fase de integração. | `https://fisiocell-backend.onrender.com` |
 
 ### Deploy na Vercel
 

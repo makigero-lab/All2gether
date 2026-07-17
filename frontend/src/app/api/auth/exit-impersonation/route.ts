@@ -4,13 +4,13 @@
  * Restauração da sessão de Super Admin após impersonação.
  *
  * Quando o admin impersona um gestor (POST /api/admin/impersonar/:id), o
- * cookie principal `autocell_token` é substituído pelo token do gestor, mas
- * o token de admin original é guardado em `autocell_admin_token`.
+ * cookie principal `fisiocell_token` é substituído pelo token do gestor, mas
+ * o token de admin original é guardado em `fisiocell_admin_token`.
  *
  * Este endpoint reverte a troca:
- *   1. Lê `autocell_admin_token`.
- *   2. Se existir, copia-o de volta para `autocell_token` e apaga
- *      `autocell_admin_token`.
+ *   1. Lê `fisiocell_admin_token`.
+ *   2. Se existir, copia-o de volta para `fisiocell_token` e apaga
+ *      `fisiocell_admin_token`.
  *   3. Se NÃO existir (não há impersonação ativa), devolve 400.
  *
  * O browser chama isto ao clicar em "Voltar a Admin" no banner de
@@ -22,8 +22,8 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-const COOKIE_NAME = "autocell_token";
-const ADMIN_COOKIE_NAME = "autocell_admin_token";
+const COOKIE_NAME = "fisiocell_token";
+const ADMIN_COOKIE_NAME = "fisiocell_admin_token";
 const COOKIE_MAX_AGE = 7 * 24 * 60 * 60; // 7 dias
 
 export async function POST() {

@@ -1,5 +1,5 @@
 /**
- * Cão de Guarda — Cron Job (Autocell)
+ * Cão de Guarda — Cron Job (FisioCell)
  *
  * Prompt 96 (Fase 1.5) — "O Cão de Guarda do Final de Dia".
  * Prompt 98 (Fase 1.5) — "A Rede de Segurança das 18h" (auto-atribuição de
@@ -72,7 +72,8 @@ async function autoAtribuicaoEmergencia() {
   }
 
   // 3) Importa o load balancer e o notificador (require lazy para testes).
-  const { _determinarUtilizadorAtribuido: determinarUtilizadorAtribuido } = require('../controllers/webhookController');
+  // F0 — load balancer extraído para utils/loadBalancer.js.
+  const { determinarUtilizadorAtribuido } = require('../utils/loadBalancer');
   const { notificarUtilizador } = require('../utils/notificar');
 
   let atribuidas = 0;

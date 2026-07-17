@@ -97,7 +97,7 @@ interface RelatorioData {
 /* Paleta e constantes                                                 */
 /* ------------------------------------------------------------------ */
 
-// Paleta coesa com o tema dourado do Autocell.
+// Paleta coesa com o tema dourado do FisioCell.
 const CORES = {
   dourado: "hsl(43, 74%, 49%)",
   verde: "hsl(142, 71%, 45%)",
@@ -292,7 +292,7 @@ export default function RelatoriosPage() {
 
       const html = [
         '<!DOCTYPE html><html lang="pt-PT"><head><meta charset="utf-8">',
-        '<title>Relatorio Autocell - ' + periodo + '</title>',
+        '<title>Relatorio FisioCell - ' + periodo + '</title>',
         '<style>',
         '* { box-sizing: border-box; margin: 0; padding: 0; }',
         'body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color: #0f172a; font-size: 12px; line-height: 1.5; padding: 20px; }',
@@ -312,7 +312,7 @@ export default function RelatoriosPage() {
         '.barra-container { width: 100%; height: 12px; background: #f1f5f9; border-radius: 3px; overflow: hidden; }',
         '@media print { body { padding: 0; } }',
         '</style></head><body>',
-        '<div class="header"><h1>Relatorio de Produtividade - Autocell</h1>',
+        '<div class="header"><h1>Relatorio de Produtividade - FisioCell</h1>',
         '<div style="font-size:12px;color:#475569;margin-top:2px;">Periodo: ' + periodo + '</div>',
         '<div style="font-size:11px;color:#64748b;margin-top:2px;">Gerado em ' + geradoEm + '</div></div>',
         iaHtml,

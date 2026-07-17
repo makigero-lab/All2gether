@@ -40,7 +40,7 @@ export default function HomePage() {
         </div>
 
         <h1 className="text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
-          Autocell
+          FisioCell
         </h1>
         <p className="mt-3 max-w-md text-base font-light leading-relaxed text-muted-foreground">
           A plataforma de gestão para Alojamento Local.
@@ -63,7 +63,7 @@ export default function HomePage() {
       </div>
 
       <p className="relative z-10 mt-12 text-xs font-light tracking-wide text-muted-foreground">
-        Autocell · Gestão de Alojamento Local
+        FisioCell · Gestão de Alojamento Local
       </p>
     </main>
   );

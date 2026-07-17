@@ -82,7 +82,7 @@ export function AdminSidebar() {
         <ShieldCheck className="h-5 w-5" />
       </div>
       <div className="flex flex-col leading-none">
-        <span className="text-sm font-bold">Autocell</span>
+        <span className="text-sm font-bold">FisioCell</span>
         <span className="text-[11px] text-muted-foreground">Super Admin</span>
       </div>
     </div>
@@ -100,7 +100,7 @@ export function AdminSidebar() {
         >
           <Menu className="h-5 w-5" />
         </Button>
-        <span className="text-sm font-semibold">Autocell — Super Admin</span>
+        <span className="text-sm font-semibold">FisioCell — Super Admin</span>
       </header>
 
       {/* Sidebar — desktop */}
@@ -121,7 +121,7 @@ export function AdminSidebar() {
             Terminar Sessão
           </Button>
           <p className="text-xs text-muted-foreground">
-            © {new Date().getFullYear()} Autocell
+            © {new Date().getFullYear()} FisioCell
           </p>
         </div>
       </aside>
@@ -140,7 +140,7 @@ export function AdminSidebar() {
                 <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
                   <ShieldCheck className="h-5 w-5" />
                 </div>
-                <span className="text-sm font-bold">Autocell</span>
+                <span className="text-sm font-bold">FisioCell</span>
               </div>
               <Button
                 variant="ghost"

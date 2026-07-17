@@ -1,8 +1,11 @@
 /**
- * Modelo: Tarefa
- * Representa uma tarefa de limpeza/trabalho gerada a partir de uma reserva.
+ * Modelo: Tarefa (futuro: Consulta)
+ * Representa uma tarefa/sessão atribuída a um utilizador.
  *
- * - utilizador_id pode ser null (tarefa por atribuir — o Admin atribui manualmente).
+ * F0: Removido smoobu_reserva_id (integração Smoobu eliminada).
+ * F4: Será transformado em Consulta (paciente + fisio + sala + nota SOAP).
+ *
+ * - utilizador_id pode ser null (tarefa por atribuir).
  * - tempo_limpeza_minutos é a unidade usada no cálculo de carga (load balancing).
  * - data é normalizada para meia-noite UTC (dia do check-in).
  */
@@ -22,11 +25,7 @@ const tarefaSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
-    // ID da reserva no Smoobu (para auditoria / idempotência futura)
-    smoobu_reserva_id: {
-      type: String,
-      index: true,
-    },
+    // F0 — smoobu_reserva_id removido (integração Smoobu eliminada).
     utilizador_id: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Utilizador',
@@ -116,19 +115,12 @@ const tarefaSchema = new mongoose.Schema(
         ],
       },
     ],
-    // Prompt 92 (Fase 1.5) — Detalhes da reserva Smoobu associada à tarefa.
-    // Snapshot dos dados da reserva no momento da criação/atualização da
-    // tarefa, para auditoria e display (cartão da tarefa, detalhe do staff,
-    // relatórios). Preparado para Fase 1.5 — o campo existe no modelo mas o
-    // preenchimento a partir do payload do webhook/sincronização será feito
-    // num prompt seguinte.
+    // F0 — detalhes_reserva mantido como vestigial (será substituído por
+    // nota_clinica SOAP na F4). O sub-campo smoobu_reserva_id foi removido.
     detalhes_reserva: {
-      // ID original da reserva no Smoobu (Prompt 102) — usado para
-      // encontrar e eliminar tarefas fantasma quando a reserva é cancelada.
-      smoobu_reserva_id: { type: String, default: null },
-      // Data/hora de check-in (ISO string ou YYYY-MM-DD conforme o Smoobu).
+      // Data/hora de check-in (ISO string ou YYYY-MM-DD).
       checkin: { type: String, default: null },
-      // Data/hora de check-out (ISO string ou YYYY-MM-DD conforme o Smoobu).
+      // Data/hora de check-out (ISO string ou YYYY-MM-DD).
       checkout: { type: String, default: null },
       // Número de hóspedes (pax) da reserva.
       pax: { type: Number, default: null, min: 0 },

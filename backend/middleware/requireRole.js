@@ -1,5 +1,5 @@
 /**
- * Middleware de Controlo de Acesso por Role (RBAC) — Autocell
+ * Middleware de Controlo de Acesso por Role (RBAC) — FisioCell
  *
  * Hierarquia (v1.29.0):
  *   admin  → Super Admin (dono da conta, gestão total)

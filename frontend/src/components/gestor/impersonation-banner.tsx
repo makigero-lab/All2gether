@@ -8,7 +8,7 @@ import { limparCacheAuth } from "@/lib/auth";
  * Banner de Impersonação — Prompt 110 / 113.
  *
  * Aparece no topo do painel do Gestor quando o Super Admin está impersonado
- * (marcador `autocell_impersonating` em sessionStorage, definido pelo botão
+ * (marcador `fisiocell_impersonating` em sessionStorage, definido pelo botão
  * "Entrar como Gestor" em /admin).
  *
  * Mostra um botão VERMELHO "Voltar a Admin" que:
@@ -31,7 +31,7 @@ export function ImpersonationBanner() {
   useEffect(() => {
     setVisivel(
       typeof window !== "undefined" &&
-        sessionStorage.getItem("autocell_impersonating") === "true"
+        sessionStorage.getItem("fisiocell_impersonating") === "true"
     );
   }, []);
 
@@ -44,7 +44,7 @@ export function ImpersonationBanner() {
         credentials: "include",
       });
       // Independentemente do resultado, limpa o marcador.
-      sessionStorage.removeItem("autocell_impersonating");
+      sessionStorage.removeItem("fisiocell_impersonating");
       // Limpa o cache de auth — o cookie mudou (gestor → admin).
       limparCacheAuth();
 
@@ -57,7 +57,7 @@ export function ImpersonationBanner() {
         window.location.href = "/login";
       }
     } catch {
-      sessionStorage.removeItem("autocell_impersonating");
+      sessionStorage.removeItem("fisiocell_impersonating");
       limparCacheAuth();
       await fetch("/api/auth/logout", { method: "POST", credentials: "include" }).catch(() => {});
       window.location.href = "/login";

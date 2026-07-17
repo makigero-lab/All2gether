@@ -1,8 +1,8 @@
 /**
- * Middleware de Proteção de Rotas — Autocell (Next.js)
+ * Middleware de Proteção de Rotas — FisioCell (Next.js)
  *
  * Executado no Edge (servidor) antes de renderizar qualquer página. Lê o
- * cookie httpOnly `autocell_token` (o Edge consegue ler cookies httpOnly
+ * cookie httpOnly `fisiocell_token` (o Edge consegue ler cookies httpOnly
  * via req.cookies) e descodifica o payload para saber o role.
  *
  *   1. **Rotas privadas** (`/admin/*`, `/gestor/*`, `/staff/*`):
@@ -22,7 +22,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-const TOKEN_COOKIE = "autocell_token";
+const TOKEN_COOKIE = "fisiocell_token";
 
 type Role = "admin" | "gestor" | "staff";
 

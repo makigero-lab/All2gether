@@ -181,7 +181,7 @@ export default function SuperAdminPage() {
 
       // O proxy já substituiu o cookie httpOnly pelo novo token do gestor.
       // Marca a sessão como impersonação para mostrar o banner "Voltar a Admin".
-      sessionStorage.setItem("autocell_impersonating", "true");
+      sessionStorage.setItem("fisiocell_impersonating", "true");
 
       // Redirecionamento forçado para /gestor.
       setToast({

@@ -1,5 +1,5 @@
 /**
- * Super Admin Controller — Autocell
+ * Super Admin Controller — FisioCell
  *
  * Endpoints exclusivos do Super Admin (role 'admin').
  *

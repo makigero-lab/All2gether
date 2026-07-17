@@ -12,7 +12,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
-const COOKIE_NAME = "autocell_token";
+const COOKIE_NAME = "fisiocell_token";
 const COOKIE_MAX_AGE = 7 * 24 * 60 * 60; // 7 dias (em segundos)
 
 export async function POST(req: Request) {
@@ -44,7 +44,7 @@ export async function POST(req: Request) {
 
     // Prompt 113 — Num login fresco, limpa qualquer cookie de backup de
     // admin que tenha ficado de uma impersonação anterior.
-    cookieStore.delete("autocell_admin_token");
+    cookieStore.delete("fisiocell_admin_token");
 
     // Devolve ao browser apenas os dados do utilizador (sem o token).
     return NextResponse.json({ utilizador: data.utilizador });

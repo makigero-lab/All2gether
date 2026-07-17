@@ -1,5 +1,5 @@
 /**
- * Staff Controller — Autocell
+ * Staff Controller — FisioCell
  *
  * Endpoints para o staff gerir as SUAS ausências (pedidos de férias/doença).
  *

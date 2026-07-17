@@ -1,5 +1,5 @@
 /**
- * Helper de Auditoria — Autocell
+ * Helper de Auditoria — FisioCell
  *
  * Regista ações administrativas na coleção Auditoria.
  * Função fire-and-forget (não bloqueia a resposta ao cliente).

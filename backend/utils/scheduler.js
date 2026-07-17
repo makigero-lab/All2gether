@@ -1,5 +1,5 @@
 /**
- * Scheduler — Autocell
+ * Scheduler — FisioCell
  *
  * Utilitário partilhado com a lógica de cálculo de horário de tarefas:
  *   - Tempo de viagem (Haversine, 30 km/h urbano)

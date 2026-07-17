@@ -1,5 +1,5 @@
 /**
- * Admin Controller — Autocell
+ * Admin Controller — FisioCell
  *
  * Endpoints do Painel de Administração.
  *
@@ -210,36 +210,31 @@ exports.getPropriedades = async (req, res) => {
 };
 
 /**
- * POST /api/admin/propriedades
- * Cria uma propriedade para essa empresa.
- * Valida: smoobu_id (obrigatório + único), nome (obrigatório),
+ * POST /api/gestor/propriedades
+ * Cria uma propriedade/sala para essa empresa.
+ * Valida: nome (obrigatório), morada (obrigatório),
  * tempo_limpeza_minutos (opcional, default 45).
  *
+ * F0: smoobu_id removido (integração Smoobu eliminada).
+ *
  * Body esperado:
- *   { smoobu_id, nome, tempo_limpeza_minutos? }
+ *   { nome, morada, tempo_limpeza_minutos? }
  */
 exports.criarPropriedade = async (req, res) => {
   try {
     const { ok, empresaId } = obterEmpresaId(req, res);
     if (!ok) return;
 
-    const { smoobu_id, nome, morada, tempo_limpeza_minutos } = req.body || {};
+    const { nome, morada, tempo_limpeza_minutos } = req.body || {};
 
     // Validações de presença.
-    if (!smoobu_id || !nome || !morada) {
+    if (!nome || !morada) {
       return res.status(400).json({
-        erro: 'Campos obrigatórios em falta: smoobu_id, nome e morada.',
+        erro: 'Campos obrigatórios em falta: nome e morada.',
       });
     }
 
-    // Validação de unicidade do smoobu_id (global, não por empresa — é o ID
-    // do apartment no Smoobu, pelo que não pode repetir-se entre empresas).
-    const existente = await Propriedade.findOne({ smoobu_id: String(smoobu_id) });
-    if (existente) {
-      return res.status(409).json({
-        erro: `Já existe uma propriedade com smoobu_id "${smoobu_id}".`,
-      });
-    }
+    // F0 — Validação de unicidade do smoobu_id removida.
 
     // Validação de tempo_limpeza_minutos (se vier, tem de ser número >= 0).
     let tempo = 45;
@@ -274,7 +269,6 @@ exports.criarPropriedade = async (req, res) => {
     }
 
     const nova = await Propriedade.create({
-      smoobu_id: String(smoobu_id),
       nome: String(nome).trim(),
       morada: moradaTrim,
       coordenadas,
@@ -294,7 +288,7 @@ exports.criarPropriedade = async (req, res) => {
       recurso: 'propriedade',
       recurso_id: nova._id,
       descricao: `Propriedade "${nova.nome}" criada`,
-      detalhes: { smoobu_id: nova.smoobu_id, morada: nova.morada },
+      detalhes: { morada: nova.morada },
     });
 
     const respostaCriar = { propriedade: nova };
@@ -790,18 +784,18 @@ exports.alternarEstadoPropriedade = async (req, res) => {
 };
 
 /**
- * PUT /api/admin/propriedades/:id
- * Atualiza os dados de uma propriedade (nome, smoobu_id, morada,
+ * PUT /api/gestor/propriedades/:id
+ * Atualiza os dados de uma propriedade/sala (nome, morada,
  * tempo_limpeza_minutos). Se a morada mudar, re-faz geocoding para
  * atualizar as coordenadas (usadas no load balancer Haversine).
  *
+ * F0: smoobu_id removido (integração Smoobu eliminada).
+ *
  * Body (todos opcionais, mas pelo menos um tem de vir):
- *   { nome?, smoobu_id?, morada?, tempo_limpeza_minutos? }
+ *   { nome?, morada?, tempo_limpeza_minutos? }
  *
  * Regras:
  *   - Valida pertença à empresa (404 se não pertencer).
- *   - smoobu_id é globalmente único → se mudar, valida que não há conflito
- *     com outra propriedade (409 se houver).
  *   - Se a morada mudar, re-faz geocoding (best-effort: se falhar, mantém
  *     as coordenadas antigas — não bloqueia a edição).
  *
@@ -827,12 +821,11 @@ exports.atualizarPropriedade = async (req, res) => {
       });
     }
 
-    const { nome, smoobu_id, morada, tempo_limpeza_minutos, funcionario_preferencial_id, modelo_checklist_id } = req.body || {};
+    const { nome, morada, tempo_limpeza_minutos, funcionario_preferencial_id, modelo_checklist_id } = req.body || {};
 
     // Tem de haver pelo menos um campo para atualizar.
     if (
       nome === undefined &&
-      smoobu_id === undefined &&
       morada === undefined &&
       tempo_limpeza_minutos === undefined &&
       funcionario_preferencial_id === undefined &&
@@ -840,7 +833,7 @@ exports.atualizarPropriedade = async (req, res) => {
       req.body?.checklist === undefined
     ) {
       return res.status(400).json({
-        erro: 'Nenhum campo para atualizar. Envie nome, smoobu_id, morada, tempo_limpeza_minutos, checklist, funcionario_preferencial_id ou modelo_checklist_id.',
+        erro: 'Nenhum campo para atualizar. Envie nome, morada, tempo_limpeza_minutos, checklist, funcionario_preferencial_id ou modelo_checklist_id.',
       });
     }
 
@@ -848,9 +841,7 @@ exports.atualizarPropriedade = async (req, res) => {
     if (nome !== undefined && !String(nome).trim()) {
       return res.status(400).json({ erro: 'nome não pode ser vazio.' });
     }
-    if (smoobu_id !== undefined && !String(smoobu_id).trim()) {
-      return res.status(400).json({ erro: 'smoobu_id não pode ser vazio.' });
-    }
+    // F0 — Validação de smoobu_id removida.
     if (morada !== undefined && !String(morada).trim()) {
       return res.status(400).json({ erro: 'morada não pode ser vazia.' });
     }
@@ -863,18 +854,7 @@ exports.atualizarPropriedade = async (req, res) => {
       }
     }
 
-    // smoobu_id único (global) — se mudou, verificar conflito com outra propriedade.
-    const novoSmoobuId =
-      smoobu_id !== undefined ? String(smoobu_id).trim() : propriedade.smoobu_id;
-    if (novoSmoobuId !== propriedade.smoobu_id) {
-      const conflito = await Propriedade.findOne({ smoobu_id: novoSmoobuId });
-      if (conflito && String(conflito._id) !== String(propriedade._id)) {
-        return res.status(409).json({
-          erro: `Já existe outra propriedade com smoobu_id "${novoSmoobuId}".`,
-        });
-      }
-      propriedade.smoobu_id = novoSmoobuId;
-    }
+    // F0 — Validação de unicidade do smoobu_id removida.
 
     // Nome.
     if (nome !== undefined) {
@@ -982,7 +962,7 @@ exports.atualizarPropriedade = async (req, res) => {
       recurso: 'propriedade',
       recurso_id: propriedade._id,
       descricao: `Propriedade "${propriedade.nome}" atualizada`,
-      detalhes: { smoobu_id: propriedade.smoobu_id, morada: propriedade.morada },
+      detalhes: { morada: propriedade.morada },
     });
 
     return res.status(200).json({
@@ -1855,12 +1835,14 @@ exports.getAuditoria = async (req, res) => {
 /* ------------------------------------------------------------------ */
 
 /**
- * GET /api/admin/setup
+ * GET /api/gestor/setup
  *
  * Cria o "Cliente Zero" — dados iniciais para testes:
- *   - 1 Empresa: "O Meu Alojamento Local"
- *   - 1 Utilizador Staff: "João Limpezas"
- *   - 1 Propriedade: "Casa Teste" (smoobu_id: "99999")
+ *   - 1 Empresa: "Clínica FisioCell Teste"
+ *   - 1 Utilizador Staff: "João Fisioterapeuta"
+ *   - 1 Propriedade/Sala: "Sala Teste"
+ *
+ * F0: Removido smoobu_id (integração Smoobu eliminada).
  *
  * Idempotente: antes de criar, verifica se a empresa já existe (por nome).
  * Se já existir, reutiliza-a e cria apenas o que faltar.
@@ -1869,28 +1851,29 @@ exports.getAuditoria = async (req, res) => {
  */
 exports.setupClienteZero = async (req, res) => {
   try {
-    const NOME_EMPRESA = 'O Meu Alojamento Local';
-    const NOME_PROPRIEDADE = 'Casa Teste';
-    const SMOOBU_ID_TESTE = '99999';
+    const NOME_EMPRESA = 'Clínica FisioCell Teste';
+    const NOME_PROPRIEDADE = 'Sala Teste';
+    // F0 — SMOOBU_ID_TESTE removido.
     // Password comum de teste do Cliente Zero (em produção, cada utilizador
     // deve alterar a sua password após o primeiro login).
-    const PASSWORD_TESTE = 'autocell123';
+    const PASSWORD_TESTE = 'fisiocell123';
 
     // Utilizadores a garantir (admin + gestor + staff).
+    // F0 — renomeado para o novo domínio (Fisioterapia).
     const UTILIZADORES_TESTE = [
       {
-        nome: 'Gestor Autocell', // admin — para ti (dono da conta)
-        email: 'admin@autocell.pt',
+        nome: 'Diretor FisioCell', // admin — para ti (dono da conta)
+        email: 'admin@fisiocell.pt',
         role: 'admin',
       },
       {
-        nome: 'Responsável Limpezas', // gestor — gere a equipa de staff
-        email: 'gestor@autocell.pt',
+        nome: 'Responsável Clínico', // gestor — gere a equipa
+        email: 'gestor@fisiocell.pt',
         role: 'gestor',
       },
       {
-        nome: 'João Limpezas', // staff — executante de limpezas
-        email: 'joao.limpezas@autocell.pt',
+        nome: 'João Fisioterapeuta', // staff — executante
+        email: 'joao.fisio@fisiocell.pt',
         role: 'staff',
       },
     ];
@@ -1951,12 +1934,12 @@ exports.setupClienteZero = async (req, res) => {
       });
     }
 
-    // 3) Propriedade — não duplicar (procura por smoobu_id único).
-    let propriedade = await Propriedade.findOne({ smoobu_id: SMOOBU_ID_TESTE });
+    // 3) Propriedade/Sala — não duplicar (procura por nome + empresa).
+    // F0 — procura por nome em vez de smoobu_id (campo removido).
+    let propriedade = await Propriedade.findOne({ nome: NOME_PROPRIEDADE, empresa_id: empresa._id });
     let propriedadeCriada = false;
     if (!propriedade) {
       propriedade = await Propriedade.create({
-        smoobu_id: SMOOBU_ID_TESTE,
         nome: NOME_PROPRIEDADE,
         empresa_id: empresa._id,
         tempo_limpeza_minutos: 45,
@@ -1980,12 +1963,11 @@ exports.setupClienteZero = async (req, res) => {
         plano_ativo: empresa.plano_ativo,
         criada: empresaCriada,
       },
-      // 3 utilizadores: admin (dono), gestor (responsável limpezas), staff (executante).
+      // 3 utilizadores: admin (dono), gestor (responsável clínico), staff (executante).
       utilizadores,
       propriedade: {
         id: propriedade._id,
         nome: propriedade.nome,
-        smoobu_id: propriedade.smoobu_id,
         criada: propriedadeCriada,
       },
     });
@@ -2004,26 +1986,21 @@ exports.setupClienteZero = async (req, res) => {
 };
 
 /* ------------------------------------------------------------------ */
-/* Webhooks — Logs do Smoobu                                          */
+/* Webhooks — Logs de integrações externas                           */
 /* ------------------------------------------------------------------ */
 
 /**
- * GET /api/admin/webhooks
- * Lista os WebhookLogs recebidos do Smoobu (ordenados por data desc).
+ * GET /api/gestor/webhooks
+ * Lista os WebhookLogs recebidos (ordenados por data desc).
  *
- * Útil para o Admin confirmar que os webhooks estão a chegar e ver o estado
- * de processamento (recebido / processado / erro) + o payload bruto + a
- * mensagem de erro (se houver).
+ * F0 — A integração Smoobu foi removida, mas o modelo WebhookLog é
+ * genérico e mantém-se para futuras integrações (saúde, faturação, etc.).
  *
  * Query params:
  *   - status (opcional): filtra por estado ('recebido' | 'processado' | 'erro')
  *   - limit (opcional, default 50, máx 200)
  *
  * Resposta 200: { webhooks: [...], total }
- *
- * NOTA: o WebhookLog é global (não tem empresa_id) porque o webhook é um
- * endpoint público do Smoobu. Em ambientes multi-tenant futuros, será
- * adicionada filtragem por empresa.
  */
 exports.getWebhooks = async (req, res) => {
   try {
@@ -2054,48 +2031,13 @@ exports.getWebhooks = async (req, res) => {
 };
 
 /**
- * POST /api/admin/webhooks/:id/reprocessar
- * Reproccessa um WebhookLog que tenha ficado com status 'erro' (ou até
- * 'processado', se o Admin quiser forçar). Volta a chamar a lógica de
- * processamento com o payload original guardado no log.
- *
- * Útil quando um webhook falhou por um motivo transitório (ex: BD em baixo,
- * geocoding indisponível, propriedade ainda não criada) e o Admin já
- * corrigiu a causa raiz.
- *
- * Resposta 200: { status: 'processado' | 'erro', erro_msg: string | null }
+ * POST /api/gestor/webhooks/:id/reprocessar
+ * F0 — Endpoint DESATIVADO. A integração Smoobu foi removida na F0.
+ * Mantido como stub 410 Gone para não quebrar clientes antigos.
+ * Será removido completamente quando o frontend for atualizado.
  */
 exports.reprocessarWebhook = async (req, res) => {
-  try {
-    const { id } = req.params;
-    if (!mongoose.isValidObjectId(id)) {
-      return res.status(400).json({ erro: 'ID de webhook inválido.' });
-    }
-
-    const log = await WebhookLog.findById(id);
-    if (!log) {
-      return res.status(404).json({ erro: 'Webhook não encontrado.' });
-    }
-
-    // Reutiliza a função de processamento do webhookController.
-    // A idempotência (verificação de smoobu_reserva_id duplicado) garante
-    // que reproccessar um webhook já processado não cria tarefa duplicada.
-    const { _processarReservaSmoobu } = require('../controllers/webhookController');
-
-    try {
-      await _processarReservaSmoobu(log.payload);
-      log.status = 'processado';
-      log.erro_msg = null;
-      await log.save();
-      return res.status(200).json({ status: 'processado', erro_msg: null });
-    } catch (e) {
-      log.status = 'erro';
-      log.erro_msg = e.message;
-      await log.save();
-      return res.status(200).json({ status: 'erro', erro_msg: e.message });
-    }
-  } catch (err) {
-    console.error('❌ reprocessarWebhook:', err.message);
-    return res.status(500).json({ erro: 'Erro interno do servidor.' });
-  }
+  return res.status(410).json({
+    erro: 'Reprocessamento de webhooks foi desativado (integração Smoobu removida na F0).',
+  });
 };

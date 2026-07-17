@@ -1,5 +1,5 @@
 /**
- * Utilitários de Autenticação (frontend) — Autocell
+ * Utilitários de Autenticação (frontend) — FisioCell
  *
  * v1.14.0 — Cookie HttpOnly:
  *   O token JWT vive EXCLUSIVAMENTE num cookie httpOnly definido pelo

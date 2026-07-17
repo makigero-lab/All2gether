@@ -1,5 +1,5 @@
 /**
- * Middleware de Autenticação (JWT) — Autocell
+ * Middleware de Autenticação (JWT) — FisioCell
  *
  * Lê o token do header `Authorization: Bearer <token>`, verifica-o e injeta
  * o payload em `req.user` ({ id, role, empresa_id }).
@@ -15,7 +15,7 @@
 
 const jwt = require('jsonwebtoken');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'autocell-dev-secret-change-me';
+const JWT_SECRET = process.env.JWT_SECRET || 'fisiocell-dev-secret-change-me';
 
 function extrairToken(req) {
   const header = req.header('authorization') || req.header('Authorization');

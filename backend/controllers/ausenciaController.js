@@ -1,5 +1,5 @@
 /**
- * Ausência Controller — Autocell
+ * Ausência Controller — FisioCell
  *
  * Gestão de Folgas e Férias da equipa.
  *

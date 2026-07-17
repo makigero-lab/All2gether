@@ -1,5 +1,5 @@
 /**
- * Relatório Controller — Autocell
+ * Relatório Controller — FisioCell
  *
  * Endpoints de analytics / relatórios de produtividade.
  *
@@ -407,7 +407,7 @@ function construirPrompt(contexto) {
     )
     .join('\n') || '- (sem dados de propriedades)';
 
-  return `És um analista de operações de uma empresa de Alojamento Local (Autocell).
+  return `És um analista de operações de uma empresa de Alojamento Local (FisioCell).
 Escreve um "Resumo Executivo" em português de Portugal, focado em gestão
 (tendências e eficiência), a partir dos seguintes dados do período.
 

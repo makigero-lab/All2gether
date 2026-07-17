@@ -1,5 +1,5 @@
 /**
- * Testes de integração do backend (Autocell) — Jest + Supertest.
+ * Testes de integração do backend (FisioCell) — Jest + Supertest.
  *
  * Estes testes importam a instância `app` exportada por server.js (que NÃO
  * inicia o servidor HTTP nem liga ao MongoDB, graças ao `if (require.main
@@ -19,7 +19,7 @@ describe('GET / (healthcheck)', () => {
     const res = await request(app).get('/');
     expect(res.body).toHaveProperty('status');
     expect(res.body.status).toBe(
-      'API do Alojamento Local online e ligada à BD!'
+      'API do FisioCell online e ligada à BD!'
     );
   });
 

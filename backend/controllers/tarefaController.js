@@ -1,5 +1,5 @@
 /**
- * Tarefa Controller — Autocell
+ * Tarefa Controller — FisioCell
  *
  * Gestão de tarefas individuais (reportar atraso, etc.)
  */
@@ -99,9 +99,8 @@ async function verificarDistanciaTarefasDia(utilizadorId, dataTarefa, propriedad
     return null; // não bloqueia em caso de erro
   }
 }
-// v1.63.0 (Prompt 86) — Load balancer partilhado do webhookController para
-// a auto-atribuição em lote.
-const { _determinarUtilizadorAtribuido: determinarUtilizadorAtribuido } = require('./webhookController');
+// F0 — Load balancer extraído para utils/loadBalancer.js (antes em webhookController).
+const { determinarUtilizadorAtribuido } = require('../utils/loadBalancer');
 
 /**
  * Limite de capacidade usado pelo reportarAtrasoTarefa para desatribuir a

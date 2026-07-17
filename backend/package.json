@@ -1,7 +1,7 @@
 {
-  "name": "autocell-backend",
+  "name": "fisiocell-backend",
   "version": "1.0.0",
-  "description": "API REST do SaaS de gestão para Alojamento Local (Autocell)",
+  "description": "API REST do SaaS de gestão para Alojamento Local (FisioCell)",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -43,5 +43,8 @@
       "server.js"
     ],
     "verbose": true
+  },
+  "allowScripts": {
+    "mongodb-memory-server@11.2.0": true
   }
 }

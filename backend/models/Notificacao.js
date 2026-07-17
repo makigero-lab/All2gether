@@ -1,5 +1,5 @@
 /**
- * Modelo Notificacao — Autocell
+ * Modelo Notificacao — FisioCell
  *
  * Prompt 114 — Centro de Notificações In-App (O Sino).
  *

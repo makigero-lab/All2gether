@@ -1,5 +1,5 @@
 /**
- * Rotas de Relatórios / Analytics — Autocell
+ * Rotas de Relatórios / Analytics — FisioCell
  *
  * Prefixo montado em server.js: /api/gestor/relatorios
  *

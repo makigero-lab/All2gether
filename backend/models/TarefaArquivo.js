@@ -1,12 +1,11 @@
 /**
  * Modelo: TarefaArquivo
  *
- * Prompt 109 — O Arquivista Automático.
- *
  * Cópia exata do schema da Tarefa, usada para arquivar tarefas concluídas
  * ou canceladas com mais de 3 meses. Mantém todos os dados para auditoria
- * futura, mas fora da coleção principal para garantir a performance do
- * calendário e das queries operacionais.
+ * futura, mas fora da coleção principal para garantir a performance.
+ *
+ * F0: Removido smoobu_reserva_id (integração Smoobu eliminada).
  *
  * Campo extra:
  *   - arquivado_em: data em que a tarefa foi movida para o arquivo.
@@ -24,7 +23,7 @@ const tarefaArquivoSchema = new mongoose.Schema(
     // Campos originais da Tarefa (mesmo schema).
     empresa_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Empresa', required: true, index: true },
     propriedade_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Propriedade', required: true, index: true },
-    smoobu_reserva_id: { type: String, index: true },
+    // F0 — smoobu_reserva_id removido.
     utilizador_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Utilizador', default: null, index: true },
     data: { type: Date, required: true, index: true },
     tempo_limpeza_minutos: { type: Number, required: true, default: 45, min: 0 },
@@ -37,7 +36,6 @@ const tarefaArquivoSchema = new mongoose.Schema(
     avarias: { type: [String], default: [] },
     checklist: { type: [String], default: [] },
     detalhes_reserva: {
-      smoobu_reserva_id: { type: String, default: null },
       checkin: { type: String, default: null },
       checkout: { type: String, default: null },
       pax: { type: Number, default: null, min: 0 },
