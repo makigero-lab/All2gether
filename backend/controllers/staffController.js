@@ -1,5 +1,5 @@
 /**
- * Staff Controller — FisioCell
+ * Staff Controller — All2gether
  *
  * Endpoints para o staff gerir as SUAS ausências (pedidos de férias/doença).
  *

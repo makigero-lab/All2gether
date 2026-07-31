@@ -1,8 +1,8 @@
 {
-  "name": "fisiocell-frontend",
+  "name": "all2gether-frontend",
   "version": "1.0.0",
   "private": true,
-  "description": "Frontend do SaaS de gestão para Alojamento Local (FisioCell)",
+  "description": "Frontend do SaaS de gestão para Alojamento Local (All2gether)",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

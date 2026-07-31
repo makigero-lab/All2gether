@@ -1,13 +1,13 @@
-# FisioCell
+# All2gether
 
-**SaaS de gestão para Clínicas de Fisioterapia.**
+**SaaS de gestão de tarefas automáticas para Alojamento Local e Airbnb.**
 
-O FisioCell é uma aplicação dividida em duas partes:
+O All2gether é uma aplicação dividida em duas partes:
 
 - **`backend/`** — API REST construída em **Node.js + Express**, com base de dados **MongoDB** (via Mongoose). A API está desenhada para ser alojada no [Render](https://render.com).
 - **`frontend/`** — Interface de utilizador em **Next.js 14 + TypeScript + Tailwind CSS + shadcn/ui**, com duas áreas: Painel de Administração (`/admin`) e Área do Staff (`/staff`). Desenhada para a [Vercel](https://vercel.com), comunica com a API via CORS. *(Fase atual: dados fictícios/mock.)*
 
-> 📌 Repositório: https://github.com/makigero-lab/FisioCell
+> 📌 Repositório: https://github.com/makigero-lab/All2gether
 > 🌿 Branch de desenvolvimento ativa: **`dev`**
 
 ---
@@ -15,7 +15,7 @@ O FisioCell é uma aplicação dividida em duas partes:
 ## Estrutura do repositório
 
 ```
-FisioCell/
+All2gether/
 ├── backend/        # API REST (Node.js + Express + MongoDB)
 │   ├── package.json
 │   ├── server.js
@@ -58,16 +58,22 @@ A API arranca na porta definida em `PORT` (por defeito **5000**).
 
 | Variável      | Descrição                                      | Exemplo                                   |
 |---------------|------------------------------------------------|-------------------------------------------|
-| `MONGODB_URI` | URI de ligação ao MongoDB                       | `mongodb://localhost:27017/fisiocell`      |
+| `MONGODB_URI` | URI de ligação ao MongoDB                       | `mongodb://localhost:27017/all2gether`      |
 | `PORT`        | Porta onde a API escuta (no Render é injetada) | `5000`                                    |
+| `JWT_SECRET`  | Segredo de assinatura dos JWT (obrigatório em produção) | `all2gether-dev-secret-change-me` |
+| `JWT_EXPIRACAO` | Expiração do JWT (default `7d`)              | `7d`                                      |
+| `FRONTEND_URL` | Origem permitida para CORS (URL do frontend)  | `https://all2gether.vercel.app`           |
+| `AUTOCELL_SSO_SECRET` | Segredo partilhado com o portal Autocell para SSO (v. `docs/BACKEND.md` §6.2) | `seu_segredo_sso_aqui` |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | Chaves VAPID para notificações push (Web Push API) | `mailto:admin@all2gether.com` |
 
 ### Endpoints disponíveis
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
-| `GET`  | `/`  | Healthcheck. Devolve `{ "status": "API do FisioCell online e ligada à BD!" }` |
+| `GET`  | `/`  | Healthcheck. Devolve `{ "status": "API do All2gether online e ligada à BD!" }` |
 | `GET`  | `/api/health` | Estado da API + BD (MongoDB) + uptime. Devolve `503` se a BD estiver em baixo. |
 | `POST` | `/api/auth/login` | **Login** (público, com rate limiting). Body: `{ email, password }`. Devolve `{ token, utilizador }`. |
+| `GET`  | `/api/auth/sso` | **Single Sign-On** com o portal Autocell (público). Query: `?token=<jwt_externo>`. Valida com `AUTOCELL_SSO_SECRET`, define cookies httpOnly e redireciona para `/admin` (ou `/login?erro=sso_falhou`). Apenas role `admin`. |
 | `GET`  | `/api/auth/me` | Dados do utilizador autenticado. **Auth:** JWT. |
 | `GET`  | `/api/auth/me/calendario` | Calendário pessoal (tarefas + ausências). **Auth:** JWT. |
 | `GET`  | `/api/auth/me/tarefas` | Tarefas de hoje do utilizador. **Auth:** JWT. |
@@ -107,7 +113,7 @@ A API arranca na porta definida em `PORT` (por defeito **5000**).
 | `POST` | `/api/gestor/propriedades/default-checklist` | Aplica o checklist padrão (6 itens) a TODAS as propriedades da empresa. Substitui o existente. **Auth:** JWT + `isGestor`. (Prompt 113) |
 | `GET`  | `/api/admin/empresas` | Lista todas as empresas (cross-tenant) com gestor principal. **Auth:** JWT + `isAdmin`. |
 | `POST` | `/api/admin/empresas/:id/impersonar` | Gera token JWT do gestor de uma empresa (impersonation). Se a empresa não tiver gestor ativo, o admin faz override (token com empresa_id alvo + role 'gestor'). Guarda o token de admin num cookie separado para "Voltar a Admin". **Auth:** JWT + `isAdmin`. |
-| `POST` | `/api/auth/exit-impersonation` | Restaura a sessão de Super Admin após impersonação (copia o cookie `fisiocell_admin_token` de volta para `fisiocell_token`). **Auth:** implícita (cookie). (Prompt 113) |
+| `POST` | `/api/auth/exit-impersonation` | Restaura a sessão de Super Admin após impersonação (copia o cookie `all2gether_admin_token` de volta para `all2gether_token`). **Auth:** implícita (cookie). (Prompt 113) |
 | `GET`  | `/api/auth/me/notificacoes` | Lista notificações in-app do utilizador (query `?lidas=false` para só não-lidas). **Auth:** JWT. (Prompt 114) |
 | `GET`  | `/api/auth/me/notificacoes/contagem` | Contagem de notificações não-lidas (para o badge do sino). **Auth:** JWT. (Prompt 114) |
 | `PATCH`| `/api/auth/me/notificacoes/marcar-lidas` | Marca TODAS as notificações não-lidas como lidas. **Auth:** JWT. (Prompt 114) |
@@ -168,7 +174,7 @@ Abrir http://localhost:3000 → landing page com links para `/admin` e `/staff`.
 
 | Variável | Descrição | Exemplo |
 |-----------|-----------|---------|
-| `NEXT_PUBLIC_API_URL` | URL base da API backend (Render). Usada na fase de integração. | `https://fisiocell-backend.onrender.com` |
+| `NEXT_PUBLIC_API_URL` | URL base da API backend (Render). Usada na fase de integração. | `https://all2gether-backend.onrender.com` |
 
 ### Deploy na Vercel
 

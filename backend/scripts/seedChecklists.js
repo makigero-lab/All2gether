@@ -1,5 +1,5 @@
 /**
- * Seed de Modelos de Checklist — FisioCell
+ * Seed de Modelos de Checklist — All2gether
  *
  * Prompt 135 — Cria dois ModeloChecklist na BD a partir dos documentos Word:
  *   1. "Limpeza Standard" — checklist básica de checkout

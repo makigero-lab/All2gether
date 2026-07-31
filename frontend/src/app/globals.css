@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 /**
- * Tema FisioCell — Rebranding Premium Dourado
+ * Tema All2gether — Rebranding Premium Dourado
  * -------------------------------------------
  * Inspirado em sites corporativos de Property Management de luxo (ex.: All2Gether).
  *
@@ -101,7 +101,7 @@
   font-family: inherit;
 }
 
-/* Toolbar — botões alinhados com o tema FisioCell (dourado) */
+/* Toolbar — botões alinhados com o tema All2gether (dourado) */
 .fc .fc-toolbar.fc-header-toolbar {
   gap: 0.5rem;
   flex-wrap: wrap;

@@ -1,5 +1,5 @@
 /**
- * Middleware de Controlo de Acesso por Role (RBAC) — FisioCell
+ * Middleware de Controlo de Acesso por Role (RBAC) — All2gether
  *
  * Hierarquia (v1.29.0):
  *   admin  → Super Admin (dono da conta, gestão total)

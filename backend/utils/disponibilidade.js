@@ -1,5 +1,5 @@
 /**
- * Disponibilidade — FisioCell
+ * Disponibilidade — All2gether
  *
  * Utilitário partilhado para validar se um utilizador está disponível para
  * receber uma tarefa num determinado dia.

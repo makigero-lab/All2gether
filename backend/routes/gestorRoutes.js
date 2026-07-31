@@ -1,5 +1,5 @@
 /**
- * Rotas do Painel do Gestor de Operações — FisioCell
+ * Rotas do Painel do Gestor de Operações — All2gether
  *
  * Prefixo montado em server.js: /api/gestor
  *

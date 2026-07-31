@@ -17,7 +17,7 @@ import { rotaPorRole, limparCacheAuth } from "@/lib/auth";
 import type { LoginResponse } from "@/lib/api";
 
 /**
- * Página de Login — FisioCell
+ * Página de Login — All2gether
  *
  * Ecrã minimalista centrado, com o design premium (dourado + sharp).
  * Ao submeter:
@@ -138,7 +138,7 @@ function LoginConteudo() {
             Iniciar sessão
           </h1>
           <p className="mt-1.5 text-sm font-light text-muted-foreground">
-            FisioCell · Gestão de Alojamento Local
+            All2gether · Gestão de Alojamento Local
           </p>
         </div>
 

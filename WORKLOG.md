@@ -831,3 +831,189 @@ Stage Summary:
 - **Rename:** Autocell→FisioCell aplicado em 73 ficheiros (cookies `fisiocell_token` + `fisiocell_admin_token`, package names, emails, manifest, docs).
 - **Documentação:** `docs/ARQUITETURA.md` criado com a proposta v0.1 + modelo `Documento` (Q4). README/BACKEND/FRONTEND limpos de Smoobu.
 - **Próximo passo:** commit + push para branch `dev`. Depois F1 (adaptar Empresa + Utilizador com novos roles + perfil profissional).
+
+---
+
+Task ID: A0-AL
+Agent: Z.ai Code
+Task: Clonar o repositório All2gether (branch dev), guardar credenciais e analisar código + documentação + worklog para entender regras de processo e lógica. Preparar para rebranding FisioCell → All2gether (regresso ao domínio Alojamento Local).
+
+Work Log:
+- Clonado `https://github.com/makigero-lab/All2gether.git` na branch `dev` para `/home/z/All2gether` (depth 50, até commit `21a6a30` — Merge PR #85).
+- Credenciais guardadas em `/home/z/.all2gether-creds/repo.env` (chmod 600, FORA do repo). Remote `origin` configurado SEM token na URL (token injectado via helper `git -c credential.helper=...` em push/pull) para evitar exposição no `.git/config`.
+- Helper de push autenticado: `/home/z/.all2gether-creds/git-push.sh` (lê o token do ficheiro seguro).
+- Lido `README.md`, `docs/BACKEND.md`, `docs/FRONTEND.md`, `docs/ARQUITETURA.md`, `backend/package.json`, `backend/server.js`, e WORKLOG completo (833 linhas, até Task F0).
+- Subagente (Task A0-AL-1) fez grep exaustivo por strings de branding em todo o repo.
+
+Stage Summary (regras de processo e lógica identificadas):
+- **Stack:** Backend Node.js+Express+MongoDB (Mongoose) no Render · Frontend Next.js 14+TS+Tailwind+shadcn/ui na Vercel.
+- **Multi-tenant:** scoping por `empresa_id` (ObjectId `ref: 'Empresa'`) em todos os modelos; JWT carrega `empresa_id`; `admin` é cross-tenant (Super Admin).
+- **RBAC (código ATUAL — Alojamento Local):** roles `admin` / `gestor` / `staff` (middleware `requireRole.js`). ⚠️ NOTA: `docs/ARQUITETURA.md` descreve roles `diretor_clinico`/`fisioterapeuta`/`rececionista` — isto é da PROPOSTA FISIOCELL NUNCA IMPLEMENTADA. O ARQUITETURA.md está obsoleto.
+- **Load balancer de atribuição (`utils/loadBalancer.js`):** pipeline ausências aprovadas + folgas fixas → Algoritmo VIP (`Propriedade.funcionario_preferencial_id`) → senão Haversine + menor `carga_total` → SLA cap 480 min (8h/dia). Estado `nao_atribuida` (Prompt 138) quando TODOS excedem SLA.
+- **Webhooks:** Smoobu COMPLETAMENTE REMOVIDO em F0. `WebhookLog` mantém-se (sem origem ativa). `gestorController.reprocessarWebhook` = stub 410 Gone.
+- **Cron jobs (4):** `dailyBriefing` (08h00), `caoGuarda` (18h00 — Fail-Safe auto-atribui órfãs de amanhã + alerta incompletas de hoje), `agendaAmanha` (19h00), `arquivista` (trimestral, >3 meses → `TarefaArquivo`). Timezone `Europe/Lisbon`.
+- **Notificações:** Web Push (VAPID) + in-app (modelo `Notificacao`). `notificarUtilizador()` fire-and-forget (push + registo BD).
+- **Auditoria + soft delete:** `utils/auditoria.js` regista ações admin; `Utilizador.eliminado_em`, `Empresa.apagada` (Reciclagem), `Ausencia.estado='cancelada'` (histórico mantido).
+- **Impersonation:** admin → gestor via JWT override (cookie backup `fisiocell_admin_token`); `POST /api/auth/exit-impersonation` restaura.
+- **Hard reset:** scoped à empresa (Propriedades + Tarefas + Ausências + Webhooks + Notificações). Soft delete de empresa → Reciclagem (restaurável).
+- **AI summary:** `POST /api/gestor/relatorios/ai-summary` via Gemini SDK — nunca crasha (placeholder se falhar).
+- **Convenções:** branch `dev`, pt-PT, commits `feat|fix|chore(escopo): descrição (Prompt N)`, atualizar README+BACKEND+FRONTEND+WORKLOG em cada alteração. CI: GitHub Actions (frontend lint+tsc+build, backend jest).
+
+Branding residual FisioCell (CRÍTICO para rebranding All2gether):
+- **170 ocorrências** de `fisiocell`/`FisioCell` em **72 ficheiros**; **16** de `Fisioterapia` em 8; **~14** de `Clínica` em 7.
+- Cookies de autenticação `fisiocell_token` / `fisiocell_admin_token` em **13 ficheiros frontend** (renomear obriga a invalidar sessões em produção).
+- `backend/package.json`: name "fisiocell-backend", description híbrida "(FisioCell)".
+- `frontend/package.json`: name "fisiocell-frontend".
+- `frontend/public/manifest.json`: "FisioCell — Gestão de Clínicas de Fisioterapia".
+- `backend/.env.example`: `MONGODB_URI=...fisiocell`, `VAPID_SUBJECT=mailto:admin@fisiocell.com`, e **resquício `SMOOBU_API_KEY=`** não limpo em F0.
+- `backend/server.js`: cabeçalho "FisioCell - API de gestão para Clínicas de Fisioterapia" + healthcheck "API do FisioCell online...".
+- `docs/ARQUITETURA.md`: inteiro obsoleto (proposta Fisioterapia F0-F9 nunca implementada).
+- WORKLOG.md + `agent-ctx/56-z-ai-code.md`: preservam referências históricas (Autocell) propositadamente — NÃO devem ser sed-replaced.
+
+Próximo passo:
+- Aguardar instruções do utilizador. O rebranding FisioCell→All2gether + reposição do domínio Alojamento Local é **essencialmente cosmético + de branding** (strings, cookies, package names, manifest, healthcheck, comentários, docs) — NÃO exige refactor de domínio (o código já é lógica de Alojamento Local: Tarefa=limpeza, Propriedade=alojamento, roles admin/gestor/staff).
+
+---
+
+Task ID: R0
+Agent: Z.ai Code
+Task: Rebranding completo FisioCell → All2gether + reposição do domínio Alojamento Local e Airbnb em todo o repositório (código, comentários, cookies, variáveis de ambiente, documentação). Limpeza de resquícios Smoobu (SMOOBU_API_KEY e campos mortos).
+
+Work Log:
+- Mapeamento exaustivo (grep) de todas as ocorrências: 182 de fisiocell/FisioCell em 72 ficheiros; 16 de Fisioterapia em 8; ~14 de "Clínica" em 7; resquício SMOOBU_API_KEY no .env.example; campos `smoobu_id` mortos nos testes (ignorados pelo schema strict).
+
+### R0-A — Backend (branding + domínio)
+- `backend/package.json`: name "fisiocell-backend" → "all2gether-backend"; description → "API REST do sistema All2gether - Gestão de Alojamento Local e Tarefas".
+- `backend/server.js`: cabeçalho "FisioCell - API de gestão para Clínicas de Fisioterapia" → "All2gether - API de gestão para Alojamento Local e Airbnb"; VAPID_SUBJECT mailto:admin@fisiocell.com → admin@all2gether.com; healthcheck "API do FisioCell..." → "API do All2gether online e ligada à BD!".
+- `backend/.env.example`: rebranding completo (MONGODB_URI, JWT_SECRET, FRONTEND_URL, VAPID_SUBJECT); REMOVIDO bloco SMOOBU_API_KEY (código morto — a integração Smoobu foi eliminada em F0).
+- `backend/controllers/gestorController.js`: setupClienteZero renomeado para domínio Alojamento Local — empresa "All2gether Teste", propriedade "Apartamento Teste", utilizadores "Diretor All2gether" (admin@all2gether.pt), "Gestor de Operações" (gestor@all2gether.pt), "João Staff" (joao.staff@all2gether.pt), password "all2gether123". Cabeçalho "Admin Controller — All2gether". "webhook do Smoobu" → "load balancer de atribuição" (2 sítios).
+- `backend/middleware/auth.js`: JWT_SECRET fallback "fisiocell-dev-secret-change-me" → "all2gether-dev-secret-change-me".
+- `backend/utils/geocoding.js`: User-Agent Nominatim "FisioCell/1.0 (fisiocell.app)" → "All2gether/1.0 (all2gether.app)".
+- `backend/utils/push.js`: VAPID_SUBJECT mailto:admin@fisiocell.com → admin@all2gether.com (2 sítios).
+- `backend/utils/loadBalancer.js`: cabeçalho "— All2gether"; "Staff/Fisioterapeutas" → "Staff de Limpeza/Manutenção".
+- `backend/utils/scheduler.js`: "webhookController.js (criação de tarefas via Smoobu)" → "loadBalancer.js (atribuição automática de tarefas)".
+- `backend/models/Empresa.js`: "Modelo: Empresa (Clínica)" → "(Gestora de Alojamento Local)"; "Salas, Utilizadores e Consultas" → "Propriedades, Utilizadores e Tarefas"; "webhooks do Smoobu são rejeitados" → "tarefas não são processadas pelo load balancer"; "Dados da clínica" → "Dados da empresa".
+- `backend/models/Propriedade.js`: "(futuro: Sala)" → "(Alojamento Local / Airbnb)"; "espaço físico da clínica" → "apartamento ou unidade de alojamento"; removidas referências a "F3: Será transformado em Sala"; "payload do Smoobu" → "a tarefa não especifica"; "vinda do Smoobu" → "definida manualmente ou vinda de integrações externas".
+- `backend/models/Tarefa.js`: "(futuro: Consulta)" → "(Limpeza/Manutenção de Alojamento Local)"; removida referência "F4: Será transformado em Consulta (paciente + fisio + sala + nota SOAP)"; "nota_clinica SOAP na F4" → "dados da reserva de Alojamento Local (check-in/check-out, hóspede)".
+- `backend/models/TarefaArquivo.js`: cabeçalho mantido (só referência histórica F0).
+- `backend/models/WebhookLog.js`: "webhook do Smoobu" → "webhook (integrações externas)"; adicionada nota "F0: A integração Smoobu foi removida, mas este modelo mantém-se para futuras integrações"; "propriedade Smoobu no payload" → "propriedade no payload".
+- `backend/models/Utilizador.js`: "O webhook do Smoobu exclui automaticamente" → "O load balancer exclui automaticamente".
+- `backend/models/Notificacao.js`, `backend/controllers/*.js`, `backend/routes/*.js`, `backend/middleware/requireRole.js`, `backend/jobs/*.js`, `backend/scripts/seedChecklists.js`: cabeçalhos "— FisioCell" → "— All2gether" (via sed).
+- `backend/controllers/relatorioController.js`: prompt da IA "empresa de Alojamento Local (FisioCell)" → "(All2gether)".
+- `backend/controllers/tarefaController.js`: "Cria uma tarefa manualmente (sem depender do Smoobu)" → "(sem depender de integrações externas)"; "datas/horas da reserva Smoobu" → "da reserva de Alojamento Local".
+- `backend/tests/server.test.js`: mensagem esperada do healthcheck atualizada para "API do All2gether online e ligada à BD!".
+- `backend/tests/integration.test.js`: comentário "gestor@fisiocell.pt" → "gestor@all2gether.pt"; cabeçalhos de secção órfãos "6. Webhook Smoobu" → "6. Dashboard", "9. Smoobu — sincronização em massa" → "9. Aprovação de ausências"; REMOVIDAS ~30 linhas `smoobu_id: '...'` (campos mortos em objetos de teste — o schema strict do Mongoose descarta-os silenciosamente, mas eram resquícios legacy).
+
+### R0-B — Frontend (branding + cookies + domínio)
+- Cookies de autenticação renomeados em 13 ficheiros: `fisiocell_token` → `all2gether_token`; `fisiocell_admin_token` → `all2gether_admin_token`. Ficheiros: middleware.ts, login/logout/exit-impersonation/me routes, impersonar/[id], admin/[...path], admin/empresas/*, gestor/[...path], staff/[...path].
+- sessionStorage/cookie: `fisiocell_impersonating` → `all2gether_impersonating` (impersonation-banner.tsx, admin/page.tsx); `fisiocell_theme` → `all2gether_theme` (theme-toggle.tsx).
+- `frontend/package.json`: name "fisiocell-frontend" → "all2gether-frontend"; description "(FisioCell)" → "(All2gether)".
+- `frontend/public/manifest.json`: "FisioCell — Gestão de Clínicas de Fisioterapia" → "All2gether — Gestão de Alojamento Local e Airbnb"; description → "SaaS de gestão para Alojamento Local e Airbnb: tarefas de limpeza, equipa, calendários e propriedades."
+- `frontend/.env.example`: NEXT_PUBLIC_API_URL fisiocell-backend.onrender.com → all2gether-backend.onrender.com; cabeçalho "All2gether Frontend".
+- `frontend/worker/index.js` + `frontend/public/worker-*.js`: título de notificação push default "FisioCell" → "All2gether".
+- Todas as referências visuais "FisioCell" em páginas (layout, page, login, staff/*, gestor/*, admin/*) e componentes (admin-sidebar, gestor-sidebar, impersonation-banner, theme-toggle) → "All2gether" (via sed PascalCase).
+- `frontend/src/app/globals.css`: "Tema FisioCell" → "Tema All2gether".
+- `frontend/src/app/gestor/relatorios/page.tsx`: "Relatorio FisioCell" → "Relatorio All2gether" (título do PDF export).
+
+### R0-C — Documentação (README + docs/BACKEND.md + docs/FRONTEND.md + docs/ARQUITETURA.md)
+- `README.md`: "SaaS de gestão para Clínicas de Fisioterapia" → "SaaS de gestão de tarefas automáticas para Alojamento Local e Airbnb". Rebranding global (FisioCell→All2gether, fisiocell→all2gether) via sed.
+- `docs/BACKEND.md`: removida nota F0 "em transição... migrar de Alojamento Local para Fisioterapia" → nova nota "projeto consolidado como All2gether — sistema de gestão de tarefas para Alojamento Local e Airbnb". "SaaS de gestão para Fisioterapia" → "sistema All2gether de gestão de Alojamento Local e Tarefas". "Sala de tratamento" → "Alojamento (apartamento/unidade)". "Duração da consulta" → "Duração estimada da tarefa de limpeza". "fisioterapeuta preferencial da sala" → "funcionário preferencial da propriedade". Setup do Cliente Zero alinhado com o código real (emails gestor@/joao.staff@, role "gestor", propriedade "Apartamento Teste") — corrigida inconsistência prévia da doc (dizia "manager" e "joao.limpezas").
+- `docs/FRONTEND.md`: "SaaS de gestão para Fisioterapia" → "sistema All2gether de gestão de Alojamento Local e Airbnb".
+- `docs/ARQUITETURA.md`: REESCRITO COMPLETAMENTE. A versão anterior era a proposta v0.1 de pivot para Fisioterapia (roles diretor_clinico/fisioterapeuta/rececionista, modelos Paciente/Consulta/Sala/HorarioFisioterapeuta/Documento, roadmap F0-F9) — NUNCA IMPLEMENTADA. Nova versão reflete a arquitetura REAL atual: roles admin/gestor/staff, modelos Propriedade/Tarefa/ModeloChecklist, load balancer de atribuição, cron jobs, notificações, segurança, impersonation, IA Gemini, PWA, convenções.
+
+### R0-D — Verificação e testes
+- Validação de sintaxe JS: `node --check` em 19 ficheiros backend — todos OK.
+- Validação JSON: manifest.json e package.json — OK.
+- **Testes Jest: 111/111 a passar ✓** (incluindo o teste do healthcheck que agora espera "API do All2gether online e ligada à BD!").
+- Verificação final grep: ZERO ocorrências de fisiocell/FisioCell/Fisioterapia/Clínica de Fisioterapia/SMOOBU_API_KEY em todo o repo (excluindo WORKLOG.md e agent-ctx/ que preservam o histórico intencionalmente).
+
+### R0-E — Histórico preservado (não alterado)
+- `WORKLOG.md`: mantém todas as referências históricas a Autocell/FisioCell/Smoobu (32 ocorrências) — são o registo de evolução do projeto. Apenas acrescentada esta entrada R0.
+- `agent-ctx/56-z-ai-code.md`: mantido inalterado (registo histórico da Task 56).
+- Comentários "F0 — smoobu_id removido" / "integração Smoobu eliminada" nos controllers/models: mantidos (notas de migração legítimas, como no WORKLOG).
+
+Stage Summary:
+- **Rebranding completo:** FisioCell → All2gether aplicado em ~72 ficheiros (backend + frontend + docs). 182 ocorrências de fisiocell/FisioCell + 16 de Fisioterapia + ~14 de "Clínica" → ZERO residuais (fora do histórico preservado).
+- **Cookies renomeados:** `all2gether_token` + `all2gether_admin_token` em 13 ficheiros frontend. ⚠️ Nota: renomear cookies invalida sessões em produção — todos os utilizadores terão de fazer login novamente após deploy.
+- **Código morto removido:** SMOOBU_API_KEY do .env.example; ~30 campos `smoobu_id` mortos nos testes.
+- **Domínio restaurado:** todas as menções a "Clínica de Fisioterapia", "Fisioterapeuta", "Sala de tratamento", "Consulta/sessão" substituídas por "Alojamento Local", "Airbnb", "Propriedade", "Tarefa de limpeza".
+- **Docs alinhadas com código:** setupClienteZero na doc agora corresponde exatamente ao código (emails, roles, nomes). docs/ARQUITETURA.md reescrito para refletir a arquitetura real (não a proposta Fisioterapia abandonada).
+- **Testes:** 111/111 ✓ (nenhum teste quebrado pelo rebranding).
+- **Próximo passo:** commit + push para branch `dev` com mensagem `chore(rebranding): alteracao global de FisioCell para All2gether e limpeza de referencias legacy`.
+
+---
+
+Task ID: S1
+Agent: Z.ai Code
+Task: Criar endpoint de Single Sign-On (SSO) no backend do All2gether para integração com o portal central Autocell. O Autocell atuará como portal orquestrador; o admin poderá entrar no All2gether sem re-pedir login.
+
+Work Log:
+- Lidos `backend/controllers/authController.js` (padrão de geração de JWT: `jwt.sign({ id, role, empresa_id }, JWT_SECRET, { expiresIn: TOKEN_EXPIRACAO })`), `backend/routes/authRoutes.js` (estrutura de rotas, rate limiter do login), `backend/middleware/auth.js` (`JWT_SECRET` exportado e reutilizado no controller).
+
+### S1-A — Variável de ambiente
+- `backend/.env.example`: adicionada `AUTOCELL_SSO_SECRET=seu_segredo_sso_aqui` com comentário explicativo (segredo partilhado entre Autocell e All2gether; tem de ser idêntico nos dois sistemas; se vazio, SSO desativado).
+
+### S1-B — Controlador (backend/controllers/authController.js)
+- Criada e exportada a função `ssoLogin` (async, colocada antes do bloco de Notificações Push para coerência temática).
+- Lógica implementada conforme especificação:
+  1. Extrai `token` de `req.query.token`.
+  2. Se token em falta OU `AUTOCELL_SSO_SECRET` não configurado → redirect `/login?erro=sso_falhou`.
+  3. `jwt.verify(token, SSO_SECRET)` valida o JWT externo. Erro (invalid/expired) → redirect erro.
+  4. Extrai `email` do payload (suporta `payload.email` OU `payload.sub` — convenção JWT). Sem email → redirect erro.
+  5. `Utilizador.findOne({ email, role: 'admin' })` — apenas admins entram via SSO. Não encontrado ou `!ativo` → redirect erro.
+  6. Gera o JWT interno do All2gether com o MESMO padrão do login normal (`{ id, role, empresa_id }`, `JWT_SECRET`, `TOKEN_EXPIRACAO`).
+  7. Define cookies httpOnly: `all2gether_token` (cookie de sessão principal, lido pelo middleware do frontend) + `all2gether_admin_token` (cookie de marcação de admin, conforme especificação; também serve de backup para impersonação — se o admin impersonar um gestor depois, o token de admin já está guardado e o "Voltar a Admin" funciona corretamente).
+  8. Opções do cookie: `httpOnly: true`, `secure: NODE_ENV === 'production'`, `sameSite: 'lax'` (OBRIGATÓRIO — não 'strict' — para que o cookie viaje no redirect top-level cross-origin Autocell → backend → frontend), `path: '/'`, `maxAge: 7 dias`.
+  9. `res.redirect(302, FRONTEND_URL + '/admin')` no sucesso.
+- Decisão de design: setar AMBOS os cookies (`all2gether_token` + `all2gether_admin_token`). O utilizador pediu explicitamente `all2gether_admin_token`, mas o middleware do frontend (`frontend/src/middleware.ts`) lê `all2gether_token`. Sem `all2gether_token`, o SSO não funcionaria end-to-end (o middleware redirecionaria para /login). Setar ambos honra a instrução E faz a funcionalidade funcionar, mantendo a compatibilidade com o fluxo de impersonation (exit-impersonation restaura a partir de `all2gether_admin_token`).
+
+### S1-C — Rotas (backend/routes/authRoutes.js)
+- Importada `ssoLogin` no destructuring do authController.
+- Adicionada rota pública: `router.get('/sso', ssoLogin);` (antes de `/me`).
+- Sem rate limiter próprio (o global de `/api/` — 100/15min — aplica-se; o segredo partilhado é a proteção principal contra abuso).
+- Atualizado o cabeçalho JSDoc do ficheiro para listar o novo endpoint.
+
+### S1-D — Documentação
+- `docs/BACKEND.md` §6.2: adicionada secção completa `#### GET /api/auth/sso (público — Single Sign-On com o Autocell)` com: query params, payload esperado, fluxo de 6 passos, variável de ambiente, notas de segurança (segredo isolado do JWT_SECRET, apenas role admin, sameSite lax), lista de erros, e nota de deploy sobre cookies cross-origin (Render vs Vercel — recomenda mesmo domínio registável ou reverse proxy).
+- `README.md`: adicionada `AUTOCELL_SSO_SECRET` (e as outras env vars de auth/push) à tabela de variáveis de ambiente; adicionada a rota `GET /api/auth/sso` à tabela de endpoints.
+
+### S1-E — Verificação
+- Sintaxe validada: `node --check` em authController.js e authRoutes.js — OK.
+- Testes Jest: 111/111 a passar (nenhum teste existente quebrado; o novo endpoint é público e não interfere com os fluxos testados).
+
+Stage Summary:
+- **Novo endpoint:** `GET /api/auth/sso` (público) — valida JWT externo do Autocell com `AUTOCELL_SSO_SECRET`, procura admin por email, gera JWT interno, seta cookies httpOnly (`all2gether_token` + `all2gether_admin_token`, `sameSite: 'lax'`), redireciona para `/admin` (sucesso) ou `/login?erro=sso_falhou` (falha).
+- **Segurança:** segredo SSO isolado do `JWT_SECRET` interno; apenas role `admin`; `sameSite: 'lax'` para redirect cross-origin.
+- **Variável de ambiente:** `AUTOCELL_SSO_SECRET` adicionada ao `.env.example` (partilhada com o Autocell).
+- **Docs:** `docs/BACKEND.md` §6.2 + `README.md` (tabela de env vars + tabela de endpoints) atualizados.
+- **Testes:** 111/111 ✓.
+- **Próximo passo:** commit + push para branch `dev`.
+
+---
+
+Task ID: F1
+Agent: Z.ai Code
+Task: Corrigir erro de build na Vercel — "Module not found: Can't resolve '@/components/detalhes-reserva-card'" (commit 52d4a18, rebranding). O build do frontend falhava porque dois componentes importavam um ficheiro que não existia no repositório.
+
+Work Log:
+- Reproduzido o erro localmente: `next build` falhava com "Module not found: Can't resolve '@/components/detalhes-reserva-card'" em `detalhe-tarefa-modal.tsx` (gestor) e `detalhe-tarefa-client.tsx` (staff).
+- Investigação git: o ficheiro `frontend/src/components/detalhes-reserva-card.tsx` (110 linhas) foi criado no commit `512b353` (Prompt: listas de tarefas só mostram hoje + futuras) e **apagado por engano no commit `bd14ca8`** (F0 — rename Autocell→FisioCell + remoção Smoobu). O commit F0 devia apagar apenas os 3 ficheiros do Smoobu (`smoobuController.js`, `webhookController.js`, `webhookRoutes.js`), mas acabou por apagar também este componente legítimo.
+- Confirmado que o tipo `DetalhesReservaDTO` (importado pelo componente a partir de `@/lib/api`) ainda existe (linhas 134 e 170 de `lib/api.ts`) — só o componente é que desapareceu. Ou seja, a correção é puramente recriar o ficheiro em falta.
+- Confirmado que mais nenhum ficheiro legítimo foi apagado no F0: dos 4 ficheiros removidos, 3 eram Smoobu (correto) e 1 era o `detalhes-reserva-card.tsx` (erro).
+
+### F1-A — Correção
+- Recriado `frontend/src/components/detalhes-reserva-card.tsx` com o conteúdo original recuperado do commit `512b353` via `git show`.
+- Única alteração ao original: o comentário JSDoc do cabeçalho. Original: "Card de destaque com os detalhes da reserva Smoobu (Prompt 95 / Fase 1.5)". Atualizado para: "Card de destaque com os detalhes da reserva de Alojamento Local (Prompt 95 / Fase 1.5)" + nota explicativa: "originalmente (Prompt 95) estes dados vinham da integração Smoobu; com a remoção do Smoobu (F0), passam a ser preenchidos manualmente ou por futuras integrações de Alojamento Local. O schema mantém-se igual."
+- Funcionalidade do componente: card visual com check-in, check-out, nº de hóspedes (pax) e nome do hóspede. Só renderiza se `detalhes_reserva` existir e tiver pelo menos um campo preenchido. Usado pelo gestor (modal de detalhe da tarefa) e pelo staff (ecrã de detalhe no terreno).
+
+### F1-B — Validação local (reproduz o build da Vercel)
+- Instaladas dependências do frontend (`npm ci`).
+- `tsc --noEmit`: **0 erros** ✓ (validação de tipos TypeScript).
+- `next build`: **exit 0, build com sucesso** ✓ — todas as 26 rotas compilaram (14 estáticas + 12 dinâmicas + middleware). O erro "Module not found" desapareceu.
+- `next lint`: **No ESLint warnings or errors** ✓.
+
+Stage Summary:
+- **Causa-raiz:** o commit F0 (bd14ca8) apagou por engano o ficheiro `frontend/src/components/detalhes-reserva-card.tsx` juntamente com os 3 ficheiros do Smoobu. O erro não foi detetado antes porque os builds intermédios da Vercel usaram cache; o build limpo do rebranding (52d4a18) é que o expôs.
+- **Correção:** ficheiro recriado a partir do histórico git (commit 512b353), com o comentário de cabeçalho atualizado para refletir o contexto pós-Smoobu (Alojamento Local).
+- **Validação:** tsc ✓, next build ✓ (reproduz o pipeline da Vercel), next lint ✓.
+- **Próximo passo:** commit + push para branch `dev` (a Vercel deve reconstruir automaticamente e o deploy passar).

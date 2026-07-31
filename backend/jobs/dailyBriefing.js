@@ -1,5 +1,5 @@
 /**
- * Daily Briefing — Cron Job (FisioCell)
+ * Daily Briefing — Cron Job (All2gether)
  *
  * Todos os dias às 08:00 (hora do servidor), gera e envia via WhatsApp
  * (mock) o plano de limpezas de cada staff para o dia.

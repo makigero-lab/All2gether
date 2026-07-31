@@ -1,8 +1,8 @@
-# Documentação Técnica — Backend (FisioCell)
+# Documentação Técnica — Backend (All2gether)
 
-> ⚠️ **F0 — Documentação em transição.** O projeto está a migrar de Alojamento Local para Fisioterapia. A integração Smoobu foi removida. Os modelos Tarefa/Propriedade serão transformados em Consulta/Sala nas próximas fases.
+> **Nota de rebranding.** O projeto foi consolidado como **All2gether** — sistema de gestão de tarefas para **Alojamento Local e Airbnb**. A antiga integração Smoobu foi removida (F0). Os modelos `Tarefa` (limpeza/manutenção) e `Propriedade` (alojamento) são o núcleo do domínio.
 
-API REST do SaaS de gestão para Fisioterapia, construída com **Node.js**, **Express** e **MongoDB** (via **Mongoose**).
+API REST do sistema All2gether de gestão de Alojamento Local e Tarefas, construída com **Node.js**, **Express** e **MongoDB** (via **Mongoose**).
 
 ---
 
@@ -34,10 +34,10 @@ backend/
 │   └── auth.js               # Verifica JWT (strito), injeta req.user — sem fallback legacy
 ├── models/                   # Modelos Mongoose (ODM do MongoDB)
 │   ├── Empresa.js            #   Entidade principal (multi-tenant)
-│   ├── Propriedade.js        #   Sala de tratamento
-│   ├── Utilizador.js         #   Admin / Staff de uma empresa (email + password_hash)
+│   ├── Propriedade.js        #   Alojamento (apartamento/unidade)
+│   ├── Utilizador.js         #   Admin / Gestor / Staff de uma empresa (email + password_hash)
 │   ├── Ausencia.js           #   Indisponibilidade de Staff num dia
-│   └── Tarefa.js             #   Tarefa (consulta/agendamento)
+│   └── Tarefa.js             #   Tarefa (limpeza/manutenção)
 └── routes/
     ├── adminRoutes.js        # GET/POST /api/admin/propriedades, GET /api/admin/setup
     └── authRoutes.js         # POST /api/auth/login, GET /api/auth/me
@@ -78,7 +78,7 @@ Entidade principal do SaaS (multi-tenant). Cada empresa agrupa Propriedades e Ut
 | `plano_ativo` | Boolean | Default `true`.                                    |
 
 ### `Propriedade`
-Representa uma sala de tratamento.
+Representa um apartamento ou unidade de alojamento gerida pela empresa.
 
 | Campo                        | Tipo     | Notas                                                              |
 |------------------------------|----------|--------------------------------------------------------------------|
@@ -86,11 +86,11 @@ Representa uma sala de tratamento.
 | `morada`                     | String   | Obrigatório, trim. Geocoding automático (Nominatim) ao criar/editar. |
 | `coordenadas`                | Object   | `{ lat: Number, lng: Number }`. Preenchidas via geocoding (default null). |
 | `empresa_id`                 | ObjectId | `ref: 'Empresa'`. Obrigatório, indexado.                           |
-| `tempo_limpeza_minutos`      | Number   | Default `45`, `min: 0`. Duração da consulta.                       |
+| `tempo_limpeza_minutos`      | Number   | Default `45`, `min: 0`. Duração estimada da tarefa de limpeza.     |
 | `ativo`                      | Boolean  | Default `true`.                                                    |
 | `checklist`                  | [String] | Default `[]`. Itens de verificação definidos pelo gestor (v1.34.0).|
-| `capacidade_hospedes`        | Number   | Default `null`, `min: 0`. Capacidade da sala (v1.61.0 / Prompt 84).|
-| `funcionario_preferencial_id`| ObjectId | `ref: 'Utilizador'`, default `null`, indexado. **Prompt 92 (Fase 1.5)** — fisioterapeuta preferencial da sala; a lógica de prioridade no load balancer será ativada num prompt seguinte. |
+| `capacidade_hospedes`        | Number   | Default `null`, `min: 0`. Capacidade máxima de hóspedes (v1.61.0 / Prompt 84).|
+| `funcionario_preferencial_id`| ObjectId | `ref: 'Utilizador'`, default `null`, indexado. **Prompt 92 (Fase 1.5)** — funcionário preferencial da propriedade; a lógica de prioridade no load balancer será ativada num prompt seguinte. |
 
 ### `Utilizador`
 Admin, Manager ou Staff de uma empresa. Credenciais de login (email + password_hash).
@@ -252,7 +252,7 @@ Rota de verificação de estado (healthcheck).
 **Resposta (200 OK):**
 ```json
 {
-  "status": "API do FisioCell online e ligada à BD!"
+  "status": "API do All2gether online e ligada à BD!"
 }
 ```
 
@@ -301,7 +301,7 @@ Lista todos os utilizadores da empresa (qualquer role), ordenados por `nome`.
 ```json
 {
   "utilizadores": [
-    { "_id": "...", "nome": "João Limpezas", "email": "joao.limpezas@fisiocell.pt", "empresa_id": "...", "role": "staff", "ativo": true, "createdAt": "...", "updatedAt": "..." }
+    { "_id": "...", "nome": "João Limpezas", "email": "joao.limpezas@all2gether.pt", "empresa_id": "...", "role": "staff", "ativo": true, "createdAt": "...", "updatedAt": "..." }
   ]
 }
 ```
@@ -316,7 +316,7 @@ Cria um novo membro de equipa (Utilizador) para a empresa.
 ```json
 {
   "nome": "Maria Ferreira",
-  "email": "maria.ferreira@fisiocell.pt",
+  "email": "maria.ferreira@all2gether.pt",
   "password": "segredo123",
   "role": "staff"
 }
@@ -366,30 +366,30 @@ Remove permanentemente o utilizador da base de dados.
 #### `GET /api/admin/setup`  *(PÚBLICO — sem auth)*
 **Bootstrap do “Cliente Zero”** — cria dados iniciais para testes (idempotente):
 
-- 1 **Empresa** «Clínica FisioCell» (procura por `nome`).
+- 1 **Empresa** «All2gether Teste» (procura por `nome`).
 - 3 **Utilizadores** (procura por `email` único), cada um com `password_hash` bcrypt:
-  - `admin@fisiocell.pt` (admin — dono da conta)
-  - `manager@fisiocell.pt` (manager — responsável de limpezas)
-  - `joao.limpezas@fisiocell.pt` (staff — executante de limpezas)
-- 1 **Propriedade** «Casa Teste».
+  - `admin@all2gether.pt` (admin — dono da conta)
+  - `gestor@all2gether.pt` (gestor — gestor de operações)
+  - `joao.staff@all2gether.pt` (staff — executante de limpezas)
+- 1 **Propriedade** «Apartamento Teste».
 
 - **Resposta (200 OK):**
 ```json
 {
   "mensagem": "Cliente Zero criado com sucesso.",
   "empresa_id": "<ObjectId>",
-  "empresa":  { "id": "...", "nome": "Clínica FisioCell", "plano_ativo": true, "criada": true },
+  "empresa":  { "id": "...", "nome": "All2gether Teste", "plano_ativo": true, "criada": true },
   "utilizadores": [
-    { "id": "...", "nome": "Gestor FisioCell", "email": "admin@fisiocell.pt", "role": "admin", "criado": true, "password_definida": true, "credenciais_teste": { "email": "admin@fisiocell.pt", "password": "fisiocell123" } },
-    { "id": "...", "nome": "Responsável Limpezas", "email": "manager@fisiocell.pt", "role": "manager", "criado": true, "password_definida": true, "credenciais_teste": { "email": "manager@fisiocell.pt", "password": "fisiocell123" } },
-    { "id": "...", "nome": "João Limpezas", "email": "joao.limpezas@fisiocell.pt", "role": "staff", "criado": true, "password_definida": true, "credenciais_teste": { "email": "joao.limpezas@fisiocell.pt", "password": "fisiocell123" } }
+    { "id": "...", "nome": "Diretor All2gether", "email": "admin@all2gether.pt", "role": "admin", "criado": true, "password_definida": true, "credenciais_teste": { "email": "admin@all2gether.pt", "password": "all2gether123" } },
+    { "id": "...", "nome": "Gestor de Operações", "email": "gestor@all2gether.pt", "role": "gestor", "criado": true, "password_definida": true, "credenciais_teste": { "email": "gestor@all2gether.pt", "password": "all2gether123" } },
+    { "id": "...", "nome": "João Staff", "email": "joao.staff@all2gether.pt", "role": "staff", "criado": true, "password_definida": true, "credenciais_teste": { "email": "joao.staff@all2gether.pt", "password": "all2gether123" } }
   ],
-  "propriedade": { "id": "...", "nome": "Casa Teste", "criada": true }
+  "propriedade": { "id": "...", "nome": "Apartamento Teste", "criada": true }
 }
 ```
 - Se já existir tudo, devolve `mensagem: "Cliente Zero já existia (nada foi alterado)."` com `criada/criado: false`.
 - **Retrocompatibilidade:** se um utilizador já existir sem `password_hash` (criado antes do auth), o setup define-lhe a password e garante o role correto.
-- **Credenciais de teste (3 contas):** `admin@fisiocell.pt`, `manager@fisiocell.pt`, `joao.limpezas@fisiocell.pt` — todas com password `fisiocell123` (remover em produção).
+- **Credenciais de teste (3 contas):** `admin@all2gether.pt`, `gestor@all2gether.pt`, `joao.staff@all2gether.pt` — todas com password `all2gether123` (remover em produção).
 
 ### 6.2. Autenticação (`/api/auth`)
 
@@ -398,7 +398,7 @@ Login com email + password. Valida a hash bcrypt e devolve um JWT.
 
 - **Body:**
 ```json
-{ "email": "joao.limpezas@fisiocell.pt", "password": "fisiocell123" }
+{ "email": "joao.limpezas@all2gether.pt", "password": "all2gether123" }
 ```
 - **Resposta (200 OK):**
 ```json
@@ -407,7 +407,7 @@ Login com email + password. Valida a hash bcrypt e devolve um JWT.
   "utilizador": {
     "id": "...",
     "nome": "João Limpezas",
-    "email": "joao.limpezas@fisiocell.pt",
+    "email": "joao.limpezas@all2gether.pt",
     "role": "staff",
     "empresa_id": "..."
   }
@@ -416,6 +416,27 @@ Login com email + password. Valida a hash bcrypt e devolve um JWT.
 - **JWT payload:** `{ id, role, empresa_id }` assinado com `JWT_SECRET`, expira em `JWT_EXPIRACAO` (default `7d`).
 - **Erros:** `400` email/password em falta; `401` credenciais inválidas / utilizador inativo / sem password definida; `429` muitas tentativas de login (rate limit); `500` erro interno.
 - **Rate limiting (v1.11.0):** a rota de login está protegida por `express-rate-limit` — máximo de **5 tentativas por IP a cada 15 minutos**. Ultrapassado o limite → `429` com `{ "erro": "Muitas tentativas de login. Tente novamente mais tarde." }`. Mitiga ataques de força bruta e credential stuffing. Headers `RateLimit-*` (standard) são enviados na resposta para o cliente saber quando pode tentar novamente.
+
+#### `GET /api/auth/sso` (público — Single Sign-On com o Autocell)
+Inicia a sessão de um administrador no All2gether a partir do portal central **Autocell**, sem re-pedir credenciais (Single Sign-On).
+
+- **Query params:** `token` — JWT externo assinado pelo Autocell com `AUTOCELL_SSO_SECRET`.
+- **Payload esperado no JWT externo:** `{ email: "admin@all2gether.pt" }` (também aceita `sub` como convenção JWT).
+- **Fluxo:**
+  1. O Autocell gera o JWT externo com `AUTOCELL_SSO_SECRET` (segredo partilhado entre os dois sistemas).
+  2. O Autocell redireciona o browser do admin para `GET /api/auth/sso?token=<jwt_externo>`.
+  3. O All2gether valida o JWT externo, procura o utilizador por `email` + `role: 'admin'` (apenas admins entram via SSO).
+  4. Gera o JWT interno do All2gether (assinado com `JWT_SECRET`, payload `{ id, role, empresa_id }` — o mesmo do login normal).
+  5. Define os cookies httpOnly `all2gether_token` + `all2gether_admin_token` (`sameSite: 'lax'`, `secure` em produção, `maxAge: 7d`).
+  6. Redireciona (`302`) para `FRONTEND_URL/admin` (sucesso) ou `FRONTEND_URL/login?erro=sso_falhou` (falha).
+- **Variável de ambiente:** `AUTOCELL_SSO_SECRET` — segredo partilhado com o Autocell. Tem de ser **idêntico** nos dois sistemas. Se vazio, o SSO fica desativado (todos os pedidos redirecionam para `?erro=sso_falhou`).
+- **Segurança:**
+  - O JWT externo é validado com um segredo **diferente** do `JWT_SECRET` interno — isola a confiança (comprometimento do segredo SSO não expõe os tokens internos).
+  - Apenas `role: 'admin'` é aceite (o Autocell é um portal de orquestração central).
+  - `sameSite: 'lax'` é obrigatório para que o cookie viaje no redirect top-level cross-origin (Autocell → backend → frontend).
+- **Erros (todos redirecionam para `/login?erro=sso_falhou`):** token em falta; `AUTOCELL_SSO_SECRET` não configurado; token inválido/expirado; payload sem `email`/`sub`; admin não encontrado ou inativo.
+
+> **Nota de deploy (cookies cross-origin):** o backend (Render) e o frontend (Vercel) estão em domínios diferentes. Cookies `httpOnly` definidos pelo backend não são enviados para o domínio do frontend por defeito. Para o SSO funcionar em produção, o backend e o frontend devem partilhar o mesmo domínio registável (ex.: `app.all2gether.com` + `api.all2gether.com` com cookie `domain=.all2gether.com`), OU ser servidos pelo mesmo origin (ex.: via reverse proxy). Em desenvolvimento local (ambos em `localhost`, portas diferentes) o `sameSite: 'lax'` funciona porque `localhost` é same-site.
 
 #### `GET /api/auth/me` (requer JWT)
 Devolve os dados do utilizador autenticado (a partir do token).
@@ -630,9 +651,9 @@ As ações diretas do admin (falta súbita, baixa prolongada, registo manual) cr
 | Inicial    | 1.0.0  | Criação da estrutura base: `package.json`, `server.js`, `.env.example`, `.gitignore`. Ligação ao MongoDB e rota de teste `GET /`. |
 | v1.1.0     | 1.1.0  | Lógica central: modelos `Propriedade`, `Utilizador`, `Ausencia`, `Tarefa`; fluxo estrito de atribuição com filtro de ausências + load balancing; resposta 200 imediata + processamento assíncrono; tratamento de erros robusto. |
 | v1.2.0     | 1.2.0  | Painel de Administração: modelo `Empresa` (nome, nif, plano_ativo); `controllers/adminController.js` (`getPropriedades`, `criarPropriedade`, `setupClienteZero`); `routes/adminRoutes.js` (`GET/POST /api/admin/propriedades`, `GET /api/admin/setup`); montagem em `server.js`. `empresa_id` via header `x-empresa-id` (sem JWT ainda). |
-| v1.3.0     | 1.3.0  | **Autenticação JWT:** dependências `jsonwebtoken` + `bcryptjs`; modelo `Utilizador` com `email` único + `password_hash`; `middleware/auth.js` (verifica JWT, injeta `req.user`, fallback legacy `x-empresa-id`); `controllers/authController.js` (`login` com bcrypt + JWT, `/me`); `routes/authRoutes.js` (`POST /api/auth/login`, `GET /api/auth/me`); `/api/admin` protegido por `auth` com `empresa_id` do token; `setupClienteZero` cria Staff com `password_hash` (`joao.limpezas@fisiocell.pt` / `fisiocell123`); `.env.example` com `JWT_SECRET` + `JWT_EXPIRACAO`. |
+| v1.3.0     | 1.3.0  | **Autenticação JWT:** dependências `jsonwebtoken` + `bcryptjs`; modelo `Utilizador` com `email` único + `password_hash`; `middleware/auth.js` (verifica JWT, injeta `req.user`, fallback legacy `x-empresa-id`); `controllers/authController.js` (`login` com bcrypt + JWT, `/me`); `routes/authRoutes.js` (`POST /api/auth/login`, `GET /api/auth/me`); `/api/admin` protegido por `auth` com `empresa_id` do token; `setupClienteZero` cria Staff com `password_hash` (`joao.limpezas@all2gether.pt` / `all2gether123`); `.env.example` com `JWT_SECRET` + `JWT_EXPIRACAO`. |
 | v1.3.1     | 1.3.1  | **Fix bootstrap:** o `auth` deixou de ser aplicado a todo `/api/admin` e passou a ser aplicado apenas às rotas `/propriedades` (dentro de `adminRoutes.js`). A rota `/api/admin/setup` voltou a ser **PÚBLICA** (era o endpoint de bootstrap que criava o primeiro utilizador — não podia exigir token). Corrige o erro `401 Autenticação obrigatória` ao chamar `/setup`. |
-| v1.4.0     | 1.4.0  | **Novo role `manager`:** modelo `Utilizador` enum `['admin','manager','staff']`; `webhookController` inclui managers na atribuição de tarefas (load balancing); `setupClienteZero` cria 3 utilizadores (admin `admin@fisiocell.pt` + manager `manager@fisiocell.pt` + staff `joao.limpezas@fisiocell.pt`, todos com password `fisiocell123`). |
+| v1.4.0     | 1.4.0  | **Novo role `manager`:** modelo `Utilizador` enum `['admin','manager','staff']`; `webhookController` inclui managers na atribuição de tarefas (load balancing); `setupClienteZero` cria 3 utilizadores (admin `admin@all2gether.pt` + manager `manager@all2gether.pt` + staff `joao.limpezas@all2gether.pt`, todos com password `all2gether123`). |
 | v1.5.0     | 1.5.0  | **Gestão de Equipa:** `adminController` com `getEquipa` (lista utilizadores, `.select('-password_hash')`) e `criarMembroEquipa` (valida nome/email/password/role, hash bcrypt, email único); `adminRoutes` com `GET/POST /api/admin/equipa` (protegidos por `auth`). |
 | v1.6.0     | 1.6.0  | **CRUD completo de Utilizadores:** `adminController` com `atualizarMembroEquipa` (PUT — nome/email/role/password opcional com nova hash bcrypt), `alternarEstadoMembro` (PATCH — ativa/desativa, inativos não fazem login), `eliminarMembroEquipa` (DELETE — não permite auto-eliminação); `adminRoutes` com `PUT/PATCH/DELETE /api/admin/equipa/:id` (protegidos por `auth`). Validação de pertença à empresa em todas as operações. |
 | v1.7.0     | 1.7.0  | **Segurança hierárquica + `responsavel_id`:** modelo `Utilizador` com campo `responsavel_id` (ObjectId ref Utilizador, superior hierárquico); `getEquipa` faz `populate('responsavel_id')` e devolve campo `responsavel` preenchido; regras 403 em criar/editar (bloqueia role `admin`), editar/eliminar/desativar (bloqueia se alvo é `admin`); `responsavel_id` validado (admin/manager da mesma empresa, não pode ser si próprio). |

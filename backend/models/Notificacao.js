@@ -1,5 +1,5 @@
 /**
- * Modelo Notificacao — FisioCell
+ * Modelo Notificacao — All2gether
  *
  * Prompt 114 — Centro de Notificações In-App (O Sino).
  *

@@ -1,7 +1,7 @@
 {
-  "name": "fisiocell-backend",
+  "name": "all2gether-backend",
   "version": "1.0.0",
-  "description": "API REST do SaaS de gestão para Alojamento Local (FisioCell)",
+  "description": "API REST do sistema All2gether - Gestão de Alojamento Local e Tarefas",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

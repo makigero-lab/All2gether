@@ -1,5 +1,5 @@
 /**
- * Helper de Auditoria — FisioCell
+ * Helper de Auditoria — All2gether
  *
  * Regista ações administrativas na coleção Auditoria.
  * Função fire-and-forget (não bloqueia a resposta ao cliente).

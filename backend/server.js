@@ -1,5 +1,5 @@
 /**
- * FisioCell - API de gestão para Clínicas de Fisioterapia
+ * All2gether - API de gestão para Alojamento Local e Airbnb
  * Ponto de entrada da aplicação backend (Express + MongoDB).
  *
  * Variáveis de ambiente (ver .env.example):
@@ -10,7 +10,7 @@
  *   - FRONTEND_URL       — origem permitida para CORS (default localhost:3000)
  *   - VAPID_PUBLIC_KEY   — Chave pública VAPID para Web Push (notificações push)
  *   - VAPID_PRIVATE_KEY  — Chave privada VAPID (assina as notificações)
- *   - VAPID_SUBJECT      — Identificador do emissor (mailto:admin@fisiocell.com)
+ *   - VAPID_SUBJECT      — Identificador do emissor (mailto:admin@all2gether.com)
  *                          Gerar com: npx web-push generate-vapid-keys
  *
  * NOTA: a instância `app` é exportada (module.exports) para poder ser
@@ -93,7 +93,7 @@ app.get('/api/health', async (req, res) => {
 
 // Rota de teste para confirmar que a API está online.
 app.get('/', (req, res) => {
-  res.json({ status: 'API do FisioCell online e ligada à BD!' });
+  res.json({ status: 'API do All2gether online e ligada à BD!' });
 });
 
 // Autenticação (login público + /me protegido).
