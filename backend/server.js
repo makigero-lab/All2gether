@@ -1,5 +1,5 @@
 /**
- * Autocell - API de gestão para Alojamento Local
+ * FisioCell - API de gestão para Clínicas de Fisioterapia
  * Ponto de entrada da aplicação backend (Express + MongoDB).
  *
  * Variáveis de ambiente (ver .env.example):
@@ -8,12 +8,9 @@
  *   - JWT_SECRET         — segredo de assinatura dos JWT (obrigatória)
  *   - JWT_EXPIRACAO      — expiração do JWT (default "7d")
  *   - FRONTEND_URL       — origem permitida para CORS (default localhost:3000)
- *   - SMOOBU_API_KEY     — API Key do Smoobu para sincronização em massa
- *                          (POST /api/admin/smoobu/sincronizar). Opcional:
- *                          sem ela, a sincronização devolve 400.
  *   - VAPID_PUBLIC_KEY   — Chave pública VAPID para Web Push (notificações push)
  *   - VAPID_PRIVATE_KEY  — Chave privada VAPID (assina as notificações)
- *   - VAPID_SUBJECT      — Identificador do emissor (mailto:admin@autocell.com)
+ *   - VAPID_SUBJECT      — Identificador do emissor (mailto:admin@fisiocell.com)
  *                          Gerar com: npx web-push generate-vapid-keys
  *
  * NOTA: a instância `app` é exportada (module.exports) para poder ser
@@ -29,7 +26,6 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 
-const webhookRoutes = require('./routes/webhookRoutes');
 const gestorRoutes = require('./routes/gestorRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const authRoutes = require('./routes/authRoutes');
@@ -70,7 +66,6 @@ app.use(
 app.use(express.json());
 
 // Rate limiting global: 100 pedidos por IP a cada 15 minutos.
-// Não se aplica ao webhook do Smoobu (que tem o seu próprio padrão).
 // Em ambiente de teste (Jest) o limite é desativado para não bloquear
 // os testes de integração que fazem centenas de pedidos seguidos.
 const globalLimiter = rateLimit({
@@ -98,11 +93,8 @@ app.get('/api/health', async (req, res) => {
 
 // Rota de teste para confirmar que a API está online.
 app.get('/', (req, res) => {
-  res.json({ status: 'API do Alojamento Local online e ligada à BD!' });
+  res.json({ status: 'API do FisioCell online e ligada à BD!' });
 });
-
-// Webhooks de integrações externas (Smoobu, etc.).
-app.use('/webhooks', webhookRoutes);
 
 // Autenticação (login público + /me protegido).
 app.use('/api/auth', authRoutes);
@@ -183,20 +175,20 @@ if (require.main === module) {
         console.log(`🚀 Servidor a correr na porta ${PORT}.`);
       });
 
-      // Inicia o cron job do Daily Briefing (WhatsApp) — só em execução
+      // Inicia o cron job do Daily Briefing — só em execução
       // direta, não nos testes. Corre todos os dias às 08:00.
       iniciarDailyBriefing();
 
-      // Prompt 94 — Cron job "Agenda de Amanhã": todos os dias às 19:00
+      // Cron job "Agenda de Amanhã": todos os dias às 19:00
       // (Europe/Lisbon), envia push a cada staff com trabalho amanhã.
       iniciarAgendaAmanha();
 
-      // Prompt 96 — Cron job "Cão de Guarda": todos os dias às 18:00
+      // Cron job "Cão de Guarda": todos os dias às 18:00
       // (Europe/Lisbon), envia push por cada tarefa de limpeza de hoje
       // ainda não concluída (lembra o staff de fechar o dia).
       iniciarCaoGuarda();
 
-      // Prompt 109 — Cron job "Arquivista": dia 1 de cada trimestre,
+      // Cron job "Arquivista": dia 1 de cada trimestre,
       // move tarefas concluídas/canceladas com mais de 3 meses para o arquivo.
       iniciarArquivista();
     })

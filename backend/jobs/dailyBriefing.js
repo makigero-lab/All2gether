@@ -1,5 +1,5 @@
 /**
- * Daily Briefing — Cron Job (Autocell)
+ * Daily Briefing — Cron Job (FisioCell)
  *
  * Todos os dias às 08:00 (hora do servidor), gera e envia via WhatsApp
  * (mock) o plano de limpezas de cada staff para o dia.

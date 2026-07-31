@@ -1,8 +1,8 @@
 {
-  "name": "autocell-frontend",
+  "name": "fisiocell-frontend",
   "version": "1.0.0",
   "private": true,
-  "description": "Frontend do SaaS de gestão para Alojamento Local (Autocell)",
+  "description": "Frontend do SaaS de gestão para Alojamento Local (FisioCell)",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

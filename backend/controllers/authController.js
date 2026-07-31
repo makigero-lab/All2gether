@@ -1,5 +1,5 @@
 /**
- * Auth Controller — Autocell
+ * Auth Controller — FisioCell
  *
  * Autenticação com JWT + bcrypt.
  *

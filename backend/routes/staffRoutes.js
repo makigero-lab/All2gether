@@ -1,5 +1,5 @@
 /**
- * Rotas do Staff — Autocell
+ * Rotas do Staff — FisioCell
  *
  * Prefixo montado em server.js: /api/staff
  *

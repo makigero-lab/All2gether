@@ -1,5 +1,5 @@
 /**
- * Controlador de Notificações In-App — Autocell
+ * Controlador de Notificações In-App — FisioCell
  *
  * Prompt 114 — Centro de Notificações In-App (O Sino).
  *

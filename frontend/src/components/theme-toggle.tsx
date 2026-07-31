@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 
 /**
  * Toggle de modo escuro/claro.
- * Persiste a preferência no cookie "autocell_theme".
+ * Persiste a preferência no cookie "fisiocell_theme".
  * Aplica/remove a classe "dark" no <html>.
  */
 export function ThemeToggle() {
@@ -17,7 +17,7 @@ export function ThemeToggle() {
     // Lê o cookie ao montar.
     const match = document.cookie
       .split("; ")
-      .find((c) => c.startsWith("autocell_theme="));
+      .find((c) => c.startsWith("fisiocell_theme="));
     const isDark = match?.split("=")[1] === "dark";
     setDark(isDark);
     document.documentElement.classList.toggle("dark", isDark);
@@ -31,7 +31,7 @@ export function ThemeToggle() {
     const expires = new Date(
       Date.now() + 7 * 24 * 60 * 60 * 1000
     ).toUTCString();
-    document.cookie = `autocell_theme=${newDark ? "dark" : "light"}; expires=${expires}; path=/; SameSite=Strict`;
+    document.cookie = `fisiocell_theme=${newDark ? "dark" : "light"}; expires=${expires}; path=/; SameSite=Strict`;
   }
 
   return (

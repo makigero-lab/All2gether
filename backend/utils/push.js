@@ -9,7 +9,7 @@
  * Variáveis de ambiente (ver .env.example):
  *   - VAPID_PUBLIC_KEY  — chave pública (partilhada com o browser)
  *   - VAPID_PRIVATE_KEY — chave privada (assina as notificações)
- *   - VAPID_SUBJECT     — mailto:admin@autocell.com
+ *   - VAPID_SUBJECT     — mailto:admin@fisiocell.com
  *
  * Gerar chaves: npx web-push generate-vapid-keys
  */
@@ -28,7 +28,7 @@ function configurarWebPush() {
   const publicKey = process.env.VAPID_PUBLIC_KEY;
   const privateKey = process.env.VAPID_PRIVATE_KEY;
   let subject =
-    process.env.VAPID_SUBJECT || 'mailto:admin@autocell.com';
+    process.env.VAPID_SUBJECT || 'mailto:admin@fisiocell.com';
 
   // Garante que o subject tem o prefixo mailto: (exige o web-push).
   // Se vier só o email (ex: "makigerorr@gmail.com"), adiciona o prefixo.

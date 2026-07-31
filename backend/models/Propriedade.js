@@ -1,19 +1,16 @@
 /**
- * Modelo: Propriedade
- * Representa um alojamento (apartment) sincronizado com o Smoobu.
- * Cada propriedade pertence a uma empresa.
+ * Modelo: Propriedade (futuro: Sala)
+ * Representa um espaço físico da clínica.
+ *
+ * F0: Removido smoobu_id (integração Smoobu eliminada).
+ * F3: Será transformado em Sala (nome, capacidade, equipamentos).
  */
 const mongoose = require('mongoose');
 
 const propriedadeSchema = new mongoose.Schema(
   {
-    // ID da propriedade no Smoobu ( usado para cruzar com o webhook )
-    smoobu_id: {
-      type: String,
-      required: true,
-      unique: true,
-      index: true,
-    },
+    // F0 — smoobu_id removido (integração Smoobu eliminada).
+    // O identificador único passará a ser (empresa_id + nome) na F3 (Sala).
     nome: {
       type: String,
       required: true,

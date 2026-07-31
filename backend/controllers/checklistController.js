@@ -1,5 +1,5 @@
 /**
- * Controlador de Modelos de Checklist — Autocell
+ * Controlador de Modelos de Checklist — FisioCell
  *
  * Prompt 133 — Sistema de Checklists Dinâmicas baseadas em Templates.
  *

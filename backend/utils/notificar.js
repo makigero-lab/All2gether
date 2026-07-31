@@ -1,5 +1,5 @@
 /**
- * Helper: Notificações para utilizadores — Autocell
+ * Helper: Notificações para utilizadores — FisioCell
  *
  * Prompt 114 — Envia DOIS tipos de notificação:
  *   1. Push (Web Push API) — se o utilizador tiver pushSubscription ativa.

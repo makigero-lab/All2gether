@@ -1,5 +1,5 @@
 /**
- * Geocoding — Autocell
+ * Geocoding — FisioCell
  *
  * Converte moradas em coordenadas (lat, lng) usando a API gratuita do
  * Nominatim (OpenStreetMap).
@@ -27,7 +27,7 @@ async function obterCoordenadas(morada) {
 
     const res = await fetch(url, {
       headers: {
-        'User-Agent': 'Autocell/1.0 (autocell.app)',
+        'User-Agent': 'FisioCell/1.0 (fisiocell.app)',
       },
     });
 

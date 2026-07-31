@@ -109,7 +109,7 @@ export function GestorSidebar() {
         <Sparkles className="h-5 w-5" />
       </div>
       <div className="flex flex-col leading-none">
-        <span className="text-sm font-bold">Autocell</span>
+        <span className="text-sm font-bold">FisioCell</span>
         <span className="text-[11px] text-muted-foreground">Gestor</span>
       </div>
     </div>
@@ -127,7 +127,7 @@ export function GestorSidebar() {
         >
           <Menu className="h-5 w-5" />
         </Button>
-        <span className="flex-1 text-sm font-semibold">Autocell — Gestor</span>
+        <span className="flex-1 text-sm font-semibold">FisioCell — Gestor</span>
         <NotificationBell />
       </header>
 
@@ -153,7 +153,7 @@ export function GestorSidebar() {
             Terminar Sessão
           </Button>
           <p className="text-xs text-muted-foreground">
-            © {new Date().getFullYear()} Autocell
+            © {new Date().getFullYear()} FisioCell
           </p>
         </div>
       </aside>
@@ -172,7 +172,7 @@ export function GestorSidebar() {
                 <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
                   <Sparkles className="h-5 w-5" />
                 </div>
-                <span className="text-sm font-bold">Autocell</span>
+                <span className="text-sm font-bold">FisioCell</span>
               </div>
               <Button
                 variant="ghost"

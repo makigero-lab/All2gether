@@ -1,10 +1,10 @@
 /**
- * Modelo: Empresa
- * Representa a entidade principal do SaaS (multi-tenant).
- * Cada empresa agrupa Propriedades e Utilizadores (Admin/Staff).
+ * Modelo: Empresa (Clínica)
+ * Representa a entidade principal do SaaS multi-tenant FisioCell.
+ * Cada empresa agrupa Salas, Utilizadores e Consultas.
  *
- * Prompt 109: Adicionado smoobu_api_key para que cada empresa (tenant)
- * tenha a sua própria ligação ao Smoobu sem hardcode no .env.
+ * F0: Removido smoobu_api_key (integração Smoobu eliminada).
+ * Adicionados campos de clínica: morada, telefone, email, nif.
  */
 const mongoose = require('mongoose');
 
@@ -44,12 +44,21 @@ const empresaSchema = new mongoose.Schema(
       default: false,
       index: true,
     },
-    // Prompt 109 — API Key do Smoobu por empresa (multi-tenant SaaS).
-    // Quando preenchida, as operações de sincronização usam esta chave
-    // em vez da variável de ambiente SMOOBU_API_KEY global.
-    smoobu_api_key: {
+    // F0 — Dados da clínica (substituem o antigo smoobu_api_key).
+    morada: {
       type: String,
       default: '',
+      trim: true,
+    },
+    telefone: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    email: {
+      type: String,
+      default: '',
+      lowercase: true,
       trim: true,
     },
   },

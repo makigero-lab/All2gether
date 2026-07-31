@@ -654,7 +654,7 @@ function EquipaPage() {
                         onChange={(e) =>
                           setForm((f) => ({ ...f, email: e.target.value }))
                         }
-                        placeholder="exemplo@autocell.pt"
+                        placeholder="exemplo@fisiocell.pt"
                         required
                       />
                     </div>

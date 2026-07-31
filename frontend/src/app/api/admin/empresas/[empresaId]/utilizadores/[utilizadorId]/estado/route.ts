@@ -8,7 +8,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
-const COOKIE_NAME = "autocell_token";
+const COOKIE_NAME = "fisiocell_token";
 
 export async function PATCH(
   req: Request,

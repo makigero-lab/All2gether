@@ -1,5 +1,5 @@
 /**
- * Disponibilidade — Autocell
+ * Disponibilidade — FisioCell
  *
  * Utilitário partilhado para validar se um utilizador está disponível para
  * receber uma tarefa num determinado dia.

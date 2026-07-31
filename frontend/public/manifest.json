@@ -1,7 +1,7 @@
 {
-  "name": "Autocell — Gestão de Alojamento Local",
-  "short_name": "Autocell",
-  "description": "SaaS de gestão para Alojamento Local: atribuição automática de tarefas de limpeza.",
+  "name": "FisioCell — Gestão de Clínicas de Fisioterapia",
+  "short_name": "FisioCell",
+  "description": "SaaS de gestão para Clínicas de Fisioterapia: marcações, agendas e fichas clínicas.",
   "start_url": "/",
   "display": "standalone",
   "orientation": "portrait",

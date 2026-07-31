@@ -1,5 +1,5 @@
 /**
- * Distância entre coordenadas — Autocell
+ * Distância entre coordenadas — FisioCell
  *
  * Prompt 114 — Utilitário de cálculo de distância entre duas coordenadas
  * geográficas usando a fórmula de Haversine. Usado pelo tarefaController

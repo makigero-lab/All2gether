@@ -754,3 +754,80 @@ Stage Summary:
 - **Lixeira / soft delete:** empresas eliminadas vão para Reciclagem (restauráveis); índice único MongoDB legado removido no arranque.
 - **Staff UX:** navegação por dias (±30 dias), tarefas agrupadas por dia, morada no cartão, `nome_hospede`, Exportar PDF (`window.print`).
 - Documentação (`README.md`, `docs/BACKEND.md`, `docs/FRONTEND.md`, este `WORKLOG.md`) atualizada retroativamente para cobrir os Prompts 115-131.
+
+---
+Task ID: DOC-F0
+Agent: general-purpose
+Task: Limpeza de documentação Smoobu + atualização de domínio (README, BACKEND.md, FRONTEND.md)
+
+Work Log:
+- Lido o WORKLOG.md (757 linhas) para entender o contexto da migração Autocell→FisioCell (F0: remoção da integração Smoobu, extração do load balancer para `utils/loadBalancer.js`, rename já aplicado via sed).
+- Lidos os 3 ficheiros de documentação alvo: `README.md` (239 linhas, ~14 refs Smoobu), `docs/BACKEND.md` (881 linhas, ~77 refs Smoobu), `docs/FRONTEND.md` (449 linhas, ~16 refs Smoobu).
+- **README.md** — Atualizada a descrição do projeto de "SaaS de gestão para Alojamento Local" → "SaaS de gestão para Clínicas de Fisioterapia". Removidas as linhas da tabela de endpoints que mencionavam Smoobu (POST /webhooks/smoobu, GET /api/gestor/webhooks, POST /api/gestor/webhooks/:id/reprocessar, POST /api/gestor/smoobu/sincronizar, GET /api/gestor/smoobu/propriedades, POST /api/gestor/smoobu/sincronizar-propriedades, POST /api/admin/empresas/:id/sincronizar-propriedades, POST /api/admin/empresas/:id/sincronizar-reservas, POST /api/admin/empresas/:id/registrar-webhooks, POST /api/admin/backfill-nomes-hospedes, POST /api/admin/backfill-tempos-viagem). Atualizado o healthcheck message de "API do Alojamento Local..." → "API do FisioCell...". Removidas referências a `smoobu_id` no body de POST/PUT propriedades. Removidas menções a "API key Smoobu" nos endpoints de config. Atualizado o link para `docs/BACKEND.md` (sem âncora Smoobu). Removidas as linhas `controllers/webhookController.js` e `routes/webhookRoutes.js` da estrutura do repositório (ficheiros já não existem). Resultado: 0 refs Smoobu.
+- **docs/BACKEND.md** — Adicionada nota F0 no topo: "⚠️ F0 — Documentação em transição. O projeto está a migrar de Alojamento Local para Fisioterapia. A integração Smoobu foi removida. Os modelos Tarefa/Propriedade serão transformados em Consulta/Sala nas próximas fases." Atualizada a descrição do domínio. Removidos `webhookController.js` e `webhookRoutes.js` da estrutura de ficheiros. Atualizada a descrição de `Propriedade` de "alojamento sincronizado com o Smoobu" → "sala de tratamento" e removido o campo `smoobu_id` da tabela. Atualizada a descrição de `Tarefa` de "tarefa de limpeza gerada a partir de uma reserva do Smoobu" → "tarefa (consulta/agendamento)" e removido o campo `smoobu_reserva_id`. Secção 3.2 (lógica central do webhook Smoobu, ~20 linhas com 9 passos) substituída por nota F0 sobre o load balancer extraído para `utils/loadBalancer.js`. Removida a secção `POST /webhooks/smoobu` (payload + exemplo JSON, ~28 linhas). Atualizado o healthcheck message. Removidas as secções 6.5 (Webhooks — Logs do Smoobu), 6.6 (Webhook Smoobu — robustez), 6.7 (Sincronização em massa do Smoobu), 6.8 (Listar propriedades do Smoobu), 6.9 (Sincronizar propriedades do Smoobu) — ~130 linhas removidas via sed. Removidas referências a `smoobu_id` dos exemplos JSON de GET/POST propriedades e do setup. Atualizada a secção "Impacto no webhook" → "Impacto no load balancer". No histórico de alterações: removidas 7 linhas inteiramente sobre Smoobu (v1.4.1, v1.18.0, v1.19.0, v1.20.0, v1.21.0, v1.22.0, Prompt 137b) e editadas cirurgicamente 9 linhas que mencionavam Smoobu entre outros tópicos (v1.1.0, v1.13.0, v1.17.0, v1.19.1, Prompt 92, Prompt 93, Correção, Prompt 117, Prompt 126). Atualizado o nome da empresa de teste de "O Meu Alojamento Local" → "Clínica FisioCell". Resultado: 2 refs Smoobu (ambas nas notas F0 intencionais).
+- **docs/FRONTEND.md** — Atualizada a descrição do domínio de "SaaS de gestão para Alojamento Local" → "SaaS de gestão para Fisioterapia". Removida a rota `/admin/webhooks` da tabela de rotas. Removido "Webhooks" da lista de itens da barra lateral (9→8 itens). Removidas as menções a "Smoobu ID read-only", "dropdown de apartamentos do Smoobu", "Sincronizar Smoobu" da secção Propriedades. Removido o botão "Sincronizar Smoobu" da secção Tarefas. Removida a secção Webhooks inteira (histórico de webhooks recebidos do Smoobu). Removidas as colunas/campos "Smoobu ID" da tabela, formulário e validações de `/admin/propriedades`. Atualizadas as referências a "webhook" → "load balancer" nas secções de ausências. No histórico: removidas 2 linhas inteiramente sobre Smoobu (Prompt 137b, Prompt 139c) e editadas cirurgicamente 7 linhas (v1.2.0, Prompt 113, Prompt 117, Prompt 122, Prompt 126, Prompt 137, Prompt 140). Resultado: 0 refs Smoobu.
+- Validação final: `rg -c -i "smoobu"` → README.md: 0, BACKEND.md: 2 (notas F0 intencionais), FRONTEND.md: 0.
+
+Stage Summary:
+- **3 ficheiros de documentação limpos de referências Smoobu ativas.** O README.md e o FRONTEND.md ficaram com 0 refs Smoobu. O BACKEND.md ficou com 2 refs — ambas nas notas F0 de transição explicitamente solicitadas pela tarefa (topo do ficheiro + substituição da secção 3.2).
+- **Domínio atualizado** em todos os 3 ficheiros: "Alojamento Local" → "Fisioterapia" / "Clínicas de Fisioterapia". O nome da empresa de teste mudou de "O Meu Alojamento Local" → "Clínica FisioCell". O healthcheck message mudou para "API do FisioCell online e ligada à BD!".
+- **Secções removidas:** POST /webhooks/smoobu (README + BACKEND), secções 6.5-6.9 do BACKEND (webhook logs, robustez, sincronização em massa, listar propriedades, sincronizar propriedades), secção Webhooks do FRONTEND, página /admin/webhooks da tabela de rotas, "Webhooks" da barra lateral do admin.
+- **Campos Smoobu removidos dos modelos:** `Propriedade.smoobu_id`, `Tarefa.smoobu_reserva_id`, `Empresa.smoobu_api_key` (referências nas tabelas de modelos e exemplos JSON).
+- **Endpoints Smoobu removidos da tabela de endpoints do README:** webhooks/smoobu, smoobu/sincronizar, smoobu/propriedades, smoobu/sincronizar-propriedades, backfill-nomes-hospedes, backfill-tempos-viagem, registrar-webhooks, sincronizar-propriedades, sincronizar-reservas.
+- **Histórico de alterações preservado:** as linhas não-Smoobu do changelog foram mantidas; apenas as linhas inteiramente sobre Smoobu foram removidas (9 no total: 7 no BACKEND + 2 no FRONTEND) e as linhas mistas foram editadas cirurgicamente para remover apenas a menção Smoobu.
+- **Estrutura de ficheiros atualizada:** removidas as referências a `webhookController.js` e `webhookRoutes.js` (ficheiros já não existem após F0).
+
+---
+Task ID: F0
+Agent: Z.ai Code
+Task: Rename Autocell → FisioCell + remoção completa da integração Smoobu + criação de docs/ARQUITETURA.md + atualização de documentação. Primeira fase da migração do domínio Alojamento Local → Fisioterapia.
+
+Work Log:
+
+### F0-A — Remoção da integração Smoobu (backend)
+- Eliminados 3 ficheiros: `backend/controllers/smoobuController.js`, `backend/controllers/webhookController.js`, `backend/routes/webhookRoutes.js`.
+- `backend/server.js`: removido o mount `/webhooks` + import de `webhookRoutes`; atualizado o cabeçalho (Autocell→FisioCell) + mensagem do healthcheck ("API do FisioCell online e ligada à BD!").
+- `backend/routes/gestorRoutes.js`: removidas 6 rotas Smoobu (`/smoobu/sincronizar`, `/smoobu/propriedades`, `/smoobu/sincronizar-propriedades`, `/smoobu/propriedades`, `/smoobu-debug`, `/smoobu-debug-reservas`) + respetivo import do `smoobuController`. Endpoint `/configuracoes` GET/PUT refatorado para gerir `nome/nif/morada/telefone/email` em vez de `smoobu_api_key`.
+- `backend/routes/adminRoutes.js` (913→~450 linhas): removidas todas as rotas Smoobu scoped (`/empresas/:id/sincronizar-propriedades`, `/sincronizar-reservas`, `/registrar-webhooks`) + globais (`/sincronizar-propriedades`, `/sincronizar-reservas`, `/registrar-webhooks`) + `/backfill-nomes-hospedes` + `/backfill-tempos-viagem`. Endpoints `/config-empresa` e `/empresas/:id/config` refatorados para gerir `nome/nif/morada/telefone/email`. Import do `smoobuController` removido.
+
+### F0-B — Extração do load balancer
+- Criado `backend/utils/loadBalancer.js` com as funções `calcularCargaLimpezaDia` e `determinarUtilizadorAtribuido` extraídas do `webhookController` eliminado. Reutiliza `obterRangeDia` + `calcularTempoViagem` do `utils/scheduler.js`.
+- `backend/controllers/tarefaController.js`: import mudou de `require('./webhookController')` para `require('../utils/loadBalancer')`.
+- `backend/jobs/caoGuarda.js`: mesma alteração de import.
+- `backend/controllers/gestorController.js`: `reprocessarWebhook` transformado em stub 410 Gone (integração Smoobu removida).
+
+### F0-C — Limpeza dos modelos Mongoose
+- `models/Empresa.js`: removido `smoobu_api_key`; adicionados `morada`, `telefone`, `email`.
+- `models/Propriedade.js`: removido `smoobu_id` (era `required: true, unique: true`).
+- `models/Tarefa.js`: removido `smoobu_reserva_id` (topo) + `detalhes_reserva.smoobu_reserva_id`. `detalhes_reserva` mantido como vestigial (será substituído por `nota_clinica` SOAP na F4).
+- `models/TarefaArquivo.js`: mesma remoção de `smoobu_reserva_id`.
+
+### F0-D — Limpeza dos controladores
+- `gestorController.js`: `criarPropriedade` removida validação de `smoobu_id` (obrigatório + único). `atualizarPropriedade` removida lógica de `smoobu_id`. `setupClienteZero`: empresa renomeada "Clínica FisioCell Teste", utilizadores renomeados (Diretor FisioCell, Responsável Clínico, João Fisioterapeuta), propriedade procurada por `nome` em vez de `smoobu_id`.
+
+### F0-E — Limpeza dos testes
+- `tests/integration.test.js` (3985→2847 linhas): removidos 6 blocos `describe` Smoobu (POST /webhooks/smoobu, GET /api/gestor/webhooks, POST /webhooks/:id/reprocessar, POST /smoobu/sincronizar, GET /smoobu/propriedades, POST /smoobu/sincronizar-propriedades) + 2 testes de `importarPropriedades` no bloco Correções. Testes de Propriedade CRUD atualizados: removido `smoobu_id` do setup e asserções; removidos 2 testes de duplicação 409 (constraint único deixou de existir).
+- `tests/server.test.js`: mensagem do healthcheck atualizada.
+- **Resultado: 111/111 testes a passar ✓** (eram 151, removidos ~40 testes Smoobu).
+
+### F0-F — Rename Autocell → FisioCell (73 ficheiros)
+- 4 passos `sed` em massa (excluindo `node_modules`, `package-lock.json`, `agent-ctx`, `WORKLOG.md` histórico):
+  1. `autocell_admin_token` → `fisiocell_admin_token` (cookie de impersonação)
+  2. `autocell_token` → `fisiocell_token` (cookie de sessão principal)
+  3. `Autocell` → `FisioCell` (capitalizado: comentários, docs, nomes)
+  4. `autocell` → `fisiocell` (lowercase: emails, package names, URLs)
+- `backend/package.json`: name → "fisiocell-backend"
+- `frontend/package.json`: name → "fisiocell-frontend"
+- `frontend/public/manifest.json`: name/description atualizados para Fisioterapia
+- `backend/.env.example` + `frontend/.env.example`: atualizados
+- 163 ocorrências em 73 ficheiros — 0 residuais (apenas .bak eliminado)
+
+### F0-G — Documentação
+- Criado `docs/ARQUITETURA.md` com a proposta v0.1: visão geral, princípios herdados, hierarquia de 4 roles (admin/diretor_clinico/fisioterapeuta/rececionista), matriz de permissões, mapa de migração, 7 modelos propostos (Empresa, Utilizador, Paciente, Consulta, Sala, HorarioFisioterapeuta, Documento), cron jobs, decisões de design, roadmap F0-F9.
+- Task DOC-F0 (subagent): limpeza de Smoobu em README.md (0 refs), docs/BACKEND.md (2 notas F0 intencionais), docs/FRONTEND.md (0 refs). Removidos ~11 endpoints Smoobu, ~130 linhas de secções Smoobu, atualizado domínio para Fisioterapia.
+
+Stage Summary:
+- **Código:** Smoobu completamente removido (3 ficheiros eliminados, 4 modelos limpos, 2 route files reescritos, load balancer extraído para `utils/loadBalancer.js`). 111/111 testes ✓.
+- **Rename:** Autocell→FisioCell aplicado em 73 ficheiros (cookies `fisiocell_token` + `fisiocell_admin_token`, package names, emails, manifest, docs).
+- **Documentação:** `docs/ARQUITETURA.md` criado com a proposta v0.1 + modelo `Documento` (Q4). README/BACKEND/FRONTEND limpos de Smoobu.
+- **Próximo passo:** commit + push para branch `dev`. Depois F1 (adaptar Empresa + Utilizador com novos roles + perfil profissional).

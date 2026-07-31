@@ -1,17 +1,19 @@
 /**
- * Rotas do Painel de Administração.
+ * Rotas do Painel do Gestor de Operações — FisioCell
  *
- * Prefixo montado em server.js: /api/admin
+ * Prefixo montado em server.js: /api/gestor
  *
  * Endpoints:
- *   GET    /api/admin/propriedades      — lista propriedades da empresa (PROTEGIDO)
- *   POST   /api/admin/propriedades      — cria propriedade para a empresa (PROTEGIDO)
- *   GET    /api/admin/equipa            — lista utilizadores da empresa (PROTEGIDO)
- *   POST   /api/admin/equipa            — cria utilizador (membro de equipa) (PROTEGIDO)
- *   PUT    /api/admin/equipa/:id        — atualiza utilizador (nome/email/role/password) (PROTEGIDO)
- *   PATCH  /api/admin/equipa/:id/estado — alterna ativo/desativo (PROTEGIDO)
- *   DELETE /api/admin/equipa/:id        — elimina utilizador (PROTEGIDO)
- *   GET    /api/admin/setup             — bootstrap do "Cliente Zero" (PÚBLICO)
+ *   GET    /propriedades                   — lista propriedades/salas da empresa (PROTEGIDO)
+ *   POST   /propriedades                   — cria propriedade/sala (PROTEGIDO)
+ *   PUT    /propriedades/:id               — atualiza propriedade/sala (PROTEGIDO)
+ *   PATCH  /propriedades/:id/estado        — alterna ativo/desativo (PROTEGIDO)
+ *   GET    /equipa                         — lista utilizadores da empresa (PROTEGIDO)
+ *   POST   /equipa                         — cria utilizador (PROTEGIDO)
+ *   PUT    /equipa/:id                     — atualiza utilizador (PROTEGIDO)
+ *   PATCH  /equipa/:id/estado              — alterna ativo/desativo (PROTEGIDO)
+ *   DELETE /equipa/:id                     — elimina utilizador (PROTEGIDO)
+ *   GET    /setup                          — bootstrap do "Cliente Zero" (PÚBLICO)
  *
  * Autenticação:
  *   - As rotas de propriedades e equipa são protegidas pelo middleware `auth`
@@ -48,8 +50,7 @@ const {
   setupClienteZero,
 } = require('../controllers/gestorController');
 const { reportarAtrasoTarefa, criarTarefa, atribuirTarefa, reatribuirTarefa, atualizarEstadoTarefa, apagarTarefasFuturas, listarIndisponiveisData, autoAtribuirTarefas } = require('../controllers/tarefaController');
-const { sincronizarReservas, getPropriedadesSmoobu, sincronizarPropriedades, importarPropriedades } = require('../controllers/smoobuController');
-// Prompt 133 — CRUD de Modelos de Checklist
+// CRUD de Modelos de Checklist (futuro: Modelos de Protocolo Clínico)
 const { listarModelos, criarModelo, obterModelo, atualizarModelo, apagarModelo } = require('../controllers/checklistController');
 
 // Bootstrap do ambiente de testes — Cliente Zero. PÚBLICO (sem auth).
@@ -58,15 +59,13 @@ router.get('/setup', setupClienteZero);
 // Dashboard com dados reais.
 router.get('/dashboard', auth, isGestor, getDashboard);
 
-// Gestão de propriedades da empresa. PROTEGIDO por JWT.
+// Gestão de propriedades/salas da empresa. PROTEGIDO por JWT.
 router.get('/propriedades', auth, isGestor, getPropriedades);
 router.post('/propriedades', auth, isGestor, criarPropriedade);
 router.put('/propriedades/:id', auth, isGestor, atualizarPropriedade);
 router.patch('/propriedades/:id/estado', auth, isGestor, alternarEstadoPropriedade);
 
-// Prompt 113 — Aplica um checklist padrão a TODAS as propriedades ativas da
-// empresa do gestor. Endpoint temporário/onboarding para poupar o gestor de
-// definir item a item. Substitui o checklist existente (não faz merge).
+// Aplica um checklist padrão a TODAS as propriedades ativas da empresa.
 router.post('/propriedades/default-checklist', auth, isGestor, async (req, res) => {
   try {
     const Propriedade = require('../models/Propriedade');
@@ -122,11 +121,11 @@ router.patch('/tarefas/:id/estado', auth, isGestor, atualizarEstadoTarefa);
 // Apagar tarefas futuras não concluídas (reset do calendário).
 router.delete('/tarefas/futuras', auth, isGestor, apagarTarefasFuturas);
 
-// v1.63.0 (Prompt 86) — Auto-atribuição em lote (corre o load balancer para
-// todas as tarefas órfãs a partir de hoje).
+// Auto-atribuição em lote (corre o load balancer para todas as tarefas
+// órfãs a partir de hoje).
 router.post('/tarefas/auto-atribuir', auth, isGestor, autoAtribuirTarefas);
 
-// v1.59.0 (Prompt 81) — Staff indisponíveis (férias/doença) numa data.
+// Staff indisponíveis (férias/doença) numa data.
 router.get('/tarefas/indisponiveis', auth, isGestor, listarIndisponiveisData);
 
 // Gestão de equipa (utilizadores) da empresa. PROTEGIDO por JWT.
@@ -142,7 +141,7 @@ router.post('/equipa/:id/falta-subita', auth, isGestor, reportarFaltaSubita);
 // Baixa prolongada / férias — redistribuição de tarefas futuras.
 router.post('/equipa/:id/baixa', auth, isGestor, registarBaixaProlongada);
 
-// Prompt 133 — CRUD de Modelos de Checklist
+// CRUD de Modelos de Checklist (futuro: Modelos de Protocolo Clínico).
 router.get('/checklists', auth, isGestor, listarModelos);
 router.post('/checklists', auth, isGestor, criarModelo);
 router.get('/checklists/:id', auth, isGestor, obterModelo);
@@ -152,61 +151,11 @@ router.delete('/checklists/:id', auth, isGestor, apagarModelo);
 // Auditoria.
 router.get('/auditoria', auth, isGestor, getAuditoria);
 
-// Webhooks — logs do Smoobu (lista + reproccessamento manual).
+// Webhooks — logs de integrações externas (lista + reproccessamento manual).
 router.get('/webhooks', auth, isGestor, getWebhooks);
 router.post('/webhooks/:id/reprocessar', auth, isGestor, reprocessarWebhook);
 
-// Smoobu — sincronização em massa de reservas (REST API pull).
-router.post('/smoobu/sincronizar', auth, isGestor, sincronizarReservas);
-
-// Smoobu — listar propriedades (apartamentos) para mapeamento no fluxo de criação.
-router.get('/smoobu/propriedades', auth, isGestor, getPropriedadesSmoobu);
-
-// Smoobu — sincronizar propriedades (upsert em massa do /api/apartments).
-router.post('/smoobu/sincronizar-propriedades', auth, isGestor, sincronizarPropriedades);
-
-// Smoobu — importar propriedades (scoped por empresa_id, morada='A definir').
-router.post('/smoobu/propriedades', auth, isGestor, importarPropriedades);
-
-// Smoobu — DEBUG temporário: devolve o payload cru do /api/apartments.
-router.get('/smoobu-debug', auth, isGestor, async (req, res) => {
-  const apiKey = process.env.SMOOBU_API_KEY;
-  if (!apiKey || !apiKey.trim()) {
-    return res.status(400).json({ erro: 'SMOOBU_API_KEY não configurada.' });
-  }
-  try {
-    const resp = await fetch('https://login.smoobu.com/api/apartments', {
-      method: 'GET',
-      headers: { 'Api-Key': apiKey.trim(), Accept: 'application/json' },
-      signal: AbortSignal.timeout(15000),
-    });
-    const body = await resp.json();
-    return res.status(resp.status).json(body);
-  } catch (err) {
-    return res.status(502).json({ erro: 'Erro ao ligar ao Smoobu.', detalhe: err.message });
-  }
-});
-
-// Smoobu — DEBUG temporário: devolve o payload cru do /api/reservations (5 reservas).
-router.get('/smoobu-debug-reservas', auth, isGestor, async (req, res) => {
-  const apiKey = process.env.SMOOBU_API_KEY;
-  if (!apiKey || !apiKey.trim()) {
-    return res.status(400).json({ erro: 'SMOOBU_API_KEY não configurada.' });
-  }
-  try {
-    const resp = await fetch('https://login.smoobu.com/api/reservations?pageSize=5', {
-      method: 'GET',
-      headers: { 'Api-Key': apiKey.trim(), Accept: 'application/json' },
-      signal: AbortSignal.timeout(15000),
-    });
-    const body = await resp.json();
-    return res.status(resp.status).json(body);
-  } catch (err) {
-    return res.status(502).json({ erro: 'Erro ao ligar ao Smoobu.', detalhe: err.message });
-  }
-});
-
-// Prompt 111 — Configurações do Gestor (tenant local).
+// Configurações do Gestor (tenant local).
 
 // GET /api/gestor/configuracoes — devolve a configuração da empresa do gestor.
 router.get('/configuracoes', auth, isGestor, async (req, res) => {
@@ -216,16 +165,16 @@ router.get('/configuracoes', auth, isGestor, async (req, res) => {
     if (!empresaId) {
       return res.status(400).json({ erro: 'empresa_id em falta no token.' });
     }
-    const empresa = await Empresa.findById(empresaId).select('nome smoobu_api_key').lean();
+    const empresa = await Empresa.findById(empresaId).select('nome nif morada telefone email').lean();
     if (!empresa) {
       return res.status(404).json({ erro: 'Empresa não encontrada.' });
     }
-    const key = empresa.smoobu_api_key || '';
-    const keyMascarada = key.length > 4 ? '•'.repeat(key.length - 4) + key.slice(-4) : key;
     return res.status(200).json({
       nome: empresa.nome,
-      smoobu_api_key_mascarada: keyMascarada,
-      tem_api_key: !!key,
+      nif: empresa.nif || '',
+      morada: empresa.morada || '',
+      telefone: empresa.telefone || '',
+      email: empresa.email || '',
     });
   } catch (err) {
     return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
@@ -240,26 +189,29 @@ router.put('/configuracoes', auth, isGestor, async (req, res) => {
     if (!empresaId) {
       return res.status(400).json({ erro: 'empresa_id em falta no token.' });
     }
-    const { nome, smoobu_api_key } = req.body || {};
+    const { nome, nif, morada, telefone, email } = req.body || {};
     const update = {};
     if (nome !== undefined) update.nome = String(nome).trim();
-    if (smoobu_api_key !== undefined) update.smoobu_api_key = String(smoobu_api_key).trim();
+    if (nif !== undefined) update.nif = String(nif).trim();
+    if (morada !== undefined) update.morada = String(morada).trim();
+    if (telefone !== undefined) update.telefone = String(telefone).trim();
+    if (email !== undefined) update.email = String(email).trim().toLowerCase();
 
     if (Object.keys(update).length === 0) {
       return res.status(400).json({ erro: 'Nenhum campo para atualizar.' });
     }
 
-    const empresa = await Empresa.findByIdAndUpdate(empresaId, { $set: update }, { new: true }).select('nome smoobu_api_key').lean();
+    const empresa = await Empresa.findByIdAndUpdate(empresaId, { $set: update }, { new: true }).select('nome nif morada telefone email').lean();
     if (!empresa) {
       return res.status(404).json({ erro: 'Empresa não encontrada.' });
     }
-    const key = empresa.smoobu_api_key || '';
-    const keyMascarada = key.length > 4 ? '•'.repeat(key.length - 4) + key.slice(-4) : key;
     return res.status(200).json({
       message: 'Configuração guardada com sucesso.',
       nome: empresa.nome,
-      smoobu_api_key_mascarada: keyMascarada,
-      tem_api_key: !!key,
+      nif: empresa.nif || '',
+      morada: empresa.morada || '',
+      telefone: empresa.telefone || '',
+      email: empresa.email || '',
     });
   } catch (err) {
     return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
