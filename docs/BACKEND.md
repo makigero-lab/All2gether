@@ -420,23 +420,73 @@ Login com email + password. Valida a hash bcrypt e devolve um JWT.
 #### `GET /api/auth/sso` (público — Single Sign-On com o Autocell)
 Inicia a sessão de um administrador no All2gether a partir do portal central **Autocell**, sem re-pedir credenciais (Single Sign-On).
 
-- **Query params:** `token` — JWT externo assinado pelo Autocell com `AUTOCELL_SSO_SECRET`.
+- **Query params:**
+  - `token` — JWT externo assinado pelo Autocell com `AUTOCELL_SSO_SECRET`.
+  - `json` — se `"true"` (OU header `Accept: application/json`), ativa o **modo JSON**: o endpoint devolve `{ sucesso: true, token: <jwt_interno> }` em vez de setar cookies + redirecionar. Usado pela proxy route do Next.js para definir cookies no domínio do frontend (ver abaixo).
 - **Payload esperado no JWT externo:** `{ email: "admin@all2gether.pt" }` (também aceita `sub` como convenção JWT).
-- **Fluxo:**
-  1. O Autocell gera o JWT externo com `AUTOCELL_SSO_SECRET` (segredo partilhado entre os dois sistemas).
-  2. O Autocell redireciona o browser do admin para `GET /api/auth/sso?token=<jwt_externo>`.
-  3. O All2gether valida o JWT externo, procura o utilizador por `email` + `role: 'admin'` (apenas admins entram via SSO).
-  4. Gera o JWT interno do All2gether (assinado com `JWT_SECRET`, payload `{ id, role, empresa_id }` — o mesmo do login normal).
-  5. Define os cookies httpOnly `all2gether_token` + `all2gether_admin_token` (`sameSite: 'lax'`, `secure` em produção, `maxAge: 7d`).
-  6. Redireciona (`302`) para `FRONTEND_URL/admin` (sucesso) ou `FRONTEND_URL/login?erro=sso_falhou` (falha).
-- **Variável de ambiente:** `AUTOCELL_SSO_SECRET` — segredo partilhado com o Autocell. Tem de ser **idêntico** nos dois sistemas. Se vazio, o SSO fica desativado (todos os pedidos redirecionam para `?erro=sso_falhou`).
-- **Segurança:**
-  - O JWT externo é validado com um segredo **diferente** do `JWT_SECRET` interno — isola a confiança (comprometimento do segredo SSO não expõe os tokens internos).
-  - Apenas `role: 'admin'` é aceite (o Autocell é um portal de orquestração central).
-  - `sameSite: 'lax'` é obrigatório para que o cookie viaje no redirect top-level cross-origin (Autocell → backend → frontend).
-- **Erros (todos redirecionam para `/login?erro=sso_falhou`):** token em falta; `AUTOCELL_SSO_SECRET` não configurado; token inválido/expirado; payload sem `email`/`sub`; admin não encontrado ou inativo.
+- **Variável de ambiente:** `AUTOCELL_SSO_SECRET` — segredo partilhado com o Autocell. Tem de ser **idêntico** nos dois sistemas. Se vazio, o SSO fica desativado (todos os pedidos falham).
 
-> **Nota de deploy (cookies cross-origin):** o backend (Render) e o frontend (Vercel) estão em domínios diferentes. Cookies `httpOnly` definidos pelo backend não são enviados para o domínio do frontend por defeito. Para o SSO funcionar em produção, o backend e o frontend devem partilhar o mesmo domínio registável (ex.: `app.all2gether.com` + `api.all2gether.com` com cookie `domain=.all2gether.com`), OU ser servidos pelo mesmo origin (ex.: via reverse proxy). Em desenvolvimento local (ambos em `localhost`, portas diferentes) o `sameSite: 'lax'` funciona porque `localhost` é same-site.
+##### Dois modos de funcionamento
+
+O endpoint suporta dois modos, consoante quem chama:
+
+**1. Modo REDIRECT (padrão, retrocompatível)** — acesso direto pelo browser:
+```
+GET /api/auth/sso?token=<jwt_externo>
+```
+Valida o token, define cookies httpOnly no backend e faz `res.redirect(302)` para `FRONTEND_URL/admin` (ou `/login?erro=sso_falhou` em caso de erro).
+⚠️ **Só funciona se backend e frontend partilharem o mesmo domínio registável** — em deploys cross-domain (Render + Vercel), os cookies definidos pelo backend não são guardados pelo browser para o domínio do frontend.
+
+**2. Modo JSON (para proxy do Next.js — recomendado para produção cross-domain):**
+```
+GET /api/auth/sso?token=<jwt_externo>&json=true
+# ou:
+GET /api/auth/sso?token=<jwt_externo>   com header: Accept: application/json
+```
+Valida o token e devolve JSON **sem** definir cookies nem redirecionar:
+- **Sucesso (200):** `{ "sucesso": true, "token": "<jwt_interno>" }`
+- **Falha (401):** `{ "sucesso": false, "erro": "sso_falhou" }`
+
+A proxy route do Next.js (`frontend/src/app/api/auth/sso/route.ts`) usa este modo: recebe o JSON, define os cookies no **domínio do frontend** (que o browser aceita) e faz o redirect final para `/admin`.
+
+##### Fluxo completo (modo JSON, recomendado para produção)
+
+```
+┌──────────┐  redirect browser  ┌─────────────────────────┐  fetch ?json=true   ┌──────────────┐
+│ Autocell │ ─────────────────► │ Next.js proxy route     │ ──────────────────► │ Backend SSO  │
+│ (portal) │                    │ /api/auth/sso           │                     │ /api/auth/sso│
+└──────────┘                    │ (domínio do frontend)   │ ◄────── JSON ────── │ (Render)     │
+                                └─────────────────────────┘ {sucesso, token}   └──────────────┘
+                                          │
+                                          │ set cookies httpOnly (domínio frontend)
+                                          │ + redirect /admin
+                                          ▼
+                                ┌─────────────────────────┐
+                                │ Browser (sessão ativa)  │
+                                └─────────────────────────┘
+```
+
+1. O Autocell gera o JWT externo com `AUTOCELL_SSO_SECRET` e redireciona o browser para `https://all2gether.vercel.app/api/auth/sso?token=<jwt_externo>`.
+2. A proxy route do Next.js (no domínio do frontend) faz `fetch` ao backend em modo JSON: `GET https://all2gether-backend.../api/auth/sso?token=...&json=true`.
+3. O backend valida o JWT externo, procura o admin por `email` + `role: 'admin'`, gera o JWT interno e devolve `{ sucesso: true, token }`.
+4. A proxy route define os cookies httpOnly `all2gether_token` + `all2gether_admin_token` no domínio do frontend (`sameSite: 'lax'`, `secure` em produção, `maxAge: 7d`) e redireciona para `/admin`.
+
+##### Segurança
+
+- O JWT externo é validado com um segredo **diferente** do `JWT_SECRET` interno — isola a confiança (comprometimento do segredo SSO não expõe os tokens internos).
+- Apenas `role: 'admin'` é aceite via SSO (o Autocell é um portal de orquestração central).
+- `sameSite: 'lax'` é obrigatório para que o cookie viaje no redirect top-level do SSO (Autocell → frontend).
+- `httpOnly: true` — o JS do browser não consegue ler o token (anti-XSS).
+- No modo JSON, o token interno só transita pela rede servidor-a-servidor (proxy Next.js → backend), nunca exposto ao browser.
+
+##### Erros
+
+- **Modo REDIRECT:** todos os erros redirecionam para `FRONTEND_URL/login?erro=sso_falhou`.
+- **Modo JSON:** todos os erros devolvem `401 { sucesso: false, erro: "sso_falhou" }` (a proxy route converte isto num redirect para `/login?erro=sso_falhou`).
+
+Casos de erro: token em falta; `AUTOCELL_SSO_SECRET` não configurado; token inválido/expirado; payload sem `email`/`sub`; admin não encontrado ou inativo.
+
+> **Arquitetura cross-domain (Render + Vercel):** o backend (Render) e o frontend (Vercel) estão em domínios diferentes. Cookies `httpOnly` definidos pelo backend não são guardados pelo browser para o domínio do frontend. A proxy route do Next.js (`frontend/src/app/api/auth/sso/route.ts`) resolve isto: corre no MESMO domínio do frontend, pede o token ao backend em modo JSON, e define os cookies localmente. Esta é a solução recomendada para produção; o modo REDIRECT fica apenas para ambientes same-domain ou desenvolvimento local.
 
 #### `GET /api/auth/me` (requer JWT)
 Devolve os dados do utilizador autenticado (a partir do token).

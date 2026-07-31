@@ -1017,3 +1017,63 @@ Stage Summary:
 - **Correção:** ficheiro recriado a partir do histórico git (commit 512b353), com o comentário de cabeçalho atualizado para refletir o contexto pós-Smoobu (Alojamento Local).
 - **Validação:** tsc ✓, next build ✓ (reproduz o pipeline da Vercel), next lint ✓.
 - **Próximo passo:** commit + push para branch `dev` (a Vercel deve reconstruir automaticamente e o deploy passar).
+
+---
+
+Task ID: S2
+Agent: Z.ai Code
+Task: Implementar proxy route no Next.js para o SSO resolver o problema cross-domain (backend Render + frontend Vercel em domínios diferentes — cookies httpOnly do backend não são guardados pelo browser para o domínio do frontend). Ajustar o backend para suportar um modo JSON e criar a rota proxy no frontend que define os cookies no domínio correto.
+
+Work Log:
+- Lido o `ssoLogin` atual (Task S1) e o `frontend/src/app/api/auth/login/route.ts` (padrão de route handler do Next.js com `cookies()` de `next/headers`).
+
+### S2-A — Backend: modo JSON no ssoLogin (backend/controllers/authController.js)
+- Adicionada deteção de modo JSON: ativa se `req.query.json === 'true'` OU header `Accept: application/json`.
+- Refatorado o helper de erro (`responderErro`) para responder consoante o modo:
+  - Modo JSON → `401 { sucesso: false, erro: "sso_falhou" }`.
+  - Modo REDIRECT → `302` redirect para `FRONTEND_URL/login?erro=sso_falhou`.
+- Lógica de validação (token, JWT externo, procura admin, geração JWT interno) mantida idêntica — só a resposta final é que diverge:
+  - Modo JSON → `200 { sucesso: true, token: <jwt_interno> }` (sem cookies, sem redirect).
+  - Modo REDIRECT → seta cookies httpOnly + `302` redirect para `/admin` (comportamento anterior, retrocompatível).
+- JSDoc reescrito com diagrama dos dois modos, fluxo completo cross-domain, e justificação da arquitetura proxy.
+
+### S2-B — Frontend: proxy route (frontend/src/app/api/auth/sso/route.ts) — NOVO
+- Criada a pasta `frontend/src/app/api/auth/sso/` e o ficheiro `route.ts` com método `GET`.
+- Fluxo da proxy:
+  1. Extrai `token` da query string (`req.nextUrl.searchParams` / `new URL(req.url).searchParams`).
+  2. Se token em falta → `NextResponse.redirect` para `/login?erro=sso_falhou`.
+  3. `fetch` ao backend em modo JSON: `GET ${NEXT_PUBLIC_API_URL}/api/auth/sso?token=...&json=true` com header `Accept: application/json` e `cache: "no-store"`.
+  4. Se backend devolver não-OK (401/500/etc.) → redirect para `/login?erro=sso_falhou`.
+  5. Faz parse do JSON e valida `{ sucesso: true, token }`. Se inválido → redirect erro.
+  6. Define os cookies httpOnly no DOMÍNIO do frontend via `cookies()` de `next/headers`:
+     - `all2gether_token` (cookie de sessão principal, lido pelo middleware do frontend)
+     - `all2gether_admin_token` (cookie de marcação de admin + backup de impersonação)
+     - Opções: `httpOnly: true`, `secure: NODE_ENV === 'production'`, `sameSite: 'lax'` (obrigatório para redirect top-level do SSO), `path: '/'`, `maxAge: 7 dias`.
+  7. `NextResponse.redirect` para `/admin`.
+- Qualquer exceção (fetch falha, JSON inválido, etc.) é apanhada e redireciona para `/login?erro=sso_falhou`.
+- JSDoc completo explica o problema cross-domain, a solução proxy, as vantagens e a segurança.
+
+### S2-C — Decisão de design: setar AMBOS os cookies na proxy
+- Tal como no S1 (modo REDIRECT do backend), a proxy seta `all2gether_token` + `all2gether_admin_token` com o mesmo valor. Motivo: o middleware do frontend (`frontend/src/middleware.ts`) lê `all2gether_token` — sem ele, o SSO não funcionaria end-to-end. O `all2gether_admin_token` honra a especificação do utilizador e mantém a compatibilidade com o fluxo de impersonation (exit-impersonation restaura a partir deste cookie).
+
+### S2-D — Documentação (docs/BACKEND.md)
+- Secção `#### GET /api/auth/sso` reescrita com:
+  - Dois modos de funcionamento (REDIRECT e JSON) com exemplos de chamada.
+  - Diagrama ASCII do fluxo completo cross-domain (Autocell → proxy Next.js → backend → browser).
+  - Fluxo passo-a-passo do modo JSON (recomendado para produção).
+  - Secção de segurança atualizada (token interno só transita servidor-a-servidor no modo JSON).
+  - Secção de erros separada por modo.
+  - Nota de arquitetura cross-domain (Render + Vercel) com explicação da proxy route como solução.
+
+### S2-E — Validação
+- Backend: `node --check controllers/authController.js` — OK. Testes Jest: **111/111 a passar** ✓ (nenhum teste quebrado; o novo modo JSON é retrocompatível).
+- Frontend: `tsc --noEmit` — **0 erros** ✓. `next build` — **exit 0** ✓; a rota `ƒ /api/auth/sso` aparece registada como dinâmica (server-rendered).
+
+Stage Summary:
+- **Problema resolvido:** cookies httpOnly do backend (Render) não chegavam ao domínio do frontend (Vercel). A proxy route do Next.js corre no MESMO domínio do frontend, pede o token ao backend em modo JSON, e define os cookies localmente — o browser aceita porque é same-origin.
+- **Backend:** `ssoLogin` agora suporta dois modos — REDIRECT (retrocompatível, same-domain) e JSON (para proxy cross-domain). Detecção via `?json=true` ou header `Accept: application/json`.
+- **Frontend:** nova rota `GET /api/auth/sso` (proxy) que faz a ponte, define cookies `all2gether_token` + `all2gether_admin_token` e redireciona para `/admin`.
+- **Fluxo de produção:** Autocell → `https://all2gether.vercel.app/api/auth/sso?token=...` (proxy Next.js) → `https://all2gether-backend.../api/auth/sso?token=...&json=true` (backend) → JSON → proxy seta cookies → redirect `/admin`.
+- **Docs:** `docs/BACKEND.md` com diagrama de arquitetura e explicação dos dois modos.
+- **Testes:** backend 111/111 ✓; frontend tsc ✓ + next build ✓.
+- **Próximo passo:** commit + push para branch `dev`.
