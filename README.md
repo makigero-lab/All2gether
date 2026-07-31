@@ -60,6 +60,11 @@ A API arranca na porta definida em `PORT` (por defeito **5000**).
 |---------------|------------------------------------------------|-------------------------------------------|
 | `MONGODB_URI` | URI de ligação ao MongoDB                       | `mongodb://localhost:27017/all2gether`      |
 | `PORT`        | Porta onde a API escuta (no Render é injetada) | `5000`                                    |
+| `JWT_SECRET`  | Segredo de assinatura dos JWT (obrigatório em produção) | `all2gether-dev-secret-change-me` |
+| `JWT_EXPIRACAO` | Expiração do JWT (default `7d`)              | `7d`                                      |
+| `FRONTEND_URL` | Origem permitida para CORS (URL do frontend)  | `https://all2gether.vercel.app`           |
+| `AUTOCELL_SSO_SECRET` | Segredo partilhado com o portal Autocell para SSO (v. `docs/BACKEND.md` §6.2) | `seu_segredo_sso_aqui` |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | Chaves VAPID para notificações push (Web Push API) | `mailto:admin@all2gether.com` |
 
 ### Endpoints disponíveis
 
@@ -68,6 +73,7 @@ A API arranca na porta definida em `PORT` (por defeito **5000**).
 | `GET`  | `/`  | Healthcheck. Devolve `{ "status": "API do All2gether online e ligada à BD!" }` |
 | `GET`  | `/api/health` | Estado da API + BD (MongoDB) + uptime. Devolve `503` se a BD estiver em baixo. |
 | `POST` | `/api/auth/login` | **Login** (público, com rate limiting). Body: `{ email, password }`. Devolve `{ token, utilizador }`. |
+| `GET`  | `/api/auth/sso` | **Single Sign-On** com o portal Autocell (público). Query: `?token=<jwt_externo>`. Valida com `AUTOCELL_SSO_SECRET`, define cookies httpOnly e redireciona para `/admin` (ou `/login?erro=sso_falhou`). Apenas role `admin`. |
 | `GET`  | `/api/auth/me` | Dados do utilizador autenticado. **Auth:** JWT. |
 | `GET`  | `/api/auth/me/calendario` | Calendário pessoal (tarefas + ausências). **Auth:** JWT. |
 | `GET`  | `/api/auth/me/tarefas` | Tarefas de hoje do utilizador. **Auth:** JWT. |

@@ -417,6 +417,27 @@ Login com email + password. Valida a hash bcrypt e devolve um JWT.
 - **Erros:** `400` email/password em falta; `401` credenciais inválidas / utilizador inativo / sem password definida; `429` muitas tentativas de login (rate limit); `500` erro interno.
 - **Rate limiting (v1.11.0):** a rota de login está protegida por `express-rate-limit` — máximo de **5 tentativas por IP a cada 15 minutos**. Ultrapassado o limite → `429` com `{ "erro": "Muitas tentativas de login. Tente novamente mais tarde." }`. Mitiga ataques de força bruta e credential stuffing. Headers `RateLimit-*` (standard) são enviados na resposta para o cliente saber quando pode tentar novamente.
 
+#### `GET /api/auth/sso` (público — Single Sign-On com o Autocell)
+Inicia a sessão de um administrador no All2gether a partir do portal central **Autocell**, sem re-pedir credenciais (Single Sign-On).
+
+- **Query params:** `token` — JWT externo assinado pelo Autocell com `AUTOCELL_SSO_SECRET`.
+- **Payload esperado no JWT externo:** `{ email: "admin@all2gether.pt" }` (também aceita `sub` como convenção JWT).
+- **Fluxo:**
+  1. O Autocell gera o JWT externo com `AUTOCELL_SSO_SECRET` (segredo partilhado entre os dois sistemas).
+  2. O Autocell redireciona o browser do admin para `GET /api/auth/sso?token=<jwt_externo>`.
+  3. O All2gether valida o JWT externo, procura o utilizador por `email` + `role: 'admin'` (apenas admins entram via SSO).
+  4. Gera o JWT interno do All2gether (assinado com `JWT_SECRET`, payload `{ id, role, empresa_id }` — o mesmo do login normal).
+  5. Define os cookies httpOnly `all2gether_token` + `all2gether_admin_token` (`sameSite: 'lax'`, `secure` em produção, `maxAge: 7d`).
+  6. Redireciona (`302`) para `FRONTEND_URL/admin` (sucesso) ou `FRONTEND_URL/login?erro=sso_falhou` (falha).
+- **Variável de ambiente:** `AUTOCELL_SSO_SECRET` — segredo partilhado com o Autocell. Tem de ser **idêntico** nos dois sistemas. Se vazio, o SSO fica desativado (todos os pedidos redirecionam para `?erro=sso_falhou`).
+- **Segurança:**
+  - O JWT externo é validado com um segredo **diferente** do `JWT_SECRET` interno — isola a confiança (comprometimento do segredo SSO não expõe os tokens internos).
+  - Apenas `role: 'admin'` é aceite (o Autocell é um portal de orquestração central).
+  - `sameSite: 'lax'` é obrigatório para que o cookie viaje no redirect top-level cross-origin (Autocell → backend → frontend).
+- **Erros (todos redirecionam para `/login?erro=sso_falhou`):** token em falta; `AUTOCELL_SSO_SECRET` não configurado; token inválido/expirado; payload sem `email`/`sub`; admin não encontrado ou inativo.
+
+> **Nota de deploy (cookies cross-origin):** o backend (Render) e o frontend (Vercel) estão em domínios diferentes. Cookies `httpOnly` definidos pelo backend não são enviados para o domínio do frontend por defeito. Para o SSO funcionar em produção, o backend e o frontend devem partilhar o mesmo domínio registável (ex.: `app.all2gether.com` + `api.all2gether.com` com cookie `domain=.all2gether.com`), OU ser servidos pelo mesmo origin (ex.: via reverse proxy). Em desenvolvimento local (ambos em `localhost`, portas diferentes) o `sameSite: 'lax'` funciona porque `localhost` é same-site.
+
 #### `GET /api/auth/me` (requer JWT)
 Devolve os dados do utilizador autenticado (a partir do token).
 

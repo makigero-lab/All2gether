@@ -940,3 +940,51 @@ Stage Summary:
 - **Docs alinhadas com código:** setupClienteZero na doc agora corresponde exatamente ao código (emails, roles, nomes). docs/ARQUITETURA.md reescrito para refletir a arquitetura real (não a proposta Fisioterapia abandonada).
 - **Testes:** 111/111 ✓ (nenhum teste quebrado pelo rebranding).
 - **Próximo passo:** commit + push para branch `dev` com mensagem `chore(rebranding): alteracao global de FisioCell para All2gether e limpeza de referencias legacy`.
+
+---
+
+Task ID: S1
+Agent: Z.ai Code
+Task: Criar endpoint de Single Sign-On (SSO) no backend do All2gether para integração com o portal central Autocell. O Autocell atuará como portal orquestrador; o admin poderá entrar no All2gether sem re-pedir login.
+
+Work Log:
+- Lidos `backend/controllers/authController.js` (padrão de geração de JWT: `jwt.sign({ id, role, empresa_id }, JWT_SECRET, { expiresIn: TOKEN_EXPIRACAO })`), `backend/routes/authRoutes.js` (estrutura de rotas, rate limiter do login), `backend/middleware/auth.js` (`JWT_SECRET` exportado e reutilizado no controller).
+
+### S1-A — Variável de ambiente
+- `backend/.env.example`: adicionada `AUTOCELL_SSO_SECRET=seu_segredo_sso_aqui` com comentário explicativo (segredo partilhado entre Autocell e All2gether; tem de ser idêntico nos dois sistemas; se vazio, SSO desativado).
+
+### S1-B — Controlador (backend/controllers/authController.js)
+- Criada e exportada a função `ssoLogin` (async, colocada antes do bloco de Notificações Push para coerência temática).
+- Lógica implementada conforme especificação:
+  1. Extrai `token` de `req.query.token`.
+  2. Se token em falta OU `AUTOCELL_SSO_SECRET` não configurado → redirect `/login?erro=sso_falhou`.
+  3. `jwt.verify(token, SSO_SECRET)` valida o JWT externo. Erro (invalid/expired) → redirect erro.
+  4. Extrai `email` do payload (suporta `payload.email` OU `payload.sub` — convenção JWT). Sem email → redirect erro.
+  5. `Utilizador.findOne({ email, role: 'admin' })` — apenas admins entram via SSO. Não encontrado ou `!ativo` → redirect erro.
+  6. Gera o JWT interno do All2gether com o MESMO padrão do login normal (`{ id, role, empresa_id }`, `JWT_SECRET`, `TOKEN_EXPIRACAO`).
+  7. Define cookies httpOnly: `all2gether_token` (cookie de sessão principal, lido pelo middleware do frontend) + `all2gether_admin_token` (cookie de marcação de admin, conforme especificação; também serve de backup para impersonação — se o admin impersonar um gestor depois, o token de admin já está guardado e o "Voltar a Admin" funciona corretamente).
+  8. Opções do cookie: `httpOnly: true`, `secure: NODE_ENV === 'production'`, `sameSite: 'lax'` (OBRIGATÓRIO — não 'strict' — para que o cookie viaje no redirect top-level cross-origin Autocell → backend → frontend), `path: '/'`, `maxAge: 7 dias`.
+  9. `res.redirect(302, FRONTEND_URL + '/admin')` no sucesso.
+- Decisão de design: setar AMBOS os cookies (`all2gether_token` + `all2gether_admin_token`). O utilizador pediu explicitamente `all2gether_admin_token`, mas o middleware do frontend (`frontend/src/middleware.ts`) lê `all2gether_token`. Sem `all2gether_token`, o SSO não funcionaria end-to-end (o middleware redirecionaria para /login). Setar ambos honra a instrução E faz a funcionalidade funcionar, mantendo a compatibilidade com o fluxo de impersonation (exit-impersonation restaura a partir de `all2gether_admin_token`).
+
+### S1-C — Rotas (backend/routes/authRoutes.js)
+- Importada `ssoLogin` no destructuring do authController.
+- Adicionada rota pública: `router.get('/sso', ssoLogin);` (antes de `/me`).
+- Sem rate limiter próprio (o global de `/api/` — 100/15min — aplica-se; o segredo partilhado é a proteção principal contra abuso).
+- Atualizado o cabeçalho JSDoc do ficheiro para listar o novo endpoint.
+
+### S1-D — Documentação
+- `docs/BACKEND.md` §6.2: adicionada secção completa `#### GET /api/auth/sso (público — Single Sign-On com o Autocell)` com: query params, payload esperado, fluxo de 6 passos, variável de ambiente, notas de segurança (segredo isolado do JWT_SECRET, apenas role admin, sameSite lax), lista de erros, e nota de deploy sobre cookies cross-origin (Render vs Vercel — recomenda mesmo domínio registável ou reverse proxy).
+- `README.md`: adicionada `AUTOCELL_SSO_SECRET` (e as outras env vars de auth/push) à tabela de variáveis de ambiente; adicionada a rota `GET /api/auth/sso` à tabela de endpoints.
+
+### S1-E — Verificação
+- Sintaxe validada: `node --check` em authController.js e authRoutes.js — OK.
+- Testes Jest: 111/111 a passar (nenhum teste existente quebrado; o novo endpoint é público e não interfere com os fluxos testados).
+
+Stage Summary:
+- **Novo endpoint:** `GET /api/auth/sso` (público) — valida JWT externo do Autocell com `AUTOCELL_SSO_SECRET`, procura admin por email, gera JWT interno, seta cookies httpOnly (`all2gether_token` + `all2gether_admin_token`, `sameSite: 'lax'`), redireciona para `/admin` (sucesso) ou `/login?erro=sso_falhou` (falha).
+- **Segurança:** segredo SSO isolado do `JWT_SECRET` interno; apenas role `admin`; `sameSite: 'lax'` para redirect cross-origin.
+- **Variável de ambiente:** `AUTOCELL_SSO_SECRET` adicionada ao `.env.example` (partilhada com o Autocell).
+- **Docs:** `docs/BACKEND.md` §6.2 + `README.md` (tabela de env vars + tabela de endpoints) atualizados.
+- **Testes:** 111/111 ✓.
+- **Próximo passo:** commit + push para branch `dev`.
