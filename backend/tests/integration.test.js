@@ -1,5 +1,5 @@
 /**
- * Testes de integração do backend (FisioCell) — Jest + Supertest + MongoDB em memória.
+ * Testes de integração do backend (All2gether) — Jest + Supertest + MongoDB em memória.
  *
  * Cobertura:
  *   - Health check com BD ligada (GET /api/health)
@@ -7,7 +7,6 @@
  *   - Auth login (sucesso, password errada, campos em falta, user inativo)
  *   - Auth /me com token
  *   - CRUD Propriedades (criar, listar, toggle estado, duplicado 409)
- *   - Webhook Smoobu (cria tarefa + atribui ao staff disponível)
  *   - Dashboard (GET /api/gestor/dashboard)
  *   - Relatórios (GET /api/gestor/relatorios/produtividade)
  *
@@ -324,14 +323,12 @@ describe('GET /api/gestor/calendario/dados', () => {
   beforeAll(async () => {
     // Cria 2 propriedades + 2 staff para testar filtros.
     prop1 = await Propriedade.create({
-      smoobu_id: 'cal-prop-1',
       nome: 'Casa 1',
       morada: 'Rua 1',
       empresa_id: new mongoose.Types.ObjectId(empresaId),
       tempo_limpeza_minutos: 45,
     });
     prop2 = await Propriedade.create({
-      smoobu_id: 'cal-prop-2',
       nome: 'Casa 2',
       morada: 'Rua 2',
       empresa_id: new mongoose.Types.ObjectId(empresaId),
@@ -570,7 +567,7 @@ describe('GET /api/gestor/calendario/dados', () => {
 });
 
 /* ------------------------------------------------------------------ */
-/* 6. Webhook Smoobu                                                   */
+/* 6. Dashboard                                                        */
 /* ------------------------------------------------------------------ */
 
 describe('GET /api/gestor/dashboard', () => {
@@ -617,7 +614,7 @@ describe('GET /api/gestor/relatorios/produtividade', () => {
 });
 
 /* ------------------------------------------------------------------ */
-/* 9. Smoobu — sincronização em massa                                  */
+/* 9. Aprovação de ausências                                           */
 /* ------------------------------------------------------------------ */
 
 describe('Fluxo de aprovação de ausências', () => {
@@ -644,7 +641,6 @@ describe('Fluxo de aprovação de ausências', () => {
 
     // Cria uma propriedade + tarefa atribuída ao staff (data futura).
     propId = await Propriedade.create({
-      smoobu_id: 'aus-prop-1',
       nome: 'Casa Ausencia',
       morada: 'Rua Ausencia',
       empresa_id: new mongoose.Types.ObjectId(empresaId),
@@ -923,7 +919,7 @@ describe('Super Admin (rotas exclusivas /api/admin)', () => {
       (e) => String(e._id) === empresaId
     );
     expect(empTeste).toBeTruthy();
-    // O setup cria um gestor (gestor@fisiocell.pt), mas pode não estar na
+    // O setup cria um gestor (gestor@all2gether.pt), mas pode não estar na
     // mesma empresa se o setup foi chamado antes do beforeAll. Verifica
     // que o campo gestor existe (pode ser null se não houver gestor).
     expect(empTeste).toHaveProperty('gestor');
@@ -1215,7 +1211,6 @@ describe('PATCH /api/staff/tarefas/:id/concluir', () => {
     // Cria uma propriedade para os testes.
     const Propriedade = require('../models/Propriedade');
     propTeste = await Propriedade.create({
-      smoobu_id: 'concluir-test-prop',
       nome: 'Casa Teste Concluir',
       morada: 'Rua Teste',
       empresa_id: new mongoose.Types.ObjectId(empresaId),
@@ -1310,7 +1305,6 @@ describe('POST /api/staff/tarefas/:id/avaria', () => {
     // Cria uma propriedade para os testes.
     const Propriedade = require('../models/Propriedade');
     propAvaria = await Propriedade.create({
-      smoobu_id: 'avaria-test-prop',
       nome: 'Casa Teste Avaria',
       morada: 'Rua Avaria',
       empresa_id: new mongoose.Types.ObjectId(empresaId),
@@ -1478,7 +1472,6 @@ describe('Cron Job: Agenda de Amanhã (Prompt 94)', () => {
     amanha.setUTCDate(amanha.getUTCDate() + 1);
 
     const prop = await Propriedade.create({
-      smoobu_id: 'ag-200',
       nome: 'Casa AG',
       morada: 'Rua AG',
       empresa_id: empresaId,
@@ -1552,7 +1545,6 @@ describe('Cron Job: Agenda de Amanhã (Prompt 94)', () => {
     amanha.setUTCDate(amanha.getUTCDate() + 1);
 
     const prop = await Propriedade.create({
-      smoobu_id: 'ag-201',
       nome: 'Casa AG2',
       morada: 'Rua AG2',
       empresa_id: empresaId,
@@ -1633,7 +1625,6 @@ describe('Cron Job: Agenda de Amanhã (Prompt 94)', () => {
     amanha.setUTCDate(amanha.getUTCDate() + 1);
 
     const prop = await Propriedade.create({
-      smoobu_id: 'ag-202',
       nome: 'Casa AG3',
       morada: 'Rua AG3',
       empresa_id: empresaId,
@@ -1710,14 +1701,12 @@ describe('Cron Job: Cão de Guarda (Prompt 96)', () => {
     );
 
     const prop1 = await Propriedade.create({
-      smoobu_id: 'cg-100',
       nome: 'Casa CG1',
       morada: 'Rua CG1',
       empresa_id: empresaId,
       ativo: true,
     });
     const prop2 = await Propriedade.create({
-      smoobu_id: 'cg-101',
       nome: 'Casa CG2',
       morada: 'Rua CG2',
       empresa_id: empresaId,
@@ -1790,7 +1779,6 @@ describe('Cron Job: Cão de Guarda (Prompt 96)', () => {
     );
 
     const prop = await Propriedade.create({
-      smoobu_id: 'cg-200',
       nome: 'Casa CG Ignorar',
       morada: 'Rua CG',
       empresa_id: empresaId,
@@ -1878,7 +1866,6 @@ describe('Cron Job: Cão de Guarda (Prompt 96)', () => {
     );
 
     const prop = await Propriedade.create({
-      smoobu_id: 'cg-300',
       nome: 'Casa CG Inativo',
       morada: 'Rua CG',
       empresa_id: empresaId,
@@ -1915,7 +1902,6 @@ describe('Prompt 97 — Desligar a Histeria Automática', () => {
   it('desativar propriedade → desatribui tarefas futuras (não apaga)', async () => {
     // Cria uma propriedade ativa.
     const prop = await Propriedade.create({
-      smoobu_id: 'p97-desativar',
       nome: 'Casa P97',
       morada: 'Rua P97',
       empresa_id: empresaId,
@@ -1986,7 +1972,6 @@ describe('Prompt 97 — Desligar a Histeria Automática', () => {
     });
 
     const prop = await Propriedade.create({
-      smoobu_id: 'p97-falta',
       nome: 'Casa Falta P97',
       morada: 'Rua Falta',
       empresa_id: empresaId,
@@ -2045,7 +2030,6 @@ describe('Prompt 97 — Desligar a Histeria Automática', () => {
     });
 
     const prop = await Propriedade.create({
-      smoobu_id: 'p97-baixa',
       nome: 'Casa Baixa P97',
       morada: 'Rua Baixa',
       empresa_id: empresaId,
@@ -2127,7 +2111,6 @@ describe('Cão de Guarda / Fail-Safe: Auto-Atribuição de Emergência (Prompt 9
     });
 
     const prop = await Propriedade.create({
-      smoobu_id: 'fs-100',
       nome: 'Casa FailSafe',
       morada: 'Rua FailSafe',
       empresa_id: empresaId,
@@ -2205,7 +2188,6 @@ describe('Cão de Guarda / Fail-Safe: Auto-Atribuição de Emergência (Prompt 9
     );
 
     const prop = await Propriedade.create({
-      smoobu_id: 'fs-200',
       nome: 'Casa FailSafe Sem Staff',
       morada: 'Rua Sem Staff',
       empresa_id: empresaId,
@@ -2252,7 +2234,6 @@ describe('Cão de Guarda / Fail-Safe: Auto-Atribuição de Emergência (Prompt 9
     });
 
     const prop = await Propriedade.create({
-      smoobu_id: 'fs-300',
       nome: 'Casa FailSafe Hoje',
       morada: 'Rua Hoje',
       empresa_id: empresaId,
@@ -2422,7 +2403,6 @@ describe('Prompt 114 — Centro de Notificações + Haversine', () => {
     });
 
     const prop = await Propriedade.create({
-      smoobu_id: 'notif-prop-1',
       nome: 'Casa Notif',
       morada: 'Rua Notif 1, Lisboa',
       empresa_id: empresaId,
@@ -2543,7 +2523,6 @@ describe('Prompt 114 — Centro de Notificações + Haversine', () => {
 
     // Lisboa
     const prop1 = await Propriedade.create({
-      smoobu_id: 'dist-prop-1',
       nome: 'Casa Lisboa',
       morada: 'Praça do Comércio, Lisboa',
       coordenadas: { lat: 38.7075, lng: -9.1364 },
@@ -2552,7 +2531,6 @@ describe('Prompt 114 — Centro de Notificações + Haversine', () => {
     });
     // Sintra (~30km de Lisboa)
     const prop2 = await Propriedade.create({
-      smoobu_id: 'dist-prop-2',
       nome: 'Casa Sintra',
       morada: 'Palácio Nacional de Sintra, Sintra',
       coordenadas: { lat: 38.7976, lng: -9.3905 },
@@ -2599,7 +2577,6 @@ describe('Prompt 114 — Centro de Notificações + Haversine', () => {
   it('criar propriedade com morada válida devolve 201 (com coordenadas)', async () => {
     const res = await authPost('/api/gestor/propriedades', {
       nome: 'Casa Geocode',
-      smoobu_id: 'geo-prop-1',
       morada: 'Praça do Comércio, Lisboa',
       tempo_limpeza_minutos: 45,
     });
@@ -2757,7 +2734,6 @@ describe('Prompt 116 — Fundação SaaS + Lógica de Negócio', () => {
     // Empresa própria para o teste.
     const emp = await Empresa.create({ nome: 'Empresa Hard Reset Scoped' });
     const prop = await Propriedade.create({
-      smoobu_id: 'hr-scoped-prop',
       nome: 'Casa HR Scoped',
       morada: 'Rua HR',
       empresa_id: emp._id,
@@ -2773,7 +2749,6 @@ describe('Prompt 116 — Fundação SaaS + Lógica de Negócio', () => {
 
     // Propriedade da empresa base (NÃO deve ser apagada).
     const propBase = await Propriedade.create({
-      smoobu_id: 'hr-base-prop',
       nome: 'Casa Base',
       morada: 'Rua Base',
       empresa_id: empresaId,
@@ -2804,7 +2779,6 @@ describe('Prompt 116 — Fundação SaaS + Lógica de Negócio', () => {
       ativo: true,
     });
     const prop = await Propriedade.create({
-      smoobu_id: 'hora-prop-1',
       nome: 'Casa Hora',
       morada: 'Rua Hora 1',
       empresa_id: empresaId,

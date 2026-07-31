@@ -1,7 +1,7 @@
 /**
- * Load Balancer — FisioCell
+ * Load Balancer — All2gether
  *
- * Motor de atribuição de tarefas a utilizadores (Staff/Fisioterapeutas).
+ * Motor de atribuição de tarefas a utilizadores (Staff de Limpeza/Manutenção).
  *
  * Lógica central (extraída do antigo webhookController.js na F0):
  *   - Filtro de ausências aprovadas (bloqueiam atribuição)

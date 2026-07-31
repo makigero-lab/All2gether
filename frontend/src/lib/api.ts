@@ -1,5 +1,5 @@
 /**
- * Configuração e helpers para chamadas à API backend (FisioCell).
+ * Configuração e helpers para chamadas à API backend (All2gether).
  *
  * v1.14.0 — Arquitetura com cookie httpOnly + proxy:
  *   As chamadas à API admin vão para SAME-ORIGIN (/api/gestor/...), não

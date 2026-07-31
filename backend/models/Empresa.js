@@ -1,10 +1,10 @@
 /**
- * Modelo: Empresa (Clínica)
- * Representa a entidade principal do SaaS multi-tenant FisioCell.
- * Cada empresa agrupa Salas, Utilizadores e Consultas.
+ * Modelo: Empresa (Gestora de Alojamento Local)
+ * Representa a entidade principal do SaaS multi-tenant All2gether.
+ * Cada empresa agrupa Propriedades, Utilizadores e Tarefas.
  *
  * F0: Removido smoobu_api_key (integração Smoobu eliminada).
- * Adicionados campos de clínica: morada, telefone, email, nif.
+ * Adicionados campos da empresa: morada, telefone, email, nif.
  */
 const mongoose = require('mongoose');
 
@@ -26,7 +26,7 @@ const empresaSchema = new mongoose.Schema(
     },
     // Prompt 116 — Estado da empresa (SaaS). Quando `false`:
     //   - o login é bloqueado para todos os utilizadores desta empresa;
-    //   - os webhooks do Smoobu são rejeitados (propriedades não criam tarefas).
+    //   - as tarefas desta empresa não são processadas pelo load balancer.
     // Diferente de `plano_ativo` (que é informativo/comercial) — `ativa`
     // é o bloqueio operacional efetivo.
     ativa: {
@@ -36,7 +36,7 @@ const empresaSchema = new mongoose.Schema(
     },
     // Prompt 122 — Soft Delete (Lixeira de Empresas). Quando `true`:
     //   - a empresa desaparece da aba "Ativas" e aparece na "Reciclagem";
-    //   - `ativa` é forçada para false (bloqueia login + webhooks);
+    //   - `ativa` é forçada para false (bloqueia login + processamento);
     //   - pode ser restaurada via PATCH /api/admin/empresas/:id/restaurar.
     // Não apaga fisicamente — preserva os dados para auditoria/restauro.
     apagada: {
@@ -44,7 +44,7 @@ const empresaSchema = new mongoose.Schema(
       default: false,
       index: true,
     },
-    // F0 — Dados da clínica (substituem o antigo smoobu_api_key).
+    // F0 — Dados da empresa (substituem o antigo smoobu_api_key).
     morada: {
       type: String,
       default: '',

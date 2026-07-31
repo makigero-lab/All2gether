@@ -1,5 +1,5 @@
 /**
- * Admin Controller — FisioCell
+ * Admin Controller — All2gether
  *
  * Endpoints do Painel de Administração.
  *
@@ -695,7 +695,7 @@ exports.getDadosCalendario = async (req, res) => {
 /**
  * PATCH /api/admin/propriedades/:id/estado
  * Alterna o campo `ativo` da propriedade (true ↔ false).
- * Propriedades inativas são ignoradas pelo webhook do Smoobu.
+ * Propriedades inativas são ignoradas pelo load balancer de atribuição.
  *
  * Prompt 97 — "Desligar a Histeria Automática": quando uma propriedade é
  * DESATIVADA (ativo=false), as tarefas FUTURAS (a partir de hoje) dessa
@@ -1838,9 +1838,9 @@ exports.getAuditoria = async (req, res) => {
  * GET /api/gestor/setup
  *
  * Cria o "Cliente Zero" — dados iniciais para testes:
- *   - 1 Empresa: "Clínica FisioCell Teste"
- *   - 1 Utilizador Staff: "João Fisioterapeuta"
- *   - 1 Propriedade/Sala: "Sala Teste"
+ *   - 1 Empresa: "All2gether Teste"
+ *   - 1 Utilizador Staff: "João Staff"
+ *   - 1 Propriedade: "Apartamento Teste"
  *
  * F0: Removido smoobu_id (integração Smoobu eliminada).
  *
@@ -1851,29 +1851,28 @@ exports.getAuditoria = async (req, res) => {
  */
 exports.setupClienteZero = async (req, res) => {
   try {
-    const NOME_EMPRESA = 'Clínica FisioCell Teste';
-    const NOME_PROPRIEDADE = 'Sala Teste';
+    const NOME_EMPRESA = 'All2gether Teste';
+    const NOME_PROPRIEDADE = 'Apartamento Teste';
     // F0 — SMOOBU_ID_TESTE removido.
     // Password comum de teste do Cliente Zero (em produção, cada utilizador
     // deve alterar a sua password após o primeiro login).
-    const PASSWORD_TESTE = 'fisiocell123';
+    const PASSWORD_TESTE = 'all2gether123';
 
     // Utilizadores a garantir (admin + gestor + staff).
-    // F0 — renomeado para o novo domínio (Fisioterapia).
     const UTILIZADORES_TESTE = [
       {
-        nome: 'Diretor FisioCell', // admin — para ti (dono da conta)
-        email: 'admin@fisiocell.pt',
+        nome: 'Diretor All2gether', // admin — para ti (dono da conta)
+        email: 'admin@all2gether.pt',
         role: 'admin',
       },
       {
-        nome: 'Responsável Clínico', // gestor — gere a equipa
-        email: 'gestor@fisiocell.pt',
+        nome: 'Gestor de Operações', // gestor — gere a equipa
+        email: 'gestor@all2gether.pt',
         role: 'gestor',
       },
       {
-        nome: 'João Fisioterapeuta', // staff — executante
-        email: 'joao.fisio@fisiocell.pt',
+        nome: 'João Staff', // staff — executante
+        email: 'joao.staff@all2gether.pt',
         role: 'staff',
       },
     ];
@@ -1934,7 +1933,7 @@ exports.setupClienteZero = async (req, res) => {
       });
     }
 
-    // 3) Propriedade/Sala — não duplicar (procura por nome + empresa).
+    // 3) Propriedade — não duplicar (procura por nome + empresa).
     // F0 — procura por nome em vez de smoobu_id (campo removido).
     let propriedade = await Propriedade.findOne({ nome: NOME_PROPRIEDADE, empresa_id: empresa._id });
     let propriedadeCriada = false;

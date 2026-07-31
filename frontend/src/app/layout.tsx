@@ -9,14 +9,14 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "FisioCell — Gestão de Alojamento Local",
+  title: "All2gether — Gestão de Alojamento Local",
   description:
     "SaaS de gestão para Alojamento Local: atribuição automática de tarefas de limpeza.",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "FisioCell",
+    title: "All2gether",
   },
   other: {
     "mobile-web-app-capable": "yes",

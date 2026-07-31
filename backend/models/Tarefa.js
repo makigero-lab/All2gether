@@ -1,9 +1,8 @@
 /**
- * Modelo: Tarefa (futuro: Consulta)
- * Representa uma tarefa/sessão atribuída a um utilizador.
+ * Modelo: Tarefa (Limpeza/Manutenção de Alojamento Local)
+ * Representa uma tarefa atribuída a um utilizador (staff).
  *
  * F0: Removido smoobu_reserva_id (integração Smoobu eliminada).
- * F4: Será transformado em Consulta (paciente + fisio + sala + nota SOAP).
  *
  * - utilizador_id pode ser null (tarefa por atribuir).
  * - tempo_limpeza_minutos é a unidade usada no cálculo de carga (load balancing).
@@ -115,8 +114,8 @@ const tarefaSchema = new mongoose.Schema(
         ],
       },
     ],
-    // F0 — detalhes_reserva mantido como vestigial (será substituído por
-    // nota_clinica SOAP na F4). O sub-campo smoobu_reserva_id foi removido.
+    // F0 — detalhes_reserva mantido (dados da reserva de Alojamento Local:
+    // check-in/check-out, hóspede). O sub-campo smoobu_reserva_id foi removido.
     detalhes_reserva: {
       // Data/hora de check-in (ISO string ou YYYY-MM-DD).
       checkin: { type: String, default: null },

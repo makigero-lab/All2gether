@@ -1,5 +1,5 @@
 /**
- * Custom Worker — FisioCell PWA
+ * Custom Worker — All2gether PWA
  *
  * Este ficheiro é importado pelo Service Worker gerado pelo next-pwa.
  * Contém os event listeners para Web Push (notificações push nativas) e
@@ -61,7 +61,7 @@ self.addEventListener("activate", (event) => {
 
 // Event listener para mensagens push recebidas do servidor.
 self.addEventListener("push", (event) => {
-  let data = { title: "FisioCell", body: "", url: "/" };
+  let data = { title: "All2gether", body: "", url: "/" };
 
   try {
     if (event.data) {
@@ -75,7 +75,7 @@ self.addEventListener("push", (event) => {
   }
 
   // Garante valores por defeito.
-  const title = data.title || "FisioCell";
+  const title = data.title || "All2gether";
   const body = data.body || "";
   const url = data.url || "/";
 

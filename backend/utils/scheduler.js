@@ -1,5 +1,5 @@
 /**
- * Scheduler — FisioCell
+ * Scheduler — All2gether
  *
  * Utilitário partilhado com a lógica de cálculo de horário de tarefas:
  *   - Tempo de viagem (Haversine, 30 km/h urbano)
@@ -7,7 +7,7 @@
  *   - Proteção de hora de almoço (13:00-14:00 local PT = 12:00-13:00 UTC)
  *
  * Usado por:
- *   - webhookController.js (criação de tarefas via Smoobu)
+ *   - loadBalancer.js (atribuição automática de tarefas)
  *   - tarefaController.js (reatribuição inteligente — Prompt 75)
  *
  * Extraído do webhookController.js em v1.53.0 para evitar duplicação.

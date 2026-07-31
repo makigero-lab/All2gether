@@ -71,8 +71,8 @@ const utilizadorSchema = new mongoose.Schema(
       default: true,
     },
     // Folgas fixas semanais: array de dias da semana (0=Dom, 1=Seg, ..., 6=Sáb).
-    // O webhook do Smoobu exclui automaticamente o staff cujo dia da semana
-    // do check-in está neste array (não precisa de marcar ausência manual).
+    // O load balancer exclui automaticamente o staff cujo dia da semana
+    // da tarefa está neste array (não precisa de marcar ausência manual).
     dias_folga: {
       type: [Number],
       default: [],

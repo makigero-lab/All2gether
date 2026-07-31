@@ -1,16 +1,15 @@
 /**
- * Modelo: Propriedade (futuro: Sala)
- * Representa um espaço físico da clínica.
+ * Modelo: Propriedade (Alojamento Local / Airbnb)
+ * Representa um apartamento ou unidade de alojamento gerida pela empresa.
  *
  * F0: Removido smoobu_id (integração Smoobu eliminada).
- * F3: Será transformado em Sala (nome, capacidade, equipamentos).
  */
 const mongoose = require('mongoose');
 
 const propriedadeSchema = new mongoose.Schema(
   {
     // F0 — smoobu_id removido (integração Smoobu eliminada).
-    // O identificador único passará a ser (empresa_id + nome) na F3 (Sala).
+    // O identificador único é (empresa_id + nome).
     nome: {
       type: String,
       required: true,
@@ -34,8 +33,8 @@ const propriedadeSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
-    // Tempo de limpeza por defeito (minutos) — usado quando o payload
-    // do Smoobu não traz esta informação.
+    // Tempo de limpeza por defeito (minutos) — usado quando a tarefa
+    // não especifica um tempo próprio.
     tempo_limpeza_minutos: {
       type: Number,
       default: 45,
@@ -68,8 +67,8 @@ const propriedadeSchema = new mongoose.Schema(
       default: '',
       trim: true,
     },
-    // v1.61.0 (Prompt 84) — Capacidade máxima de hóspedes (vinda do Smoobu:
-    // apt.rooms.maxOccupancy ou apt.maxOccupancy). Usada para estimar tempo
+    // v1.61.0 (Prompt 84) — Capacidade máxima de hóspedes (definida manualmente
+    // ou vinda de integrações externas). Usada para estimar tempo
     // de limpeza e para display no gestor.
     capacidade_hospedes: {
       type: Number,

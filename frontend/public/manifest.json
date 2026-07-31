@@ -1,7 +1,7 @@
 {
-  "name": "FisioCell — Gestão de Clínicas de Fisioterapia",
-  "short_name": "FisioCell",
-  "description": "SaaS de gestão para Clínicas de Fisioterapia: marcações, agendas e fichas clínicas.",
+  "name": "All2gether — Gestão de Alojamento Local e Airbnb",
+  "short_name": "All2gether",
+  "description": "SaaS de gestão para Alojamento Local e Airbnb: tarefas de limpeza, equipa, calendários e propriedades.",
   "start_url": "/",
   "display": "standalone",
   "orientation": "portrait",

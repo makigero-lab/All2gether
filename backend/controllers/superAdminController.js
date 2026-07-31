@@ -1,5 +1,5 @@
 /**
- * Super Admin Controller — FisioCell
+ * Super Admin Controller — All2gether
  *
  * Endpoints exclusivos do Super Admin (role 'admin').
  *

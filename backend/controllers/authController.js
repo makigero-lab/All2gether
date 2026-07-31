@@ -1,5 +1,5 @@
 /**
- * Auth Controller — FisioCell
+ * Auth Controller — All2gether
  *
  * Autenticação com JWT + bcrypt.
  *

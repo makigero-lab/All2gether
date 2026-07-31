@@ -1,5 +1,5 @@
 /**
- * Ausência Controller — FisioCell
+ * Ausência Controller — All2gether
  *
  * Gestão de Folgas e Férias da equipa.
  *

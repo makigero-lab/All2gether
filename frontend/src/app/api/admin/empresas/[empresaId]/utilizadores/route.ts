@@ -11,7 +11,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
-const COOKIE_NAME = "fisiocell_token";
+const COOKIE_NAME = "all2gether_token";
 
 export async function GET(
   _req: Request,

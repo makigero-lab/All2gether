@@ -1,5 +1,5 @@
 /**
- * Tarefa Controller — FisioCell
+ * Tarefa Controller — All2gether
  *
  * Gestão de tarefas individuais (reportar atraso, etc.)
  */
@@ -220,7 +220,7 @@ exports.reportarAtrasoTarefa = async (req, res) => {
 /**
  * POST /api/admin/tarefas
  *
- * Cria uma tarefa manualmente (sem depender do Smoobu).
+ * Cria uma tarefa manualmente (sem depender de integrações externas).
  *
  * Body: { propriedade_id, utilizador_id?, data, tempo_limpeza_minutos?, tipo? }
  *
@@ -236,7 +236,7 @@ exports.criarTarefa = async (req, res) => {
 
     // Prompt 116 — aceita novos campos opcionais: hora, check_in, check_out, hospedes, nome_hospede.
     //   - hora: "HH:mm" (combina com `data` para definir a hora local da tarefa)
-    //   - check_in / check_out: strings (datas/horas da reserva Smoobu)
+    //   - check_in / check_out: strings (datas/horas da reserva de Alojamento Local)
     //   - hospedes: número de hóspedes (vai para detalhes_reserva.pax)
     //   - nome_hospede: nome do hóspede principal (vai para detalhes_reserva.nome_hospede)
     const {

@@ -430,7 +430,7 @@ export default function StaffCalendarioPage() {
 
       {/* Rodapé */}
       <footer className="border-t px-5 py-4 text-center text-xs text-muted-foreground">
-        FisioCell · Área do Staff
+        All2gether · Área do Staff
       </footer>
     </div>
   );

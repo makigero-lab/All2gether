@@ -1,5 +1,5 @@
 /**
- * Cão de Guarda — Cron Job (FisioCell)
+ * Cão de Guarda — Cron Job (All2gether)
  *
  * Prompt 96 (Fase 1.5) — "O Cão de Guarda do Final de Dia".
  * Prompt 98 (Fase 1.5) — "A Rede de Segurança das 18h" (auto-atribuição de
