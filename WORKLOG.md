@@ -988,3 +988,32 @@ Stage Summary:
 - **Docs:** `docs/BACKEND.md` §6.2 + `README.md` (tabela de env vars + tabela de endpoints) atualizados.
 - **Testes:** 111/111 ✓.
 - **Próximo passo:** commit + push para branch `dev`.
+
+---
+
+Task ID: F1
+Agent: Z.ai Code
+Task: Corrigir erro de build na Vercel — "Module not found: Can't resolve '@/components/detalhes-reserva-card'" (commit 52d4a18, rebranding). O build do frontend falhava porque dois componentes importavam um ficheiro que não existia no repositório.
+
+Work Log:
+- Reproduzido o erro localmente: `next build` falhava com "Module not found: Can't resolve '@/components/detalhes-reserva-card'" em `detalhe-tarefa-modal.tsx` (gestor) e `detalhe-tarefa-client.tsx` (staff).
+- Investigação git: o ficheiro `frontend/src/components/detalhes-reserva-card.tsx` (110 linhas) foi criado no commit `512b353` (Prompt: listas de tarefas só mostram hoje + futuras) e **apagado por engano no commit `bd14ca8`** (F0 — rename Autocell→FisioCell + remoção Smoobu). O commit F0 devia apagar apenas os 3 ficheiros do Smoobu (`smoobuController.js`, `webhookController.js`, `webhookRoutes.js`), mas acabou por apagar também este componente legítimo.
+- Confirmado que o tipo `DetalhesReservaDTO` (importado pelo componente a partir de `@/lib/api`) ainda existe (linhas 134 e 170 de `lib/api.ts`) — só o componente é que desapareceu. Ou seja, a correção é puramente recriar o ficheiro em falta.
+- Confirmado que mais nenhum ficheiro legítimo foi apagado no F0: dos 4 ficheiros removidos, 3 eram Smoobu (correto) e 1 era o `detalhes-reserva-card.tsx` (erro).
+
+### F1-A — Correção
+- Recriado `frontend/src/components/detalhes-reserva-card.tsx` com o conteúdo original recuperado do commit `512b353` via `git show`.
+- Única alteração ao original: o comentário JSDoc do cabeçalho. Original: "Card de destaque com os detalhes da reserva Smoobu (Prompt 95 / Fase 1.5)". Atualizado para: "Card de destaque com os detalhes da reserva de Alojamento Local (Prompt 95 / Fase 1.5)" + nota explicativa: "originalmente (Prompt 95) estes dados vinham da integração Smoobu; com a remoção do Smoobu (F0), passam a ser preenchidos manualmente ou por futuras integrações de Alojamento Local. O schema mantém-se igual."
+- Funcionalidade do componente: card visual com check-in, check-out, nº de hóspedes (pax) e nome do hóspede. Só renderiza se `detalhes_reserva` existir e tiver pelo menos um campo preenchido. Usado pelo gestor (modal de detalhe da tarefa) e pelo staff (ecrã de detalhe no terreno).
+
+### F1-B — Validação local (reproduz o build da Vercel)
+- Instaladas dependências do frontend (`npm ci`).
+- `tsc --noEmit`: **0 erros** ✓ (validação de tipos TypeScript).
+- `next build`: **exit 0, build com sucesso** ✓ — todas as 26 rotas compilaram (14 estáticas + 12 dinâmicas + middleware). O erro "Module not found" desapareceu.
+- `next lint`: **No ESLint warnings or errors** ✓.
+
+Stage Summary:
+- **Causa-raiz:** o commit F0 (bd14ca8) apagou por engano o ficheiro `frontend/src/components/detalhes-reserva-card.tsx` juntamente com os 3 ficheiros do Smoobu. O erro não foi detetado antes porque os builds intermédios da Vercel usaram cache; o build limpo do rebranding (52d4a18) é que o expôs.
+- **Correção:** ficheiro recriado a partir do histórico git (commit 512b353), com o comentário de cabeçalho atualizado para refletir o contexto pós-Smoobu (Alojamento Local).
+- **Validação:** tsc ✓, next build ✓ (reproduz o pipeline da Vercel), next lint ✓.
+- **Próximo passo:** commit + push para branch `dev` (a Vercel deve reconstruir automaticamente e o deploy passar).
