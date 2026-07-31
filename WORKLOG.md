@@ -1077,3 +1077,75 @@ Stage Summary:
 - **Docs:** `docs/BACKEND.md` com diagrama de arquitetura e explicação dos dois modos.
 - **Testes:** backend 111/111 ✓; frontend tsc ✓ + next build ✓.
 - **Próximo passo:** commit + push para branch `dev`.
+
+---
+
+Task ID: W1
+Agent: Z.ai Code
+Task: Implementar o Sistema de Emissão de Webhooks (Outbound) para notificar o portal central Autocell quando ocorrem eventos críticos no All2gether. Comunicação M2M assíncrona com payloads leves ("esparso") e assinatura HMAC-SHA256.
+
+Work Log:
+- Lidos os pontos de integração: `backend/jobs/caoGuarda.js` (função `alertasTarefasIncompletas` — Fase B, loop de tarefas pendentes) e `backend/controllers/relatorioController.js` (função `getResumoIA` — ponto de "submissão" do relatório para geração do resumo com IA).
+
+### W1-A — Variáveis de ambiente (backend/.env.example)
+- Adicionadas:
+  - `AUTOCELL_WEBHOOK_URL=http://url-do-autocell/api/webhooks/all2gether` (URL de destino no Autocell).
+  - `AUTOCELL_WEBHOOK_SECRET=o_mesmo_segredo_usado_no_autocell` (segredo para HMAC-SHA256; tem de ser idêntico no Autocell).
+- Comentário explica o modo degradado: se ambas as variáveis não estiverem definidas, o utilitário faz apenas console.log e não tenta o pedido de rede (útil em dev).
+
+### W1-B — Utilitário (backend/utils/outboundWebhook.js) — NOVO
+- Exporta `enviarEventoParaAutocell(tipoEvento, dadosPayload)` (async, fire-and-forget).
+- Lógica:
+  1. Se `AUTOCELL_WEBHOOK_URL` ou `AUTOCELL_WEBHOOK_SECRET` não definidas → `console.log` do evento e retorna (modo dev).
+  2. Monta o payload base esparso: `{ eventId: crypto.randomUUID(), eventType: tipoEvento, timestamp: ISO 8601, data: dadosPayload }`.
+  3. Serializa UMA VEZ (`JSON.stringify`) — a assinatura e o corpo enviado têm de ser byte-idênticos.
+  4. Gera assinatura HMAC-SHA256 do corpo JSON com `crypto.createHmac('sha256', WEBHOOK_SECRET).update(corpoJson, 'utf8').digest('hex')`.
+  5. `fetch(WEBHOOK_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-All2gether-Signature': assinatura }, body: corpoJson })`.
+  6. Se `!res.ok` → warning loggado, não lança.
+  7. Erros de rede (fetch failed) → warning loggado, não lança (fire-and-forget puro).
+- Também exporta `webhookConfigurado()` (boolean, útil para callers) e `gerarAssinatura()` (para testes/verificação).
+- JSDoc completo explica o fluxo, o modo degradado e o padrão fire-and-forget.
+
+### W1-C — Integração no relatorioController.js (evento `relatorio.submetido`)
+- Import adicionado: `const { enviarEventoParaAutocell } = require('../utils/outboundWebhook');` + `const crypto = require('crypto');`.
+- Ponto de integração: `getResumoIA`, depois de `const resumo = resumoLLM || gerarPlaceholder(contexto)` e antes de `return res.status(200).json({ resumo })`.
+- Disparado **sem await** (fire-and-forget) envolvido em try/catch (nunca bloqueia a resposta).
+- Payload enviado: `{ relatorio_id: crypto.randomUUID() (UUID efémero desta submissão), empresa_id: req.user.empresa_id (do JWT), periodo: { inicio, fim } do contexto }`.
+- Decisão de design documentada: o `getResumoIA` é o endpoint onde o gestor "submete" o payload do relatório para gerar o resumo executivo. Não há `tarefa_id` direto (um relatório agrega múltiplas tarefas), pelo que o payload inclui `relatorio_id` (UUID efémero) + `empresa_id` + `periodo`. Os relatórios não são persistidos (gerados on-the-fly), daí o UUID efémero.
+
+### W1-D — Integração no caoGuarda.js (evento `alerta.tarefas_pendentes`)
+- Import lazy adicionado dentro de `alertasTarefasIncompletas`: `const { enviarEventoParaAutocell } = require('../utils/outboundWebhook');` (lazy como o `notificarUtilizador` para permitir spyOn nos testes).
+- Modificado o loop para acumular os IDs das tarefas notificadas num array `tarefasIdsNotificadas`.
+- No final (depois do `console.log` de estatísticas), se `tarefasIdsNotificadas.length > 0`, dispara o webhook agregado **sem await** (fire-and-forget):
+  - Evento: `'alerta.tarefas_pendentes'`.
+  - Payload: `{ tarefas_ids: [String, ...], data_alvo: hojeInicio.toISOString() }`.
+- Só dispara se houver pelo menos uma tarefa pendente que disparou alerta — não envia webhooks "vazios".
+
+### W1-E — Documentação (docs/BACKEND.md)
+- Nova secção **3.4. Sistema de Emissão de Webhooks (Outbound) — integração com o Autocell** com:
+  - Tabela de variáveis de ambiente (`AUTOCELL_WEBHOOK_URL`, `AUTOCELL_WEBHOOK_SECRET`).
+  - Explicação do modo degradado (dev sem config → console.log).
+  - Estrutura do payload esparso (JSON exemplo com eventId, eventType, timestamp, data).
+  - Secção "Assinatura HMAC-SHA256" explicando o cabeçalho `X-All2gether-Signature` e como o Autocell verifica (recalcula o HMAC e compara).
+  - Tabela de cabeçalhos do pedido.
+  - Catálogo de eventos: `relatorio.submetido` (com JSON exemplo + ponto de integração) e `alerta.tarefas_pendentes` (com JSON exemplo + ponto de integração).
+  - Secção "Padrão fire-and-forget" explicando que erros de rede nunca bloqueiam o All2gether.
+- Secção 5 (Variáveis de ambiente) atualizada com todas as env vars (AUTOCELL_SSO_SECRET, AUTOCELL_WEBHOOK_URL, AUTOCELL_WEBHOOK_SECRET, GEMINI_API_KEY, OPENAI_API_KEY, VAPID_*).
+
+### W1-F — Validação
+- Sintaxe: `node --check` em `outboundWebhook.js`, `relatorioController.js`, `caoGuarda.js` — todos OK.
+- Teste manual do utilitário:
+  - Modo dev (sem env vars): `webhookConfigurado()` = false; `enviarEventoParaAutocell()` faz console.log e retorna sem rede. ✓
+  - Modo configurado (env vars + URL inexistente): `webhookConfigurado()` = true; `fetch` falha graciosamente com warning, promise resolvida sem lançar. ✓
+  - Assinatura HMAC gerada corretamente. ✓
+- Testes Jest: **111/111 a passar** ✓ (nenhum teste quebrado; as integrações são fire-and-forget e não afetam os fluxos testados).
+
+Stage Summary:
+- **Novo utilitário:** `backend/utils/outboundWebhook.js` — `enviarEventoParaAutocell(tipoEvento, dadosPayload)` com HMAC-SHA256, modo degradado (dev), fire-and-forget puro.
+- **2 integrações:** `relatorio.submetido` (relatorioController.getResumoIA) + `alerta.tarefas_pendentes` (caoGuarda.alertasTarefasIncompletas, agregado).
+- **Payload esparso:** só IDs críticos (relatorio_id, empresa_id, periodo / tarefas_ids, data_alvo) — nunca dados sensíveis nem conteúdo completo.
+- **Segurança:** assinatura HMAC-SHA256 no cabeçalho `X-All2gether-Signature`; o Autocell verifica recalculando com o mesmo segredo.
+- **Resiliência:** fire-and-forget — falhas no Autocell nunca prejudicam o All2gether (erros loggados como warning, nunca lançados).
+- **Docs:** nova secção 3.4 no `docs/BACKEND.md` + tabela de env vars completa.
+- **Testes:** 111/111 ✓.
+- **Próximo passo:** commit + push para branch `dev`.
