@@ -308,15 +308,17 @@ A função `enviarEventoParaAutocell()` é `async` mas os callers **não devem a
 
 ## 4. Scripts disponíveis
 
-| Script               | Comando                       | Descrição                                                          |
-|----------------------|-------------------------------|--------------------------------------------------------------------|
-| `npm start`          | `node server.js`              | Arranca a API em modo produção                                     |
-| `npm run dev`        | `nodemon server.js`           | Arranca em modo desenvolvimento (auto-restart)                     |
-| `npm test`           | `jest`                        | Corre os testes unitários/integração (Jest + Supertest)            |
-| `npm run seed:admin` | `node seed-admin.js`          | Cria/atualiza o Super Admin (`admin@makigero.com`) para SSO (§6.2) |
+| Script               | Comando                            | Descrição                                                          |
+|----------------------|------------------------------------|--------------------------------------------------------------------|
+| `npm start`          | `node seed-admin.js && node server.js` | Corre o seed do Super Admin e **depois** arranca a API (fail-fast) |
+| `npm run dev`        | `nodemon server.js`                | Arranca em modo desenvolvimento (auto-restart)                     |
+| `npm test`           | `jest`                             | Corre os testes unitários/integração (Jest + Supertest)            |
+| `npm run seed:admin` | `node seed-admin.js`               | Cria/atualiza o Super Admin (`admin@makigero.com`) para SSO (§6.2) |
 | `npm run seed:checklists` | `node scripts/seedChecklists.js` | Cria 2 modelos de checklist base e associa-os às propriedades |
 
-### Seed do Super Admin (`npm run seed:admin`)
+> **Nota sobre o `npm start`:** o script `start` corre o `seed-admin.js` **antes** de `server.js` (via `&&`). Isto garante que o Super Admin existe em cada arranque do Render (plano gratuito, sem acesso à shell) — fundamental para o SSO funcionar. O seed é **idempotente** e **conciso**: se o admin já estiver correto, não escreve na BD e emite só uma linha de log. Se o seed falhar persistentemente, o `&&` impede o servidor de arrancar (fail-fast — torna o problema visível nos logs em vez de arrancar sem admin).
+
+### Seed do Super Admin (`npm run seed:admin` ou automático no `npm start`)
 
 Script `seed-admin.js` (raiz do backend) que faz **upsert** do Super Admin da plataforma — a conta utilizada pelo **Single Sign-On (SSO)** com o portal Autocell para iniciar sessão no painel `/admin` em produção.
 
@@ -327,13 +329,20 @@ Script `seed-admin.js` (raiz do backend) que faz **upsert** do Super Admin da pl
   - `ativo`: `true`
   - `password_hash`: hash **bcrypt** (custo 10). Embora o SSO **não** use a password (autentica-se via JWT externo do Autocell), é sempre definida para permitir login normal (`POST /api/auth/login`) como **fallback de emergência**.
 - **Empresa âncora:** o modelo `Utilizador` exige `empresa_id`. Como o admin é cross-tenant ("não tem empresa_id de operações"), o script faz **find-or-create** de uma empresa-sistema dedicada `All2gether (Sistema)` (NIF `SISTEMA`) para o ancorar, sem o associar a um tenant de cliente real. Override via `EMPRESA_ID`.
-- **Idempotente:** se o admin já existir, atualiza `nome`, `role`, `empresa_id`, `ativo`, limpa `eliminado_em` e — apenas se `ADMIN_PASSWORD` estiver definida OU o admin não tiver password — reescreve a hash. Caso contrário **mantém** a password existente (não regenera a cada execução).
+- **Idempotente e conciso (para arranque automático no Render free):**
+  - Se o admin não existe → cria.
+  - Se existe mas tem campos desatualizados (nome/role/empresa_id/ativo/`eliminado_em`) → atualiza.
+  - Se existe e **já está correto** → não escreve na BD, emite só `ℹ️ Super Admin já existe e está correto — sem alterações` (reduz ruído nos logs de arranque do Render, que reinicia periodicamente).
+  - Mantém a password existente se o admin já tiver hash (não regenera a cada arranque). Só reescreve a hash se `ADMIN_PASSWORD` estiver definida OU o admin não tiver password.
+- **Robustez para cold starts do MongoDB (Render free + Atlas):** a ligação ao MongoDB tem **retry com backoff exponencial** (3 tentativas por defeito: 1s, 2s, 4s) para tolerar flutuações transitórias sem desativar o fail-fast para falhas persistentes. Configurável via `SEED_ADMIN_RETRIES`.
+- **Fecho garantido da ligação à BD:** o wrapper `run()` usa `finally` para garantir `mongoose.disconnect()` em **todos** os caminhos (sucesso, erro de validação, erro de conexão, erro de runtime). Crítico porque o `&&` do `npm start` só passa para `node server.js` quando o processo do seed termina — se a ligação não fechar, o processo fica pendurado e o servidor nunca arranca.
 - **Variáveis de ambiente:**
   - `MONGODB_URI` (obrigatória) — URI de ligação ao MongoDB.
   - `ADMIN_PASSWORD` (opcional) — password em claro do admin. Se não definida, é gerada uma password aleatória segura e **impressa uma única vez** na consola.
   - `EMPRESA_ID` (opcional) — ID da empresa âncora (override). Se não definida, usa/find-or-cria a empresa-sistema.
+  - `SEED_ADMIN_RETRIES` (opcional) — nº de tentativas de ligação ao MongoDB em caso de falha transitória (default: `3`).
 
-> **Fluxo de produção:** definir `MONGODB_URI`, `AUTOCELL_SSO_SECRET` (idêntico ao do Autocell) e opcionalmente `ADMIN_PASSWORD` no ambiente do Render → correr `npm run seed:admin` uma vez → o SSO do Autocell passa a conseguir iniciar sessão do admin no All2gether.
+> **Fluxo de produção (Render free, sem shell):** definir `MONGODB_URI`, `AUTOCELL_SSO_SECRET` (idêntico ao do Autocell) e opcionalmente `ADMIN_PASSWORD` nas variáveis de ambiente do Render → o `npm start` corre o seed automaticamente em cada arranque (idempotente) e depois arranca o servidor → o SSO do Autocell passa a conseguir iniciar sessão do admin no All2gether. Não é preciso aceder à shell.
 
 ### Testes (v1.9.0)
 

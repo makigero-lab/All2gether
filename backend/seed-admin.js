@@ -12,6 +12,19 @@
  *       - role   = 'admin'  (Super Admin da PLATAFORMA — cross-tenant)
  *       - ativo  = true
  *
+ * AUTOMATIZAÇÃO NO ARRANQUE (Render free, sem shell):
+ *   O script é corrido automaticamente antes do servidor através do script
+ *   `start` do package.json:  "node seed-admin.js && node server.js".
+ *   Como o Render free reinicia/redeploya periodicamente, o script corre em
+ *   CADA arranque. Por isso:
+ *     • É IDEMPOTENTE (upsert) — re-executar não causa danos.
+ *     • MANTÉM a password existente se o admin já tiver hash (não regenera
+ *       a cada arranque, para não invalidar sessões/fallback de login).
+ *     • Tem RETRY de conexão ao MongoDB (cold starts do Atlas no Render free
+ *       podem fazer a 1ª tentativa falhar transitóriamente).
+ *     • Modo CONCISO: quando o admin já existe e está correto, emite apenas
+ *       uma linha de log (reduz ruído nos logs de arranque do Render).
+ *
  * Notas arquitecturais:
  *   - O modelo Utilizador exige `empresa_id` (required: true). Contudo, o
  *     Super Admin é cross-tenant ("não tem empresa_id de operações" — ver
@@ -25,9 +38,12 @@
  *     uma password bcrypt para que o admin possa também entrar pelo login
  *     normal (POST /api/auth/login) como fallback de emergência.
  *
- * Uso:
+ * Uso (manual):
  *   node seed-admin.js
  *   (ou: npm run seed:admin)
+ *
+ * Uso (automático no arranque do Render):
+ *   npm start   →  "node seed-admin.js && node server.js"
  *
  * Variáveis de ambiente:
  *   - MONGODB_URI       — URI de ligação ao MongoDB (OBRIGATÓRIA)
@@ -37,6 +53,9 @@
  *   - EMPRESA_ID        — ID da empresa âncora do admin (OPCIONAL).
  *                         Se não definida, usa/encontra a empresa-sistema
  *                         "All2gether (Sistema)".
+ *   - SEED_ADMIN_RETRIES — nº de tentativas de ligação ao MongoDB em caso
+ *                         de falha transitória (default: 3). Entre tentativas
+ *                         há backoff exponencial (1s, 2s, 4s, ...).
  */
 
 require('dotenv').config();
@@ -63,6 +82,53 @@ const BCRYPT_COST = 10;
 
 // Comprimento da password aleatória gerada (em bytes antes de base64url).
 const RANDOM_PASSWORD_BYTES = 24;
+
+// ── Retry de ligação ao MongoDB (robustez para arranque no Render free) ──
+const RETRY_TENTATIVAS = Math.max(1, parseInt(process.env.SEED_ADMIN_RETRIES || '3', 10) || 3);
+const RETRY_BACKOFF_BASE_MS = 1000; // 1s, 2s, 4s, ...
+
+/**
+ * Espera N milissegundos (para backoff entre tentativas de ligação).
+ * @param {number} ms
+ * @returns {Promise<void>}
+ */
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Liga ao MongoDB com retry e backoff exponencial.
+ *
+ * No Render free, o MongoDB Atlas pode ter cold starts ou flutuações
+ * momentâneas de rede. Sem retry, a 1ª tentativa pode falhar e o servidor
+ * nunca arranca (porque o script `start` usa `&&` — fail-fast). Com retry,
+ * toleramos flutuações transitórias sem desativar o fail-fast para falhas
+ * persistentes.
+ *
+ * @param {string} uri
+ * @returns {Promise<void>}
+ */
+async function ligarMongoComRetry(uri) {
+  let ultimoErro = null;
+  for (let tentativa = 1; tentativa <= RETRY_TENTATIVAS; tentativa++) {
+    try {
+      await mongoose.connect(uri);
+      return; // sucesso
+    } catch (err) {
+      ultimoErro = err;
+      if (tentativa < RETRY_TENTATIVAS) {
+        const espera = RETRY_BACKOFF_BASE_MS * Math.pow(2, tentativa - 1);
+        console.warn(
+          `⚠️  Ligação ao MongoDB falhou (tentativa ${tentativa}/${RETRY_TENTATIVAS}): ${err.message}.`
+        );
+        console.warn(`   A tentar novamente em ${espera}ms...`);
+        await sleep(espera);
+      }
+    }
+  }
+  // Esgotadas as tentativas — lança o último erro (fail-fast no `&&`).
+  throw ultimoErro;
+}
 
 /**
  * Gera uma password aleatória segura (base64url, sem caracteres problemáticos).
@@ -92,14 +158,12 @@ async function resolverEmpresaAncora() {
     if (!emp) {
       throw new Error(`EMPRESA_ID="${overrideId}" não corresponde a nenhuma empresa existente.`);
     }
-    console.log(`📋 Empresa âncora (via EMPRESA_ID): "${emp.nome}" (${emp._id})`);
     return { empresaId: String(emp._id), empresaNome: emp.nome, criada: false };
   }
 
   // 2. Find-or-create da empresa-sistema.
   const existente = await Empresa.findOne({ nif: EMPRESA_SISTEMA_NIF }).lean();
   if (existente) {
-    console.log(`📋 Empresa-sistema encontrada: "${existente.nome}" (${existente._id})`);
     return { empresaId: String(existente._id), empresaNome: existente.nome, criada: false };
   }
 
@@ -148,19 +212,39 @@ function decidirPassword(adminExistente) {
   return { password: gerarPasswordAleatoria(), imprimirPassword: true };
 }
 
+/**
+ * Verifica se o admin existente já está exatamente no estado pretendido.
+ * Usado para o modo conciso: se nada mudou, emite só uma linha de log
+ * (reduz ruído nos arranques repetidos do Render free).
+ *
+ * @param {Object} admin - documento Utilizador existente (lean)
+ * @param {string} empresaId - empresa_id pretendida
+ * @returns {boolean} true se o admin já está correto (sem alterações)
+ */
+function adminEstaCorreto(admin, empresaId) {
+  return (
+    admin.nome === ADMIN_NOME &&
+    admin.role === ADMIN_ROLE &&
+    String(admin.empresa_id) === String(empresaId) &&
+    admin.ativo === true &&
+    admin.eliminado_em === null &&
+    !!admin.password_hash
+  );
+}
+
 async function main() {
   // ── 1. Validar MONGODB_URI ───────────────────────────────────────
   const uri = process.env.MONGODB_URI;
   if (!uri) {
-    console.error('❌ MONGODB_URI não definida no ambiente (.env).');
-    console.error('   Copia backend/.env.example para .env e preenche a MONGODB_URI.');
-    process.exit(1);
+    throw new Error(
+      'MONGODB_URI não definida no ambiente. Copia backend/.env.example para .env e preenche a MONGODB_URI.'
+    );
   }
 
-  // ── 2. Ligar ao MongoDB ──────────────────────────────────────────
-  console.log('🔌 A ligar ao MongoDB...');
-  await mongoose.connect(uri);
-  console.log('✅ Ligado.');
+  // ── 2. Ligar ao MongoDB (com retry para cold starts do Render free) ──
+  console.log('🔌 [seed-admin] A ligar ao MongoDB...');
+  await ligarMongoComRetry(uri);
+  console.log('✅ [seed-admin] Ligado ao MongoDB.');
 
   // ── 3. Resolver a empresa âncora (find-or-create da sistema) ─────
   const { empresaId, empresaNome } = await resolverEmpresaAncora();
@@ -170,6 +254,17 @@ async function main() {
 
   // ── 5. Decidir a password ────────────────────────────────────────
   const { password, imprimirPassword } = decidirPassword(adminExistente);
+
+  // ── 5b. Modo conciso: se o admin já existe e está correto (e o
+  //       operador não forçou redefinição via ADMIN_PASSWORD), não há
+  //       nada a escrever na BD — saímos em silêncio para não poluir os
+  //       logs de arranque do Render free.
+  if (adminExistente && !password && adminEstaCorreto(adminExistente, empresaId)) {
+    console.log(
+      `ℹ️  [seed-admin] Super Admin já existe e está correto — sem alterações (${ADMIN_EMAIL}).`
+    );
+    return; // main() termina; o fecho da BD fica a cargo do run().
+  }
 
   // ── 6. Calcular hash bcrypt (se houver password nova) ────────────
   let passwordHash = adminExistente ? adminExistente.password_hash : null;
@@ -192,7 +287,7 @@ async function main() {
       ativo: true,
     });
     acao = 'criado';
-    console.log(`✅ Super Admin ${acao}: "${admin.nome}" <${admin.email}>`);
+    console.log(`✅ [seed-admin] Super Admin ${acao}: "${admin.nome}" <${admin.email}>`);
   } else {
     // ATUALIZAR Super Admin existente (upsert).
     // Garante nome, role, empresa_id, ativo e password_hash corretos.
@@ -215,7 +310,7 @@ async function main() {
     ).lean();
     admin = atualizado;
     acao = 'atualizado';
-    console.log(`✅ Super Admin ${acao}: "${admin.nome}" <${admin.email}>`);
+    console.log(`✅ [seed-admin] Super Admin ${acao}: "${admin.nome}" <${admin.email}>`);
   }
 
   // ── 8. Resumo (SEM expor a hash nem a password) ──────────────────
@@ -250,16 +345,53 @@ async function main() {
   }
 
   console.log('\n🎉 Seed do Super Admin concluído com sucesso!');
-
-  await mongoose.disconnect();
-  process.exit(0);
 }
 
-main().catch((err) => {
-  console.error('❌ Erro no seed do Super Admin:', err.message);
-  if (err.stack) {
-    console.error('\n' + err.stack);
+/**
+ * Wrapper que garante o FECHO da ligação à BD em TODOS os caminhos:
+ *   - Sucesso → disconnect + exit(0).
+ *   - Erro (validação, conexão, runtime) → disconnect + exit(1).
+ *
+ * Isto é crítico porque o script corre como subprocesso do `npm start`
+ * ("node seed-admin.js && node server.js"). Se a ligação não for fechada,
+ * o processo `node seed-admin.js` não termina e o `&&` nunca passa para
+ * o `node server.js` → o servidor nunca arranca.
+ *
+ * O `finally` garante o fecho mesmo se main() lançar de forma inesperada.
+ */
+async function run() {
+  try {
+    await main();
+  } catch (err) {
+    console.error('❌ [seed-admin] Erro no seed do Super Admin:', err.message);
+    if (err.stack && process.env.NODE_ENV !== 'production') {
+      console.error('\n' + err.stack);
+    }
+    throw err; // re-lança para o catch externo fazer exit(1)
+  } finally {
+    // Garante SEMPRE o fecho da ligação à BD (sucesso OU erro), mesmo
+    // que main() tenha lançado antes de algumas operações.
+    try {
+      if (mongoose.connection.readyState !== 0) {
+        await mongoose.disconnect();
+      }
+    } catch (disconnectErr) {
+      // Ignora erros no disconnect — o process.exit() força o fecho.
+      console.error('⚠️  [seed-admin] Erro ao fechar a ligação à BD:', disconnectErr.message);
+    }
   }
-  // Garante fecho da ligação mesmo em caso de erro.
-  mongoose.disconnect().finally(() => process.exit(1));
-});
+}
+
+run().then(
+  () => {
+    // Sucesso: o `&&` do package.json prossegue para `node server.js`.
+    process.exit(0);
+  },
+  (err) => {
+    // Erro: o `&&` NÃO prossegue → o servidor não arranca (fail-fast).
+    // Isto é intencional: se o seed falhar persistentemente, é melhor
+    // o deploy falhar alto (visível nos logs) do que arrancar sem admin.
+    void err; // já loggado no run()
+    process.exit(1);
+  }
+);

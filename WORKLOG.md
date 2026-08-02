@@ -1190,3 +1190,50 @@ Stage Summary:
 - **Decisão arquitetural:** empresa-sistema `All2gether (Sistema)` (NIF `SISTEMA`) como âncora do admin cross-tenant — satisfaz `empresa_id` required sem poluir tenants de cliente.
 - **Segurança:** password bcrypt sempre definida (fallback de login normal); password auto-gerada impressa uma única vez; nenhuma credencial hardcodeada (tudo via process.env).
 - **Próximo passo:** commit + push direto para branch `main` (mensagem: `chore: adiciona script seed de super admin para sso`).
+
+---
+
+Task ID: SA2
+Agent: Z.ai Code
+Task: Automatizar a execução do seed-admin.js no arranque do servidor (Render free sem shell): reforçar o script para fecho garantido da BD em sucesso/erro, alterar o `start` do package.json para correr o seed antes do servidor, e fazer commit/push para main.
+
+Work Log:
+- Sincronizado o repo com origin/main (commit anterior `4d7cb52` no topo). Confirmado que `backend/seed-admin.js` já existia (Task SA1) e já fechava a BD em sucesso/erro.
+- Revisto `backend/server.js`: entry point é `server.js` (`mongoose.connect` + `app.listen` dentro de `if (require.main === module)`). Confirmado que o `start` deve ser `"node seed-admin.js && node server.js"`.
+
+### SA2-A — Reforço do seed-admin.js para arranque automático (Render free)
+Identificados 3 riscos do contexto Render free (sem shell, reinícios periódicos, cold starts do MongoDB Atlas):
+1. **Cold start do MongoDB** — a 1ª tentativa de `mongoose.connect()` pode falhar transitóriamente; com `&&`, o servidor nunca arrancaria.
+2. **Ruído nos logs** — o Render reinicia periodicamente; se o seed imprimir o resumo completo em cada arranque, os logs ficam poluídos.
+3. **Ligação pendurada** — se a BD não fechar, o processo `node seed-admin.js` não termina e o `&&` nunca passa para `node server.js`.
+
+Soluções implementadas:
+- **Retry de conexão com backoff exponencial** (`ligarMongoComRetry`): 3 tentativas por defeito (1s, 2s, 4s). Configurável via `SEED_ADMIN_RETRIES`. Tolerâncias flutuações transitórias sem desativar o fail-fast para falhas persistentes.
+- **Modo conciso** (`adminEstaCorreto`): se o admin já existe e está exatamente no estado pretendido (nome/role/empresa_id/ativo/eliminado_em/password_hash) E o operador não forçou redefinição via `ADMIN_PASSWORD`, o script **não escreve na BD** e emite só `ℹ️ Super Admin já existe e está correto — sem alterações`. Reduz ruído nos arranques repetidos do Render.
+- **Fecho garantido da BD** (wrapper `run()` com `finally`): garante `mongoose.disconnect()` em **todos** os caminhos (sucesso, erro de validação, erro de conexão, erro de runtime). Verifica `readyState !== 0` antes de desconectar. O `process.exit(0/1)` só corre depois do `finally`.
+- Logs prefixados com `[seed-admin]` para distinção fácil nos logs mistos do arranque do Render.
+- Sintaxe validada com `node --check` ✓.
+
+### SA2-B — package.json (backend)
+- `start` alterado de `"node server.js"` para `"node seed-admin.js && node server.js"`.
+- O `&&` (shell POSIX) garante fail-fast: se o seed falhar persistentemente, o servidor não arranca (torna o problema visível nos logs em vez de arrancar sem admin).
+- `dev` mantido como `nodemon server.js` (em desenvolvimento local o seed corre-se manualmente via `npm run seed:admin` quando necessário).
+
+### SA2-C — Documentação (docs/BACKEND.md)
+- Tabela "Scripts disponíveis" (§4): `start` atualizado para `node seed-admin.js && node server.js` com nota explicativa do fail-fast.
+- Subsecção "Seed do Super Admin" expandida com:
+  - Comportamento idempotente + conciso (3 ramos: criar / atualizar / sem alterações).
+  - Retry de conexão com backoff (`SEED_ADMIN_RETRIES`).
+  - Fecho garantido da BD via `finally` (justificação: sem fecho, o `&&` pendura o arranque).
+  - Fluxo de produção Render free (sem shell) atualizado.
+
+### SA2-D — Variáveis de ambiente (backend/.env.example)
+- Secção "Scripts de Seed" atualizada com explicação de que o `npm start` corre o seed automaticamente.
+- Nova variável `SEED_ADMIN_RETRIES` (opcional, default 3) documentada.
+
+Stage Summary:
+- **seed-admin.js reforçado:** retry de conexão MongoDB (backoff exponencial), modo conciso (não escreve na BD se admin já correto), fecho garantido da BD via `finally` em todos os caminhos.
+- **package.json:** `start` = `"node seed-admin.js && node server.js"` (seed automático + fail-fast).
+- **Robustez Render free:** tolera cold starts do Atlas (retry) sem desativar o fail-fast; reduz ruído nos logs (modo conciso); garante arranque do servidor (fecho da BD).
+- **Docs:** `docs/BACKEND.md` (tabela + subsecção + nota fail-fast) e `backend/.env.example` (SEED_ADMIN_RETRIES) atualizados.
+- **Próximo passo:** commit + push direto para branch `main` (mensagem: `chore: adiciona e automatiza script seed de super admin no arranque do servidor`).
