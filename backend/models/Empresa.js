@@ -1,10 +1,13 @@
 /**
  * Modelo: Empresa (Gestora de Alojamento Local)
- * Representa a entidade principal do SaaS multi-tenant All2gether.
+ * Representa a entidade principal do satélite All2gether (single-tenant).
  * Cada empresa agrupa Propriedades, Utilizadores e Tarefas.
  *
  * F0: Removido smoobu_api_key (integração Smoobu eliminada).
  * Adicionados campos da empresa: morada, telefone, email, nif.
+ * DCE-B: Removido plano_ativo (campo informativo SaaS sem enforcement —
+ *        a gestão de Planos SaaS passou para a Nave-Mãe). O controlo
+ *        operacional efetivo é o campo `ativa`.
  */
 const mongoose = require('mongoose');
 
@@ -20,15 +23,12 @@ const empresaSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
-    plano_ativo: {
-      type: Boolean,
-      default: true,
-    },
-    // Prompt 116 — Estado da empresa (SaaS). Quando `false`:
+    // Prompt 116 — Estado da empresa (controlo operacional). Quando `false`:
     //   - o login é bloqueado para todos os utilizadores desta empresa;
     //   - as tarefas desta empresa não são processadas pelo load balancer.
-    // Diferente de `plano_ativo` (que é informativo/comercial) — `ativa`
-    // é o bloqueio operacional efetivo.
+    // É o bloqueio operacional efetivo (DCE-B: o antigo `plano_ativo`,
+    // meramente informativo, foi removido — a gestão de Planos SaaS passou
+    // para a Nave-Mãe).
     ativa: {
       type: Boolean,
       default: true,

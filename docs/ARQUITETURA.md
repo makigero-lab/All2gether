@@ -102,7 +102,7 @@ empresaSchema = {
   telefone:    { type: String, trim: true, default: '' },
   email:       { type: String, lowercase: true, trim: true, default: '' },
   logo_url:    { type: String, default: '' },
-  plano_ativo: { type: Boolean, default: true },
+  // DCE-B: plano_ativo (SaaS informativo) removido — gestão de Planos passou para a Nave-Mãe.
   ativa:       { type: Boolean, default: true, index: true },
   apagada:     { type: Boolean, default: false, index: true },
 }

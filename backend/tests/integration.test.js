@@ -45,7 +45,7 @@ beforeAll(async () => {
   await mongoose.connect(uri);
 
   // Semeia a empresa + admin base.
-  const empresa = await Empresa.create({ nome: 'Empresa Teste', plano_ativo: true });
+  const empresa = await Empresa.create({ nome: 'Empresa Teste' });
   empresaId = String(empresa._id);
 
   const hash = await bcrypt.hash(PASSWORD, 10);
@@ -985,7 +985,6 @@ describe('Super Admin (rotas exclusivas /api/admin)', () => {
     // Cria uma empresa nova sem nenhum gestor (só staff).
     const empSemGestor = await Empresa.create({
       nome: 'Empresa Sem Gestor',
-      plano_ativo: true,
     });
     const hash = await bcrypt.hash(PASSWORD, 10);
     await Utilizador.create({
@@ -1035,7 +1034,7 @@ describe('Super Admin (rotas exclusivas /api/admin)', () => {
 
   it('Prompt 101 — GET /api/admin/empresas/:empresaId/utilizadores → lista utilizadores (só admin)', async () => {
     // Cria uma empresa + 2 utilizadores (1 gestor + 1 staff).
-    const emp = await Empresa.create({ nome: 'Emp P101', plano_ativo: true });
+    const emp = await Empresa.create({ nome: 'Emp P101' });
     const hash = await bcrypt.hash(PASSWORD, 10);
     await Utilizador.create([
       {
@@ -1074,7 +1073,7 @@ describe('Super Admin (rotas exclusivas /api/admin)', () => {
   });
 
   it('Prompt 101 — POST /api/admin/empresas/:empresaId/utilizadores → cria gestor (empresa sem gestor)', async () => {
-    const emp = await Empresa.create({ nome: 'Emp Sem Gestor P101', plano_ativo: true });
+    const emp = await Empresa.create({ nome: 'Emp Sem Gestor P101' });
 
     const res = await authPost(`/api/admin/empresas/${emp._id}/utilizadores`, {
       nome: 'Novo Gestor P101',
@@ -1096,7 +1095,7 @@ describe('Super Admin (rotas exclusivas /api/admin)', () => {
   });
 
   it('Prompt 101 — POST criação rejeita role admin (403) e email duplicado (409)', async () => {
-    const emp = await Empresa.create({ nome: 'Emp Valida P101', plano_ativo: true });
+    const emp = await Empresa.create({ nome: 'Emp Valida P101' });
 
     // role admin → 403.
     const resAdmin = await authPost(`/api/admin/empresas/${emp._id}/utilizadores`, {
@@ -1126,7 +1125,7 @@ describe('Super Admin (rotas exclusivas /api/admin)', () => {
   });
 
   it('Prompt 101 — PATCH .../utilizadores/:id/estado → alterna ativo/inativo', async () => {
-    const emp = await Empresa.create({ nome: 'Emp Toggle P101', plano_ativo: true });
+    const emp = await Empresa.create({ nome: 'Emp Toggle P101' });
     const hash = await bcrypt.hash(PASSWORD, 10);
     const user = await Utilizador.create({
       nome: 'Staff Toggle P101',
@@ -1162,10 +1161,10 @@ describe('Super Admin (rotas exclusivas /api/admin)', () => {
   });
 
   it('Prompt 101 — PATCH não permite modificar estado de admin (403) nem empresa errada (404)', async () => {
-    const emp = await Empresa.create({ nome: 'Emp Seg P101', plano_ativo: true });
+    const emp = await Empresa.create({ nome: 'Emp Seg P101' });
     const hash = await bcrypt.hash(PASSWORD, 10);
     // Utilizador de outra empresa (não pertence a emp).
-    const outraEmp = await Empresa.create({ nome: 'Outra Emp P101', plano_ativo: true });
+    const outraEmp = await Empresa.create({ nome: 'Outra Emp P101' });
     const userOutra = await Utilizador.create({
       nome: 'Staff Outra P101',
       email: 'outra.p101@teste.pt',

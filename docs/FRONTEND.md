@@ -34,37 +34,36 @@ frontend/
 ├── .env.example              # Modelo de variáveis de ambiente
 ├── .gitignore
 └── src/
-    ├── middleware.ts          # Proteção de rotas (Edge): /admin/** e /staff/** exigem token; / e /login redirecionam autenticados
+    ├── middleware.ts          # Proteção de rotas (Edge): /gestor/** e /staff/** exigem token; / e /login redirecionam autenticados
     ├── app/
     │   ├── globals.css       # Variáveis CSS do tema premium (azul marinho) — light/dark
     │   ├── layout.tsx        # Layout root (fonte Inter, lang pt-PT)
     │   ├── page.tsx          # Landing page premium (1 botão 'Entrar na Plataforma' → /login)
     │   ├── login/
     │   │   └── page.tsx      # Ecrã de Login (POST /api/auth/login, redirect por role / ?from=)
-    │   ├── admin/
-    │   │   ├── layout.tsx    # Layout admin + RouteGuard (role admin)
-    │   │   ├── page.tsx      # Dashboard (estatísticas, tarefas, equipa)
-    │   │   ├── propriedades/page.tsx   # Consome API real (GET/POST)
-    │   │   ├── equipa/page.tsx         # Placeholder
-    │   │   └── calendario/page.tsx     # Placeholder
-    │   ├── manager/
-    │   │   ├── layout.tsx    # Layout manager + RouteGuard (role manager)
-    │   │   ├── page.tsx      # Dashboard do responsável (tarefas + equipa)
-    │   │   ├── tarefas/page.tsx        # Placeholder
-    │   │   └── equipa/page.tsx          # Placeholder
+    │   ├── gestor/           # Programa operacional (rebrand SSO — antiga "Área Admin" eliminada)
+    │   │   ├── layout.tsx    # Layout gestor + RouteGuard (role gestor/admin) + AutoImpersonarEmpresa
+    │   │   ├── page.tsx      # Dashboard (estatísticas, equipa, radar de risco)
+    │   │   ├── calendario/   # Calendário operacional
+    │   │   ├── tarefas/      # Gestão de tarefas
+    │   │   ├── propriedades/ # CRUD de propriedades
+    │   │   ├── equipa/       # CRUD de equipa
+    │   │   ├── ausencias/    # Pedidos de ausência
+    │   │   ├── relatorios/   # Analytics + resumo IA
+    │   │   └── configuracoes/ # Configurações da empresa + webhooks
     │   └── staff/
     │       ├── layout.tsx    # Layout staff + RouteGuard (role staff)
     │       ├── page.tsx      # Área do Staff (mobile-first)
     │       └── tarefas/[id]/page.tsx  # Detalhe da Tarefa (checklist + concluir)
     ├── components/
     │   ├── ui/               # shadcn: button, card, badge, avatar, separator, checkbox, textarea, input
-    │   ├── admin/
-    │   │   ├── admin-sidebar.tsx    # Sidebar responsiva (desktop fixa / mobile overlay)
-    │   │   └── placeholder-page.tsx # Componente de página "Em breve"
     │   ├── auth/
     │   │   └── route-guard.tsx      # Camada client-side de proteção (valida token + role)
-    │   ├── manager/
-    │   │   └── manager-sidebar.tsx  # Sidebar do responsável de limpezas
+    │   ├── gestor/
+    │   │   ├── gestor-sidebar.tsx   # Sidebar do gestor (desktop fixa / mobile overlay)
+    │   │   ├── auto-impersonar-empresa.tsx  # Auto-impersonação da empresa principal (admin SSO)
+    │   │   ├── impersonation-banner.tsx     # Banner "Sair da empresa" (modo impersonação)
+    │   │   └── detalhe-tarefa-modal.tsx     # Modal de detalhe de tarefa
     │   └── staff/
     │       ├── task-card.tsx             # Cartão de tarefa (link para detalhe)
     │       └── detalhe-tarefa-client.tsx # Ecrã de detalhe (estado interativo)
@@ -85,32 +84,18 @@ A aplicação tem **três áreas privadas** (cada uma com layout próprio), uma 
 |-----------------|----------------------------------------------------|-------------------|
 | `/`             | Landing premium — 1 botão 'Entrar na Plataforma' → `/login` | — |
 | `/login`        | **Login** (POST /api/auth/login; redirect por role / `?from=`) | Centrado, premium |
-| `/admin`        | Painel de Administração (Dashboard com dados reais) — **protegido** (role admin) | Desktop-first |
-| `/admin/propriedades` | **Consome API real** (GET/POST/PATCH propriedades + geocoding) | Desktop-first |
-| `/admin/tarefas`      | Gestão manual de tarefas (criar + atribuir + cancelar) + exportação CSV + paginação | Desktop-first |
-| `/admin/equipa`       | CRUD completo de equipa + folgas + telefone + falta súbita + baixa + paginação | Desktop-first |
-| `/admin/aprovacoes`   | Pedidos de Férias (Centro de Aprovações RH): tabela pendentes + Aprovar/Rejeitar | Desktop-first |
-| `/admin/calendario`   | Calendário geral de operações (grelha mensal estilo Google) | Desktop-first |
-| `/admin/calendario-operacional` | Calendário operacional avançado (filtros + navegação meses + cartões coloridos por estado + modal com reatribuição rápida) | Desktop-first |
-| `/admin/relatorios`   | Relatórios/Analytics com gráficos (recharts: linha, barras, pie) | Desktop-first |
+| `/gestor`       | **Programa operacional** (Dashboard, Calendário, Tarefas, Propriedades, Equipa, Ausências, Relatórios, Configurações) — **protegido** (role gestor ou admin) | Desktop-first |
 | `/staff`        | Área do Staff — tarefas de limpeza do dia — **protegida** (role staff) | Mobile-first |
 | `/staff/ausencias` | Pedidos de ausência do staff (férias/doença/outro) — criar + histórico + cancelar pendentes | Mobile-first |
 | `/staff/tarefas/[id]` | Detalhe da Tarefa (checklist + concluir)      | Mobile-first |
 
-### 3.1 Área Admin (`/admin`)
+### 3.1 Programa Operacional (`/gestor`) — antiga "Área Admin"
 
-- **Barra lateral** (`admin-sidebar.tsx`) com 8 itens: **Dashboard**, **Propriedades**, **Tarefas**, **Equipa**, **Pedidos de Férias**, **Calendário Operacional**, **Calendário de Folgas**, **Relatórios**.
-  - Desktop (`lg+`): sidebar fixa à esquerda, sempre visível.
-  - Mobile: colapsada; abre como **overlay** ao tocar no botão de menu (hambúrguer).
-  - Item ativo destacado com cor primária (dourado). Toggle de tema (claro/escuro) no fundo.
-- **Dashboard** (`/admin`): cartões de estatística em tempo real (Propriedades, Staff ativo, Tarefas hoje, Por atribuir, Concluídas) + estado da equipa com carga de trabalho (`GET /api/admin/dashboard`).
-- **Propriedades** (`/admin/propriedades`): CRUD completo (criar + **editar** + toggle ativo/inativo) + morada com geocoding automático (re-geocoding ao editar). Modal de edição com Nome, Morada e Tempo de Limpeza.
-- **Tarefas** (`/admin/tarefas`): gestão manual (criar + atribuir + cancelar) + botão de exportação CSV + paginação client-side.
-- **Equipa** (`/admin/equipa`): CRUD completo + folgas fixas semanais + telefone + botão Falta Súbita + botão Baixa/Férias + paginação client-side.
-- **Pedidos de Férias** (`/admin/aprovacoes`): Centro de Aprovações de RH — tabela de pedidos pendentes com Nome do Funcionário, Tipo, Datas, Notas + botões **Aprovar** (verde, redistribui tarefas automaticamente) e **Rejeitar** (vermelho). Toast de sucesso com contadores de redistribuição. Responsive (tabela desktop + cards mobile). Consome `GET /api/admin/ausencias?estado=pendente` + `PATCH /api/admin/ausencias/:id/estado`.
-- **Calendário de Folgas** (`/admin/calendario`): grelha mensal estilo Google Calendar com tarefas + ausências + modal de detalhe.
-- **Calendário Operacional** (`/admin/calendario-operacional`): vista mensal avançada com filtros (propriedade, staff, estado — incl. "Por atribuir"), navegação entre meses (Anterior/Hoje/Seguinte + badge com mês/ano em pt-PT), cartões de tarefa coloridos por estado (vermelho=por atribuir, âmbar=atribuída, verde=concluída, cinza=cancelada) com hover elevation, e modal de detalhe com reatribuição rápida via dropdown. Consome `GET /api/admin/calendario/dados` (auto-refresh quando filtros ou mês mudam). Legenda visual no fundo.
-- **Relatórios** (`/admin/relatorios`): analytics com gráficos recharts — evolução diária (linha), produtividade por funcionário (barras), distribuição por estado (pie) + tabela de carga por propriedade. Filtro de período (7/30/90 dias ou datas custom).
+> **Rebrand SSO (satélite single-tenant):** o painel `/admin` (gestão cross-tenant de empresas: criar, suspender, apagar, restaurar) foi **eliminado** — essa gestão pertence agora à Nave-Mãe. O Super Admin entra diretamente no programa operacional `/gestor` (via SSO ou login), onde o componente `<AutoImpersonarEmpresa/>` assume automaticamente a empresa principal do satélite. As funcionalidades operacionais (Dashboard, Propriedades, Tarefas, Equipa, Ausências, Calendário, Relatórios, Configurações) vivem agora todas em `/gestor/*`.
+
+- **Barra lateral** (`gestor-sidebar.tsx`) com 8 itens: **Dashboard**, **Calendário**, **Tarefas**, **Propriedades**, **Equipa**, **Ausências**, **Relatórios**, **Configurações** + sino de Notificações.
+- **Dashboard** (`/gestor`): cartões de estatística em tempo real + estado da equipa com carga de trabalho (`GET /api/gestor/dashboard`).
+- As restantes secções (`/gestor/propriedades`, `/gestor/tarefas`, `/gestor/equipa`, etc.) contêm o CRUD operacional completo (anteriormente em `/admin/*`, migrado para `/gestor/*`).
 
 ### 3.2 Área Staff (`/staff`)
 

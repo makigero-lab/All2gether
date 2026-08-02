@@ -5,10 +5,14 @@
  * cookie httpOnly `all2gether_token` (o Edge consegue ler cookies httpOnly
  * via req.cookies) e descodifica o payload para saber o role.
  *
- *   1. **Rotas privadas** (`/admin/*`, `/gestor/*`, `/staff/*`):
+ *   1. **Rotas privadas** (`/gestor/*`, `/staff/*`):
  *      - Sem token → redireciona para /login
  *      - Token inválido → redireciona para /login
  *      - Token válido + role errado → redireciona para o painel correto
+ *
+ *   Rebrand SSO (satélite single-tenant): as rotas /admin/* foram eliminadas
+ *   (gestão cross-tenant de empresas deixou de fazer sentido neste
+ *   repositório dedicado). O Super Admin entra diretamente em /gestor.
  *
  *   2. **Rotas públicas para autenticados** (`/`, `/login`):
  *      - Com token válido → redireciona para o painel do role
@@ -70,7 +74,7 @@ export function middleware(req: NextRequest) {
   const autenticado = payload !== null && !!payload.role;
 
   // --- Rotas privadas ---
-  const isAdmin = pathname === "/admin" || pathname.startsWith("/admin/");
+  // (Rebrand SSO: /admin/* eliminado — gestão de empresas pertence à Nave-Mãe)
   const isGestor = pathname === "/gestor" || pathname.startsWith("/gestor/");
   const isStaff = pathname === "/staff" || pathname.startsWith("/staff/");
 
@@ -79,7 +83,7 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  if (isAdmin || isGestor || isStaff) {
+  if (isGestor || isStaff) {
     if (!autenticado) {
       const loginUrl = req.nextUrl.clone();
       loginUrl.pathname = "/login";
@@ -91,10 +95,8 @@ export function middleware(req: NextRequest) {
     const rotaEsperada = rotaPorRole(role);
     // Rebrand SSO (satélite single-tenant): o Super Admin (role 'admin') tem
     // acesso ao programa operacional /gestor — alinha com o backend, onde
-    // isGestor = requireRole('admin', 'gestor'). O painel /admin (gestão
-    // cross-tenant de empresas) deixou de ser usado neste repositório dedicado.
+    // isGestor = requireRole('admin', 'gestor').
     const rotaErrada =
-      (isAdmin && role !== "admin") ||
       (isGestor && role !== "gestor" && role !== "admin") ||
       (isStaff && role !== "staff");
     if (rotaErrada) {
@@ -119,5 +121,6 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/", "/login", "/admin/:path*", "/gestor/:path*", "/staff/:path*"],
+  // Rebrand SSO: /admin/:path* removido (páginas eliminadas).
+  matcher: ["/", "/login", "/gestor/:path*", "/staff/:path*"],
 };

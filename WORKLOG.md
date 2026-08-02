@@ -1314,3 +1314,71 @@ Stage Summary:
 - **Docs**: docs/FRONTEND.md atualizado (rotaPorRole, login, nova secção Fluxo SSO).
 - **Validação**: tsc 0 erros ✓; lint 0 warnings ✓.
 - **Próximo passo:** commit + push direto para branch `main` (mensagem: `fix(sso): atualiza redirecionamento pos-login para o painel principal`).
+
+---
+
+Task ID: DCE
+Agent: Z.ai Code
+Task: Dead Code Elimination (DCE) — limpeza de código morto no Satélite Single-Tenant. 3 frentes: (1) dependências órfãs (html2pdf.js), (2) UI de gestão de empresas no /admin, (3) código de Planos SaaS. Análise rigorosa antes de apagar; execução com commit de chore/refactor.
+
+Work Log:
+- Análise prévia despachada a 2 agentes Explore em paralelo (DCE-A: UI /admin; DCE-B: Planos SaaS). Relatórios thorough confirmaram: 10 ficheiros a eliminar no /admin, 3 a manter (AutoImpersonarEmpresa precisa deles), 1 a limpar (remover POST); NÃO existe gestão real de Planos SaaS (sem Stripe/quotas/trials — apenas campo `plano_ativo` informativo sem enforcement).
+- Confirmados imports antes de apagar: AdminSidebar, WebhookLogsCard, PlaceholderPage só tinham importadores que iam ser eliminados (ou nenhum).
+
+### DCE-A — Eliminação da UI de gestão de empresas no /admin
+Eliminados 10 ficheiros (~2907 linhas) via `git rm`:
+- frontend/src/app/admin/page.tsx (1021 linhas) — painel principal (criar/suspender/apagar/restaurar empresas, gerir utilizadores, criar gestor). Impersonar manual substituído pelo <AutoImpersonarEmpresa/>.
+- frontend/src/app/admin/layout.tsx (27) — layout do /admin (órfão).
+- frontend/src/app/admin/empresas/[id]/page.tsx (609) — gaveta de empresa (config, suspender, hard reset scoped, sincronizações, seed, backfill, webhooks).
+- frontend/src/app/admin/sistema/page.tsx (286) — cockpit global (cron, push, hard reset). Sem gestão de empresas mas sob /admin (eliminado).
+- frontend/src/app/admin/webhooks/page.tsx (275) — caixa negra global de webhooks. Sem link no AdminSidebar.
+- frontend/src/components/admin/admin-sidebar.tsx (161) — sidebar do /admin (órfão).
+- frontend/src/components/admin/webhook-logs-card.tsx (316) — card de webhooks por empresa (só usado pela gaveta eliminada).
+- frontend/src/components/admin/placeholder-page.tsx (51) — dead code puro (sem importadores).
+- frontend/src/app/api/admin/empresas/[empresaId]/utilizadores/route.ts (103) — proxy GET/POST utilizadores (só /admin/page.tsx).
+- frontend/src/app/api/admin/empresas/[empresaId]/utilizadores/[utilizadorId]/estado/route.ts (58) — proxy PATCH estado (só /admin/page.tsx).
+
+MANTIDOS (necessários ao <AutoImpersonarEmpresa/> ou a /gestor):
+- frontend/src/app/api/admin/empresas/route.ts — GET (listar empresas) usado pelo AutoImpersonarEmpresa.
+- frontend/src/app/api/admin/impersonar/[id]/route.ts — POST (impersonar) usado pelo AutoImpersonarEmpresa.
+- frontend/src/app/api/admin/[...path]/route.ts — catch-all proxy (usado por /gestor/configuracoes para /api/admin/registrar-webhooks).
+- frontend/src/components/admin/pagination-bar.tsx — componente GENÉRICO reutilizado por /gestor/equipa e /gestor/tarefas.
+
+Limpeza cirúrgica:
+- frontend/src/app/api/admin/empresas/route.ts — removido handler POST (criar empresa), mantido GET. Cabeçalho atualizado.
+- frontend/src/middleware.ts — removidas referências a /admin (isAdmin, verificação, matcher /admin/:path*). Matcher agora: ["/", "/login", "/gestor/:path*", "/staff/:path*"].
+
+### DCE-B — Eliminação de código de Planos SaaS
+Veredicto da análise: NÃO EXISTE gestão real de Planos SaaS (zero dependências Stripe, zero variáveis STRIPE_*, zero rotas /stripe|/planos|/billing, zero webhooks de pagamento). Apenas o campo `plano_ativo` (Boolean informativo, sem enforcement — o próprio comentário do modelo declarava "informativo/comercial"). Todas as menções a "subscription"/"subscrição" eram PushSubscription (Web Push); "checkout" era data de check-out de hóspede Airbnb; "plano" era "plano de limpezas" (calendário).
+
+Removido o campo `plano_ativo` (dead code sem enforcement):
+- backend/models/Empresa.js — removido bloco `plano_ativo` (4 linhas) + ajustado comentário do campo `ativa` + cabeçalho do modelo (SaaS multi-tenant → satélite single-tenant).
+- backend/controllers/gestorController.js — removidas 2 menções (set em setupClienteZero: linha 1886 create + linha 1962 resposta JSON).
+- backend/controllers/superAdminController.js — atualizado JSDoc do listarEmpresas (removida referência a plano_ativo na resposta).
+- backend/tests/integration.test.js — removidos 8 `plano_ativo: true` em Empresa.create() (linhas 48, 988, 1038, 1077, 1099, 1129, 1165, 1168).
+
+MANTIDOS (não SaaS): campo `ativa` (controlo operacional — bloqueia login em authController.login), campo `apagada` (soft delete), todos os endpoints /api/admin/empresas (listar, impersonar), AUTOCELL_WEBHOOK_SECRET (HMAC com Nave-Mãe, não Stripe).
+
+### DCE-C — Dependências órfãs
+- html2pdf.js: já não estava no package.json (removido no Prompt 136) mas ficou órfão no package-lock.json. Regenerado o lockfile com `npm install --package-lock-only`. Diff confirmado: removeu html2pdf.js (dependência + entrada node_modules) e corrigiu nome autocell-frontend → all2gether-frontend (consistente com package.json). Sem alterações a versões de outras dependências.
+- Verificado: xlsx é usado via dynamic import em /gestor/calendario (manter); recharts usado em /gestor/relatorios (manter); @ducanh2912/next-pwa usado em next.config.mjs (manter).
+
+### DCE-D — Documentação
+- docs/FRONTEND.md: árvore de pastas atualizada (removido admin/ e manager/, adicionado gestor/ com sub-páginas + componentes gestor/ incluindo auto-impersonar-empresa.tsx); tabela de rotas atualizada (removidas 8 rotas /admin/*, adicionada /gestor); secção 3.1 reescrita de "Área Admin" para "Programa Operacional (/gestor)" com nota de rebrand SSO; comentário do middleware atualizado (/admin/** → /gestor/**).
+- docs/BACKEND.md: tabela de campos do modelo Empresa (removido plano_ativo, adicionada nota DCE-B); exemplo JSON do setupClienteZero (removido plano_ativo). Linha histórica v1.2.0 preservada (registo histórico).
+- docs/ARQUITETURA.md: esquema do modelo Empresa (removido plano_ativo, adicionado comentário DCE-B).
+- WORKLOG.md: esta entrada.
+
+### DCE-E — Validação
+- Frontend: npx tsc --noEmit → 0 erros ✓; npx next lint → "No ESLint warnings or errors" ✓.
+- Backend: npx jest → 111/111 testes passam ✓ (testes de setupClienteZero, listarEmpresas, impersonarGestor, criarUtilizadorEmpresa, alternarEstadoUtilizadorEmpresa todos verdes após remoção de plano_ativo).
+- <AutoImpersonarEmpresa/> continua funcional: GET /api/admin/empresas (mantido) + POST /api/admin/impersonar/:id (mantido).
+- /admin completamente eliminado do frontend; acesso a /admin* cai em 404 do Next.js (middleware já não o referencia).
+
+Stage Summary:
+- **DCE-A:** 10 ficheiros eliminados (~2907 linhas) + 1 limpo (remover POST) + middleware limpo. /admin deixa de existir no frontend. Utilizador não consegue criar/editar/suspender/apagar empresas no Satélite.
+- **DCE-B:** campo `plano_ativo` (SaaS informativo sem enforcement) removido do schema + 2 controllers + 8 testes + docs. Não havia gestão real de Planos SaaS para remover (já estava na Nave-Mãe).
+- **DCE-C:** package-lock.json regenerado — html2pdf.js órfão removido + nome do projeto corrigido.
+- **Restrições respeitadas:** endpoints /api/admin/empresas (listar) e /api/admin/empresas/:id/impersonar mantidos (AutoImpersonarEmpresa precisa deles); campo `ativa` mantido (controlo operacional, não SaaS).
+- **Validação:** tsc 0 erros ✓; lint 0 warnings ✓; 111/111 testes ✓.
+- **Próximo passo:** commit + push direto para branch `main` (mensagem: `refactor: dead code elimination — remove UI gestão empresas, plano_ativo SaaS e html2pdf.js órfão`).

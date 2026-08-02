@@ -1883,7 +1883,6 @@ exports.setupClienteZero = async (req, res) => {
     if (!empresa) {
       empresa = await Empresa.create({
         nome: NOME_EMPRESA,
-        plano_ativo: true,
       });
       empresaCriada = true;
     }
@@ -1959,7 +1958,6 @@ exports.setupClienteZero = async (req, res) => {
       empresa: {
         id: empresa._id,
         nome: empresa.nome,
-        plano_ativo: empresa.plano_ativo,
         criada: empresaCriada,
       },
       // 3 utilizadores: admin (dono), gestor (responsável clínico), staff (executante).

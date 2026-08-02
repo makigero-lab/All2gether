@@ -71,11 +71,12 @@ O sistema gira em torno de 5 coleções. Todas usam `timestamps: true` (createdA
 ### `Empresa`
 Entidade principal do SaaS (multi-tenant). Cada empresa agrupa Propriedades e Utilizadores.
 
-| Campo         | Tipo    | Notas                                              |
-|---------------|---------|----------------------------------------------------|
-| `nome`        | String  | Obrigatório, trim, indexado.                       |
-| `nif`         | String  | Opcional, trim.                                    |
-| `plano_ativo` | Boolean | Default `true`.                                    |
+| Campo  | Tipo    | Notas                                              |
+|--------|---------|----------------------------------------------------|
+| `nome` | String  | Obrigatório, trim, indexado.                       |
+| `nif`  | String  | Opcional, trim.                                    |
+
+> DCE-B: o campo `plano_ativo` (booleano informativo SaaS sem enforcement) foi removido — a gestão de Planos SaaS passou para a Nave-Mãe. O controlo operacional efetivo é o campo `ativa`.
 
 ### `Propriedade`
 Representa um apartamento ou unidade de alojamento gerida pela empresa.
@@ -516,7 +517,7 @@ Remove permanentemente o utilizador da base de dados.
 {
   "mensagem": "Cliente Zero criado com sucesso.",
   "empresa_id": "<ObjectId>",
-  "empresa":  { "id": "...", "nome": "All2gether Teste", "plano_ativo": true, "criada": true },
+  "empresa":  { "id": "...", "nome": "All2gether Teste", "criada": true },
   "utilizadores": [
     { "id": "...", "nome": "Diretor All2gether", "email": "admin@all2gether.pt", "role": "admin", "criado": true, "password_definida": true, "credenciais_teste": { "email": "admin@all2gether.pt", "password": "all2gether123" } },
     { "id": "...", "nome": "Gestor de Operações", "email": "gestor@all2gether.pt", "role": "gestor", "criado": true, "password_definida": true, "credenciais_teste": { "email": "gestor@all2gether.pt", "password": "all2gether123" } },

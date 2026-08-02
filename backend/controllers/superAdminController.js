@@ -40,7 +40,7 @@ const TOKEN_EXPIRACAO = process.env.JWT_EXPIRACAO || '7d';
  *
  * Prompt 112 — Adicionadas contagens de Propriedades e Tarefas.
  *
- * Resposta 200: { empresas: [{ _id, nome, nif, plano_ativo, createdAt,
+ * Resposta 200: { empresas: [{ _id, nome, nif, createdAt,
  *   gestor: { id, nome, email } | null,
  *   num_propriedades: number,
  *   num_tarefas: number }] }
