@@ -13,8 +13,9 @@
  *      `all2gether_admin_token`.
  *   3. Se NÃO existir (não há impersonação ativa), devolve 400.
  *
- * O browser chama isto ao clicar em "Voltar a Admin" no banner de
- * impersonação, e depois faz window.location.href = '/admin'.
+ * O browser chama isto ao clicar em "Sair da empresa" no banner de
+ * impersonação (rebrand satélite single-tenant — o painel /admin deixou de
+ * existir neste repositório, pelo que "sair" significa logout + /login).
  *
  * Prompt 113.
  */

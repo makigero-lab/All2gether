@@ -173,12 +173,20 @@ export async function fazerLogout(): Promise<void> {
 
 /**
  * Determina para onde redirecionar o utilizador após login, com base no role.
- * - admin   -> /admin   (Super Admin — painel de administração)
+ *
+ * Rebrand SSO (satélite single-tenant): o repositório passou de Nave-Mãe
+ * (multi-tenant) para Satélite dedicado à All2gether. O painel /admin (gestão
+ * cross-tenant de empresas) deixou de fazer sentido — o Super Admin entra
+ * diretamente no programa operacional (/gestor). A auto-impersonação da
+ * empresa principal é tratada pelo <AutoImpersonarEmpresa/> no layout do gestor.
+ *
+ * - admin   -> /gestor  (Super Admin — entra no programa operacional; a
+ *                        empresa principal é assumida automaticamente)
  * - gestor  -> /gestor  (Gestor de Operações — painel operacional)
- * - staff   -> /staff    (executante de limpezas)
+ * - staff   -> /staff   (executante de limpezas)
  */
 export function rotaPorRole(role: Role): string {
-  if (role === "admin") return "/admin";
+  if (role === "admin") return "/gestor";
   if (role === "gestor") return "/gestor";
   return "/staff";
 }

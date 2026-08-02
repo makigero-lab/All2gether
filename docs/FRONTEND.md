@@ -301,7 +301,7 @@ Isto força o framework para `nextjs`, pelo que o output directory passa a `.nex
   - `Secure` — o cookie só é enviado over HTTPS (em `http://localhost` o cookie não será definido — testar em HTTPS ou ajustar temporariamente em dev).
 - `lerUtilizadorDoToken()` — descodifica o payload JWT (base64url) **sem verificar assinatura** (isso é responsabilidade do backend); devolve `{ id, role, empresa_id }` ou `null` se inválido/expirado.
 - `estaAutenticado()` — true se houver token válido.
-- `rotaPorRole(role)` — devolve `/admin` para admin, `/gestor` para gestor, `/staff` para staff (usado no redirect pós-login).
+- `rotaPorRole(role)` — devolve `/gestor` para admin e gestor, `/staff` para staff (usado no redirect pós-login). **Rebrand SSO (satélite single-tenant):** o painel `/admin` (gestão cross-tenant de empresas) deixou de fazer sentido neste repositório dedicado — o Super Admin entra diretamente no programa operacional `/gestor`. A auto-impersonação da empresa principal é tratada pelo `<AutoImpersonarEmpresa/>` no layout do gestor (ver abaixo).
 
 ### `src/lib/api.ts` — Helpers de fetch
 - `API_URL` — lê `process.env.NEXT_PUBLIC_API_URL`.
@@ -315,8 +315,26 @@ Isto força o framework para `nextjs`, pelo que o output directory passa a `.nex
 Ecrã minimalista premium centrado:
 - Formulário com **Email** + **Password** + botão **Entrar** (design premium: azul marinho, padrão de pontos de fundo, marca "A").
 - Ao submeter: `POST /api/auth/login` (sem auth header — endpoint público).
-- Em caso de sucesso: `guardarToken(token)` + `router.push(rotaPorRole(role))` → **admin → `/admin`**, **staff → `/staff`**.
+- Em caso de sucesso: `limparCacheAuth()` + `router.push(rotaPorRole(role))` → **admin → `/gestor`**, **gestor → `/gestor`**, **staff → `/staff`**. **Rebrand SSO:** o admin entra no `/gestor` e o `<AutoImpersonarEmpresa/>` assume automaticamente a empresa principal do satélite.
 - Estados: loading (spinner), erro (cartão vermelho com a mensagem do backend).
+
+### Fluxo SSO (satélite single-tenant) — Rebrand
+
+O repositório passou de Nave-Mãe (multi-tenant) para **Satélite dedicado à All2gether**. O painel `/admin` (gestão cross-tenant de empresas) deixou de fazer sentido — o Super Admin entra **diretamente no programa operacional** (`/gestor`).
+
+**Fluxo pós-SSO:**
+1. Autocell → `GET /api/auth/sso?token=<jwt_externo>` (proxy route do Next.js).
+2. Proxy valida com o backend, define cookies httpOnly (`all2gether_token` + `all2gether_admin_token`) e **redireciona para `/gestor`**.
+3. O `middleware.ts` deixa o admin passar em `/gestor/*` (alinhado com o backend, onde `isGestor = requireRole('admin', 'gestor')`).
+4. O `<RouteGuard role="gestor">` aceita admin (alinhado com o `isGestor` do backend).
+5. O `<AutoImpersonarEmpresa/>` (no `gestor/layout.tsx`) deteta `role === 'admin'` e:
+   - `GET /api/admin/empresas` → encontra a primeira empresa ativa, não apagada, com NIF ≠ `SISTEMA` (empresa principal do satélite).
+   - `POST /api/admin/impersonar/:id` → substitui o cookie pelo token de gestor dessa empresa (mantém `all2gether_admin_token` guardado).
+   - Marca `sessionStorage` (`all2gether_auto_impersonado` + `all2gether_impersonating`) para não repetir.
+   - `limparCacheAuth()` + `window.location.reload()` → o `/gestor` volta a montar com o token de gestor e vê dados reais.
+6. O `<ImpersonationBanner/>` mostra "Sair da empresa" — o admin pode terminar a impersonação (logout + `/login`).
+
+**Porquê auto-impersonação?** O Super Admin é cross-tenant: no token, `empresa_id` aponta para a empresa-sistema `All2gether (Sistema)` (NIF `SISTEMA`, criada pelo `seed-admin.js`), que **não tem dados operacionais**. Sem a auto-impersonação, as queries do `/gestor` (que filtram por `req.user.empresa_id`) devolviam dados vazios. A auto-impersonação reutiliza a infraestrutura de impersonation já existente e testada.
 
 ### `/admin/propriedades` (Client Component)
 Primeiro ecrã a consumir a API real (mock-data abandonado nesta secção):

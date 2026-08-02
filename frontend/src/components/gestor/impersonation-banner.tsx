@@ -8,15 +8,21 @@ import { limparCacheAuth } from "@/lib/auth";
  * Banner de Impersonação — Prompt 110 / 113.
  *
  * Aparece no topo do painel do Gestor quando o Super Admin está impersonado
- * (marcador `all2gether_impersonating` em sessionStorage, definido pelo botão
- * "Entrar como Gestor" em /admin).
+ * (marcador `all2gether_impersonating` em sessionStorage, definido pelo
+ * <AutoImpersonarEmpresa/> no layout do /gestor — rebrand satélite
+ * single-tenant).
  *
  * Mostra um botão VERMELHO "Voltar a Admin" que:
  *   1. Chama POST /api/auth/exit-impersonation (restaura o cookie de admin
  *      guardado durante a impersonação).
- *   2. Limpa o marcador de sessionStorage.
- *   3. Redireciona para /admin (o middleware deixa passar porque o token
- *      voltou a ser de admin).
+ *   2. Limpa os marcadores de sessionStorage.
+ *   3. Faz logout e vai para /login.
+ *
+ * Rebrand SSO (satélite single-tenant): o painel /admin deixou de existir
+ * neste repositório. "Voltar a Admin" significa terminar a sessão
+ * impersonada e sair (não há painel de admin para onde ir). Se o admin
+ * quiser voltar a entrar no programa operacional, faz login/SSO novamente
+ * (o <AutoImpersonarEmpresa/> re-assume a empresa principal automaticamente).
  *
  * Se a restauração falhar (ex.: cookie de admin expirou), faz logout e manda
  * para /login como fallback seguro.
@@ -39,25 +45,29 @@ export function ImpersonationBanner() {
     if (aRestaurar) return;
     setARestaurar(true);
     try {
-      const res = await fetch("/api/auth/exit-impersonation", {
+      // Tenta restaurar o token de admin (limpa o cookie de gestor e restaura
+      // o de admin guardado). Independentemente do resultado, faz logout no
+      // fim — no satélite single-tenant não há painel /admin.
+      await fetch("/api/auth/exit-impersonation", {
         method: "POST",
         credentials: "include",
-      });
-      // Independentemente do resultado, limpa o marcador.
+      }).catch(() => {});
+
+      // Limpa os marcadores de sessionStorage (auto-impersonação + impersonação).
       sessionStorage.removeItem("all2gether_impersonating");
-      // Limpa o cache de auth — o cookie mudou (gestor → admin).
+      sessionStorage.removeItem("all2gether_auto_impersonado");
+      // Limpa o cache de auth — a sessão vai terminar.
       limparCacheAuth();
 
-      if (res.ok) {
-        // Token de admin restaurado → vai para /admin.
-        window.location.href = "/admin";
-      } else {
-        // Fallback: logout + login.
-        await fetch("/api/auth/logout", { method: "POST", credentials: "include" }).catch(() => {});
-        window.location.href = "/login";
-      }
+      // Logout (limpa ambos os cookies httpOnly) e redirect para /login.
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include",
+      }).catch(() => {});
+      window.location.href = "/login";
     } catch {
       sessionStorage.removeItem("all2gether_impersonating");
+      sessionStorage.removeItem("all2gether_auto_impersonado");
       limparCacheAuth();
       await fetch("/api/auth/logout", { method: "POST", credentials: "include" }).catch(() => {});
       window.location.href = "/login";
@@ -84,7 +94,7 @@ export function ImpersonationBanner() {
         ) : (
           <ShieldCheck className="h-3.5 w-3.5" />
         )}
-        {aRestaurar ? "A restaurar…" : "Voltar a Admin"}
+        {aRestaurar ? "A sair…" : "Sair da empresa"}
       </button>
     </div>
   );

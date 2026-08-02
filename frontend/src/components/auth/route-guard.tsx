@@ -58,12 +58,18 @@ export function RouteGuard({ role, children }: RouteGuardProps) {
         return;
       }
 
+      // Rebrand SSO (satélite single-tenant): o Super Admin (role 'admin')
+      // tem acesso ao programa operacional /gestor — alinha com o backend,
+      // onde isGestor = requireRole('admin', 'gestor'). O guard aceita
+      // admin quando o role exigido é 'gestor'. A auto-impersonação da
+      // empresa principal é tratada pelo <AutoImpersonarEmpresa/> no layout.
+      const roleAutorizado =
+        user.role === role || (role === "gestor" && user.role === "admin");
+
       // Role errado → redirect HARD para o painel certo desse role.
-      if (user.role !== role) {
+      if (!roleAutorizado) {
         const destino =
-          user.role === "admin"
-            ? "/admin"
-            : user.role === "gestor"
+          user.role === "admin" || user.role === "gestor"
             ? "/gestor"
             : "/staff";
         window.location.href = destino;

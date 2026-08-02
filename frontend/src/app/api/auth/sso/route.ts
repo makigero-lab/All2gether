@@ -105,8 +105,17 @@ export async function GET(req: Request) {
 
     console.log("✅ [SSO proxy] sessão de admin iniciada via SSO (Autocell).");
 
-    // 6. Redireciona para o painel de administração.
-    return NextResponse.redirect(new URL("/admin", req.url));
+    // 6. Redireciona para o programa operacional (/gestor).
+    //
+    // Rebrand SSO (satélite single-tenant): este repositório deixou de ser a
+    // Nave-Mãe (multi-tenant) e passou a Satélite dedicado à All2gether. O
+    // painel /admin (gestão cross-tenant de empresas) deixou de fazer sentido
+    // — o Super Admin entra diretamente no programa operacional.
+    //
+    // A auto-impersonação da empresa principal (para o admin, que é
+    // cross-tenant e tem empresa_id = empresa-sistema) é tratada pelo
+    // componente <AutoImpersonarEmpresa/> no layout do /gestor.
+    return NextResponse.redirect(new URL("/gestor", req.url));
   } catch (err) {
     console.error("❌ [SSO proxy] erro inesperado:", err);
     return NextResponse.redirect(urlErro);

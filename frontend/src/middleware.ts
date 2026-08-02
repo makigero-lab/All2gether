@@ -54,7 +54,11 @@ function descodificarToken(token: string): JwtPayload | null {
 }
 
 function rotaPorRole(role: Role): string {
-  if (role === "admin") return "/admin";
+  // Rebrand SSO (satélite single-tenant): o Super Admin entra diretamente
+  // no programa operacional (/gestor). O painel /admin deixou de fazer
+  // sentido neste repositório dedicado. A auto-impersonação da empresa
+  // principal é tratada no layout do gestor (<AutoImpersonarEmpresa/>).
+  if (role === "admin") return "/gestor";
   if (role === "gestor") return "/gestor";
   return "/staff";
 }
@@ -85,9 +89,13 @@ export function middleware(req: NextRequest) {
 
     const role = payload!.role!;
     const rotaEsperada = rotaPorRole(role);
+    // Rebrand SSO (satélite single-tenant): o Super Admin (role 'admin') tem
+    // acesso ao programa operacional /gestor — alinha com o backend, onde
+    // isGestor = requireRole('admin', 'gestor'). O painel /admin (gestão
+    // cross-tenant de empresas) deixou de ser usado neste repositório dedicado.
     const rotaErrada =
       (isAdmin && role !== "admin") ||
-      (isGestor && role !== "gestor") ||
+      (isGestor && role !== "gestor" && role !== "admin") ||
       (isStaff && role !== "staff");
     if (rotaErrada) {
       const url = req.nextUrl.clone();

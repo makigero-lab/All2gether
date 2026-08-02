@@ -1237,3 +1237,80 @@ Stage Summary:
 - **Robustez Render free:** tolera cold starts do Atlas (retry) sem desativar o fail-fast; reduz ruído nos logs (modo conciso); garante arranque do servidor (fecho da BD).
 - **Docs:** `docs/BACKEND.md` (tabela + subsecção + nota fail-fast) e `backend/.env.example` (SEED_ADMIN_RETRIES) atualizados.
 - **Próximo passo:** commit + push direto para branch `main` (mensagem: `chore: adiciona e automatiza script seed de super admin no arranque do servidor`).
+
+---
+
+Task ID: SA3
+Agent: Z.ai Code
+Task: Alterar o redirecionamento pós-SSO para o programa operacional (/gestor) — rebrand satélite single-tenant. O /admin (gestão cross-tenant de empresas) deixou de fazer sentido; o Super Admin entra diretamente no /gestor. Ajustar middleware, RouteGuard, rotaPorRole e login. Implementar auto-impersonação da empresa principal para o admin cross-tenant.
+
+Work Log:
+- Análise prévia rigorosa: lidos sso/route.ts, middleware.ts, lib/auth.ts (rotaPorRole), route-guard.tsx, login/page.tsx, gestor/layout.tsx, gestor/page.tsx, lib/api.ts, proxy /api/gestor/[...path], impersonation-banner.tsx, /api/admin/impersonar/[id]/route.ts, /api/auth/exit-impersonation/route.ts, backend (authController.ssoLogin, superAdminController.listarEmpresas/impersonarGestor, requireRole.isGestor, gestorController). Confirmado: não existem rotas /dashboard nem /app; /admin era o destino canónico do admin; backend já permite admin em /api/gestor/* (isGestor = requireRole('admin','gestor')) mas o frontend bloqueava.
+- Contexto de negócio fornecido pelo utilizador: o repositório passou de Nave-Mãe (multi-tenant) para Satélite dedicado à All2gether. O /admin perdeu sentido. Opção B: admin entra direto no /gestor.
+
+### SA3-A — sso/route.ts: redirecionamento final → /gestor
+- Linha 109: `new URL("/admin", req.url)` → `new URL("/gestor", req.url)`.
+- Comentário atualizado a explicar o rebrand satélite single-tenant e que a auto-impersonação da empresa principal é tratada pelo <AutoImpersonarEmpresa/>.
+
+### SA3-B — middleware.ts: permitir role admin em /gestor/*
+- `rotaPorRole`: admin → /gestor (era /admin).
+- `rotaErrada`: `(isGestor && role !== "gestor")` → `(isGestor && role !== "gestor" && role !== "admin")`. Alinha com o backend (isGestor = requireRole('admin','gestor')).
+- Consequência: admin autenticado em / ou /login é redirecionado para /gestor (via rotaPorRole); admin em /gestor/* passa.
+
+### SA3-C — lib/auth.ts: rotaPorRole admin → /gestor
+- `rotaPorRole('admin')` devolve agora `/gestor` (era `/admin`). Comentário explica o rebrand.
+- Login normal (login/page.tsx) já usa `rotaPorRole` → herda a mudança automaticamente (admin → /gestor).
+
+### SA3-D — route-guard.tsx: aceitar admin no guard do /gestor
+- Antes: `if (user.role !== role)` rejeitava admin no RouteGuard role="gestor".
+- Agora: `roleAutorizado = user.role === role || (role === "gestor" && user.role === "admin")`.
+- Redirect de role errado: admin → /gestor (era /admin).
+
+### SA3-E — Novo componente <AutoImpersonarEmpresa/> (empresa principal automática)
+- Ficheiro: frontend/src/components/gestor/auto-impersonar-empresa.tsx (NOVO).
+- Resolve o problema do admin cross-tenant: o token do admin tem empresa_id = empresa-sistema (NIF 'SISTEMA', do seed-admin.js) que NÃO tem dados operacionais. Sem isto, as queries do /gestor devolviam dados vazios.
+- Lógica:
+  1. lerUtilizador() — só age se role === 'admin' (gestores/staff não afetados).
+  2. sessionStorage 'all2gether_auto_impersonado' — se já feito na sessão, não repete (evita loop em navegações).
+  3. GET /api/admin/empresas → encontra a 1ª empresa ativa, não apagada, com NIF ≠ 'SISTEMA' (empresa principal do satélite).
+  4. POST /api/admin/impersonar/:id → substitui cookie principal pelo token de gestor (mantém all2gether_admin_token guardado).
+  5. Marca sessionStorage (all2gether_auto_impersonado + all2gether_impersonating) para o <ImpersonationBanner/> aparecer.
+  6. limparCacheAuth() + window.location.reload() — /gestor remonta com token de gestor real.
+- Estados UI: 'a-impersonar' (loading), 'erro' (mensagem + botão voltar ao login), 'concluido' (null).
+- Reutiliza a infraestrutura de impersonation JÁ EXISTENTE e testada (rota /api/admin/impersonar/:id + cookies httpOnly). Não inventa caminhos novos.
+- Casos limite: se não houver empresa operacional → erro claro com instrução. Se impersonação falhar → erro (sem loop de reload).
+
+### SA3-F — gestor/layout.tsx: integrar <AutoImpersonarEmpresa/>
+- Importado e colocado DENTRO do <RouteGuard role="gestor"> mas ANTES do conteúdo. Enquanto impersona, mostra loading em vez do /gestor (evita queries com token de admin).
+- Comentário do layout atualizado.
+
+### SA3-G — impersonation-banner.tsx: "Voltar a Admin" → "Sair da empresa"
+- Rebrand satélite: o painel /admin deixou de existir. "Voltar a Admin" significava ir para /admin, que agora redirecionaria para /gestor → loop de auto-impersonação.
+- Novo comportamento: exit-impersonation (restaura token de admin) + logout (limpa cookies) + redirect /login. Botão renomeado para "Sair da empresa".
+- Limpa ambos os flags de sessionStorage (all2gether_impersonating + all2gether_auto_impersonado).
+
+### SA3-H — exit-impersonation/route.ts: corrigir comentário
+- Comentário referia redirect para /admin — atualizado para refletir o logout + /login.
+
+### SA3-I — docs/FRONTEND.md + WORKLOG.md
+- docs/FRONTEND.md: atualizado rotaPorRole (admin → /gestor), redirect pós-login (admin → /gestor), e nova secção "Fluxo SSO (satélite single-tenant) — Rebrand" com os 6 passos do fluxo pós-SSO e justificação da auto-impersonação.
+- WORKLOG.md: esta entrada.
+
+### SA3-J — Validação
+- npm install (frontend) ✓.
+- npx tsc --noEmit → 0 erros ✓.
+- npx next lint → "No ESLint warnings or errors" ✓.
+- /admin mantido acessível (rota escondida para gestão manual de empresas se necessário) — não quebra nada existente. Links internos do AdminSidebar e botão "Voltar à lista de empresas" em /admin/empresas/[id] mantêm-se corretos (são internos ao próprio painel admin).
+
+Stage Summary:
+- **sso/route.ts**: redirect final /admin → /gestor.
+- **middleware.ts**: rotaPorRole admin → /gestor; admin autorizado em /gestor/* (alinha com backend isGestor).
+- **lib/auth.ts**: rotaPorRole admin → /gestor (login normal herda).
+- **route-guard.tsx**: RouteGuard role="gestor" aceita admin; redirect de role errado admin → /gestor.
+- **NOVO auto-impersonar-empresa.tsx**: auto-impersonação da empresa principal (1ª ativa, NIF ≠ SISTEMA) para o admin cross-tenant. Reutiliza /api/admin/impersonar/:id existente.
+- **gestor/layout.tsx**: integra <AutoImpersonarEmpresa/> antes do conteúdo.
+- **impersonation-banner.tsx**: "Voltar a Admin" → "Sair da empresa" (logout + /login, evita loop).
+- **exit-impersonation/route.ts**: comentário corrigido.
+- **Docs**: docs/FRONTEND.md atualizado (rotaPorRole, login, nova secção Fluxo SSO).
+- **Validação**: tsc 0 erros ✓; lint 0 warnings ✓.
+- **Próximo passo:** commit + push direto para branch `main` (mensagem: `fix(sso): atualiza redirecionamento pos-login para o painel principal`).
