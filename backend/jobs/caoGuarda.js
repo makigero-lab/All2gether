@@ -243,7 +243,11 @@ async function alertasTarefasIncompletas() {
   //    esquecida), e não agrupado por utilizador — a mensagem inclui o
   //    nome da propriedade, pelo que cada push é específica.
   const { notificarUtilizador } = require('../utils/notificar');
+  const { enviarEventoParaAutocell } = require('../utils/outboundWebhook');
   let notificadas = 0;
+  // Acumula os IDs das tarefas pendentes que dispararam alertas, para
+  // enviar um único webhook agregado ao Autocell no final.
+  const tarefasIdsNotificadas = [];
 
   for (const t of tarefas) {
     const u = t.utilizador_id;
@@ -260,12 +264,27 @@ async function alertasTarefasIncompletas() {
       { criarInApp: true, tipo: 'aviso' }
     );
     notificadas++;
+    tarefasIdsNotificadas.push(String(t._id));
   }
 
   console.log(
     `✅ [Cão de Guarda / Alertas] ${notificadas} notificação(ões) enviada(s) ` +
       `(${tarefas.length} tarefa(s) de limpeza incompleta(s) hoje).`
   );
+
+  // Notifica o portal Autocell das tarefas pendentes identificadas (webhook
+  // agregado, fire-and-forget). Só dispara se houver pelo menos uma tarefa
+  // pendente que disparou alerta — não envia webhooks "vazios".
+  if (tarefasIdsNotificadas.length > 0) {
+    try {
+      enviarEventoParaAutocell('alerta.tarefas_pendentes', {
+        tarefas_ids: tarefasIdsNotificadas,
+        data_alvo: hojeInicio.toISOString(),
+      });
+    } catch (e) {
+      // Fire-and-forget: não bloqueia o job.
+    }
+  }
 
   return { encontradas: tarefas.length, notificadas };
 }

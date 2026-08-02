@@ -9,10 +9,12 @@
 
 const mongoose = require('mongoose');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const crypto = require('crypto');
 const Tarefa = require('../models/Tarefa');
 const Utilizador = require('../models/Utilizador');
 const Propriedade = require('../models/Propriedade');
 const { obterEmpresaId } = require('./gestorController');
+const { enviarEventoParaAutocell } = require('../utils/outboundWebhook');
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -319,6 +321,27 @@ exports.getResumoIA = async (req, res) => {
     }
 
     const resumo = resumoLLM || gerarPlaceholder(contexto);
+
+    // Notifica o portal Autocell de que um relatório foi submetido/gerado.
+    // Fire-and-forget (sem await): o envio do webhook não deve bloquear a
+    // resposta ao gestor. O utilitário apanha os próprios erros internamente.
+    // Payload esparso: só IDs críticos + período (não envia dados sensíveis
+    // nem o conteúdo do relatório — o Autocell pode pedir detalhes depois).
+    try {
+      const empresaId = req.user?.empresa_id
+        ? String(req.user.empresa_id)
+        : null;
+      enviarEventoParaAutocell('relatorio.submetido', {
+        relatorio_id: crypto.randomUUID(), // ID efémero desta submissão
+        empresa_id: empresaId,
+        periodo: {
+          inicio: contexto.periodoInicio,
+          fim: contexto.periodoFim,
+        },
+      });
+    } catch (e) {
+      // Fire-and-forget: nunca bloqueia a resposta.
+    }
 
     return res.status(200).json({ resumo });
   } catch (err) {
