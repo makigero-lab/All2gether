@@ -1149,3 +1149,44 @@ Stage Summary:
 - **Docs:** nova secção 3.4 no `docs/BACKEND.md` + tabela de env vars completa.
 - **Testes:** 111/111 ✓.
 - **Próximo passo:** commit + push para branch `dev`.
+
+---
+
+Task ID: SA1
+Agent: Z.ai Code
+Task: Criar o script de criação do Super Admin (backend/seed-admin.js) para permitir o login via SSO em produção, adicionar o comando seed:admin ao package.json do backend e fazer commit/push para a branch main.
+
+Work Log:
+- Analisada a arquitetura SSO existente: `GET /api/auth/sso` (backend/controllers/authController.js) procura o admin por `Utilizador.findOne({ email, role: 'admin' })`. Confirmado que a role de "administrador supremo do sistema" é `'admin'` (Super Admin da PLATAFORMA — cross-tenant, ver docs/ARQUITETURA.md §3 e middleware/requireRole.js).
+- Analisado o modelo `Utilizador` (backend/models/Utilizador.js): `empresa_id` é `required: true` e `password_hash` é opcional (para migrações). bcryptjs (custo 10) é a biblioteca usada no resto do codebase (authController, superAdminController).
+- Analisado o script seed existente (backend/scripts/seedChecklists.js) como referência de estilo: `require('dotenv').config()`, `mongoose.connect(uri)`, logs com emojis, `main().catch()`, `mongoose.disconnect()` + `process.exit()`.
+
+### SA-A — Script seed-admin.js (backend/seed-admin.js) — NOVO
+- Upsert do Super Admin: email `admin@makigero.com`, nome `Super Admin`, role `admin`, `ativo: true`.
+- **Empresa âncora:** o modelo exige `empresa_id`, mas o admin é cross-tenant ("não tem empresa_id de operações"). Decisão: find-or-create de uma empresa-sistema dedicada `All2gether (Sistema)` (NIF `SISTEMA`) para ancorar o admin sem o associar a um tenant de cliente. Override opcional via `EMPRESA_ID` (mesma convenção do seedChecklists).
+- **Password bcrypt:** sempre definida (mesmo que o SSO não a use) para permitir login normal como fallback de emergência. Lógica `decidirPassword()`:
+  - Se `ADMIN_PASSWORD` (env) definida → usa-a (não imprime).
+  - Senão, se admin já existe com `password_hash` → mantém (não regenera a cada execução).
+  - Senão → gera password aleatória segura (`crypto.randomBytes(24).toString('base64url')`) e imprime UMA ÚNICA VEZ na consola.
+- **Upsert idempotente:** se o admin não existe → `Utilizador.create()`; se existe → `findByIdAndUpdate` com `$set` de nome/role/empresa_id/ativo/eliminado_em=null e (condicional) password_hash.
+- Resumo final impresso SEM expor a hash nem a password (apenas indica "definida (bcrypt)").
+- Tratamento de erros: `main().catch()` garante `mongoose.disconnect()` + `process.exit(1)`.
+- Sintaxe validada com `node --check seed-admin.js` ✓.
+
+### SA-B — package.json (backend)
+- Adicionado `"seed:admin": "node seed-admin.js"` à secção `scripts` (junto ao `seed:checklists` existente).
+
+### SA-C — Documentação (docs/BACKEND.md)
+- Tabela "Scripts disponíveis" (§4) atualizada: adicionados `seed:admin` e `seed:checklists` (este último já existia mas não estava documentado na tabela).
+- Nova subsecção "Seed do Super Admin (`npm run seed:admin`)" com: campos do utilizador, justificação da empresa-sistema âncora, idempotência, variáveis de ambiente (MONGODB_URI, ADMIN_PASSWORD, EMPRESA_ID) e fluxo de produção (Render + AUTOCELL_SSO_SECRET).
+
+### SA-D — Variáveis de ambiente (backend/.env.example)
+- Nova secção "Scripts de Seed" documentando `ADMIN_PASSWORD` (opcional) e `EMPRESA_ID` (opcional), com explicação do comportamento de cada uma quando não definidas.
+
+Stage Summary:
+- **Novo script:** `backend/seed-admin.js` — upsert idempotente do Super Admin (`admin@makigero.com`, role `admin`) com hash bcrypt, empresa-sistema âncora find-or-create, e geração automática de password segura.
+- **package.json:** adicionado `npm run seed:admin`.
+- **Docs:** `docs/BACKEND.md` (tabela de scripts + nova subsecção) e `backend/.env.example` (ADMIN_PASSWORD + EMPRESA_ID) atualizados.
+- **Decisão arquitetural:** empresa-sistema `All2gether (Sistema)` (NIF `SISTEMA`) como âncora do admin cross-tenant — satisfaz `empresa_id` required sem poluir tenants de cliente.
+- **Segurança:** password bcrypt sempre definida (fallback de login normal); password auto-gerada impressa uma única vez; nenhuma credencial hardcodeada (tudo via process.env).
+- **Próximo passo:** commit + push direto para branch `main` (mensagem: `chore: adiciona script seed de super admin para sso`).

@@ -308,11 +308,32 @@ A função `enviarEventoParaAutocell()` é `async` mas os callers **não devem a
 
 ## 4. Scripts disponíveis
 
-| Script       | Comando            | Descrição                                          |
-|--------------|--------------------|----------------------------------------------------|
-| `npm start`  | `node server.js`   | Arranca a API em modo produção                     |
-| `npm run dev`| `nodemon server.js`| Arranca em modo desenvolvimento (auto-restart)     |
-| `npm test`   | `jest`             | Corre os testes unitários/integração (Jest + Supertest) |
+| Script               | Comando                       | Descrição                                                          |
+|----------------------|-------------------------------|--------------------------------------------------------------------|
+| `npm start`          | `node server.js`              | Arranca a API em modo produção                                     |
+| `npm run dev`        | `nodemon server.js`           | Arranca em modo desenvolvimento (auto-restart)                     |
+| `npm test`           | `jest`                        | Corre os testes unitários/integração (Jest + Supertest)            |
+| `npm run seed:admin` | `node seed-admin.js`          | Cria/atualiza o Super Admin (`admin@makigero.com`) para SSO (§6.2) |
+| `npm run seed:checklists` | `node scripts/seedChecklists.js` | Cria 2 modelos de checklist base e associa-os às propriedades |
+
+### Seed do Super Admin (`npm run seed:admin`)
+
+Script `seed-admin.js` (raiz do backend) que faz **upsert** do Super Admin da plataforma — a conta utilizada pelo **Single Sign-On (SSO)** com o portal Autocell para iniciar sessão no painel `/admin` em produção.
+
+- **Utilizador criado/atualizado:**
+  - `email`: `admin@makigero.com`
+  - `nome`: `Super Admin`
+  - `role`: `admin` (Super Admin da PLATAFORMA — cross-tenant; ver `docs/ARQUITETURA.md` §3)
+  - `ativo`: `true`
+  - `password_hash`: hash **bcrypt** (custo 10). Embora o SSO **não** use a password (autentica-se via JWT externo do Autocell), é sempre definida para permitir login normal (`POST /api/auth/login`) como **fallback de emergência**.
+- **Empresa âncora:** o modelo `Utilizador` exige `empresa_id`. Como o admin é cross-tenant ("não tem empresa_id de operações"), o script faz **find-or-create** de uma empresa-sistema dedicada `All2gether (Sistema)` (NIF `SISTEMA`) para o ancorar, sem o associar a um tenant de cliente real. Override via `EMPRESA_ID`.
+- **Idempotente:** se o admin já existir, atualiza `nome`, `role`, `empresa_id`, `ativo`, limpa `eliminado_em` e — apenas se `ADMIN_PASSWORD` estiver definida OU o admin não tiver password — reescreve a hash. Caso contrário **mantém** a password existente (não regenera a cada execução).
+- **Variáveis de ambiente:**
+  - `MONGODB_URI` (obrigatória) — URI de ligação ao MongoDB.
+  - `ADMIN_PASSWORD` (opcional) — password em claro do admin. Se não definida, é gerada uma password aleatória segura e **impressa uma única vez** na consola.
+  - `EMPRESA_ID` (opcional) — ID da empresa âncora (override). Se não definida, usa/find-or-cria a empresa-sistema.
+
+> **Fluxo de produção:** definir `MONGODB_URI`, `AUTOCELL_SSO_SECRET` (idêntico ao do Autocell) e opcionalmente `ADMIN_PASSWORD` no ambiente do Render → correr `npm run seed:admin` uma vez → o SSO do Autocell passa a conseguir iniciar sessão do admin no All2gether.
 
 ### Testes (v1.9.0)
 
