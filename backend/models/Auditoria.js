@@ -19,10 +19,14 @@ const auditoriaSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    // Single-tenant (Satélite): empresa_id pode estar ausente em ações sem
+    // empresa no contexto (ex.: Super Admin via SSO). Opcional para não quebrar
+    // a validação da auditoria e evitar 502s nos endpoints principais.
     empresa_id: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Empresa',
-      required: true,
+      required: false,
+      default: null,
       index: true,
     },
     // Tipo de ação (ex: 'criar', 'atualizar', 'eliminar', 'atribuir', 'falta_subita').

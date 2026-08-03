@@ -1382,3 +1382,25 @@ Stage Summary:
 - **Restrições respeitadas:** endpoints /api/admin/empresas (listar) e /api/admin/empresas/:id/impersonar mantidos (AutoImpersonarEmpresa precisa deles); campo `ativa` mantido (controlo operacional, não SaaS).
 - **Validação:** tsc 0 erros ✓; lint 0 warnings ✓; 111/111 testes ✓.
 - **Próximo passo:** commit + push direto para branch `main` (mensagem: `refactor: dead code elimination — remove UI gestão empresas, plano_ativo SaaS e html2pdf.js órfão`).
+
+---
+
+Task ID: HF1
+Agent: Z.ai Code (Eng. Software Principal)
+Task: Correção cirúrgica de 502 Bad Gateway em `/api/gestor/*` causado por `Auditoria validation failed: empresa_id: Path 'empresa_id' is required`. Tornar `empresa_id` opcional no schema e blindar o helper de auditoria (try/catch + console.error, nunca abortar o pedido).
+
+Work Log:
+- Clonado `https://github.com/makigero-lab/All2gether.git` (branch `main`, `3c5da00`) para `/home/z/All2gether`.
+- Análise prévia: lidos `backend/models/Auditoria.js`, `backend/utils/auditoria.js`, `docs/BACKEND.md` e `WORKLOG.md`. Confirmado que TODOS os pontos de escrita passam pelo helper `registarAuditoria` (11 call sites em `gestorController`, `superAdminController`, `adminRoutes`, `ausenciaController`) — não há `Auditoria.create` direto fora do helper; o único `await Auditoria` é um `.find` (leitura).
+- Verificado que nenhum call site faz `await registarAuditoria(...)` (todos fire-and-forget) e que nenhum teste (`backend/tests/*`) referencia `Auditoria`/`empresa_id` required → alteração segura, sem partir testes.
+- `backend/models/Auditoria.js`: campo `empresa_id` alterado de `required: true` para `required: false` + `default: null`, com comentário a justificar (Satélite single-tenant, ações sem empresa no contexto ex.: Super Admin via SSO). Índice composto `{ empresa_id: 1, createdAt: -1 }` mantido (funciona com nulls).
+- `backend/utils/auditoria.js`: `registarAuditoria` convertida para `async` + `try/catch` best-effort. Erros ao gravar fazem apenas `console.error` e a função nunca rejeita (semântica equivalente a `next()` num middleware) — a auditoria nunca aborta o pedido principal. Adicionada normalização `empresa_id: empresa_id || null` para o caso de chegar `undefined`. JSDoc atualizado (`empresa_id` passa a opcional).
+- Sintaxe validada: `node --check models/Auditoria.js` ✓ e `node --check utils/auditoria.js` ✓.
+- Documentação atualizada (convenção do projeto): adicionada linha "Hotfix" ao changelog de `docs/BACKEND.md` e esta entrada ao `WORKLOG.md`.
+
+Stage Summary:
+- **Root cause:** em modo Satélite single-tenant, ações sem `empresa_id` no contexto (ex.: Super Admin via SSO) faziam `Auditoria.create` rejeitar com `ValidationError: empresa_id is required`, gerando ruído nos logs e, na perceção do utilizador, contribuindo para 502s.
+- **Correção cirúrgica (2 ficheiros):** schema `Auditoria.empresa_id` → opcional (`required: false`, `default: null`); helper `registarAuditoria` → `async`/`try-catch` best-effort (nunca propaga erros).
+- **Garantia anti-502:** mesmo que a gravação da auditoria falhe por qualquer motivo, o pedido principal do utilizador continua e devolve os dados (fire-and-forget + try/catch + console.error).
+- **Sem alterações de contrato** nos endpoints `/api/gestor/*` nem noutros; sem alterações a call sites.
+- **Próximo passo:** commit + push direto para `main` com a mensagem `fix(backend): torna empresa_id opcional na auditoria para evitar 502s`.
