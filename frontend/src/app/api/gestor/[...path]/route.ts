@@ -13,8 +13,11 @@
 
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import {
+  buildBackendUrl,
+  ERRO_BACKEND_NAO_CONFIGURADO,
+} from "@/lib/backend";
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 const COOKIE_NAME = "all2gether_token";
 
 async function proxyHandler(
@@ -52,7 +55,17 @@ async function proxyHandler(
     // Encaminha para o backend (incluindo query params).
     const url = new URL(req.url);
     const queryString = url.search; // preserva ?futuras=true etc.
-    const backendUrl = `${BACKEND_URL}/api/gestor/${pathString}${queryString}`;
+    const backendUrl = buildBackendUrl(
+      `/api/gestor/${pathString}`,
+      queryString
+    );
+
+    if (!backendUrl) {
+      return NextResponse.json(
+        { erro: ERRO_BACKEND_NAO_CONFIGURADO },
+        { status: 502 }
+      );
+    }
 
     const res = await fetch(backendUrl, {
       method,

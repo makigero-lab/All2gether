@@ -1404,3 +1404,29 @@ Stage Summary:
 - **Garantia anti-502:** mesmo que a gravação da auditoria falhe por qualquer motivo, o pedido principal do utilizador continua e devolve os dados (fire-and-forget + try/catch + console.error).
 - **Sem alterações de contrato** nos endpoints `/api/gestor/*` nem noutros; sem alterações a call sites.
 - **Próximo passo:** commit + push direto para `main` com a mensagem `fix(backend): torna empresa_id opcional na auditoria para evitar 502s`.
+
+---
+
+Task ID: HF2
+Agent: Z.ai Code (Eng. Software Principal)
+Task: Corrigir a construção do URL de destino nos proxies do frontend (`/api/gestor/*`, `/api/staff/*`, etc.) que provocava 502 Bad Gateway em ~304ms sem log no Render. Usar `new URL()` para composição segura + guarda explícito quando a env var falha.
+
+Work Log:
+- Atualizado o clone local: `git pull origin main` (incorporou o hotfix HF1 `91b400e`).
+- Análise prévia rigorosa: lidos os 9 proxy routes (`gestor/[...path]`, `staff/[...path]`, `admin/[...path]`, `auth/me/[...path]`, `auth/login`, `auth/me`, `auth/sso`, `admin/empresas`, `admin/impersonar/[id]`) + `tsconfig.json` (alias `@/*` → `./src/*` confirmado) + `.env.example` + `FRONTEND.md`.
+- Confirmado que TODOS os 9 proxies partilham o padrão frágil `const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL ?? "";` + concatenação por template literal. O `exit-impersonation` NÃO usa `fetch` ao backend (só manipula cookies) → não precisava de alteração.
+- Diagnóstico duplo: (1) **fragilidade no código** — fallback `?? ""` produz URL relativo (`/api/gestor/...`) que resolve contra o próprio domínio Vercel → loop/404 → `catch` → 502 silencioso; barra final na env var produziria `//api/...`. (2) **valor da env var na Vercel** — o log mostra `autocell-kv5g.onrender.com` (host antigo do Autocell), não `all2gether-backend.onrender.com` (valor esperado segundo `.env.example`); esse serviço está provavelmente inativo/apagado, daí o 502 rápido sem log no Render.
+- Criado helper partilhado `frontend/src/lib/backend.ts`:
+  - `BACKEND_URL` exportado: `process.env.NEXT_PUBLIC_API_URL` com `trim()` + `replace(/\/+$/, "")` (remove barras finais).
+  - `buildBackendUrl(path, queryString?)`: combina path + base com **`new URL(path, BACKEND_URL)`** — tolera barras finais na base, valida a base (lança se inválida → apanhado), **sem protocolo hardcoded** (usa o que vier na env var); define `url.search` apenas se houver query string; devolve `null` se a env var faltar/for inválida.
+  - `ERRO_BACKEND_NAO_CONFIGURADO`: mensagem standard que nomeia a env var em falta.
+- Refatorados os 9 proxies para usar o helper + guarda explícito (`if (!url) return 502 com ERRO_BACKEND_NAO_CONFIGURADO`); no `auth/sso` (usa redirects, não JSON) o guarda faz `console.warn` + `redirect(urlErro)`.
+- Validado: `npx tsc --noEmit` → 0 erros ✓; `npx next lint` → "No ESLint warnings or errors" ✓.
+- Documentação atualizada: nova linha "Hotfix" no changelog de `docs/FRONTEND.md` + esta entrada no `WORKLOG.md`.
+
+Stage Summary:
+- **Root cause (código):** concatenação frágil por template literal + fallback `?? ""` → URL relativo/inválido → `fetch` falha → `catch` devolve 502 genérico sem diagnóstico.
+- **Correção:** helper `lib/backend.ts` com `new URL()` para composição segura + normalização (trim/barras) + guarda que devolve 502 com mensagem que **nomeia a env var em falta** (diagnóstico imediato nos logs Vercel).
+- **Sem protocolo hardcoded:** o `new URL(path, base)` usa o protocolo da env var; se esta tiver `https://`, funciona; se não tiver protocolo, lança → null → 502 diagnosável.
+- **Ação operacional pendente (NÃO é código):** a env var `NEXT_PUBLIC_API_URL` na Vercel aponta para `autocell-kv5g.onrender.com` (host antigo do Autocell) — deve ser corrigida para `https://all2gether-backend.onrender.com` e feito novo deploy. A correção de código blinda contra URLs malformados, mas não resolve um host destino morto.
+- **Próximo passo:** commit + push direto para `main` com a mensagem `fix(proxy): corrige construcao do url de destino no proxy para evitar 502`.

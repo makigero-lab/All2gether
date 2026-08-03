@@ -38,8 +38,8 @@
 
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { buildBackendUrl } from "@/lib/backend";
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 const COOKIE_MAX_AGE = 7 * 24 * 60 * 60; // 7 dias (em segundos)
 
 export async function GET(req: Request) {
@@ -60,14 +60,20 @@ export async function GET(req: Request) {
     //    O backend valida o token SSO com AUTOCELL_SSO_SECRET e devolve o
     //    JWT interno do All2gether SEM setar cookies (o backend não consegue
     //    setar cookies válidos para o domínio do frontend).
-    const backendRes = await fetch(
-      `${BACKEND_URL}/api/auth/sso?token=${encodeURIComponent(tokenSso)}&json=true`,
-      {
-        method: "GET",
-        headers: { Accept: "application/json" },
-        cache: "no-store",
-      }
+    const ssoUrl = buildBackendUrl(
+      "/api/auth/sso",
+      `?token=${encodeURIComponent(tokenSso)}&json=true`
     );
+    if (!ssoUrl) {
+      console.warn("⚠️  [SSO proxy] NEXT_PUBLIC_API_URL em falta ou inválida.");
+      return NextResponse.redirect(urlErro);
+    }
+
+    const backendRes = await fetch(ssoUrl, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
 
     // 3. Se o backend devolver não-OK (401/500/etc.), redireciona para login.
     if (!backendRes.ok) {

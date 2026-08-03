@@ -18,8 +18,11 @@
 
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import {
+  buildBackendUrl,
+  ERRO_BACKEND_NAO_CONFIGURADO,
+} from "@/lib/backend";
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 const COOKIE_NAME = "all2gether_token";
 
 /** Lê o token do cookie; devolve null se não existir. */
@@ -49,7 +52,15 @@ export async function GET() {
       );
     }
 
-    const res = await fetch(`${BACKEND_URL}/api/admin/empresas`, {
+    const empresasUrl = buildBackendUrl("/api/admin/empresas");
+    if (!empresasUrl) {
+      return NextResponse.json(
+        { erro: ERRO_BACKEND_NAO_CONFIGURADO },
+        { status: 502 }
+      );
+    }
+
+    const res = await fetch(empresasUrl, {
       method: "GET",
       headers: {
         Authorization: `Bearer ${token}`,

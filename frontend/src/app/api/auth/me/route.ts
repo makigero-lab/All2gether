@@ -9,8 +9,11 @@
 
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import {
+  buildBackendUrl,
+  ERRO_BACKEND_NAO_CONFIGURADO,
+} from "@/lib/backend";
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 const COOKIE_NAME = "all2gether_token";
 
 export async function GET() {
@@ -25,7 +28,15 @@ export async function GET() {
       );
     }
 
-    const res = await fetch(`${BACKEND_URL}/api/auth/me`, {
+    const meUrl = buildBackendUrl("/api/auth/me");
+    if (!meUrl) {
+      return NextResponse.json(
+        { erro: ERRO_BACKEND_NAO_CONFIGURADO },
+        { status: 502 }
+      );
+    }
+
+    const res = await fetch(meUrl, {
       headers: { Authorization: `Bearer ${token}` },
       cache: "no-store",
     });

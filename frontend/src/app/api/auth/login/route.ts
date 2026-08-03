@@ -10,8 +10,11 @@
 
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import {
+  buildBackendUrl,
+  ERRO_BACKEND_NAO_CONFIGURADO,
+} from "@/lib/backend";
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 const COOKIE_NAME = "all2gether_token";
 const COOKIE_MAX_AGE = 7 * 24 * 60 * 60; // 7 dias (em segundos)
 
@@ -19,7 +22,15 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
 
-    const res = await fetch(`${BACKEND_URL}/api/auth/login`, {
+    const loginUrl = buildBackendUrl("/api/auth/login");
+    if (!loginUrl) {
+      return NextResponse.json(
+        { erro: ERRO_BACKEND_NAO_CONFIGURADO },
+        { status: 502 }
+      );
+    }
+
+    const res = await fetch(loginUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
