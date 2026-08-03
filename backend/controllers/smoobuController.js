@@ -235,13 +235,14 @@ function extrairDadosReserva(payload) {
  * e o chamador faz fallback para arrival.
  *
  * @param {string} reservaId - ID da reserva no Smoobu.
+ * @param {import('mongoose').Types.ObjectId} [empresaId] - para ler a chave da BD (HF6).
  * @returns {Promise<object|null>} { departure, arrival, pax, nome_hospede } ou null.
  */
-async function enriquecerReservaSmoobu(reservaId) {
-  const apiKey = process.env.SMOOBU_API_KEY;
+async function enriquecerReservaSmoobu(reservaId, empresaId) {
+  const { chave: apiKey } = await obterApiKeySmoobu(empresaId);
   if (!apiKey || !reservaId) {
     console.warn(
-      '⚠️  [Smoobu] enriquecerReservaSmoobu: SMOOBU_API_KEY em falta ou reservaId vazio — fallback para dados do webhook.'
+      '⚠️  [Smoobu] enriquecerReservaSmoobu: API key em falta ou reservaId vazio — fallback para dados do webhook.'
     );
     return null;
   }
@@ -702,9 +703,10 @@ async function atualizarTarefaPorReserva(
  * REST API do Smoobu. Fallback final: arrival.
  *
  * @param {object} payload - payload bruto do Smoobu.
+ * @param {import('mongoose').Types.ObjectId} [empresaId] - para resolver a API key (HF6).
  * @returns {Promise<Tarefa|{canceladas:number,total:number}|null>}
  */
-async function processarReservaSmoobu(payload) {
+async function processarReservaSmoobu(payload, empresaId) {
   const {
     action,
     smoobuPropId,
@@ -729,7 +731,7 @@ async function processarReservaSmoobu(payload) {
     (!dataCheckOutRaw || !detalhesReserva.nome_hospede);
 
   if (precisaEnriquecimento) {
-    const enriched = await enriquecerReservaSmoobu(reservaId);
+    const enriched = await enriquecerReservaSmoobu(reservaId, empresaId);
     if (enriched) {
       dataCheckOutFinal = enriched.departure || dataCheckOutRaw || null;
       detalhesFinal = {
@@ -792,7 +794,7 @@ async function processarReservaSmoobu(payload) {
  */
 async function processarWebhookSmoobu(payload, webhookLogId, empresaId) {
   try {
-    const resultado = await processarReservaSmoobu(payload);
+    const resultado = await processarReservaSmoobu(payload, empresaId);
 
     // Atualiza o WebhookLog para 'processado'.
     try {
@@ -847,12 +849,40 @@ async function processarWebhookSmoobu(payload, webhookLogId, empresaId) {
 const { obterCoordenadas } = require('../utils/geocoding');
 
 /**
- * Lê a API key do Smoobu (single-tenant satélite: env var global).
- * @returns {string|null}
+ * Lê a API key do Smoobu para uma empresa.
+ *
+ * HF6 — Descentralização: prioridade invertida.
+ *   1. Empresa.integracoes.smoobu.api_key (se `ativo: true`) — fonte de
+ *      verdade em produção (gestão via /api/gestor/configuracoes/integracoes).
+ *   2. process.env.SMOOBU_API_KEY — fallback (retrocompatibilidade / dev /
+ *      empresas sem chave configurada na BD).
+ *
+ * @param {import('mongoose').Types.ObjectId} [empresaId] - ID da empresa (do JWT).
+ * @returns {Promise<{ chave: string, origem: 'empresa' | 'env' | null }>}
+ *   Devolve `origem` para logging/diagnóstico (de onde veio a chave).
  */
-function obterApiKeySmoobu() {
-  const key = process.env.SMOOBU_API_KEY;
-  return key && key.trim() ? key.trim() : null;
+async function obterApiKeySmoobu(empresaId) {
+  // 1. Tenta ler da empresa (se integracao ativa e chave preenchida).
+  if (empresaId) {
+    try {
+      const Empresa = require('../models/Empresa');
+      const empresa = await Empresa.findById(empresaId)
+        .select('integracoes.smoobu')
+        .lean();
+      const smoobu = empresa?.integracoes?.smoobu;
+      if (smoobu?.ativo && smoobu.api_key && smoobu.api_key.trim()) {
+        return { chave: smoobu.api_key.trim(), origem: 'empresa' };
+      }
+    } catch {
+      // Se falhar a leitura da empresa, continua para o fallback.
+    }
+  }
+  // 2. Fallback: env var global (retrocompatibilidade / dev).
+  const envKey = process.env.SMOOBU_API_KEY;
+  if (envKey && envKey.trim()) {
+    return { chave: envKey.trim(), origem: 'env' };
+  }
+  return { chave: null, origem: null };
 }
 
 /**
@@ -970,11 +1000,12 @@ async function buscarApartamentosSmoobu(apiKey) {
  */
 async function getPropriedadesSmoobu(req, res) {
   try {
-    const apiKey = obterApiKeySmoobu();
+    const empresaId = req.user && req.user.empresa_id;
+    const { chave: apiKey } = await obterApiKeySmoobu(empresaId);
     if (!apiKey) {
       return res.status(400).json({
         erro:
-          'API Key do Smoobu não configurada. Define SMOOBU_API_KEY no Render.',
+          'API Key do Smoobu não configurada. Define-a em Configurações → Integrações, ou via env var SMOOBU_API_KEY.',
       });
     }
 
@@ -1025,11 +1056,11 @@ async function importarPropriedades(req, res) {
       return res.status(400).json({ erro: 'empresa_id em falta no token.' });
     }
 
-    const apiKey = obterApiKeySmoobu();
+    const { chave: apiKey } = await obterApiKeySmoobu(empresaId);
     if (!apiKey) {
       return res.status(400).json({
         erro:
-          'API Key do Smoobu não configurada. Define SMOOBU_API_KEY no Render.',
+          'API Key do Smoobu não configurada. Define-a em Configurações → Integrações, ou via env var SMOOBU_API_KEY.',
       });
     }
 

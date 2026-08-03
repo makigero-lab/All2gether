@@ -1,0 +1,491 @@
+"use client";
+
+/**
+ * Página: /gestor/configuracoes/integracoes (HF6)
+ *
+ * Gestão descentralizada das integrações externas (Smoobu) e rotinas de
+ * sincronização automática. Antes desta página, a configuração do Smoobu
+ * vivia na Nave-Mãe (Autocell); agora passa a viver no All2gether.
+ *
+ * Comunica com:
+ *   GET  /api/gestor/configuracoes/integracoes  → lê config atual
+ *   PUT  /api/gestor/configuracoes/integracoes  → guarda config
+ *   POST /api/gestor/smoobu/propriedades        → importar propriedades (manual)
+ */
+
+import { useCallback, useEffect, useState } from "react";
+import {
+  Loader2,
+  Save,
+  Key,
+  RefreshCw,
+  Clock,
+  CheckCircle2,
+  AlertCircle,
+  Plug,
+  Power,
+  Building2,
+} from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { adminGet, adminPut, adminPost } from "@/lib/api";
+
+type Toast = { tipo: "sucesso" | "erro"; msg: string } | null;
+
+interface IntegracoesConfig {
+  smoobu: {
+    api_key_mascarada: string;
+    configurado: boolean;
+    ativo: boolean;
+    ultima_sincronizacao: string | null;
+  };
+  rotinas: {
+    sincronizacao_automatica: boolean;
+    frequencia_horas: number;
+  };
+  env_var_ativa: boolean;
+}
+
+function formatarData(iso: string | null): string {
+  if (!iso) return "Nunca";
+  try {
+    return new Date(iso).toLocaleString("pt-PT", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
+}
+
+export default function IntegracoesPage() {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [importando, setImportando] = useState(false);
+  const [toast, setToast] = useState<Toast>(null);
+
+  // Estado do formulário.
+  const [apiKeyInput, setApiKeyInput] = useState("");
+  const [editApiKey, setEditApiKey] = useState(false);
+  const [limparChave, setLimparChave] = useState(false);
+  const [smoobuAtivo, setSmoobuAtivo] = useState(false);
+  const [sincronizacaoAutomatica, setSincronizacaoAutomatica] = useState(false);
+  const [frequenciaHoras, setFrequenciaHoras] = useState(24);
+
+  // Estado exibido (da BD).
+  const [apiKeyMascarada, setApiKeyMascarada] = useState("");
+  const [temApiKey, setTemApiKey] = useState(false);
+  const [ultimaSincronizacao, setUltimaSincronizacao] = useState<string | null>(null);
+  const [envVarAtiva, setEnvVarAtiva] = useState(false);
+
+  function showToast(tipo: "sucesso" | "erro", msg: string) {
+    setToast({ tipo, msg });
+    setTimeout(() => setToast(null), 6000);
+  }
+
+  const carregar = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await adminGet<IntegracoesConfig>(
+        "/api/gestor/configuracoes/integracoes"
+      );
+      setApiKeyMascarada(data.smoobu.api_key_mascarada || "");
+      setTemApiKey(data.smoobu.configurado || false);
+      setSmoobuAtivo(data.smoobu.ativo || false);
+      setUltimaSincronizacao(data.smoobu.ultima_sincronizacao || null);
+      setSincronizacaoAutomatica(data.rotinas.sincronizacao_automatica || false);
+      setFrequenciaHoras(data.rotinas.frequencia_horas || 24);
+      setEnvVarAtiva(data.env_var_ativa || false);
+      setEditApiKey(false);
+      setLimparChave(false);
+      setApiKeyInput("");
+    } catch (e) {
+      showToast(
+        "erro",
+        e instanceof Error ? e.message : "Erro ao carregar configurações."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    carregar();
+  }, [carregar]);
+
+  async function handleSalvar(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setToast(null);
+    try {
+      const body: {
+        smoobu?: { api_key?: string; ativo?: boolean };
+        rotinas?: { sincronizacao_automatica?: boolean; frequencia_horas?: number };
+      } = {};
+
+      // Só envia a chave se o utilizador a editou ou pediu para limpar.
+      if (editApiKey || limparChave) {
+        body.smoobu = { api_key: limparChave ? "" : apiKeyInput };
+      }
+      // Envia sempre o estado do toggle ativo.
+      if (body.smoobu) {
+        body.smoobu.ativo = smoobuAtivo;
+      } else {
+        body.smoobu = { ativo: smoobuAtivo };
+      }
+      body.rotinas = {
+        sincronizacao_automatica: sincronizacaoAutomatica,
+        frequencia_horas: frequenciaHoras,
+      };
+
+      interface PutResponse {
+        message?: string;
+        smoobu?: { api_key_mascarada: string; configurado: boolean; ultima_sincronizacao?: string | null };
+        rotinas?: { frequencia_horas: number };
+      }
+      const data = await adminPut<PutResponse>(
+        "/api/gestor/configuracoes/integracoes",
+        body
+      );
+      setApiKeyMascarada(data.smoobu?.api_key_mascarada || "");
+      setTemApiKey(data.smoobu?.configurado || false);
+      setEditApiKey(false);
+      setLimparChave(false);
+      setApiKeyInput("");
+      showToast("sucesso", data.message || "Configurações guardadas.");
+    } catch (e) {
+      showToast("erro", e instanceof Error ? e.message : "Erro ao guardar.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleImportarPropriedades() {
+    setImportando(true);
+    setToast(null);
+    try {
+      interface ImportResponse {
+        message?: string;
+        criadas?: number;
+        atualizadas?: number;
+        existentes?: number;
+        erros?: number;
+      }
+      const data = await adminPost<ImportResponse>(
+        "/api/gestor/smoobu/propriedades",
+        {}
+      );
+      showToast(
+        "sucesso",
+        data.message ||
+          `${data.criadas ?? 0} importada(s), ${data.atualizadas ?? 0} atualizada(s).`
+      );
+      // Atualiza o timestamp de última sincronização.
+      await carregar();
+    } catch (e) {
+      showToast(
+        "erro",
+        e instanceof Error ? e.message : "Erro ao importar propriedades."
+      );
+    } finally {
+      setImportando(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
+        <Loader2 className="h-5 w-5 animate-spin" />
+        A carregar configurações de integrações…
+      </div>
+    );
+  }
+
+  return (
+    <div className="mx-auto w-full max-w-3xl space-y-6 p-4 md:p-6">
+      {/* Cabeçalho */}
+      <div className="flex items-center gap-3">
+        <Plug className="h-6 w-6 text-primary" />
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">
+            Integrações &amp; Rotinas
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            Gestão descentralizada das integrações externas e sincronização
+            automática.
+          </p>
+        </div>
+      </div>
+
+      {/* Toast */}
+      {toast && (
+        <div
+          className={`flex items-start gap-2 rounded-md border p-3 text-sm ${
+            toast.tipo === "sucesso"
+              ? "border-emerald-500/50 bg-emerald-50 text-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-100"
+              : "border-red-500/50 bg-red-50 text-red-900 dark:bg-red-950/50 dark:text-red-100"
+          }`}
+        >
+          {toast.tipo === "sucesso" ? (
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+          ) : (
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          )}
+          <span>{toast.msg}</span>
+        </div>
+      )}
+
+      {/* Aviso: env var ativa */}
+      {envVarAtiva && (
+        <div className="flex items-start gap-2 rounded-md border border-amber-500/50 bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          <div>
+            <p className="font-medium">Variável de ambiente SMOOBU_API_KEY ativa</p>
+            <p className="text-xs">
+              A chave da base de dados (acima) tem prioridade quando a integração
+              está ativa. A env var serve apenas de fallback para retrocompatibilidade.
+            </p>
+          </div>
+        </div>
+      )}
+
+      <form onSubmit={handleSalvar} className="space-y-6">
+        {/* Secção: Integração Smoobu */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Key className="h-5 w-5" />
+              Integração Smoobu
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* API Key */}
+            <div className="space-y-2">
+              <label htmlFor="api-key" className="text-sm font-medium leading-none">
+                API Key do Smoobu
+              </label>
+              {!editApiKey && !limparChave ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex h-10 min-w-[200px] flex-1 items-center rounded-md border bg-muted px-3 font-mono text-sm">
+                    {temApiKey ? apiKeyMascarada : "Não configurada"}
+                  </div>
+                  {temApiKey ? (
+                    <Badge variant="secondary" className="shrink-0">
+                      <CheckCircle2 className="mr-1 h-3 w-3" /> Configurada
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="shrink-0">
+                      Por configurar
+                    </Badge>
+                  )}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setEditApiKey(true);
+                      setLimparChave(false);
+                    }}
+                  >
+                    {temApiKey ? "Substituir" : "Configurar"}
+                  </Button>
+                  {temApiKey && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="text-red-600"
+                      onClick={() => {
+                        setLimparChave(true);
+                        setEditApiKey(false);
+                        setApiKeyInput("");
+                      }}
+                    >
+                      Limpar
+                    </Button>
+                  )}
+                </div>
+              ) : limparChave ? (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 rounded-md border border-red-500/50 bg-red-50 p-2 text-sm text-red-900 dark:bg-red-950/50 dark:text-red-100">
+                    <AlertCircle className="h-4 w-4 shrink-0" />
+                    <span>A chave será removida ao guardar.</span>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setLimparChave(false)}
+                  >
+                    Cancelar
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Input
+                    id="api-key"
+                    type="password"
+                    placeholder="Cola aqui a API key do Smoobu"
+                    value={apiKeyInput}
+                    onChange={(e) => setApiKeyInput(e.target.value)}
+                    autoComplete="off"
+                  />
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setEditApiKey(false);
+                        setApiKeyInput("");
+                      }}
+                    >
+                      Cancelar
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Gera a API key no painel do Smoobu → Settings → API. A chave
+                    é guardada na base de dados do All2gether (nunca exposta no
+                    GET — só mascarada).
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Toggle Ativo */}
+            <div className="flex items-center justify-between rounded-md border p-3">
+              <div className="flex items-center gap-2">
+                <Power className="h-4 w-4 text-muted-foreground" />
+                <div>
+                  <label htmlFor="smoobu-ativo" className="cursor-pointer text-sm font-medium leading-none">
+                    Integração ativa
+                  </label>
+                  <p className="text-xs text-muted-foreground">
+                    Quando desativada, webhooks e sincronização do Smoobu são
+                    ignorados (a chave mantém-se guardada).
+                  </p>
+                </div>
+              </div>
+              <Checkbox
+                id="smoobu-ativo"
+                checked={smoobuAtivo}
+                onCheckedChange={(checked) => setSmoobuAtivo(checked === true)}
+              />
+            </div>
+
+            {/* Última sincronização + Importar agora */}
+            <div className="flex flex-col gap-3 rounded-md border bg-muted/30 p-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-2 text-sm">
+                <Clock className="h-4 w-4 text-muted-foreground" />
+                <span className="text-muted-foreground">Última sincronização:</span>
+                <span className="font-medium">{formatarData(ultimaSincronizacao)}</span>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleImportarPropriedades}
+                disabled={importando}
+              >
+                {importando ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                )}
+                Importar Propriedades
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Secção: Rotinas de Sincronização */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <RefreshCw className="h-5 w-5" />
+              Rotinas de Sincronização
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Toggle Sincronização Automática */}
+            <div className="flex items-center justify-between rounded-md border p-3">
+              <div className="flex items-center gap-2">
+                <RefreshCw className="h-4 w-4 text-muted-foreground" />
+                <div>
+                  <label htmlFor="sync-auto" className="cursor-pointer text-sm font-medium leading-none">
+                    Sincronização automática
+                  </label>
+                  <p className="text-xs text-muted-foreground">
+                    Um cron job corre a cada hora e sincroniza as propriedades
+                    do Smoobu com a frequência definida abaixo.
+                  </p>
+                </div>
+              </div>
+              <Checkbox
+                id="sync-auto"
+                checked={sincronizacaoAutomatica}
+                onCheckedChange={(checked) => setSincronizacaoAutomatica(checked === true)}
+              />
+            </div>
+
+            {/* Frequência */}
+            <div className="space-y-2">
+              <label htmlFor="frequencia" className="text-sm font-medium leading-none">
+                Frequência de sincronização
+              </label>
+              <select
+                id="frequencia"
+                value={frequenciaHoras}
+                onChange={(e) => setFrequenciaHoras(Number(e.target.value))}
+                className="flex h-10 w-full items-center rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+              >
+                <option value={1}>A cada 1 hora</option>
+                <option value={6}>A cada 6 horas</option>
+                <option value={12}>A cada 12 horas</option>
+                <option value={24}>Diariamente (24h)</option>
+              </select>
+              <p className="text-xs text-muted-foreground">
+                O cron job verifica a cada hora se passou o tempo desde a última
+                sincronização. Se sim, dispara uma nova importação.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Botão Guardar */}
+        <div className="flex justify-end gap-2">
+          <Button type="submit" disabled={saving}>
+            {saving ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="mr-2 h-4 w-4" />
+            )}
+            Guardar Configurações
+          </Button>
+        </div>
+      </form>
+
+      {/* Nota informativa */}
+      <div className="flex items-start gap-2 rounded-md border bg-muted/30 p-3 text-xs text-muted-foreground">
+        <Building2 className="mt-0.5 h-4 w-4 shrink-0" />
+        <div>
+          <p className="font-medium text-foreground">Arquitetura descentralizada (HF6)</p>
+          <p>
+            A configuração do Smoobu passou a viver no All2gether (não mais na
+            Nave-Mãe). Isto respeita o princípio de separation of concerns: cada
+            satélite gere as suas próprias integrações. A variável de ambiente
+            <code className="mx-1 rounded bg-muted px-1 py-0.5">SMOOBU_API_KEY</code>
+            mantém-se como fallback para retrocompatibilidade.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -250,4 +250,140 @@ router.post('/configuracoes/forcar-agenda-amanha', auth, isGestor, async (req, r
   }
 });
 
+// ----------------------------------------------------------------
+// HF6 — Configurações de Integrações e Rotinas (descentralizadas).
+// ----------------------------------------------------------------
+// A gestão da integração Smoobu (api_key, ativo) e das rotinas de
+// sincronização (frequência, estado) passou a viver no All2gether.
+// Estes endpoints permitem ao gestor configurar tudo no painel local,
+// sem depender da Nave-Mãe (Autocell).
+
+/**
+ * Máscara a API key para o GET (nunca expor em claro).
+ * Mostra só os últimos 4 chars: "••••••••1234".
+ */
+function mascararApiKey(chave) {
+  if (!chave || typeof chave !== 'string') return '';
+  if (chave.length <= 4) return '••••';
+  return '••••••••' + chave.slice(-4);
+}
+
+// GET /api/gestor/configuracoes/integracoes — lê as configurações atuais.
+router.get('/configuracoes/integracoes', auth, isGestor, async (req, res) => {
+  try {
+    const Empresa = require('../models/Empresa');
+    const empresaId = req.user && req.user.empresa_id;
+    if (!empresaId) {
+      return res.status(400).json({ erro: 'empresa_id em falta no token.' });
+    }
+    const empresa = await Empresa.findById(empresaId)
+      .select('integracoes rotinas')
+      .lean();
+    if (!empresa) {
+      return res.status(404).json({ erro: 'Empresa não encontrada.' });
+    }
+    const smoobu = empresa.integracoes?.smoobu || {};
+    const rotinas = empresa.rotinas || {};
+    return res.status(200).json({
+      smoobu: {
+        // NUNCA devolver a chave em claro — só mascarada + booleano `configurado`.
+        api_key_mascarada: mascararApiKey(smoobu.api_key),
+        configurado: Boolean(smoobu.api_key && smoobu.api_key.trim()),
+        ativo: Boolean(smoobu.ativo),
+        ultima_sincronizacao: smoobu.ultima_sincronizacao || null,
+      },
+      rotinas: {
+        sincronizacao_automatica: Boolean(rotinas.sincronizacao_automatica),
+        frequencia_horas: Number(rotinas.frequencia_horas) || 24,
+      },
+      // Indica se a env var fallback está ativa (para o frontend mostrar aviso
+      // de que a chave da BD tem prioridade).
+      env_var_ativa: Boolean(process.env.SMOOBU_API_KEY),
+    });
+  } catch (err) {
+    return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
+  }
+});
+
+// PUT /api/gestor/configuracoes/integracoes — atualiza as configurações.
+//
+// Body:
+//   {
+//     smoobu: {
+//       api_key?: string,        // nova chave (opcional — se undefined, mantém)
+//                               // se string vazia, limpa a chave.
+//       ativo?: boolean,
+//     },
+//     rotinas: {
+//       sincronizacao_automatica?: boolean,
+//       frequencia_horas?: number,  // 1, 6, 12, 24
+//     }
+//   }
+router.put('/configuracoes/integracoes', auth, isGestor, async (req, res) => {
+  try {
+    const Empresa = require('../models/Empresa');
+    const empresaId = req.user && req.user.empresa_id;
+    if (!empresaId) {
+      return res.status(400).json({ erro: 'empresa_id em falta no token.' });
+    }
+    const { smoobu, rotinas } = req.body || {};
+
+    const update = {};
+    if (smoobu) {
+      if (typeof smoobu.api_key === 'string') {
+        update['integracoes.smoobu.api_key'] = smoobu.api_key.trim();
+      }
+      if (typeof smoobu.ativo === 'boolean') {
+        update['integracoes.smoobu.ativo'] = smoobu.ativo;
+      }
+    }
+    if (rotinas) {
+      if (typeof rotinas.sincronizacao_automatica === 'boolean') {
+        update['rotinas.sincronizacao_automatica'] = rotinas.sincronizacao_automatica;
+      }
+      if (rotinas.frequencia_horas !== undefined) {
+        const freq = Number(rotinas.frequencia_horas);
+        if (!Number.isFinite(freq) || freq < 1) {
+          return res.status(400).json({ erro: 'frequencia_horas inválida (mínimo 1).' });
+        }
+        update['rotinas.frequencia_horas'] = Math.floor(freq);
+      }
+    }
+
+    if (Object.keys(update).length === 0) {
+      return res.status(400).json({ erro: 'Nenhum campo para atualizar.' });
+    }
+
+    const empresa = await Empresa.findByIdAndUpdate(
+      empresaId,
+      { $set: update },
+      { new: true }
+    )
+      .select('integracoes rotinas')
+      .lean();
+
+    if (!empresa) {
+      return res.status(404).json({ erro: 'Empresa não encontrada.' });
+    }
+
+    const smoobuAtualizado = empresa.integracoes?.smoobu || {};
+    const rotinasAtualizadas = empresa.rotinas || {};
+    return res.status(200).json({
+      message: 'Configurações de integrações guardadas com sucesso.',
+      smoobu: {
+        api_key_mascarada: mascararApiKey(smoobuAtualizado.api_key),
+        configurado: Boolean(smoobuAtualizado.api_key && smoobuAtualizado.api_key.trim()),
+        ativo: Boolean(smoobuAtualizado.ativo),
+        ultima_sincronizacao: smoobuAtualizado.ultima_sincronizacao || null,
+      },
+      rotinas: {
+        sincronizacao_automatica: Boolean(rotinasAtualizadas.sincronizacao_automatica),
+        frequencia_horas: Number(rotinasAtualizadas.frequencia_horas) || 24,
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
+  }
+});
+
 module.exports = router;

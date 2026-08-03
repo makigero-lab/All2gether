@@ -37,6 +37,7 @@ const { iniciarDailyBriefing } = require('./jobs/dailyBriefing');
 const { iniciarAgendaAmanha } = require('./jobs/agendaAmanha');
 const { iniciarCaoGuarda } = require('./jobs/caoGuarda');
 const { iniciarArquivista } = require('./jobs/arquivista');
+const { iniciarSincronizacaoSmoobu } = require('./jobs/sincronizacaoSmoobu');
 const { configurarWebPush } = require('./utils/push');
 
 const app = express();
@@ -201,6 +202,11 @@ if (require.main === module) {
       // Cron job "Arquivista": dia 1 de cada trimestre,
       // move tarefas concluídas/canceladas com mais de 3 meses para o arquivo.
       iniciarArquivista();
+
+      // HF6 — Cron job "Sincronização Smoobu": a cada hora, verifica empresas
+      // com sincronização automática ligada e dispara a importação de
+      // propriedades (futuro: reservas) quando a frequência o dita.
+      iniciarSincronizacaoSmoobu();
     })
     .catch((err) => {
       console.error('❌ Erro ao ligar ao MongoDB:', err.message);

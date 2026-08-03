@@ -1554,3 +1554,61 @@ Stage Summary:
 - **Ação operacional pendente (utilizador):** (1) garantir `SMOOBU_API_KEY` no Render (HF3); (2) deploy; (3) o gestor clica em "Importar Propriedades" no painel `/gestor/propriedades` ou `/gestor/configuracoes` para popular os `smoobu_id`. Depois disso, o webhook HF4 passa a conseguir fazer match de reservas → propriedades.
 - **Próximos passos (follow-up, NÃO neste commit):** (1) portar `sincronizarReservas` (backfill de reservas em massa — o botão "Sincronizar Reservas" em `configuracoes/page.tsx` ainda 404); (2) adicionar testes para os endpoints `/api/gestor/smoobu/propriedades` (GET e POST — mock fetch Smoobu, testar upsert, morada preservada, capacidade atualizada); (3) corrigir bug DST do scheduler (HF4 limitation).
 - **Próximo passo (este commit):** commit + push direto para `main` com a mensagem `feat(smoobu): implementa rota de importacao e sincronizacao de propriedades`.
+
+---
+
+Task ID: HF6
+Agent: Z.ai Code (Eng. Software Principal)
+Task: Migrar a gestão de integrações Smoobu e rotinas da Nave-Mãe (Autocell) para o All2gether (descentralização arquitetural — separation of concerns). Implementar schema + API + frontend + cron job + docs.
+
+Work Log:
+- **Branch:** verificado que `dev` existia no remote mas estava ~10 commits atrás de `main` (incluindo HF1-HF5). Como `dev` era ancestral de `main` (nenhum commit único em dev), fiz `git checkout dev` + `git merge --ff-only origin/main` para alinhar dev com main. Trabalho em `dev` (convenção do projeto: dev para features, main para correções produção). PUSH final para `dev`.
+- **Análise prévia:** lido `models/Empresa.js` (F0 removeu `smoobu_api_key`; HF3-HF5 usaram `process.env.SMOOBU_API_KEY` global), `routes/smoobuRoutes.js` (auth via env var), `controllers/smoobuController.js` (`obterApiKeySmoobu()` sem args), `routes/gestorRoutes.js` (já tem `/configuracoes` para nome/nif/etc.). Identificado que a página `configuracoes/page.tsx` existente tenta ler `smoobu_api_key_mascarada` do `GET /configuracoes` (que não suporta esse campo) — campos residuais não funcionais.
+- **Decisão de design:** usar sub-documentos em `Empresa` (não criar modelo `Configuracoes` separado, nem campos flat com prefixo). `integracoes.smoobu` agrupa a integração (extensível a futuras: Airbnb, Booking); `rotinas` agrupa a config de sync automática. Mantém tudo numa coleção (query simples), separa conceitualmente.
+- **Schema `models/Empresa.js`:** adicionados sub-documentos:
+  - `integracoes.smoobu` → `{ api_key: String default '', ativo: Boolean default false, ultima_sincronizacao: Date default null }`.
+  - `rotinas` → `{ sincronizacao_automatica: Boolean default false, frequencia_horas: Number min 1 default 24 }`.
+  - Cabeçalho atualizado (F0 → HF6, nota de descentralização).
+- **`controllers/smoobuController.js`:**
+  - `obterApiKeySmoobu(empresaId)` agora é **async**, lê da Empresa (se `integracoes.smoobu.ativo === true` e api_key preenchida) com fallback a `process.env.SMOOBU_API_KEY`; devolve `{ chave, origem }` onde `origem ∈ {'empresa','env',null}` para diagnóstico.
+  - `enriquecerReservaSmoobu(reservaId, empresaId)` — aceita `empresaId` para resolver a chave da BD.
+  - `processarReservaSmoobu(payload, empresaId)` — propaga `empresaId` ao enriquecimento.
+  - `processarWebhookSmoobu(payload, webhookLogId, empresaId)` — propaga `empresaId` ao dispatcher.
+  - `getPropriedadesSmoobu` e `importarPropriedades` — passam `req.user.empresa_id` ao `obterApiKeySmoobu` e leem `.chave` do retorno.
+- **`routes/smoobuRoutes.js` — auth descentralizada:**
+  - Nova função `validarChaveSmoobu(chaveRecebida)` que: (1) procura empresa ativa com `integracoes.smoobu.ativo === true && integracoes.smoobu.api_key === chave`; (2) fallback a `process.env.SMOOBU_API_KEY`; (3) modo dev se ambas falharem; (4) 'rejeitado' se chave não bate com nenhuma.
+  - Devolve `{ empresaId, origem }` — `empresaId` da empresa que matchou (prioridade sobre match por propriedade).
+  - Substituído o bloco `if (SMOOBU_API_KEY) {...}` por `validarChaveSmoobu()`. Logs diferenciados por origem (empresa/env/dev/rejeitado).
+  - `empresaId` resolvido: prioridade `auth.empresaId` (se veio da BD) > `resolverEmpresaIdDoPayload` (match por propriedade).
+- **Novo endpoint `GET/PUT /api/gestor/configuracoes/integracoes`** (`routes/gestorRoutes.js`):
+  - **GET** — lê `integracoes + rotinas` da empresa; devolve `smoobu.api_key_mascarada` (`••••••••1234`, NUNCA em claro) + `configurado: boolean` + `ativo` + `ultima_sincronizacao` + `rotinas` + `env_var_ativa` (para o frontend mostrar aviso).
+  - **PUT** — aceita `smoobu.api_key` (undefined = mantém, "" = limpa), `smoobu.ativo`, `rotinas.sincronizacao_automatica`, `rotinas.frequencia_horas` (valida min 1); usa `$set` com dot notation (`integracoes.smoobu.api_key`) para atualizar sub-documentos sem reescrever todo o doc; devolve o estado atualizado (mascarado).
+  - Helper `mascararApiKey(chave)` partilhado entre GET e PUT.
+- **Novo cron job `jobs/sincronizacaoSmoobu.js`:**
+  - `executarSincronizacaoSmoobu()` — procura empresas com `sincronizacao_automatica === true && integracoes.smoobu.ativo === true && api_key != ''`; para cada, verifica se `ultima_sincronizacao + frequencia_horas < agora`; se sim, chama `importarPropriedades` (placeholder — `sincronizarReservas` real é follow-up) via req/res fake; atualiza `ultima_sincronizacao`; try/catch por empresa (uma falha não para as outras).
+  - `iniciarSincronizacaoSmoobu()` — agenda cron `15 * * * *` (cada hora, no minuto 15 para evitar colisão com outros jobs).
+  - Montado em `server.js` após `iniciarArquivista()`.
+- **Frontend — nova página `/gestor/configuracoes/integracoes`:**
+  - `frontend/src/app/gestor/configuracoes/integracoes/page.tsx` — página client component com:
+    - **Secção "Integração Smoobu"**: input password para nova chave (toggle Substituir/Limpar/Cancelar), mostra mascarada + Badge "Configurada"/"Por configurar", Checkbox "Integração ativa", indicador "Última sincronização: <data pt-PT>", botão "Importar Propriedades" (chama `POST /api/gestor/smoobu/propriedades` e recarrega).
+    - **Secção "Rotinas de Sincronização"**: Checkbox "Sincronização automática", `<select>` nativo de frequência (1h/6h/12h/24h).
+    - **Avisos**: toast sucesso/erro (6s), aviso âmbar se `env_var_ativa` (a chave da BD tem prioridade), nota informativa sobre arquitetura descentralizada.
+    - Comunica via `adminGet`/`adminPut`/`adminPost` de `@/lib/api` (que usam o proxy `/api/gestor/[...path]`).
+  - **Adaptado aos componentes UI disponíveis**: o projeto só tem `dialog, avatar, tabs, checkbox, card, separator, button, badge, textarea, input` — NÃO tem `label`, `switch`, `select` shadcn. Usei `<label>` HTML nativo, `Checkbox` para toggles, `<select>` nativo com classes Tailwind.
+  - **Sidebar `gestor-sidebar.tsx`**: adicionado item `{ label: "Integrações", href: "/gestor/configuracoes/integracoes", icon: Plug }` + import do ícone `Plug` do lucide-react.
+- **`.env.example`**: atualizada a secção `SMOOBU_API_KEY` com nota HF6 (fonte de verdade passou a ser a BD; env var é fallback; 3 níveis de prioridade: BD → env → dev).
+- **Validação:**
+  - Backend: `node --check` ✓ em `models/Empresa.js`, `controllers/smoobuController.js`, `routes/smoobuRoutes.js`, `routes/gestorRoutes.js`, `jobs/sincronizacaoSmoobu.js`, `server.js`; `NODE_ENV=test npx jest` → **111/111 testes passam** ✓ (sub-documentos opcionais com defaults não partiram testes existentes).
+  - Frontend: `npx tsc --noEmit` → 0 erros ✓; `npx next lint` → "No ESLint warnings or errors" ✓.
+- **Documentação atualizada:** `docs/BACKEND.md` (changelog HF6) · `docs/FRONTEND.md` (changelog HF6) · `backend/.env.example` (nota de prioridade HF6) · esta entrada no `WORKLOG.md`.
+
+Stage Summary:
+- **Descentralização arquitetural concluída:** a gestão da integração Smoobu (api_key, ativo) e das rotinas de sincronização (frequência, estado) passam a viver no All2gether (BD `Empresa.integracoes.smoobu` + `Empresa.rotinas`), em vez de na Nave-Mãe (Autocell). Respeita o princípio de separation of concerns.
+- **Segurança:** a API key NUNCA é exposta em claro no GET (mascarada `••••••••1234` + booleano `configurado`); o PUT aceita string vazia para limpar; auth do webhook agora valida contra empresas ativas (multi-tenant safe) com fallback a env var.
+- **Retrocompatibilidade:** env var `SMOOBU_API_KEY` mantém-se como fallback (3 níveis: BD → env → dev). Empresas existentes sem config continuam a funcionar via env var; migração gradual.
+- **Cron job automático:** `sincronizacaoSmoobu` corre a cada hora, sincroniza empresas com `sincronizacao_automatica + smoobu.ativo` quando `ultima_sincronizacao + frequencia_horas < agora`. Placeholder: chama `importarPropriedades` (o `sincronizarReservas` real é follow-up HF5).
+- **Frontend:** nova página `/gestor/configuracoes/integracoes` com formulário limpo (2 secções: Smoobu + Rotinas) + item sidebar "Integrações". Adaptado aos componentes UI disponíveis (sem Switch/Label/Select shadcn — usa Checkbox + nativos).
+- **Branch:** trabalho em `dev` (alinhado com main via fast-forward). PUSH para `dev` (convenção: features em dev, correções em main). Os HF1-HF5 foram para main por instrução explícita do utilizador; este HF6 vai para dev por a instrução ter sido "branch apropriada (ex: dev para novas features)".
+- **Ação operacional pendente (utilizador):** (1) deploy do backend no Render (a env var `SMOOBU_API_KEY` continua como fallback); (2) deploy do frontend na Vercel; (3) o gestor entra em `/gestor/configuracoes/integracoes`, cola a API key do Smoobu, ativa a integração, e (opcional) liga a sincronização automática. A partir daí, o webhook valida contra a chave da BD (não mais a env var).
+- **Próximos passos (follow-up, NÃO neste commit):** (1) portar `sincronizarReservas` (backfill de reservas em massa — botão "Sincronizar Reservas" em `configuracoes/page.tsx` ainda 404; o cron job HF6 chama `importarPropriedades` como placeholder); (2) adicionar testes para `GET/PUT /api/gestor/configuracoes/integracoes` e para o job `sincronizacaoSmoobu`; (3) adicionar um botão "Testar Conexão" na página (faz `GET /api/gestor/smoobu/propriedades` para validar a chave); (4) corrigir bug DST do scheduler (HF4 limitation); (5) quando `dev` estiver estável, fazer merge/PR para `main`.
+- **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat: migra gestão de integrações Smoobu e rotinas para o All2gether`.
