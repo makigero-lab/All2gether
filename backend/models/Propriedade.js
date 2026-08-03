@@ -2,14 +2,24 @@
  * Modelo: Propriedade (Alojamento Local / Airbnb)
  * Representa um apartamento ou unidade de alojamento gerida pela empresa.
  *
- * F0: Removido smoobu_id (integração Smoobu eliminada).
+ * HF4 — smoobu_id re-introduzido (integração Smoobu reativada). Usado pelo
+ * webhook /api/smoobu/webhook para fazer match entre o apartamento Smoobu
+ * (payload.data.apartment.id) e a Propriedade local. Opcional — propriedades
+ * criadas manualmente (sem origem Smoobu) ficam com smoobu_id = null.
  */
 const mongoose = require('mongoose');
 
 const propriedadeSchema = new mongoose.Schema(
   {
-    // F0 — smoobu_id removido (integração Smoobu eliminada).
-    // O identificador único é (empresa_id + nome).
+    // HF4 — Identificador do apartamento no Smoobu (string, coercido).
+    // Usado para match no webhook. Opcional (propriedades manuais não têm).
+    smoobu_id: {
+      type: String,
+      default: null,
+      trim: true,
+      index: true,
+      sparse: true,
+    },
     nome: {
       type: String,
       required: true,

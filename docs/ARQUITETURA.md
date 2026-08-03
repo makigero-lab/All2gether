@@ -153,7 +153,7 @@ tarefaSchema = {
 - **`Ausencia`** — indisponibilidades do staff (férias, doença, formação). Estados: `pendente`, `aprovada`, `rejeitada`, `cancelada`.
 - **`ModeloChecklist`** — templates de checklist reutilizáveis por propriedade (Prompt 133-135).
 - **`Notificacao`** — notificações in-app (tipos: `tarefa_atribuida`, `tarefa_reatribuida`, `tarefa_cancelada`, `aviso`, `sistema`).
-- **`WebhookLog`** — registo de payloads de webhooks para auditoria. O endpoint `POST /api/smoobu/webhook` (HF3) grava aqui os payloads recebidos do Smoobu (best-effort, nunca crasha). A conversão reserva→tarefa foi removida em F0 e fica como follow-up.
+- **`WebhookLog`** — registo de payloads de webhooks para auditoria. O endpoint `POST /api/smoobu/webhook` (HF3) grava aqui os payloads recebidos do Smoobu (best-effort, nunca crasha). A conversão reserva→tarefa foi recuperada do histórico Git e reativada em HF4 (`controllers/smoobuController.js`), que atualiza o `status` do log para `processado`/`erro`.
 - **`TarefaArquivo`** — cópia de tarefas arquivadas (>3 meses).
 - **`Auditoria`** — registo de ações administrativas.
 

@@ -5,15 +5,13 @@
  * Alojamento Local). O Smoobu envia eventos de reserva (criação, atualização,
  * cancelamento) para este endpoint quando configurado no painel do Smoobu.
  *
- * F0 (histórico): a antiga integração Smoobu (que convertia reservas em
- * tarefas de limpeza automaticamente via `criarTarefaPorReserva`) foi
- * removida. O modelo `WebhookLog` foi mantido precisamente para esta
- * re-integração. Esta versão implementa a camada de RECEÇÃO + LOG
- * (auditoria) — o processamento de reservas em tarefas é uma funcionalidade
- * separada (ver WORKLOG.md, Task HF3 — Próximos passos).
+ * HF3: criado o recetor/logger (auth SMOOBU_API_KEY + WebhookLog best-effort).
+ * HF4: integrada a lógica de conversão de reservas em tarefas (controller
+ *   smoobuController.js). Padrão anti-timeout do Smoobu: resposta 200
+ *   IMEDIATA + processamento assíncrono via setImmediate.
  *
  * Segurança:
- *   - Autenticação via env var `SMOOBU_API_KEY`. O Smoobu deve enviar a
+ *   - Autenticação via env var `SMOOOBU_API_KEY`. O Smoobu deve enviar a
  *     chave num dos headers suportados: `X-Smoobu-Api-Key`, `Api-Key` ou
  *     `Authorization: Bearer <key>` (flexível — o Smoobu permite configurar
  *     o header no painel).
@@ -25,8 +23,11 @@
  *   - O payload é sempre gravado em `WebhookLog` num bloco try/catch —
  *     uma falha na BD NUNCA aborta o pedido (o Smoobu faria retry em cadeia).
  *   - Devolve sempre 200 para pedidos autenticados (webhook best practice —
- *     o Smoobu para de fazer retries em 2xx). Erros de processamento futuro
- *     ficarão registados em `WebhookLog.status = 'erro'` para reprocesso.
+ *     o Smoobu para de fazer retries em 2xx). Erros de processamento ficam
+ *     registados em `WebhookLog.status = 'erro'` para reprocesso.
+ *   - O processamento de conversão reserva→tarefa corre ASSINCRONAMENTE
+ *     (setImmediate) depois do 200 ser enviado — o Smoobu cancela pedidos
+ *     demorados (>~10s), pelo que NUNCA podemos bloquear a resposta.
  *
  * Rate limiting:
  *   - A rota `/api/smoobu` está ISENTA do rate limiter global (100 req/15min)
@@ -37,6 +38,8 @@
 
 const express = require('express');
 const WebhookLog = require('../models/WebhookLog');
+const Propriedade = require('../models/Propriedade');
+const { extrairDadosReserva } = require('../controllers/smoobuController');
 
 const router = express.Router();
 
@@ -49,9 +52,6 @@ const SMOOBU_API_KEY = process.env.SMOOBU_API_KEY;
  *   - X-Smoobu-Api-Key  (header custom, mais comum)
  *   - Api-Key           (header genérico)
  *   - Authorization: Bearer <key>  (standard OAuth/Bearer)
- *
- * @param {import('express').Request} req
- * @returns {string | null} a chave extraída, ou null se não vier no pedido.
  */
 function extrairApiKey(req) {
   const xSmoobu = req.get('X-Smoobu-Api-Key');
@@ -69,13 +69,32 @@ function extrairApiKey(req) {
 }
 
 /**
+ * Resolve o empresa_id a partir do payload (best-effort, para o WebhookLog).
+ * Procura a propriedade pelo smoobu_id extraído do payload. Se não encontrar,
+ * devolve null (o log fica sem empresa — não bloqueia o processamento).
+ */
+async function resolverEmpresaIdDoPayload(payload) {
+  try {
+    const { smoobuPropId } = extrairDadosReserva(payload);
+    if (!smoobuPropId) return null;
+    const prop = await Propriedade.findOne({ smoobu_id: smoobuPropId })
+      .select('empresa_id')
+      .lean();
+    return prop?.empresa_id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * POST /api/smoobu/webhook
  *
  * Recebe um evento do Smoobu, valida a autenticação, grava o payload no
- * `WebhookLog` (best-effort) e devolve 200.
+ * `WebhookLog` (best-effort), devolve 200 IMEDIATO, e dispara o
+ * processamento assíncrono de conversão reserva→tarefa via setImmediate.
  *
  * Respostas:
- *   - 200: payload recebido e gravado (ou gravado com warning de log).
+ *   - 200: payload recebido e gravado (processamento decorre em background).
  *   - 401: autenticação falhou (SMOOBU_API_KEY definida mas chave recebida
  *          não corresponde). O payload rejeitado É gravado no WebhookLog
  *          (status='erro') para auditoria.
@@ -87,8 +106,6 @@ router.post('/webhook', async (req, res) => {
   const timestampRececao = new Date().toISOString();
 
   // 1. Autenticação.
-  //    Se SMOOBU_API_KEY estiver definida, valida a chave recebida.
-  //    Se NÃO estiver definida (dev), aceita mas avisa (NÃO usar em prod).
   if (SMOOBU_API_KEY) {
     const chaveRecebida = extrairApiKey(req);
     if (!chaveRecebida || chaveRecebida !== SMOOBU_API_KEY) {
@@ -117,21 +134,25 @@ router.post('/webhook', async (req, res) => {
     );
   }
 
-  // 2. Grava o payload no WebhookLog (best-effort — NUNCA crasha o pedido).
+  // 2. Resolve empresa_id (best-effort, para o WebhookLog) — NÃO bloqueia.
+  const empresaId = await resolverEmpresaIdDoPayload(payloadRecebido);
+
+  // 3. Grava o payload no WebhookLog (best-effort — NUNCA crasha o pedido).
   let webhookLogId = null;
   try {
     const log = await WebhookLog.create({
       payload: payloadRecebido,
       status: 'recebido',
+      empresa_id: empresaId || undefined,
     });
     webhookLogId = log._id;
     console.log(
-      `📥 [Smoobu Webhook] payload recebido e gravado (WebhookLog=${log._id}).`
+      `📥 [Smoobu Webhook] payload recebido e gravado (WebhookLog=${log._id}${
+        empresaId ? `, empresa=${empresaId}` : ''
+      }).`
     );
   } catch (logErr) {
     // O log falhou, mas o pedido NÃO deve crashar — o Smoobu faria retry.
-    // Devolve 200 mesmo assim: o serviço continua disponível e o erro fica
-    // no log do servidor para investigação.
     console.error(
       '⚠️  [Smoobu Webhook] falha ao gravar WebhookLog:',
       logErr.message
@@ -143,33 +164,46 @@ router.post('/webhook', async (req, res) => {
     });
   }
 
-  // 3. Processamento — PLACEHOLDER (F0).
-  //    A conversão de reservas Smoobu em tarefas de limpeza foi removida em
-  //    F0. Re-implementar requer: mapear o payload Smoobu → Propriedade
-  //    existente (match por smoobu_id/morada) + detalhes_reserva (checkin,
-  //    checkout, pax, nome_hospede) + chamar o load balancer para atribuir
-  //    staff. Ver WORKLOG.md Task HF3 — Próximos passos.
-  //    Por agora: marca como 'processado' (receção confirmada, sem ação de
-  //    domínio). Os payloads ficam disponíveis em WebhookLog para reprocesso
-  //    assim que a lógica de conversão existir.
-  try {
-    await WebhookLog.findByIdAndUpdate(webhookLogId, {
-      status: 'processado',
-    });
-  } catch (updateErr) {
-    // Não-crítico: o payload já está gravado como 'recebido'.
-    console.error(
-      '⚠️  [Smoobu Webhook] falha ao marcar como processado:',
-      updateErr.message
-    );
-  }
-
-  // 4. Devolve 200 — webhook best practice (o Smoobu para de fazer retries).
-  return res.status(200).json({
+  // 4. Devolve 200 IMEDIATO (anti-timeout do Smoobu). O processamento
+  //    de conversão reserva→tarefa corre assincronamente via setImmediate.
+  //    Isto é CRÍTICO: o Smoobu cancela pedidos demorados (>~10s) e faz
+  //    retry, o que levaria a tarefas duplicadas. Respondendo 200 primeiro
+  //    e processando depois, garantimos que o Smoobu não reenvia.
+  res.status(200).json({
     recebido: true,
     log_id: webhookLogId,
     timestamp: timestampRececao,
   });
+
+  // 5. Processamento assíncrono (fire-and-forget).
+  //    setImmediate garante que o loop de eventos envia o 200 ANTES de
+  //    iniciar o processamento pesado (load balancer, REST API do Smoobu,
+  //    criação de tarefa, notificações).
+  if (webhookLogId) {
+    setImmediate(async () => {
+      // require inline para evitar dependência circular no arranque e
+      // permitir que o controller use os modelos já carregados.
+      const { processarWebhookSmoobu } = require('../controllers/smoobuController');
+      try {
+        await processarWebhookSmoobu(payloadRecebido, webhookLogId, empresaId);
+      } catch (err) {
+        // Captura de segurança extra — processarWebhookSmoobu já tem o seu
+        // próprio try/catch, mas isto garante que NUNCA há unhandledRejection.
+        console.error(
+          '❌ [Smoobu Webhook] erro não capturado no processamento assíncrono:',
+          err.message
+        );
+        try {
+          await WebhookLog.findByIdAndUpdate(webhookLogId, {
+            status: 'erro',
+            erro_msg: `Erro não capturado: ${err.message}`,
+          });
+        } catch {
+          /* já fizemos o que podíamos */
+        }
+      }
+    });
+  }
 });
 
 module.exports = router;

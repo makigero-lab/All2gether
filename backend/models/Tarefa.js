@@ -2,7 +2,10 @@
  * Modelo: Tarefa (Limpeza/Manutenção de Alojamento Local)
  * Representa uma tarefa atribuída a um utilizador (staff).
  *
- * F0: Removido smoobu_reserva_id (integração Smoobu eliminada).
+ * HF4 — smoobu_reserva_id re-introduzido (integração Smoobu reativada).
+ * Usado para idempotência: o webhook procura tarefas existentes por este
+ * campo antes de criar duplicados. Opcional — tarefas criadas manualmente
+ * (sem origem Smoobu) ficam com smoobu_reserva_id = null.
  *
  * - utilizador_id pode ser null (tarefa por atribuir).
  * - tempo_limpeza_minutos é a unidade usada no cálculo de carga (load balancing).
@@ -24,7 +27,17 @@ const tarefaSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
-    // F0 — smoobu_reserva_id removido (integração Smoobu eliminada).
+    // HF4 — ID da reserva no Smoobu (string, coercido). Usado para
+    // idempotência no webhook (evita criar tarefas duplicadas para a mesma
+    // reserva) e para cancelamento/atualização quando o Smoobu envia
+    // eventos de update/cancel. Opcional (tarefas manuais não têm).
+    smoobu_reserva_id: {
+      type: String,
+      default: null,
+      trim: true,
+      index: true,
+      sparse: true,
+    },
     utilizador_id: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Utilizador',
@@ -114,8 +127,9 @@ const tarefaSchema = new mongoose.Schema(
         ],
       },
     ],
-    // F0 — detalhes_reserva mantido (dados da reserva de Alojamento Local:
-    // check-in/check-out, hóspede). O sub-campo smoobu_reserva_id foi removido.
+    // detalhes_reserva mantido (dados da reserva de Alojamento Local:
+    // check-in/check-out, hóspede). Preenchido pelo webhook Smoobu (HF4)
+    // ou manualmente pelo gestor (criarTarefa com hora/hospedes).
     detalhes_reserva: {
       // Data/hora de check-in (ISO string ou YYYY-MM-DD).
       checkin: { type: String, default: null },

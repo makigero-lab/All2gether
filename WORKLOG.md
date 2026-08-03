@@ -1466,3 +1466,48 @@ Stage Summary:
 - **Rate limiter:** `/api/smoobu` isento do global (100/15min) porque webhooks M2M burstar de IP único; auth via API key substitui a proteção.
 - **Próximos passos (follow-up, NÃO neste commit):** (1) re-implementar `criarTarefaPorReserva` mapeando payload Smoobu → Propriedade (match por `smoobu_id`/morada) + `detalhes_reserva` + load balancer; (2) adicionar testes para o endpoint `/api/smoobu/webhook` (auth válida/inválida, payload gravado, modo dev).
 - **Próximo passo (este commit):** commit + push direto para `main` com a mensagem `feat(smoobu): configura endpoint de webhooks e injecao da api key`.
+
+---
+
+Task ID: HF4
+Agent: Z.ai Code (Eng. Software Principal)
+Task: Recuperar a lógica complexa de conversão de reservas Smoobu em tarefas (removida em F0) via arqueologia Git, e reimplementá-la adaptada à nova rota `/api/smoobu/webhook` (criada em HF3). Objetivo: o webhook volta a gerar/atualizar tarefas automaticamente, com as mesmas regras preciosas do passado.
+
+Work Log:
+- Atualizado o clone local: `git pull origin main` (incorporou HF3 `ccde345`).
+- **Arqueologia Git:**
+  - `git log --grep="smoobu\|F0" -i` → identificado o commit F0: `bd14ca8 feat(F0): rename Autocell→FisioCell + remoção completa Smoobu`. Commit imediatamente anterior (último com Smoobu intacto): `681f807` (Prompt 140).
+  - `git show --name-status bd14ca8 | grep "^D"` → 3 ficheiros JS removidos: `controllers/smoobuController.js` (826 linhas), `controllers/webhookController.js` (1235 linhas), `routes/webhookRoutes.js` (13 linhas).
+  - Recuperados via `git show 681f807:<path> > /tmp/smoobu-recovery/<file>` (2074 linhas totais).
+- **Análise exaustiva via subagent (Explore, Task HF4-research):** leu os 3 ficheiros + WORKLOG e devolveu relatório estruturado com: estrutura geral, `criarTarefaPorReserva` passo-a-passo (11 passos), schema do payload Smoobu (dezenas de variantes de campos), regra do check-out (tarefa no departure, não arrival), cancelamento soft delete, atualização revalida disponibilidade, 4 campos removidos em F0 (`Propriedade.smoobu_id`, `Tarefa.smoobu_reserva_id`, `Tarefa.detalhes_reserva.smoobu_reserva_id`, `Empresa.smoobu_api_key`), integrações com `utils/scheduler` e `utils/notificar`, tratamento de erros/idempotência, eventos suportados (CRIAR/ATUALIZAR/CANCELAR), regras preciosas (timezone, SLA 480min, Algoritmo VIP, snapshot checklist_dinamica, truncagem nome_hospede, setImmediate anti-timeout).
+- **Confirmação de compatibilidade:** li os schemas atuais (`Tarefa.js`, `Propriedade.js`), `utils/loadBalancer.js` e `utils/scheduler.js`. Confirmei que: `determinarUtilizadorAtribuido(empresaId, range, coordenadas, tempo, propriedadeId)` tem a MESMA assinatura do código inline antigo (Algoritmo VIP + SLA 480min + Haversine + guardas NaN); `scheduler.js` exporta `obterRangeDia`, `calcularInicioTarefaUtilizador`, `calcularTempoViagem`, `CAPACIDADE_MAXIMA_MINUTOS`; `ModeloChecklist` tem `seccoes: [{ nome, items: [String] }]`. → Posso reutilizar `utils/loadBalancer.js` em vez de portar a lógica inline.
+- **Decisões de arquitetura:**
+  1. Recriar 2 campos no schema (não recriar `Empresa.smoobu_api_key` — projeto é single-tenant satélite, uso `process.env.SMOOBU_API_KEY` global).
+  2. Novo `controllers/smoobuController.js` (não recriar o `webhookController.js` legacy de 1235 linhas — porto só a lógica de conversão, adaptada).
+  3. Reutilizar `utils/loadBalancer.js` (DRY — não duplicar a lógica inline do original).
+  4. Manter a rota HF3 (`routes/smoobuRoutes.js`) com auth `SMOOBU_API_KEY` — apenas substituir o placeholder por chamada ao controller.
+  5. Padrão anti-timeout Smoobu: resposta 200 imediata + `setImmediate` → `processarWebhookSmoobu`.
+- **Recriação de schema:**
+  - `models/Propriedade.js`: adicionado `smoobu_id` (String, default null, trim, index, sparse). Cabeçalho atualizado (F0 → HF4).
+  - `models/Tarefa.js`: adicionado `smoobu_reserva_id` (String, default null, trim, index, sparse). Cabeçalho + comentário de `detalhes_reserva` atualizados.
+- **Criado `backend/controllers/smoobuController.js`** (~530 linhas) com 7 funções exportadas:
+  - `extrairDadosReserva(payload)` — port direto, defensivo (cobre `guestName`/`guest_name`/`guest-name`/`guest.name`/`firstName+lastName` e variants de apartment.id, arrival, departure, guests, id).
+  - `enriquecerReservaSmoobu(reservaId)` — GET REST API Smoobu (`https://login.smoobu.com/api/reservations/{id}`) com `AbortSignal.timeout(15000)`, fallback gracioso a null.
+  - `criarTarefaPorReserva(...)` — 11 passos: idempotência por `smoobu_reserva_id` (reativa se cancelada), match por `Propriedade.smoobu_id`, valida `ativo` + `Empresa.ativa`, calcula tempo limpeza (payload > propriedade > 45), load balancer (best-effort), scheduler (best-effort, fallback 10:00 UTC), snapshot `checklist_dinamica`, 3 estados iniciais (`atribuida`/`nao_atribuida`/`por_atribuir`), `Tarefa.create`, notificação fire-and-forget.
+  - `cancelarTarefaPorReserva(reservaId)` — soft delete (`estado='cancelada'`, `utilizador_id=null`), idempotente, mantém histórico.
+  - `atualizarTarefaPorReserva(...)` — atualiza data/propriedade/detalhes, reativa se cancelada, revalida disponibilidade do staff no novo dia (folgas + ausências) sem shuffle do load balancer; tarefas `concluida` intocáveis.
+  - `processarReservaSmoobu(payload)` — dispatcher: extrai dados → cancela (se ACOES_CANCELAR) → enriquece (se faltar departure/nome_hospede) → atualiza (se ACOES_ATUALIZAR e existe) → cria (fallback). Data = departure || arrival.
+  - `processarWebhookSmoobu(payload, webhookLogId, empresaId)` — orquestra try/catch + atualiza `WebhookLog` para `processado`/`erro`.
+- **Atualizado `backend/routes/smoobuRoutes.js`:** mantida auth `SMOOBU_API_KEY` (HF3); adicionada `resolverEmpresaIdDoPayload` (best-effort via match de propriedade); resposta 200 IMEDIATA antes do processamento; `setImmediate(async () => processarWebhookSmoobu(...))` com try/catch de segurança extra para evitar `unhandledRejection`. Require inline do controller (evita dependência circular no arranque).
+- **Validação:** `node --check` ✓ em todos os 4 ficheiros modificados; `NODE_ENV=test npx jest` → **111/111 testes passam** ✓ (a recriação dos campos opcionais `smoobu_id`/`smoobu_reserva_id` com sparse index + default null não partiu testes existentes).
+- **Documentação atualizada:** `docs/BACKEND.md` (nota de rebranding + nota F0/HF3/HF4 + entrada no changelog) · `docs/ARQUITETURA.md` (linha do `WebhookLog`) · esta entrada no `WORKLOG.md`.
+
+Stage Summary:
+- **Arqueologia Git bem-sucedida:** commit F0 (`bd14ca8`) identificado; 3 ficheiros (2074 linhas) recuperados do commit `681f807`; regras de negócio extraídas via subagent.
+- **Reutilização em vez de duplicação:** `utils/loadBalancer.js` existente tem a mesma assinatura da lógica inline antiga — usei-o em vez de portar 200+ linhas de código de load balancing duplicado.
+- **Regras preciosas preservadas (todas):** tarefa no dia do CHECK-OUT (não check-in); 1 tarefa por reserva; enriquecimento via REST API se faltar departure/nome_hospede; fallback para arrival; idempotência por `smoobu_reserva_id`; cancelamento soft delete (liberta staff, mantém histórico); atualização revalida disponibilidade sem shuffle; 3 estados iniciais (`atribuida`/`nao_atribuida`/`por_atribuir`); snapshot `checklist_dinamica`; Algoritmo VIP; SLA 480min; notificação fire-and-forget; resposta 200 imediata + `setImmediate` (anti-timeout Smoobu).
+- **Schema:** 2 campos recriados (`Propriedade.smoobu_id`, `Tarefa.smoobu_reserva_id`), opcionais + sparse index + default null — não partiu testes existentes.
+- **Limitação conhecida (NÃO bloqueante):** o scheduler assume 10:00 UTC = 11:00 local (UTC+1 fixo, Portugal inverno). No verão (WEST = UTC+1), 10:00 UTC = 11:00 local — coincide. No inverno (WET = UTC+0), 10:00 UTC = 10:00 local — 1h cedo. Bug herdado do original; corrigir DST é refactor separado (WORKLOG Prompt 128 já tem helper de offset Lisboa que podia ser aplicado aqui).
+- **Ação operacional pendente (utilizador):** (1) garantir que o Render tem `SMOOBU_API_KEY` definida (HF3); (2) fazer deploy; (3) **importar/sincronizar propriedades Smoobu** para que `Propriedade.smoobu_id` seja preenchido (sem isto, o match falha com "Propriedade Smoobu X não encontrada"). A sincronização de propriedades (que existia no `smoobuController` legacy) não foi portada neste commit — é um follow-up (ver Próximos passos).
+- **Próximos passos (follow-up, NÃO neste commit):** (1) portar `sincronizarPropriedades` / `importarPropriedades` do `smoobuController` legacy (para popular `Propriedade.smoobu_id`); (2) portar `sincronizarReservas` (backfill em massa); (3) adicionar testes para o endpoint `/api/smoobu/webhook` (auth válida/inválida, criar tarefa, cancelar, atualizar, idempotência, modo dev); (4) corrigir bug DST do scheduler (usar helper `Intl.DateTimeFormat` do Prompt 128).
+- **Próximo passo (este commit):** commit + push direto para `main` com a mensagem `feat(smoobu): recupera e moderniza logica complexa de conversao de reservas em tarefas`.
