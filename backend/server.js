@@ -32,6 +32,7 @@ const authRoutes = require('./routes/authRoutes');
 const ausenciaRoutes = require('./routes/ausenciaRoutes');
 const relatorioRoutes = require('./routes/relatorioRoutes');
 const staffRoutes = require('./routes/staffRoutes');
+const smoobuRoutes = require('./routes/smoobuRoutes');
 const { iniciarDailyBriefing } = require('./jobs/dailyBriefing');
 const { iniciarAgendaAmanha } = require('./jobs/agendaAmanha');
 const { iniciarCaoGuarda } = require('./jobs/caoGuarda');
@@ -68,12 +69,16 @@ app.use(express.json());
 // Rate limiting global: 100 pedidos por IP a cada 15 minutos.
 // Em ambiente de teste (Jest) o limite é desativado para não bloquear
 // os testes de integração que fazem centenas de pedidos seguidos.
+// EXCEÇÃO: /api/smoobu — webhooks M2M do Smoobu chegam de um IP único e
+// podem burstar (várias reservas em poucos minutos). A autenticação via
+// SMOOBU_API_KEY substitui a proteção anti-abuso do rate limiter nessa rota.
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: process.env.NODE_ENV === 'test' ? Infinity : 100,
   standardHeaders: true,
   legacyHeaders: false,
   message: { erro: 'Muitos pedidos. Tente novamente mais tarde.' },
+  skip: (req) => req.path.startsWith('/api/smoobu'),
 });
 app.use('/api/', globalLimiter);
 
@@ -116,6 +121,11 @@ app.use('/api/admin', adminRoutes);
 
 // Staff — gestão das próprias ausências (pedidos de férias/doença).
 app.use('/api/staff', staffRoutes);
+
+// Smoobu — receção de webhooks INBOUND (reservas de Alojamento Local).
+// Endpoint público (autentica via SMOOBU_API_KEY no header, NÃO via JWT).
+// O rate limiter global está ISENTO para esta rota (ver skip acima).
+app.use('/api/smoobu', smoobuRoutes);
 
 /* ------------------------------------------------------------------ */
 /* Middleware global de tratamento de erros                            */

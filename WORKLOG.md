@@ -1430,3 +1430,39 @@ Stage Summary:
 - **Sem protocolo hardcoded:** o `new URL(path, base)` usa o protocolo da env var; se esta tiver `https://`, funciona; se não tiver protocolo, lança → null → 502 diagnosável.
 - **Ação operacional pendente (NÃO é código):** a env var `NEXT_PUBLIC_API_URL` na Vercel aponta para `autocell-kv5g.onrender.com` (host antigo do Autocell) — deve ser corrigida para `https://all2gether-backend.onrender.com` e feito novo deploy. A correção de código blinda contra URLs malformados, mas não resolve um host destino morto.
 - **Próximo passo:** commit + push direto para `main` com a mensagem `fix(proxy): corrige construcao do url de destino no proxy para evitar 502`.
+
+---
+
+Task ID: HF3
+Agent: Z.ai Code (Eng. Software Principal)
+Task: Configurar endpoint de webhooks Smoobu (`POST /api/smoobu/webhook`) + injeção da API key. Garantir que `WebhookLog` regista entradas sem crashar. O utilizador configurou o Smoobu para apontar para `https://all2gether.onrender.com/api/smoobu/webhook` e colocou o Token de API no Render.
+
+Work Log:
+- Atualizado o clone local: `git pull origin main` (incorporou HF2 `d552b69`).
+- Análise prévia rigorosa (CRÍTICA — conflito arquitetural detectado):
+  - `backend/routes/` tem só 6 ficheiros — **nenhum `smoobuRoutes.js`**. `server.js` não monta `/api/smoobu`.
+  - `backend/models/WebhookLog.js` (linhas 6-7): *"F0: A integração Smoobu foi removida, mas este modelo mantém-se para futuras integrações"*.
+  - `docs/BACKEND.md` (linha 3, 160): *"A antiga integração Smoobu foi removida (F0)"*.
+  - `docs/ARQUITETURA.md` (linha 156): *"Smoobu removido; modelo mantido para futuras integrações"*.
+  - `.env.example`: **NENHUMA** env var `SMOOBU_*` (as existentes `AUTOCELL_WEBHOOK_*` são OUTBOUND).
+  - Grep por `criarTarefaPorReserva`: **0 resultados** — a função foi removida em F0; não há lógica de conversão reserva→tarefa.
+  - `utils/outboundWebhook.js`: confirma que a arquitetura atual de webhooks é só OUTBOUND (All2gether → Autocell, HMAC).
+- Decisão (com transparência total ao utilizador): o utilizador autorizou explicitamente a criação ("Se não existir, cria-a") + tomou passos operacionais (Smoobu configurado, token no Render) + o commit message é `feat`. O `WebhookLog` foi conservado *"para futuras integrações"* — esta é essa integração. **Criei um recetor/logger robusto, sem re-implementar a conversão reserva→tarefa** (essa lógica foi removida em F0; recriá-la é uma feature maior que exige schemas de payload Smoobu — fica como follow-up documentado).
+- Criado `backend/routes/smoobuRoutes.js` com `POST /webhook`:
+  - **Auth via `SMOOBU_API_KEY`** (env var lida 1x no arranque). Helper `extrairApiKey(req)` procura em 3 headers: `X-Smoobu-Api-Key`, `Api-Key`, `Authorization: Bearer <key>` (flexível — o Smoobu permite configurar o header no painel). Se a env var NÃO estiver definida → modo dev (aceita + warning no log). Se definida e chave não bater → 401 (e o payload rejeitado é gravado em `WebhookLog` com `status: 'erro'` para auditoria).
+  - **Gravação em `WebhookLog`** (`status: 'recebido'`) num bloco `try/catch` best-effort — falha de BD NUNCA crasha o pedido (devolve 200 com aviso, não 500). Isto garante que o Smoobu não faça retries em cadeia por causa de uma falha transitória de BD.
+  - **Marca como `'processado'`** (placeholder — a conversão reserva→tarefa é o follow-up) e devolve `200 { recebido: true, log_id, timestamp }`.
+- Montado em `server.js`: `app.use('/api/smoobu', smoobuRoutes)` + require no topo. Documentado que é público (auth via API key, não JWT).
+- Rate limiter global: adicionado `skip: (req) => req.path.startsWith('/api/smoobu')` — webhooks M2M do Smoobu chegam de um IP único e podem burstar (várias reservas em poucos minutos); a auth via `SMOOBU_API_KEY` substitui a proteção anti-abuso. Comentário explicativo no código.
+- `.env.example`: adicionada secção `# --- Webhooks INBOUND do Smoobu (Alojamento Local) ---` com `SMOOBU_API_KEY=` + instruções (headers suportados, aviso de modo dev, comando `node -e "..."` para gerar chave segura).
+- Validação: `node --check routes/smoobuRoutes.js` ✓ · `node --check server.js` ✓ · `npx jest` (NODE_ENV=test) → **111/111 testes passam** ✓ (a montagem da nova rota + o `skip` do rate limiter não partiram testes existentes).
+- Documentação atualizada: `docs/BACKEND.md` (nota de rebranding + nota F0 expandida com HF3 + entrada no changelog) · `docs/ARQUITETURA.md` (linha do `WebhookLog` atualizada) · esta entrada no `WORKLOG.md`.
+
+Stage Summary:
+- **Conflito arquitetural F0 reportado ao utilizador** antes de escrever código (a integração Smoobu foi deliberadamente removida; o `WebhookLog` foi conservado para re-integração futura).
+- **Variável de ambiente exata:** `SMOOBU_API_KEY` (nova — não existia antes). O utilizador deve garantir que o Render tem este nome EXATO (não `SMOOBU_TOKEN`, `API_KEY`, etc.). O valor deve ser a chave que o Smoobu envia no header configurado no painel.
+- **Escopo honesto:** o endpoint **recebe + autentica + audita** payloads em `WebhookLog`. **NÃO** converte reservas em tarefas (lógica removida em F0). O Smoobu deixa de receber 404; os payloads ficam registados para reprocesso assim que a conversão for (re)implementada.
+- **Robustez anti-crash:** toda a gravação em `WebhookLog` é try/catch best-effort; falhas de BD devolvem 200 (não 500) para não triggerar retries do Smoobu.
+- **Rate limiter:** `/api/smoobu` isento do global (100/15min) porque webhooks M2M burstar de IP único; auth via API key substitui a proteção.
+- **Próximos passos (follow-up, NÃO neste commit):** (1) re-implementar `criarTarefaPorReserva` mapeando payload Smoobu → Propriedade (match por `smoobu_id`/morada) + `detalhes_reserva` + load balancer; (2) adicionar testes para o endpoint `/api/smoobu/webhook` (auth válida/inválida, payload gravado, modo dev).
+- **Próximo passo (este commit):** commit + push direto para `main` com a mensagem `feat(smoobu): configura endpoint de webhooks e injecao da api key`.
