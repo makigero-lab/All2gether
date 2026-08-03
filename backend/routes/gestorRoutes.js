@@ -52,6 +52,8 @@ const {
 const { reportarAtrasoTarefa, criarTarefa, atribuirTarefa, reatribuirTarefa, atualizarEstadoTarefa, apagarTarefasFuturas, listarIndisponiveisData, autoAtribuirTarefas } = require('../controllers/tarefaController');
 // CRUD de Modelos de Checklist (futuro: Modelos de Protocolo Clínico)
 const { listarModelos, criarModelo, obterModelo, atualizarModelo, apagarModelo } = require('../controllers/checklistController');
+// Smoobu — importação/sincronização de propriedades (HF5).
+const { getPropriedadesSmoobu, importarPropriedades } = require('../controllers/smoobuController');
 
 // Bootstrap do ambiente de testes — Cliente Zero. PÚBLICO (sem auth).
 router.get('/setup', setupClienteZero);
@@ -99,6 +101,14 @@ router.post('/propriedades/default-checklist', auth, isGestor, async (req, res) 
     return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
   }
 });
+
+// Smoobu — importação/sincronização de propriedades (HF5).
+// GET  /api/gestor/smoobu/propriedades — lista apartamentos do Smoobu (dropdown).
+// POST /api/gestor/smoobu/propriedades — upsert em massa (cria novas + atualiza
+//        morada/capacidade das existentes). Popula Propriedade.smoobu_id, essencial
+//        para o webhook (HF4) fazer match de reservas → propriedades.
+router.get('/smoobu/propriedades', auth, isGestor, getPropriedadesSmoobu);
+router.post('/smoobu/propriedades', auth, isGestor, importarPropriedades);
 
 // Calendário Geral de Operações — lista tarefas com filtro de datas.
 router.get('/tarefas', auth, isGestor, getTarefas);

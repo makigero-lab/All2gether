@@ -830,6 +830,354 @@ async function processarWebhookSmoobu(payload, webhookLogId, empresaId) {
   }
 }
 
+/* ================================================================== */
+/* Sincronização / Importação de Propriedades (HF5)                   */
+/* ================================================================== */
+/*
+ * Recuperado do histórico Git (commit pré-F0 681f807) e adaptado ao
+ * schema atual. O projeto é single-tenant satélite — usa
+ * process.env.SMOOBU_API_KEY diretamente (não recria Empresa.smoobu_api_key).
+ *
+ * Dois handlers Express (montados em /api/gestor/smoobu/propriedades):
+ *   - GET  getPropriedadesSmoobu  → lista apartamentos do Smoobu (dropdown)
+ *   - POST importarPropriedades   → upsert em massa (cria novas + atualiza
+ *                                   morada/capacidade das existentes)
+ */
+
+const { obterCoordenadas } = require('../utils/geocoding');
+
+/**
+ * Lê a API key do Smoobu (single-tenant satélite: env var global).
+ * @returns {string|null}
+ */
+function obterApiKeySmoobu() {
+  const key = process.env.SMOOBU_API_KEY;
+  return key && key.trim() ? key.trim() : null;
+}
+
+/**
+ * Extrai a morada de um apartamento do Smoobu, cobrindo várias estruturas
+ * possíveis da resposta do endpoint /api/apartments:
+ *   - apt.location.{street, zip, city}  (documentada)
+ *   - apt.address (string)
+ *   - apt.address.{street, zipcode, city}
+ *   - apt.{street, zip, zipcode, city}
+ *   - apt.full_address
+ * Devolve 'A definir' se não encontrar nada.
+ */
+function extrairMoradaSmoobu(apt) {
+  if (!apt) return 'A definir';
+
+  // 1) apt.location (estrutura documentada do Smoobu).
+  if (apt.location) {
+    const partes = [apt.location.street, apt.location.zip, apt.location.city]
+      .filter(Boolean);
+    if (partes.length > 0) return partes.join(', ');
+  }
+
+  // 2) apt.address como string.
+  if (typeof apt.address === 'string' && apt.address.trim()) {
+    return apt.address.trim();
+  }
+
+  // 3) apt.address como objeto.
+  if (apt.address && typeof apt.address === 'object') {
+    const partes = [apt.address.street, apt.address.zipcode, apt.address.city]
+      .filter(Boolean);
+    if (partes.length > 0) return partes.join(', ');
+  }
+
+  // 4) Campos achatados no próprio apt.
+  const partesChat = [apt.street, apt.zip, apt.zipcode, apt.city].filter(Boolean);
+  if (partesChat.length > 0) return partesChat.join(', ');
+
+  // 5) apt.full_address.
+  if (typeof apt.full_address === 'string' && apt.full_address.trim()) {
+    return apt.full_address.trim();
+  }
+
+  return 'A definir';
+}
+
+/**
+ * Helper interno: faz fetch ao endpoint /api/apartments do Smoobu e devolve
+ * o array de apartamentos (ou lança um erro com mensagem útil).
+ *
+ * @param {string} apiKey
+ * @returns {Promise<Array>} array de apartamentos.
+ * @throws {Error} com `.status` (400/502) para o handler devolver.
+ */
+async function buscarApartamentosSmoobu(apiKey) {
+  let respostaSmoobu;
+  try {
+    respostaSmoobu = await fetch('https://login.smoobu.com/api/apartments', {
+      method: 'GET',
+      headers: {
+        'Api-Key': apiKey,
+        Accept: 'application/json',
+      },
+      signal: AbortSignal.timeout(15000),
+    });
+  } catch (err) {
+    const e = new Error('Não foi possível ligar ao Smoobu.');
+    e.status = 502;
+    e.detalhe = err.message;
+    throw e;
+  }
+
+  if (!respostaSmoobu.ok) {
+    const texto = await respostaSmoobu.text().catch(() => '');
+    const e = new Error(`Smoobu devolveu erro ${respostaSmoobu.status}.`);
+    e.status = 502;
+    e.detalhe = texto.slice(0, 500) || respostaSmoobu.statusText;
+    throw e;
+  }
+
+  let body;
+  try {
+    body = await respostaSmoobu.json();
+  } catch (err) {
+    const e = new Error('Resposta do Smoobu não é JSON válido.');
+    e.status = 502;
+    e.detalhe = err.message;
+    throw e;
+  }
+
+  const apartments =
+    body?.apartments ??
+    body?.data?.apartments ??
+    (Array.isArray(body) ? body : []);
+
+  if (!Array.isArray(apartments)) {
+    const e = new Error('Resposta do Smoobu não contém array "apartments".');
+    e.status = 502;
+    e.detalhe = JSON.stringify(body).slice(0, 500);
+    throw e;
+  }
+
+  return apartments;
+}
+
+/**
+ * GET /api/gestor/smoobu/propriedades
+ *
+ * Vai buscar a lista de apartamentos ao Smoobu (REST API /api/apartments) e
+ * devolve-a ao frontend de forma limpa (id + name), para alimentar o
+ * dropdown no formulário de criação de propriedades.
+ *
+ * Resposta 200: { propriedadesSmoobu: [{ id, name }, ...] }
+ * Erros: 400 (API key em falta) / 502 (Smoobu indisponível) / 500 (interno)
+ */
+async function getPropriedadesSmoobu(req, res) {
+  try {
+    const apiKey = obterApiKeySmoobu();
+    if (!apiKey) {
+      return res.status(400).json({
+        erro:
+          'API Key do Smoobu não configurada. Define SMOOBU_API_KEY no Render.',
+      });
+    }
+
+    const apartments = await buscarApartamentosSmoobu(apiKey);
+
+    const propriedadesSmoobu = apartments.map((a) => ({
+      id: a.id,
+      name: a.name,
+    }));
+
+    return res.status(200).json({ propriedadesSmoobu });
+  } catch (err) {
+    if (err.status) {
+      return res.status(err.status).json({
+        erro: err.message,
+        ...(err.detalhe ? { detalhe: err.detalhe } : {}),
+      });
+    }
+    console.error('❌ [Smoobu] getPropriedadesSmoobu: erro interno:', err.message);
+    return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
+  }
+}
+
+/**
+ * POST /api/gestor/smoobu/propriedades
+ *
+ * Importa em massa os apartamentos do Smoobu para a coleção Propriedade da
+ * empresa do gestor. Comportamento (upsert inteligente, Prompt 92/104):
+ *   - Propriedades NOVAS → criadas com smoobu_id, nome, morada, coordenadas
+ *     (geocoding Nominatim), capacidade_hospedes e tempo_limpeza_minutos (45).
+ *   - Propriedades JÁ EXISTENTES (match por smoobu_id + empresa_id):
+ *       • morada só é preenchida se o nosso campo estiver vazio/'A definir'
+ *         (a edição manual do gestor tem prioridade — Prompt 104).
+ *       • capacidade_hospedes é atualizada SEMPRE (Smoobu é fonte de verdade).
+ *       • restantes campos (nome, tempo_limpeza, ativo, checklist,
+ *         funcionario_preferencial_id) são preservados.
+ *
+ * Requer: env var SMOOBU_API_KEY.
+ *
+ * Resposta 200: { totalRecebidas, criadas, atualizadas, existentes, erros,
+ *                 detalheErros, message }
+ *   (message é legível para toasts; os contadores são para o painel de propriedades)
+ */
+async function importarPropriedades(req, res) {
+  try {
+    const empresaId = req.user && req.user.empresa_id;
+    if (!empresaId) {
+      return res.status(400).json({ erro: 'empresa_id em falta no token.' });
+    }
+
+    const apiKey = obterApiKeySmoobu();
+    if (!apiKey) {
+      return res.status(400).json({
+        erro:
+          'API Key do Smoobu não configurada. Define SMOOBU_API_KEY no Render.',
+      });
+    }
+
+    const apartments = await buscarApartamentosSmoobu(apiKey);
+
+    let criadas = 0;
+    let existentes = 0;
+    let atualizadas = 0;
+    let erros = 0;
+    const detalheErros = [];
+
+    for (const apt of apartments) {
+      const smoobuId = apt?.id != null ? String(apt.id) : null;
+      try {
+        if (!smoobuId) {
+          throw new Error('Apartamento sem id.');
+        }
+
+        // Extrai capacidade (Smoobu usa rooms.maxOccupancy ou maxOccupancy).
+        const capacidade =
+          apt.rooms?.maxOccupancy || apt.maxOccupancy || null;
+
+        // Constrói morada usando o helper (cobre várias estruturas).
+        const moradaTexto = extrairMoradaSmoobu(apt);
+
+        // Log de debug quando a morada não é preenchida (ajuda a perceber
+        // a estrutura do payload Smoobu).
+        if (moradaTexto === 'A definir') {
+          console.log(
+            `⚠️  [importarPropriedades] apt ${smoobuId} ("${apt.name}") sem morada — ` +
+              `location=${JSON.stringify(apt.location ?? null)}, ` +
+              `address=${JSON.stringify(apt.address ?? null)}, ` +
+              `keys=${Object.keys(apt).join(',')}`
+          );
+        }
+
+        // Verifica se JÁ EXISTE uma propriedade com este smoobu_id QUE
+        // PERTENÇA a esta empresa (multi-tenant safe).
+        const existente = await Propriedade.findOne({
+          smoobu_id: smoobuId,
+          empresa_id: empresaId,
+        });
+
+        if (existente) {
+          // Atualização: morada só se vazia/'A definir'; capacidade sempre.
+          let mudou = false;
+
+          if (
+            moradaTexto !== 'A definir' &&
+            (!existente.morada || existente.morada === 'A definir')
+          ) {
+            existente.morada = moradaTexto;
+            try {
+              const coords = await obterCoordenadas(moradaTexto);
+              if (coords) existente.coordenadas = coords;
+            } catch (e) {
+              console.warn(
+                '⚠️  [importarPropriedades] geocoding falhou (update morada):',
+                e.message
+              );
+            }
+            mudou = true;
+          }
+
+          if (capacidade) {
+            existente.capacidade_hospedes = capacidade;
+            mudou = true;
+          }
+
+          if (mudou) {
+            await existente.save();
+            atualizadas++;
+          } else {
+            existentes++;
+          }
+          continue;
+        }
+
+        // Nova propriedade: geocoding + create.
+        let coords = { lat: null, lng: null };
+        if (moradaTexto !== 'A definir') {
+          try {
+            const result = await obterCoordenadas(moradaTexto);
+            if (result) coords = result;
+          } catch (e) {
+            console.warn(
+              '⚠️  [importarPropriedades] geocoding falhou (nova):',
+              e.message
+            );
+          }
+        }
+
+        await Propriedade.create({
+          smoobu_id: smoobuId,
+          nome: apt.name || `Propriedade ${smoobuId}`,
+          morada: moradaTexto,
+          coordenadas: coords,
+          empresa_id: empresaId,
+          tempo_limpeza_minutos: 45,
+          capacidade_hospedes: capacidade,
+        });
+        criadas++;
+      } catch (err) {
+        erros++;
+        detalheErros.push({ smoobuId, erro: err.message });
+        console.error(
+          `⚠️  [importarPropriedades] apartamento ${smoobuId} falhou:`,
+          err.message
+        );
+        // Continua para o próximo.
+      }
+    }
+
+    console.log(
+      `✅ [Smoobu] importarPropriedades: ${apartments.length} recebidas, ` +
+        `${criadas} criadas, ${atualizadas} atualizadas, ` +
+        `${existentes} já existiam, ${erros} com erro.`
+    );
+
+    // message legível para toasts (configuracoes/page.tsx executarAcao);
+    // contadores estruturados para o painel de propriedades.
+    let message = `${criadas} propriedade(s) importada(s)`;
+    if (atualizadas > 0) message += `, ${atualizadas} atualizada(s)`;
+    if (existentes > 0) message += `, ${existentes} já existiam`;
+    if (erros > 0) message += `, ${erros} com erro`;
+    message += '.';
+
+    return res.status(200).json({
+      totalRecebidas: apartments.length,
+      criadas,
+      atualizadas,
+      existentes,
+      erros,
+      detalheErros,
+      message,
+    });
+  } catch (err) {
+    if (err.status) {
+      return res.status(err.status).json({
+        erro: err.message,
+        ...(err.detalhe ? { detalhe: err.detalhe } : {}),
+      });
+    }
+    console.error('❌ [Smoobu] importarPropriedades: erro interno:', err.message);
+    return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
+  }
+}
+
 module.exports = {
   processarWebhookSmoobu,
   processarReservaSmoobu, // exportado para reprocesso manual / testes
@@ -838,4 +1186,8 @@ module.exports = {
   criarTarefaPorReserva, // exportado para testes
   cancelarTarefaPorReserva, // exportado para reprocesso manual / testes
   atualizarTarefaPorReserva, // exportado para testes
+  getPropriedadesSmoobu, // GET /api/gestor/smoobu/propriedades (dropdown)
+  importarPropriedades, // POST /api/gestor/smoobu/propriedades (upsert em massa)
+  extrairMoradaSmoobu, // exportado para testes
+  obterApiKeySmoobu, // exportado para reutilização
 };

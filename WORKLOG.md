@@ -1511,3 +1511,46 @@ Stage Summary:
 - **Ação operacional pendente (utilizador):** (1) garantir que o Render tem `SMOOBU_API_KEY` definida (HF3); (2) fazer deploy; (3) **importar/sincronizar propriedades Smoobu** para que `Propriedade.smoobu_id` seja preenchido (sem isto, o match falha com "Propriedade Smoobu X não encontrada"). A sincronização de propriedades (que existia no `smoobuController` legacy) não foi portada neste commit — é um follow-up (ver Próximos passos).
 - **Próximos passos (follow-up, NÃO neste commit):** (1) portar `sincronizarPropriedades` / `importarPropriedades` do `smoobuController` legacy (para popular `Propriedade.smoobu_id`); (2) portar `sincronizarReservas` (backfill em massa); (3) adicionar testes para o endpoint `/api/smoobu/webhook` (auth válida/inválida, criar tarefa, cancelar, atualizar, idempotência, modo dev); (4) corrigir bug DST do scheduler (usar helper `Intl.DateTimeFormat` do Prompt 128).
 - **Próximo passo (este commit):** commit + push direto para `main` com a mensagem `feat(smoobu): recupera e moderniza logica complexa de conversao de reservas em tarefas`.
+
+---
+
+Task ID: HF5
+Agent: Z.ai Code (Eng. Software Principal)
+Task: Implementar a rota `POST /api/gestor/smoobu/propriedades` (e GET) para importar/sincronizar propriedades do Smoobu, populating `Propriedade.smoobu_id` — passo prévio obrigatório para o webhook HF4 funcionar (sem isto, o match de reservas falha com "Propriedade Smoobu X não encontrada").
+
+Work Log:
+- Atualizado o clone local: `git pull origin main` (incorporou HF4 `ab72acb`).
+- **Análise do contrato do frontend:**
+  - `propriedades/page.tsx` (linha 95): `adminGet("/api/gestor/smoobu/propriedades")` → espera `{ propriedadesSmoobu: [{ id, name }] }` (GET, para dropdown).
+  - `propriedades/page.tsx` (linha 244): `adminPost("/api/gestor/smoobu/propriedades", {})` → espera `{ totalRecebidas, criadas, existentes, erros }` (POST, import em massa).
+  - `configuracoes/page.tsx` (linha 255): `executarAcao("Importar Propriedades", "/api/gestor/smoobu/propriedades")` → faz POST e espera `{ message }` ou `{ erro }` para toast.
+  - `configuracoes/page.tsx` (linha 259): também chama `POST /api/gestor/smoobu/sincronizar` ("Sincronizar Reservas") — esse é o `sincronizarReservas` (backfill de reservas em massa), follow-up NÃO pedido neste prompt (deixa 404 por agora; é tarefa separada).
+  - `gestorRoutes.js` atual: NÃO tinha `/smoobu/propriedades` montado (daí o erro 404/502 que o utilizador reportou).
+- **Recuperação da lógica legacy:** li `/tmp/smoobu-recovery/smoobuController.js` (recuperado em HF4 do commit `681f807`). Identifiquei 3 handlers relevantes:
+  - `getPropriedadesSmoobu` (linha 354) — GET para dropdown.
+  - `sincronizarPropriedades` (linha 463) — POST upsert global (match só por `smoobu_id`, ignora `empresa_id`).
+  - `importarPropriedades` (linha 652) — POST upsert multi-tenant safe (match por `smoobu_id` + `empresa_id`).
+  - Escolhi `importarPropriedades` (mais seguro para multi-tenant, mesmo o projeto sendo single-tenant satélite — previne cross-contamination se o schema evoluir).
+- **Confirmação de dependências:** `utils/geocoding.js` exporta `obterCoordenadas(morada)` ✓. `Propriedade.smoobu_id` foi recriado em HF4 (sparse index, default null) ✓.
+- **Implementação em `controllers/smoobuController.js`** (acrescentado ao fim do ficheiro HF4, sem alterar a lógica de conversão de reservas):
+  - `obterApiKeySmoobu()` — simplificado: lê `process.env.SMOOBU_API_KEY` diretamente (single-tenant satélite; não recria `Empresa.smoobu_api_key` multi-tenant).
+  - `extrairMoradaSmoobu(apt)` — port direto do helper legacy; cobre 5 estruturas de morada do payload Smoobu (`location.{street,zip,city}`, `address` string, `address` objeto, campos achatados `street/zip/zipcode/city`, `full_address`); devolve 'A definir' se vazio.
+  - `buscarApartamentosSmoobu(apiKey)` — helper partilhado (DRY): GET `https://login.smoobu.com/api/apartments` com header `Api-Key`, `AbortSignal.timeout(15000)`, valida JSON, extrai array `apartments` com fallbacks (`body.apartments` → `body.data.apartments` → `body` se array). Erros tipados com `.status` (400/502) para o handler.
+  - `getPropriedadesSmoobu(req, res)` — GET handler: valida API key, busca apartamentos, mapeia para `{ id, name }`, devolve `{ propriedadesSmoobu }`.
+  - `importarPropriedades(req, res)` — POST handler: valida `empresa_id` do JWT + API key, busca apartamentos, itera com try/catch por apartamento (uma falha não para as outras):
+    - **Nova:** `Propriedade.create({ smoobu_id, nome, morada, coordenadas (geocoding Nominatim best-effort), empresa_id, tempo_limpeza_minutos: 45, capacidade_hospedes })`.
+    - **Existente** (match `smoobu_id` + `empresa_id`): morada só se vazia/'A definir' (Prompt 104 — edição manual tem prioridade) + refaz geocoding; `capacidade_hospedes` atualizada sempre (Smoobu é fonte de verdade); restantes campos preservados.
+    - Resposta: `{ totalRecebidas, criadas, atualizadas, existentes, erros, detalheErros, message }` — `message` legível (ex: "3 propriedade(s) importada(s), 2 atualizada(s), 1 já existiam.") para toasts do `configuracoes/page.tsx`; contadores estruturados para o `propriedades/page.tsx`.
+- **Rotas em `routes/gestorRoutes.js`:** montadas `GET /smoobu/propriedades` + `POST /smoobu/propriedades` com `auth + isGestor` (require no topo + rotas após `propriedades/default-checklist`).
+- **Validação:** `node --check controllers/smoobuController.js` ✓ · `node --check routes/gestorRoutes.js` ✓ · `NODE_ENV=test npx jest` → **111/111 testes passam** ✓.
+- **Documentação atualizada:** `docs/BACKEND.md` (entrada HF5 no changelog) + esta entrada no `WORKLOG.md`.
+
+Stage Summary:
+- **Contrato satisfeito (ambas as páginas frontend):** GET devolve `{ propriedadesSmoobu: [{ id, name }] }` (dropdown); POST devolve contadores estruturados + `message` legível (toasts).
+- **Desbloqueia o HF4:** sem `Propriedade.smoobu_id` preenchido, o webhook `criarTarefaPorReserva` falhava com "Propriedade Smoobu X não encontrada". Esta rota é o passo prévio obrigatório — o gestor clica em "Importar Propriedades" e os `smoobu_id` ficam populados.
+- **Regras preservadas do legacy (Prompt 92/104):** upsert inteligente (cria novas + atualiza existentes); morada só preenchida se vazia/'A definir' (edição manual tem prioridade); `capacidade_hospedes` sempre atualizada (Smoobu é fonte de verdade); geocoding Nominatim best-effort (falha não bloqueia); match multi-tenant safe (`smoobu_id` + `empresa_id`).
+- **Adaptação single-tenant:** `obterApiKeySmoobu()` lê `process.env.SMOOBU_API_KEY` diretamente (não recria `Empresa.smoobu_api_key`).
+- **Helper partilhado `buscarApartamentosSmoobu`:** DRY — GET + validação + extração do array numa só função, usada por ambos os handlers; erros tipados com `.status` para respostas HTTP consistentes (400/502/500).
+- **Ação operacional pendente (utilizador):** (1) garantir `SMOOBU_API_KEY` no Render (HF3); (2) deploy; (3) o gestor clica em "Importar Propriedades" no painel `/gestor/propriedades` ou `/gestor/configuracoes` para popular os `smoobu_id`. Depois disso, o webhook HF4 passa a conseguir fazer match de reservas → propriedades.
+- **Próximos passos (follow-up, NÃO neste commit):** (1) portar `sincronizarReservas` (backfill de reservas em massa — o botão "Sincronizar Reservas" em `configuracoes/page.tsx` ainda 404); (2) adicionar testes para os endpoints `/api/gestor/smoobu/propriedades` (GET e POST — mock fetch Smoobu, testar upsert, morada preservada, capacidade atualizada); (3) corrigir bug DST do scheduler (HF4 limitation).
+- **Próximo passo (este commit):** commit + push direto para `main` com a mensagem `feat(smoobu): implementa rota de importacao e sincronizacao de propriedades`.
