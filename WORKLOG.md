@@ -1861,3 +1861,36 @@ Stage Summary:
 - **Retrocompatibilidade:** strings legacy no array `avarias` (tarefas antigas) não partem o schema; o Mongoose `strict: true` ignora a validação de subdocumento para entries que não sejam objetos.
 - **Sem quebras:** 111/111 testes passam; tsc 0 erros; lint limpo.
 - **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat: corrige banner impersonacao, remove menu integracoes e adiciona modulo de avarias no staff`.
+
+---
+
+Task ID: HF14
+Agent: Z.ai Code (Eng. Software Principal)
+Task: Complemento do HF13 — o utilizador reenviou a mesma solicitação (3 pontos). Verificado que os pontos 1 (banner impersonação), 2 (remover menu Integrações) e 3a/b/c (schema + controller + UI staff de avarias) já estavam implementados no commit `ab5f07e` (HF13). O GAP genuíno era o ponto "Frontend (Gestor): renderizar avarias de forma visível no detalhe da tarefa" — o `detalhe-tarefa-modal.tsx` continuava a renderizar `{a}` como string (linha 273), sem mostrar fotos/estado/data.
+
+Work Log:
+- Re-clonado o repo em `dev` (`ab5f07e`); configurado `git config user.name "Makigero Lab"`.
+- **Verificação do estado HF13 (todos os 3 pontos já implementados):**
+  1. `login/page.tsx` linhas 108-109 — `sessionStorage.removeItem("all2gether_impersonating")` + `removeItem("all2gether_auto_impersonado")` ✓
+  2. `gestor-sidebar.tsx` — item "Integrações" removido (só comentário HF13) ✓
+  3a. `models/Tarefa.js` — `avarias: [{ descricao, fotos, resolvido, data_registo }]` ✓
+  3b. `staffController.reportarAvaria` — aceita `fotos`, faz push do objeto rico ✓
+  3c. `detalhe-tarefa-client.tsx` (staff) — modal com `handleSelecionarFotos` + preview + `removerFoto` ✓
+  3d. `staffController.reportarAvaria` — notifica gestores via `notificarUtilizador` (já existia desde Prompt 88) ✓
+- **GAP identificado:** `detalhe-tarefa-modal.tsx` (gestor) linha 268 — `tarefa.avarias.map((a, i) => ... {a} ...)` renderiza `a` como string, mas o schema mudou para objeto. Tipo `avarias?: string[]` (linha 46).
+- **Implementação em `detalhe-tarefa-modal.tsx`:**
+  - Nova interface `AvariaDTO { descricao: string; fotos?: string[]; resolvido?: boolean; data_registo?: string | Date }` exportada.
+  - `TarefaDetalheGestor.avarias` passa a `AvariaDTO[] | string[]` (retrocompatível — aceita entries legacy strings e objetos ricos).
+  - Novo helper `normalizarAvaria(a: AvariaDTO | string): AvariaDTO` — converte strings legacy para `{ descricao: a, resolvido: false }`.
+  - Novo helper `formatarDataAvaria(data)` — formata para pt-PT (dd/MM/yyyy HH:mm).
+  - Renderização enriquecida: cada avaria mostra descrição (font-medium) + Badge "Resolvido" (se `resolvido: true`, ícone `CheckCircle2`) + data de registo + thumbnails 64×64 das fotos (click abertas em nova aba via `<a target="_blank">`).
+  - Imports `Camera` e `CheckCircle2` adicionados ao lucide-react.
+- **Verificação `tarefas/page.tsx`:** a interface `TarefaMock.avarias` mantém-se como `string[]` mas só usa `.length` (contagem) e `Array.isArray` — não acede ao conteúdo, pelo que a mudança de schema não afeta a listagem/filtro. Não precisa de alteração.
+- **Validação:** frontend `npx tsc --noEmit` → 0 erros ✓; `npx next lint` → "No ESLint warnings or errors" ✓; backend `NODE_ENV=test npx jest` → **111/111 testes passam** ✓ (backend não foi tocado, confirmei sem regressões).
+- **Documentação atualizada:** `docs/BACKEND.md` (changelog HF14) + esta entrada no `WORKLOG.md`.
+
+Stage Summary:
+- **Esclarecimento ao utilizador:** esta solicitação é quase idêntica à HF13 (commit `ab5f07e`). Os pontos 1, 2, 3a/b/c já estavam implementados. O GAP genuíno era a renderização das avarias no painel do gestor.
+- **GAP corrigido:** o `detalhe-tarefa-modal.tsx` agora renderiza o objeto rico de avarias (descrição + fotos + estado resolvido + data de registo), em vez de `{a}` como string. Retrocompatível com entries legacy.
+- **Notificação aos gestores:** já existia desde Prompt 88 (v1.65.0) — `reportarAvaria` chama `notificarUtilizador` para cada gestor ativo da empresa com mensagem "🛠️ Nova Avaria Reportada" + nome da propriedade. Não precisava de alteração.
+- **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat: corrige impersonacao, remove menu integracoes e cria sistema de avarias com notificacao`.
