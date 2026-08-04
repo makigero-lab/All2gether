@@ -1755,3 +1755,38 @@ Stage Summary:
 - **Integração com HF9:** as folgas rotativas adicionadas aqui são lidas pelo webhook `criarTarefaPorReserva` (HF9) — se o staff exclusivo tiver folga rotativa no dia do check-out, a tarefa é criada com `estado: 'por_atribuir'` + `alerta: 'Staff exclusivo de folga (motivo)'`.
 - **Design system:** usa os mesmos componentes (Input, Button, Card, Dialog) + `date-fns` com locale `pt` já usado noutros sítios da página. Responsivo (flex-col no mobile, flex-row no sm+).
 - **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat(ui): cria interface de gestao de folgas rotativas para o staff`.
+
+---
+
+Task ID: HF11
+Agent: Z.ai Code (Eng. Software Principal)
+Task: Reverter as restrições rígidas da HF9 (1-para-1 estrito) e reativar o Load Balancer. Implementar sistema híbrido: staff pode ser exclusivo de múltiplas propriedades (X, Y, Z); propriedades sem staff exclusivo (ou cujo staff exclusivo está de folga) são distribuídas pela restante equipa via Load Balancer. Manter a gestão de folgas (HF9/HF10).
+
+Work Log:
+- Re-clonado o repo em `dev` (`b938419`); configurado `git config user.name "Makigero Lab"`.
+- **Análise do estado HF9 (3 restrições a reverter):**
+  1. `models/Propriedade.js` — índice único `funcionario_preferencial_unique_1to1` (linhas 108-120) com `partialFilterExpression`.
+  2. `controllers/gestorController.js` — bloco `Propriedade.updateMany` em `atualizarPropriedade` (linhas 926-941) que desassociava o staff de propriedades anteriores.
+  3. `controllers/smoobuController.js` — `criarTarefaPorReserva` (passos 5-8) sem load balancer; import de `determinarUtilizadorAtribuido` removido em HF9.
+- **Reverter #1 — `models/Propriedade.js`:** removido o bloco `propriedadeSchema.index({ funcionario_preferencial_id: 1 }, { unique: true, partialFilterExpression: ... })`. Atualizado o comentário do campo `funcionario_preferencial_id` (HF9 → HF11, sistema híbrido). O `index: true` simples mantém-se (índice não-unique para performance de queries).
+- **Reverter #2 — `controllers/gestorController.js` (`atualizarPropriedade`):** removido o bloco `Propriedade.updateMany({ empresa_id, funcionario_preferencial_id: valor, _id: { $ne: propriedade._id } }, { $set: { funcionario_preferencial_id: null } })`. O staff acumula propriedades. Comentário atualizado (HF9 → HF11).
+- **Restaurar #3 — `controllers/smoobuController.js` (`criarTarefaPorReserva`):**
+  - Reimportado `const { determinarUtilizadorAtribuido } = require('../utils/loadBalancer');`.
+  - Substituído o bloco de atribuição direta (passos 5-8) pela **lógica híbrida**:
+    - **(a) Staff exclusivo disponível:** se a propriedade tem `funcionario_preferencial_id` e ele está ativo + não está de folga (verifica `dias_folga` + `folgas_rotativas`) → atribui diretamente a ele.
+    - **(b) Fallback ao Load Balancer:** se a propriedade não tem staff exclusivo, OU o staff exclusivo está inativo/eliminado, OU está de folga → chama `determinarUtilizadorAtribuido(empresaId, range, coordenadas, tempo, propriedadeId)` que procura alguém na equipa geral (SLA 480min + Haversine + Algoritmo VIP + ausências).
+    - **(c) LB não encontrou ninguém:** `estado: 'nao_atribuida'` + `alerta`.
+  - **Alertas inteligentes:** se o staff exclusivo está de folga MAS o LB encontrou substituto, **NÃO** gera alerta (a tarefa foi atribuída). Só gera alerta se o LB também falhou: "Staff exclusivo de folga (motivo) — sem substituto disponível" ou "Sem staff disponível (load balancer não encontrou ninguém)".
+  - Estados restaurados a 3: `atribuida` (alguém atribuído) / `nao_atribuida` (LB tentou, SLA excedido) / `por_atribuir` (erro no LB, não chegou a tentar).
+  - `tempo_viagem_minutos` restaurado (LB + scheduler calculam).
+- **Drop do índice legacy no arranque (`server.js`):** índices MongoDB NÃO são auto-removidos quando desaparecem do schema Mongoose. Adicionado bloco (junto ao existente de `Ausencia`) que lista os índices da coleção `propriedades` e faz `dropIndex('funcionario_preferencial_unique_1to1')` se existir. Log informativo. Try/catch (não bloqueia o arranque se o índice já não existir ou se a BD não tiver permissões).
+- **Validação:** `node --check` ✓ em `models/Propriedade.js`, `controllers/gestorController.js`, `controllers/smoobuController.js`, `server.js`; `NODE_ENV=test npx jest` → **111/111 testes passam** ✓; frontend `npx tsc --noEmit` → 0 erros ✓; `npx next lint` → limpo ✓ (frontend não foi tocado, mas confirmei sem regressões).
+- **Documentação atualizada:** `docs/BACKEND.md` (changelog HF11) + esta entrada no `WORKLOG.md`.
+
+Stage Summary:
+- **Sistema híbrido implementado:** um staff pode ser exclusivo de múltiplas propriedades (X, Y, Z). As propriedades sem staff exclusivo (ou cujo staff exclusivo está de folga/inativo) são distribuídas pela restante equipa via Load Balancer.
+- **3 reversões HF9 concluídas:** (1) índice unique removido do schema + drop explícito no arranque; (2) desassociação automática removida do `atualizarPropriedade`; (3) load balancer reimportado e restaurado no `criarTarefaPorReserva`.
+- **Gestão de folgas mantida (HF9/HF10):** o campo `folgas_rotativas` no `Utilizador` + campo `alerta` na `Tarefa` + UI de gestão (HF10) continuam funcionais. A diferença: em HF9, folga do staff exclusivo → `por_atribuir` imediato; em HF11, folga do staff exclusivo → **fallback ao LB** → se LB encontra substituto, tarefa atribuída sem alerta; se não encontra, `nao_atribuida` + alerta.
+- **Alertas inteligentes:** só geram alerta os casos que realmente precisam de intervenção do gestor (LB falhou). Se o LB encontrou substituto, a tarefa é atribuída silenciosamente.
+- **Drop do índice legacy:** crítico para produção — sem o `dropIndex` no arranque, o MongoDB rejeitaria atribuir o mesmo staff a duas propriedades com `E11000 duplicate key` (o índice unique criado em HF9 persiste na BD mesmo depois de removido do schema).
+- **Próximo passo (este commit):** commit + push para `dev` com a mensagem `fix: implementa sistema hibrido de atribuicao e restaura load balancer`.

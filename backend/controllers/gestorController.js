@@ -900,9 +900,10 @@ exports.atualizarPropriedade = async (req, res) => {
     }
 
     // Prompt 95 (Fase 1.5) — Funcionário preferencial (Algoritmo VIP).
-    // HF9 — Regra 1-para-1 ESTRITA: ao associar um staff a esta propriedade,
-    // remove-o automaticamente de qualquer outra propriedade onde ele fosse
-    // o preferencial. Um staff só pode estar alocado a UMA propriedade.
+    // HF11 — Sistema HÍBRIDO: um staff PODE ser o preferencial de MÚLTIPLAS
+    // propriedades (X, Y, Z). A desassociação automática da HF9 foi REMOVIDA.
+    // Aceita null/empty para remover; caso contrário valida que é um staff
+    // ativo da mesma empresa.
     if (funcionario_preferencial_id !== undefined) {
       const valor = funcionario_preferencial_id === null || funcionario_preferencial_id === ''
         ? null
@@ -922,22 +923,6 @@ exports.atualizarPropriedade = async (req, res) => {
           return res.status(400).json({
             erro: 'Funcionário preferencial não encontrado (não é staff ativo desta empresa).',
           });
-        }
-        // HF9 — Remove este staff de qualquer OUTRA propriedade onde ele
-        // fosse o preferencial (garante 1-para-1).
-        const resultadoRemocao = await Propriedade.updateMany(
-          {
-            empresa_id: empresaId,
-            funcionario_preferencial_id: valor,
-            _id: { $ne: propriedade._id },
-          },
-          { $set: { funcionario_preferencial_id: null } }
-        );
-        if (resultadoRemocao.modifiedCount > 0) {
-          console.log(
-            `🔄 [HF9] staff ${valor} removido de ${resultadoRemocao.modifiedCount} ` +
-              `outra(s) propriedade(s) (regra 1-para-1).`
-          );
         }
       }
       propriedade.funcionario_preferencial_id = valor;

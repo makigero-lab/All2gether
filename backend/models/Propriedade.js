@@ -86,37 +86,21 @@ const propriedadeSchema = new mongoose.Schema(
       min: 0,
     },
     // Prompt 92 (Fase 1.5) — Funcionário preferencial desta propriedade.
-    // HF9 — Regra 1-para-1 ESTRITA: um staff só pode estar alocado a UMA
-    // propriedade, e uma propriedade só pode ter UM staff responsável.
-    // O índice único sparse garante que nenhum staff aparece em duas
-    // propriedades (valores null são ignorados pelo sparse).
-    // Ao associar um staff a uma propriedade, o gestorController remove-o
-    // automaticamente de qualquer propriedade anterior.
-    // O webhook (criarTarefaPorReserva) ignora o load balancer e atribui
-    // DIRETAMENTE a este staff (salvo se estiver de folga — ver alerta).
+    // HF11 — Sistema HÍBRIDO (Many-to-One + Load Balancer):
+    //   - Um staff PODE ser o preferencial de MÚLTIPLAS propriedades (X, Y, Z).
+    //   - O webhook (criarTarefaPorReserva) tenta atribuir ao preferencial
+    //     primeiro; se estiver de folga ou a propriedade não tiver preferencial,
+    //     faz fallback para o load balancer (determinarUtilizadorAtribuido).
+    // HF9 havia adicionado um índice unique (1-para-1 estrito) — foi REMOVIDO
+    // em HF11. O drop do índice legacy é feito no arranque do servidor (server.js).
     funcionario_preferencial_id: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Utilizador',
       default: null,
       index: true,
-      // Índice único sparse definido abaixo (no schema.index) para garantir 1-para-1.
     },
   },
   { timestamps: true }
-);
-
-// HF9 — Índice único parcial em funcionario_preferencial_id.
-// Garante a regra 1-para-1: um staff NÃO pode ser o preferencial de duas
-// propriedades. Usa partialFilterExpression (em vez de sparse) para só
-// indexar documentos onde o campo NÃO é null — assim propriedades sem
-// staff atribuído (default: null) não conflitam entre si.
-propriedadeSchema.index(
-  { funcionario_preferencial_id: 1 },
-  {
-    unique: true,
-    partialFilterExpression: { funcionario_preferencial_id: { $ne: null } },
-    name: 'funcionario_preferencial_unique_1to1',
-  }
 );
 
 module.exports = mongoose.model('Propriedade', propriedadeSchema);

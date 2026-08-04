@@ -182,6 +182,27 @@ if (require.main === module) {
         console.warn('⚠️  Não foi possível verificar/remover índices únicos:', idxErr.message);
       }
 
+      // HF11 — Remove o índice único legacy `funcionario_preferencial_unique_1to1`
+      // da coleção Propriedades. Este índice foi criado em HF9 (regra 1-para-1
+      // estrita) e removido do schema em HF11 (sistema híbrido Many-to-One).
+      // Índices MongoDB NÃO são auto-removidos quando desaparecem do schema
+      // Mongoose, pelo que é necessário drops explícito. Sem isto, o MongoDB
+      // rejeitaria atribuir o mesmo staff a duas propriedades (E11000 duplicate key).
+      try {
+        const Propriedade = require('./models/Propriedade');
+        const propIndexes = await Propriedade.collection.listIndexes().toArray();
+        for (const idx of propIndexes) {
+          if (idx.unique && idx.name === 'funcionario_preferencial_unique_1to1') {
+            console.log(`🔧 [HF11] A remover índice único legacy: ${idx.name}`);
+            await Propriedade.collection.dropIndex(idx.name);
+            console.log(`✅ [HF11] Índice ${idx.name} removido. Staff pode ser preferencial de múltiplas propriedades.`);
+          }
+        }
+      } catch (propIdxErr) {
+        // Não bloqueia o arranque se falhar (ex: índice já não existe, BD sem permissões).
+        console.warn('⚠️  [HF11] Não foi possível verificar/remover índice legacy de Propriedades:', propIdxErr.message);
+      }
+
       app.listen(PORT, () => {
         console.log(`🚀 Servidor a correr na porta ${PORT}.`);
       });
