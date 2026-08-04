@@ -1354,9 +1354,12 @@ describe('POST /api/staff/tarefas/:id/avaria', () => {
     expect(res.body.mensagem).toBeTruthy();
 
     // A tarefa original passa a ter a avaria no array.
+    // HF13 — schema enriquecido: { descricao, fotos, resolvido, data_registo }.
     expect(res.body.tarefa.avarias).toBeInstanceOf(Array);
     expect(res.body.tarefa.avarias.length).toBeGreaterThanOrEqual(1);
-    expect(res.body.tarefa.avarias[0]).toMatch(/Torreira/);
+    expect(res.body.tarefa.avarias[0].descricao).toMatch(/Torreira/);
+    expect(res.body.tarefa.avarias[0].resolvido).toBe(false);
+    expect(res.body.tarefa.avarias[0].data_registo).toBeTruthy();
 
     // Cria uma nova tarefa de manutenção.
     const manutencao = res.body.tarefa_manutencao;

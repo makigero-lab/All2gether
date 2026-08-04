@@ -100,6 +100,15 @@ function LoginConteudo() {
       // no painel de destino vá ao backend buscar o user real.
       limparCacheAuth();
 
+      // HF13 — Limpa flags de impersonação do sessionStorage no login direto.
+      // Sem isto, se um utilizador fez logout de uma sessão impersonada mas
+      // as flags ficaram no sessionStorage, o banner de impersonação aparece
+      // indevidamente no próximo login normal. Login direto = sem impersonação.
+      if (typeof window !== "undefined") {
+        sessionStorage.removeItem("all2gether_impersonating");
+        sessionStorage.removeItem("all2gether_auto_impersonado");
+      }
+
       // Redireciona conforme o role.
       const destino = from || rotaPorRole(data.utilizador.role);
       router.push(destino);

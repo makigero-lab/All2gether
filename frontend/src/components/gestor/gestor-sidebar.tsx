@@ -17,7 +17,6 @@ import {
   LogOut,
   Bell,
   ListChecks,
-  Plug,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -60,8 +59,9 @@ const gestorNavItems: NavItem[] = [
   { label: "Notificações", href: "/gestor/notificacoes", icon: Bell },
   // Prompt 134 — Modelos de Checklist (configuração).
   { label: "Checklists", href: "/gestor/configuracoes/checklists", icon: ListChecks },
-  // HF6 — Integrações & Rotinas (Smoobu descentralizado da Nave-Mãe).
-  { label: "Integrações", href: "/gestor/configuracoes/integracoes", icon: Plug },
+  // HF13 — Item "Integrações" removido (sistema agora usa webhooks exclusivamente;
+  // a página /gestor/configuracoes/integracoes mantém-se acessível via URL direta
+  // para gestão da API key, mas não é exposta na navegação principal).
 ];
 
 /**

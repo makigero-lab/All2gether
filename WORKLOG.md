@@ -1827,3 +1827,37 @@ Stage Summary:
 - **Performance:** pré-busca agregada de cargas + contagens em 2 queries paralelas (em vez de N por staff).
 - **Sem quebras:** 111/111 testes passam; VIP, SLA, ausências, folgas, scheduler e proteção de almoço todos mantidos.
 - **Próximo passo (este commit):** commit + push para `dev` com a mensagem `refactor: otimiza load balancer para paralelizar tarefas e priorizar inicio mais cedo`.
+
+---
+
+Task ID: HF13
+Agent: Z.ai Code (Eng. Software Principal)
+Task: 3 ajustes: (1) Bugfix banner impersonação aparece no login normal; (2) Remover menu "Integrações" do sidebar; (3) Feature reportar avarias com fotos no staff.
+
+Work Log:
+- Re-clonado o repo em `dev` (`c700a8f`); configurado `git config user.name "Makigero Lab"`.
+- **Análise prévia (4 ficheiros):**
+  - `frontend/src/lib/auth.ts` — cache temporal, `limparCacheAuth`, `fazerLogout`. O login é processado em `frontend/src/app/login/page.tsx` `handleLogin`.
+  - `frontend/src/components/gestor/impersonation-banner.tsx` — mostra banner se `sessionStorage.getItem("all2gether_impersonating") === "true"`.
+  - `frontend/src/components/gestor/gestor-sidebar.tsx` — item "Integrações" (linha 64, adicionado em HF6) com ícone `Plug`.
+  - `backend/models/Tarefa.js` — `avarias: [String]` (schema simples, v1.38.0).
+  - `backend/controllers/staffController.js` — `reportarAvaria` faz `tarefa.avarias.push(String(descricao))`.
+  - `backend/routes/staffRoutes.js` — rota `POST /tarefas/:id/avaria` JÁ EXISTE (linha 46).
+  - `frontend/src/components/staff/detalhe-tarefa-client.tsx` — modal "Reportar Avaria" JÁ EXISTE (v1.38.0) mas só com textarea (sem fotos).
+- **Bugfix #1 — Banner de impersonação (`login/page.tsx`):** no `handleLogin`, após `limparCacheAuth()`, adicionado bloco que limpa `sessionStorage.removeItem("all2gether_impersonating")` + `removeItem("all2gether_auto_impersonado")`. Sem isto, as flags persistiam entre sessões e o banner aparecia no login normal. O banner só pode aparecer se a flag for ativamente definida pelo `<AutoImpersonarEmpresa/>` no layout do /gestor.
+- **UI #2 — Remover menu Integrações (`gestor-sidebar.tsx`):** removido o item `{ label: "Integrações", href: "/gestor/configuracoes/integracoes", icon: Plug }` + import `Plug` do lucide-react. A página `/gestor/configuracoes/integracoes` mantém-se acessível via URL direta para gestão da API key, mas não é exposta na navegação principal. Comentário explicativo HF13 adicionado.
+- **Feature #3 — Módulo de avarias enriquecido (3 camadas):**
+  - **(a) Schema `models/Tarefa.js`:** `avarias` migrado de `[String]` para `[{ descricao: String, fotos: [String], resolvido: Boolean, data_registo: Date }]`. Retrocompatível: strings legacy (tarefas antigas com `avarias: ["desc"]`) serão lidas pelo frontend; o Mongoose com `strict: true` ignora a validação de subdocumento para entries legacy.
+  - **(b) `staffController.reportarAvaria`:** atualizado para aceitar `fotos` (array de strings base64/URLs, máx. 5) no `req.body`. Valida `fotos` como array; filtra não-strings; trunca a 5. Faz `tarefa.avarias.push({ descricao, fotos: fotosNormalizadas, resolvido: false, data_registo: new Date() })` em vez de `push(String(descricao))`.
+  - **(c) UI `detalhe-tarefa-client.tsx`:** novo estado `avariaFotos: string[]` + funções `handleSelecionarFotos` (FileReader → base64, máx. 5 fotos, 2MB cada, só imagens, valida `type.startsWith("image/")`) + `removerFoto(index)`. Modal enriquecido com secção "Fotos (opcional)": input `type="file" accept="image/*" multiple` (escondido, label custom com ícone `Camera`), preview em thumbnails 80×80 com botão `X` (ícone `X` do lucide-react) para remover cada foto, contador "(N/5)", texto de ajuda "Máx. 5 fotos, até 2MB cada (JPG, PNG)". Reset do estado ao fechar o modal. Imports `Camera` e `X` adicionados ao lucide-react.
+- **Teste atualizado:** `integration.test.js` linha 1359 — `expect(res.body.tarefa.avarias[0]).toMatch(/Torreira/)` → `expect(res.body.tarefa.avarias[0].descricao).toMatch(/Torreira/)` + asserções `resolvido: false` + `data_registo:toBeTruthy()`.
+- **Validação:** `node --check` ✓ em `models/Tarefa.js`, `controllers/staffController.js`; `NODE_ENV=test npx jest` → **111/111 testes passam** ✓ (após fix do teste); frontend `npx tsc --noEmit` → 0 erros ✓; `npx next lint` → "No ESLint warnings or errors" ✓.
+- **Documentação atualizada:** `docs/BACKEND.md` (changelog HF13) + esta entrada no `WORKLOG.md`.
+
+Stage Summary:
+- **Banner de impersonação corrigido:** flags de sessionStorage são limpas no login direto; o banner só aparece em sessões ativamente impersonadas via `<AutoImpersonarEmpresa/>`.
+- **Menu Integrações removido:** o sidebar do gestor está mais limpo (só items operacionais). A página de integrações mantém-se acessível via URL direta para gestão da API key.
+- **Módulo de avarias enriquecido:** o staff pode agora anexar fotos (até 5, base64) ao reportar avarias. O schema passou de `[String]` para `[{ descricao, fotos, resolvido, data_registo }]`. O controller valida e normaliza as fotos. A UI tem preview em thumbnails com botão de remover. A tarefa de manutenção continua a ser criada automaticamente (comportamento existente mantido).
+- **Retrocompatibilidade:** strings legacy no array `avarias` (tarefas antigas) não partem o schema; o Mongoose `strict: true` ignora a validação de subdocumento para entries que não sejam objetos.
+- **Sem quebras:** 111/111 testes passam; tsc 0 erros; lint limpo.
+- **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat: corrige banner impersonacao, remove menu integracoes e adiciona modulo de avarias no staff`.

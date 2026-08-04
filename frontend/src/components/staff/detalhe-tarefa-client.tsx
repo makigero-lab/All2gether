@@ -22,6 +22,8 @@ import {
   CalendarRange,
   ClipboardList,
   Folder,
+  Camera,
+  X,
 } from "lucide-react";
 
 import { cn, parsearDataSegura } from "@/lib/utils";
@@ -134,9 +136,12 @@ export function DetalheTarefaClient({
   const [atrasoSubmitting, setAtrasoSubmitting] = useState(false);
   const [atrasoResultado, setAtrasoResultado] = useState<string | null>(null);
 
-  // Modal de reportar avaria (v1.38.0)
+  // Modal de reportar avaria (v1.38.0 / HF13 enriquecido com fotos)
   const [mostrarAvaria, setMostrarAvaria] = useState(false);
   const [avariaDesc, setAvariaDesc] = useState("");
+  // HF13 — fotos em base64 (upload simplificado, sem object storage).
+  // O input type="file" lê o ficheiro e converte para base64 via FileReader.
+  const [avariaFotos, setAvariaFotos] = useState<string[]>([]);
   const [avariaSubmitting, setAvariaSubmitting] = useState(false);
   const [avariaResultado, setAvariaResultado] = useState<string | null>(null);
 
@@ -262,7 +267,7 @@ export function DetalheTarefaClient({
     }
   }
 
-  // v1.38.0 — Reportar avaria
+  // v1.38.0 / HF13 — Reportar avaria (com fotos opcional)
   async function handleReportarAvaria() {
     if (!avariaDesc.trim()) return;
     setAvariaSubmitting(true);
@@ -272,12 +277,17 @@ export function DetalheTarefaClient({
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ descricao: avariaDesc.trim() }),
+        body: JSON.stringify({
+          descricao: avariaDesc.trim(),
+          // HF13 — envia as fotos em base64 (se houver).
+          fotos: avariaFotos.length > 0 ? avariaFotos : undefined,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.erro || `Erro ${res.status}`);
       setAvariaResultado("Avaria reportada com sucesso. O gestor será notificado.");
       setAvariaDesc("");
+      setAvariaFotos([]);
       // Fecha o dialog após 1.5s.
       setTimeout(() => {
         setMostrarAvaria(false);
@@ -290,6 +300,40 @@ export function DetalheTarefaClient({
     } finally {
       setAvariaSubmitting(false);
     }
+  }
+
+  // HF13 — Processa a seleção de ficheiros e converte para base64.
+  // Limita a 5 fotos, cada uma até ~2MB (base64 incluído no payload JSON).
+  function handleSelecionarFotos(e: React.ChangeEvent<HTMLInputElement>) {
+    const ficheiros = Array.from(e.target.files || []);
+    if (ficheiros.length === 0) return;
+
+    // Limita a 5 fotos no total (incluindo as já adicionadas).
+    const slotsDisponiveis = 5 - avariaFotos.length;
+    const ficheirosParaLer = ficheiros.slice(0, slotsDisponiveis);
+
+    for (const ficheiro of ficheirosParaLer) {
+      // Valida tipo (só imagens).
+      if (!ficheiro.type.startsWith("image/")) continue;
+      // Valida tamanho (~2MB — base64 aumenta ~33%, pelo que ~2.6MB no payload).
+      if (ficheiro.size > 2 * 1024 * 1024) continue;
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64 = reader.result as string;
+        if (base64) {
+          setAvariaFotos((prev) => [...prev, base64].slice(0, 5));
+        }
+      };
+      reader.readAsDataURL(ficheiro);
+    }
+    // Limpa o input para permitir re-selecionar o mesmo ficheiro.
+    e.target.value = "";
+  }
+
+  // HF13 — Remove uma foto da lista (botão X sobre a preview).
+  function removerFoto(index: number) {
+    setAvariaFotos((prev) => prev.filter((_, i) => i !== index));
   }
 
   return (
@@ -717,10 +761,19 @@ export function DetalheTarefaClient({
         </DialogFooter>
       </Dialog>
 
-      {/* Modal de Reportar Avaria (v1.38.0) */}
+      {/* Modal de Reportar Avaria (v1.38.0 / HF13 com fotos) */}
       <Dialog
         open={mostrarAvaria}
-        onOpenChange={(o) => !o && setMostrarAvaria(false)}
+        onOpenChange={(o) => {
+          if (!o) {
+            setMostrarAvaria(false);
+            // Reseta estado ao fechar.
+            if (!avariaResultado) {
+              setAvariaDesc("");
+              setAvariaFotos([]);
+            }
+          }
+        }}
       >
         <DialogHeader>
           <div>
@@ -729,14 +782,16 @@ export function DetalheTarefaClient({
               Reportar Avaria
             </DialogTitle>
             <DialogDescription>
-              Descreve o problema encontrado na propriedade.
+              Descreve o problema encontrado na propriedade. Podes anexar fotos
+              (opcional, máx. 5).
             </DialogDescription>
           </div>
           <DialogClose onClick={() => setMostrarAvaria(false)} />
         </DialogHeader>
         <DialogContent className="space-y-4">
           {!avariaResultado ? (
-            <div className="space-y-1.5">
+            <>
+              <div className="space-y-1.5">
               <label htmlFor="avaria-desc" className="text-sm font-medium">
                 Descreva o problema
               </label>
@@ -748,7 +803,62 @@ export function DetalheTarefaClient({
                 placeholder="Ex.: torneira da cozinha a pingar; lâmpada fundida no WC…"
                 className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
-            </div>
+              </div>
+
+              {/* HF13 — Input de fotos (opcional, máx. 5, até 2MB cada) */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium">
+                  Fotos (opcional)
+                </label>
+                {avariaFotos.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {avariaFotos.map((foto, idx) => (
+                      <div
+                        key={idx}
+                        className="relative h-20 w-20 overflow-hidden rounded-md border"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={foto}
+                          alt={`Avaria ${idx + 1}`}
+                          className="h-full w-full object-cover"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removerFoto(idx)}
+                          className="absolute right-0 top-0 rounded-bl-md bg-red-600 p-0.5 text-white hover:bg-red-700"
+                          aria-label="Remover foto"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {avariaFotos.length < 5 && (
+                  <label
+                    htmlFor="avaria-fotos"
+                    className="flex cursor-pointer items-center gap-2 rounded-md border border-dashed border-input bg-muted/30 px-3 py-2 text-sm text-muted-foreground hover:bg-muted/50"
+                  >
+                    <Camera className="h-4 w-4" />
+                    {avariaFotos.length === 0
+                      ? "Adicionar fotos"
+                      : `Adicionar mais (${avariaFotos.length}/5)`}
+                    <input
+                      id="avaria-fotos"
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      onChange={handleSelecionarFotos}
+                      className="hidden"
+                    />
+                  </label>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  Máx. 5 fotos, até 2MB cada (JPG, PNG).
+                </p>
+              </div>
+            </>
           ) : (
             <div className="rounded-md bg-emerald-50 dark:bg-emerald-950/20 p-3 text-sm text-emerald-800 dark:text-emerald-200">
               {avariaResultado}
