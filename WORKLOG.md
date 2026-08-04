@@ -1650,3 +1650,45 @@ Stage Summary:
 - **Ação operacional pendente (utilizador):** (1) deploy do backend no Render; (2) deploy do frontend na Vercel; (3) o gestor configura a api_key em `/gestor/configuracoes/integracoes`, importa as propriedades (botão), e pode clicar em "Sincronizar Reservas" para o backfill inicial. A partir daí, se `sincronizacao_automatica` estiver ligada, o cron job mantém tudo sincronizado.
 - **Próximos passos (follow-up, NÃO neste commit):** (1) adicionar testes para `sincronizarReservas` (mock fetch Smoobu, testar paginação, idempotência, cancelamentos); (2) adicionar botão "Testar Conexão" na página de Configurações; (3) corrigir bug DST do scheduler (HF4 limitation); (4) quando `dev` estiver estável, fazer merge/PR para `main`.
 - **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat(smoobu): restaura motor original de reservas de 14/07 e integra com novas configuracoes de admin`.
+
+---
+
+Task ID: HF8
+Agent: Z.ai Code (Eng. Software Principal)
+Task: Correção urgente — o utilizador esclareceu que o programa original era 100% orientado a webhooks (não fazia fetch ativo à API do Smoobu). As funções `importarPropriedades`/`sincronizarReservas` causavam 502s. Além disso, o `validarChaveSmoobu` (HF6) estava a rejeitar webhooks válidos do Smoobu (log: "autenticação falhou"). Tarefa: corrigir a auth do webhook, remover a sincronização ativa do frontend e o cron job, manter o ecrã de Configurações só para guardar a API key.
+
+Work Log:
+- Re-clonado o repo em `dev` (`e50b209`); configurado `git config user.name "Makigero Lab"`.
+- **Diagnóstico do bug de auth (3 causas identificadas):**
+  1. **Causa principal:** O Smoobu, por defeito, NÃO envia a API key nos headers do webhook. O `extrairApiKey` devolvia `null` → o `validarChaveSmoobu` rejeitava porque a env var `SMOOBU_API_KEY` estava definida (o passo de "modo dev" só ativava se a env var NÃO existisse). Isto causava o 401 que o utilizador via nos logs do Render.
+  2. **Query demasiado restritiva:** A query à BD exigia `integracoes.smoobu.ativo: true` — se o utilizador configurou a chave mas não ligou o toggle, a auth falhava.
+  3. **Headers limitados:** Só cobria 3 headers (`X-Smoobu-Api-Key`, `Api-Key`, `Authorization: Bearer`); o Smoobu pode usar outros (`X-Smoobu-Webhook-Secret`, etc.).
+- **(A) Correção do webhook auth (`routes/smoobuRoutes.js`):**
+  - `extrairApiKey` agora cobre **7 headers** (em vez de 3): `X-Smoobu-Api-Key`, `Api-Key`, `X-Smoobu-Webhook-Secret`, `Webhook-Secret`, `X-Webhook-Secret`, `Smoobu-Api-Key`, + `Authorization: Bearer`.
+  - `validarChaveSmoobu` reescrito: a query à BD NÃO exige mais `ativo: true` para AUTH (a presença da chave é suficiente). Se encontrar a empresa com `ativo: false`, devolve `origem: 'empresa_desativada'` — o webhook é aceite (200) mas o processamento é saltado (só log).
+  - Nova env var `SMOOBU_WEBHOOK_AUTH_DISABLED=true` desativa a auth completamente (para o caso do Smoobu não enviar headers — usar com allowlist de IP no reverse proxy). Nova constante `SMOOBU_WEBHOOK_AUTH_DISABLED` lida no arranque.
+  - Nova função `listarHeadersPresentes(req)` para log de debug em caso de rejeição (mostra quais headers auth-relevantes foram recebidos, sem expor valores).
+  - Log de rejeição MUITO detalhado: mostra headers recebidos, se a chave foi extraída (com length), se a env var está definida, e lista as 3 causas possíveis + como usar `SMOOBU_WEBHOOK_AUTH_DISABLED`.
+  - Handler do webhook: adicionado guard para `empresa_desativada` — depois do 200, se `origem === 'empresa_desativada'`, marca o WebhookLog como processado com mensagem explicativa e NÃO chama `processarWebhookSmoobu` (return early).
+- **(B) Remoção de sincronização ativa do frontend (`configuracoes/page.tsx`):**
+  - Removidos os botões "Importar Propriedades" e "Sincronizar Reservas" do card "Ações Smoobu".
+  - O card agora tem: nota explicativa ("O sistema é 100% reativo a webhooks..."), botão "Registrar Webhooks", botão "Logs de Webhooks Smoobu" (renomeado de "Logs de Sincronização Smoobu").
+  - Removido o import unused `Calendar` do lucide-react (lint limpo).
+- **(C) Desativação do cron job (`server.js`):**
+  - `iniciarSincronizacaoSmoobu()` comentado com nota explicativa HF8.
+  - A função mantém-se exportada em `jobs/sincronizacaoSmoobu.js` (não apagada) para uso manual via API direta se necessário no futuro, mas NÃO é agendada.
+- **(D) Backend mantém `importarPropriedades`/`sincronizarReservas`** (não apagados): as rotas `POST /api/gestor/smoobu/propriedades` e `POST /api/gestor/smoobu/sincronizar` continuam a existir no `gestorRoutes.js` para uso via API direta (curl, scripts, debug), mas sem UI nem cron. Não fazem parte do fluxo de produção.
+- **`.env.example`:** adicionada documentação da nova env var `SMOOBU_WEBHOOK_AUTH_DISABLED` (default: false; definir `true` se o Smoobu não enviar headers + garantir allowlist de IP).
+- **Validação:**
+  - Backend: `node --check` ✓ em `routes/smoobuRoutes.js` e `server.js`; `NODE_ENV=test npx jest` → **111/111 testes passam** ✓.
+  - Frontend: `npx tsc --noEmit` → 0 erros ✓; `npx next lint` → "No ESLint warnings or errors" ✓.
+- **Documentação atualizada:** `docs/BACKEND.md` (changelog HF8) + `backend/.env.example` (nova env var) + esta entrada no `WORKLOG.md`.
+
+Stage Summary:
+- **Bug de auth corrigido (3 causas):** (1) cobertura de headers expandida de 3 para 7; (2) query à BD sem exigir `ativo: true` (presença da chave basta); (3) env var `SMOOBU_WEBHOOK_AUTH_DISABLED` para o caso do Smoobu não enviar headers. Logs detalhados para debug.
+- **Sistema alinhado com o fluxo original:** 100% reativo a webhooks. O Smoobu envia eventos → o webhook valida a auth → `processarWebhookSmoobu` cria/atualiza tarefas. Sem fetch ativo, sem cron job, sem botões de sincronização no UI.
+- **Ecrã de Configurações limpo:** serve apenas para guardar a API key na BD + toggle ativo + (informativo) frequência/estado das rotinas. Os botões de ação ativa foram removidos.
+- **Semântica do toggle `ativo` esclarecida:** `integracoes.smoobu.ativo` controla se o PROCESSAMENTO do webhook acontece (não se a auth é válida). Se `false`, o webhook é aceite (auth válida pela presença da chave) mas o processamento é saltado — útil para pausar temporariamente a integração sem apagar a chave.
+- **Cenário de uso real (após deploy):** (1) o gestor cola a API key em `/gestor/configuracoes/integracoes` e ativa o toggle; (2) o Smoobu envia webhooks com a chave num header (ou, se não enviar, o utilizador define `SMOOBU_WEBHOOK_AUTH_DISABLED=true` no Render + allowlist de IP); (3) o webhook valida a chave contra a BD → processa → cria tarefas automaticamente.
+- **Ação operacional pendente (utilizador):** (1) deploy do backend no Render; (2) se o Smoobu não enviar a chave em headers (provável), definir `SMOOBU_WEBHOOK_AUTH_DISABLED=true` no Render E configurar allowlist de IP para só aceitar pedidos do IP do Smoobu; (3) deploy do frontend na Vercel; (4) o gestor cola a API key em `/gestor/configuracoes/integracoes` e ativa o toggle. A partir daí, o webhook processa automaticamente.
+- **Próximo passo (este commit):** commit + push para `dev` com a mensagem `fix(smoobu): corrige auth do webhook e remove sincronizacao ativa desnecessaria`.
