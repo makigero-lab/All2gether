@@ -1,18 +1,19 @@
 /**
- * Sincronização Smoobu — Cron Job (All2gether) — HF6
+ * Sincronização Smoobu — Cron Job (All2gether) — HF6 + HF7
  *
  * Corre a cada hora e, para cada empresa com `rotinas.sincronizacao_automatica
  * === true` e `integracoes.smoobu.ativo === true`, verifica se é altura de
  * sincronizar com base na `frequencia_horas` e `ultima_sincronizacao`.
  *
- * Se for altura (ultima_sincronizacao + frequencia_horas < agora), chama a
- * lógica de importação de propriedades (que popula `Propriedade.smoobu_id`).
+ * Se for altura (ultima_sincronizacao + frequencia_horas < agora), chama
+ * `sincronizarReservas` — o motor de backfill que puxa TODAS as reservas
+ * futuras do Smoobu (REST API + paginação) e processa cada uma via
+ * `processarReservaSmoobu` (cria tarefas, cancela reservas canceladas,
+ * idempotente). O próprio handler atualiza `ultima_sincronizacao` no fim.
  *
- * NOTA: O backfill de RESERVAS em massa (`sincronizarReservas` do legacy)
- * ainda não foi portado (follow-up do HF5). Até lá, este job sincroniza
- * PROPRIEDADES (que é o pré-requisito para o webhook HF4 funcionar).
- * Quando `sincronizarReservas` for portado, substituir a chamada
- * `importarPropriedades` por `sincronizarReservas` aqui.
+ * HF7 — Antes deste hotfix, o cron chamava `importarPropriedades` como
+ * placeholder (só sincronizava propriedades, não reservas). Agora chama
+ * `sincronizarReservas` (o motor real de reservas → tarefas).
  *
  * Robustez:
  *   - Erros por empresa são loggados mas não param o job (try/catch por iteração).
@@ -67,13 +68,15 @@ async function executarSincronizacaoSmoobu() {
       }
     }
 
-    // Dispara a sincronização (placeholder: chama importarPropriedades).
-    // Quando `sincronizarReservas` for portado, substituir aqui.
+    // Dispara a sincronização de RESERVAS (HF7 — motor real).
+    // O handler `sincronizarReservas` puxa todas as reservas futuras do Smoobu
+    // e processa cada uma (cria tarefas, cancela canceladas, idempotente).
+    // Também atualiza `ultima_sincronizacao` no fim (internamente).
     try {
-      const { importarPropriedades } = require('../controllers/smoobuController');
+      const { sincronizarReservas } = require('../controllers/smoobuController');
       // Simula um req/res mínimo para reutilizar o handler existente.
-      // Isto evita duplicar a lógica de upsert. O handler não usa res para
-      // nada além de res.status().json() no fim, que ignoramos aqui.
+      // Isto evita duplicar a lógica. O handler não usa res para nada além
+      // de res.status().json() no fim, que capturamos aqui para log.
       const reqFake = { user: { empresa_id: empresaId } };
       let resultado = null;
       const resFake = {
@@ -83,17 +86,16 @@ async function executarSincronizacaoSmoobu() {
           },
         }),
       };
-      await importarPropriedades(reqFake, resFake);
+      await sincronizarReservas(reqFake, resFake);
 
-      // Atualiza ultima_sincronizacao (mesmo se houve erros parciais nas
-      // propriedades — a sincronização foi tentada e não vale a pena repetir
-      // imediatamente).
+      // o handler já atualiza ultima_sincronizacao internamente (HF7),
+      // mas fazemos também aqui como safeguard (se o handler falhar silenciosamente).
       await Empresa.findByIdAndUpdate(empresaId, {
         $set: { 'integracoes.smoobu.ultima_sincronizacao': new Date() },
       });
 
       const summary = resultado
-        ? `${resultado.criadas || 0} criadas, ${resultado.atualizadas || 0} atualizadas, ${resultado.erros || 0} erros`
+        ? `${resultado.criadas || 0} tarefas criadas, ${resultado.existentes || 0} já existiam, ${resultado.erros || 0} erros (de ${resultado.totalRecebidas || 0} reservas)`
         : 'sem detalhe';
       console.log(
         `✅ [Sincronização Smoobu] empresa ${empresaId} ("${empresa.nome}") sincronizada: ${summary}.`
