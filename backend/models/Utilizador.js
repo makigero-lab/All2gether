@@ -83,6 +83,20 @@ const utilizadorSchema = new mongoose.Schema(
         message: 'dias_folga: valores devem ser inteiros entre 0 (Dom) e 6 (Sáb).',
       },
     },
+    // Folgas rotativas: array de datas específicas (além das fixas semanais).
+    // Cada entrada é { data: Date, motivo: String }.
+    // O webhook (criarTarefaPorReserva) verifica se o staff exclusivo da
+    // propriedade tem folga rotativa no dia do check-out. Se sim, a tarefa é
+    // criada com estado 'por_atribuir' + alerta 'Staff exclusivo de folga'.
+    folgas_rotativas: {
+      type: [
+        {
+          data: { type: Date, required: true },
+          motivo: { type: String, default: '', trim: true },
+        },
+      ],
+      default: [],
+    },
     // Soft delete: em vez de remover o utilizador da BD (o que deixaria
     // Tarefas antigas com utilizador_id órfão), marca-se a data de eliminação.
     // Utilizadores com eliminado_em !== null são excluídos das queries normais.

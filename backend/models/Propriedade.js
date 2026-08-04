@@ -86,19 +86,37 @@ const propriedadeSchema = new mongoose.Schema(
       min: 0,
     },
     // Prompt 92 (Fase 1.5) — Funcionário preferencial desta propriedade.
-    // Quando definido, o load balancer do webhook deve dar prioridade a este
-    // staff (desde que esteja disponível: ativo, sem ausência/folga no dia e
-    // dentro do SLA de capacidade). Preparado para Fase 1.5 — o campo existe
-    // no modelo mas a lógica de preferência no webhook será ativada num
-    // prompt seguinte.
+    // HF9 — Regra 1-para-1 ESTRITA: um staff só pode estar alocado a UMA
+    // propriedade, e uma propriedade só pode ter UM staff responsável.
+    // O índice único sparse garante que nenhum staff aparece em duas
+    // propriedades (valores null são ignorados pelo sparse).
+    // Ao associar um staff a uma propriedade, o gestorController remove-o
+    // automaticamente de qualquer propriedade anterior.
+    // O webhook (criarTarefaPorReserva) ignora o load balancer e atribui
+    // DIRETAMENTE a este staff (salvo se estiver de folga — ver alerta).
     funcionario_preferencial_id: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Utilizador',
       default: null,
       index: true,
+      // Índice único sparse definido abaixo (no schema.index) para garantir 1-para-1.
     },
   },
   { timestamps: true }
+);
+
+// HF9 — Índice único parcial em funcionario_preferencial_id.
+// Garante a regra 1-para-1: um staff NÃO pode ser o preferencial de duas
+// propriedades. Usa partialFilterExpression (em vez de sparse) para só
+// indexar documentos onde o campo NÃO é null — assim propriedades sem
+// staff atribuído (default: null) não conflitam entre si.
+propriedadeSchema.index(
+  { funcionario_preferencial_id: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { funcionario_preferencial_id: { $ne: null } },
+    name: 'funcionario_preferencial_unique_1to1',
+  }
 );
 
 module.exports = mongoose.model('Propriedade', propriedadeSchema);

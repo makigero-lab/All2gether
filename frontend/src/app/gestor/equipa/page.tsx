@@ -14,6 +14,7 @@ import {
   Phone,
   Siren,
   CalendarOff,
+  Calendar,
   // Ícones usados pela aba de Aprovações
   CalendarCheck,
   Check,
@@ -259,9 +260,13 @@ function EquipaPage() {
     responsavel_id: "" as string,
     dias_folga: [] as number[],
     telefone: "",
+    // HF10 — Folgas rotativas (datas específicas).
+    folgas_rotativas: [] as { _id?: string; data: string; motivo: string }[],
   });
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editErro, setEditErro] = useState<string | null>(null);
+  // HF10 — Estado do formulário de nova folga rotativa.
+  const [novaFolga, setNovaFolga] = useState({ data: "", motivo: "" });
 
   // Modal de confirmação de eliminação
   const [eliminando, setEliminando] = useState<UtilizadorDTO | null>(null);
@@ -368,6 +373,16 @@ function EquipaPage() {
   /** Abre o modal de edição com os dados atuais do utilizador. */
   function abrirEdicao(u: UtilizadorDTO) {
     setEditando(u);
+    // Normaliza folgas_rotativas: data pode vir como ISO string do backend.
+    const folgas = (u.folgas_rotativas ?? []).map((fr) => ({
+      _id: fr._id,
+      // Converte para YYYY-MM-DD (formato do input type="date").
+      data:
+        typeof fr.data === "string"
+          ? fr.data.slice(0, 10)
+          : new Date(fr.data).toISOString().slice(0, 10),
+      motivo: fr.motivo ?? "",
+    }));
     setEditForm({
       nome: u.nome,
       email: u.email,
@@ -376,8 +391,43 @@ function EquipaPage() {
       responsavel_id: u.responsavel_id ?? "",
       dias_folga: u.dias_folga ?? [],
       telefone: u.telefone ?? "",
+      folgas_rotativas: folgas,
     });
+    setNovaFolga({ data: "", motivo: "" });
     setEditErro(null);
+  }
+
+  /** HF10 — Adiciona uma folga rotativa ao editForm (local, sem guardar na BD). */
+  function adicionarFolgaRotativa() {
+    if (!novaFolga.data) {
+      setEditErro("Seleciona uma data para a folga rotativa.");
+      return;
+    }
+    // Evita duplicados (mesma data).
+    const jaExiste = editForm.folgas_rotativas.some(
+      (f) => f.data === novaFolga.data
+    );
+    if (jaExiste) {
+      setEditErro("Já existe uma folga rotativa nessa data.");
+      return;
+    }
+    setEditForm((f) => ({
+      ...f,
+      folgas_rotativas: [
+        ...f.folgas_rotativas,
+        { data: novaFolga.data, motivo: novaFolga.motivo.trim() },
+      ].sort((a, b) => a.data.localeCompare(b.data)),
+    }));
+    setNovaFolga({ data: "", motivo: "" });
+    setEditErro(null);
+  }
+
+  /** HF10 — Remove uma folga rotativa do editForm (local, sem guardar na BD). */
+  function removerFolgaRotativa(data: string) {
+    setEditForm((f) => ({
+      ...f,
+      folgas_rotativas: f.folgas_rotativas.filter((f2) => f2.data !== data),
+    }));
   }
 
   /** Submete a edição (PUT). Password só é enviada se preenchida. */
@@ -404,6 +454,11 @@ function EquipaPage() {
         responsavel_id: editForm.responsavel_id || null,
         dias_folga: editForm.dias_folga,
         telefone: editForm.telefone,
+        // HF10 — Envia o array completo de folgas rotativas (substituição total).
+        folgas_rotativas: editForm.folgas_rotativas.map((fr) => ({
+          data: fr.data,
+          motivo: fr.motivo,
+        })),
       };
       if (editForm.password) body.password = editForm.password;
 
@@ -1085,6 +1140,119 @@ function EquipaPage() {
                     setEditForm((f) => ({ ...f, dias_folga: dias }))
                   }
                 />
+
+                {/* HF10 — Folgas Específicas / Rotativas */}
+                <div className="space-y-3 rounded-md border p-3">
+                  <div className="flex items-center gap-2">
+                    <Calendar className="h-4 w-4 text-primary" />
+                    <h4 className="text-sm font-medium leading-none">
+                      Folgas Específicas / Rotativas
+                    </h4>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Datas específicas em que o funcionário não está disponível
+                    (além das folgas semanais fixas). O sistema cria a tarefa
+                    com alerta se o check-out calhar num destes dias.
+                  </p>
+
+                  {/* Formulário para adicionar nova folga */}
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                    <div className="flex-1 space-y-1">
+                      <label htmlFor="nova-folga-data" className="text-xs text-muted-foreground">
+                        Data
+                      </label>
+                      <Input
+                        id="nova-folga-data"
+                        type="date"
+                        value={novaFolga.data}
+                        onChange={(e) =>
+                          setNovaFolga((nf) => ({ ...nf, data: e.target.value }))
+                        }
+                        className="h-9"
+                      />
+                    </div>
+                    <div className="flex-[2] space-y-1">
+                      <label htmlFor="nova-folga-motivo" className="text-xs text-muted-foreground">
+                        Motivo (opcional)
+                      </label>
+                      <Input
+                        id="nova-folga-motivo"
+                        type="text"
+                        placeholder="Ex.: Férias, formação, médico…"
+                        value={novaFolga.motivo}
+                        onChange={(e) =>
+                          setNovaFolga((nf) => ({ ...nf, motivo: e.target.value }))
+                        }
+                        className="h-9"
+                        maxLength={200}
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-9"
+                      onClick={adicionarFolgaRotativa}
+                      disabled={!novaFolga.data}
+                    >
+                      <Plus className="h-4 w-4" />
+                      Adicionar
+                    </Button>
+                  </div>
+
+                  {/* Lista de folgas agendadas (ordenadas por data) */}
+                  {editForm.folgas_rotativas.length === 0 ? (
+                    <p className="text-xs italic text-muted-foreground">
+                      Nenhuma folga específica agendada.
+                    </p>
+                  ) : (
+                    <ul className="max-h-48 space-y-1 overflow-y-auto">
+                      {editForm.folgas_rotativas.map((fr) => {
+                        // Formata a data para pt-PT (dd/MM/yyyy).
+                        let dataFormatada = fr.data;
+                        try {
+                          const d = new Date(fr.data + "T00:00:00");
+                          dataFormatada = format(d, "dd/MM/yyyy", { locale: pt });
+                        } catch {
+                          // mantém o valor original
+                        }
+                        const isPassada = new Date(fr.data + "T00:00:00") < new Date(new Date().toDateString());
+                        return (
+                          <li
+                            key={fr.data}
+                            className={`flex items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-sm ${
+                              isPassada ? "opacity-50" : ""
+                            }`}
+                          >
+                            <div className="flex flex-col">
+                              <span className="font-medium">{dataFormatada}</span>
+                              {fr.motivo && (
+                                <span className="text-xs text-muted-foreground">
+                                  {fr.motivo}
+                                </span>
+                              )}
+                              {isPassada && (
+                                <span className="text-xs text-muted-foreground">
+                                  (passada)
+                                </span>
+                              )}
+                            </div>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10"
+                              onClick={() => removerFolgaRotativa(fr.data)}
+                              aria-label={`Remover folga de ${dataFormatada}`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
 
                 {editErro && (
                   <p className="flex items-center gap-2 text-sm text-destructive">

@@ -42,7 +42,6 @@ const Tarefa = require('../models/Tarefa');
 const WebhookLog = require('../models/WebhookLog');
 const Ausencia = require('../models/Ausencia');
 const Utilizador = require('../models/Utilizador');
-const { determinarUtilizadorAtribuido } = require('../utils/loadBalancer');
 const {
   obterRangeDia,
   calcularInicioTarefaUtilizador,
@@ -415,33 +414,72 @@ async function criarTarefaPorReserva(
     propriedade.tempo_limpeza_minutos ??
     45;
 
-  // 5. Load balancer (VIP + SLA + Haversine) — best-effort.
-  let resultadoLoadBalancer = null;
-  let tentouAtribuir = false;
-  try {
-    resultadoLoadBalancer = await determinarUtilizadorAtribuido(
-      empresaId,
-      range,
-      propriedade.coordenadas,
-      Number(tempoLimpeza) || 45,
-      propriedade._id
+  // 5. Atribuição DIRETA ao staff exclusivo (HF9 — regra 1-para-1).
+  //    Ignora o load balancer. Se a propriedade tem funcionario_preferencial_id,
+  //    atribui diretamente a ele. Verifica folgas (fixas + rotativas) no dia
+  //    do check-out. Se estiver de folga, cria com por_atribuir + alerta.
+  const staffExclusivoId = propriedade.funcionario_preferencial_id;
+
+  let utilizadorAtribuido = null;
+  let alertaTarefa = null;
+
+  if (staffExclusivoId) {
+    // Verifica se o staff exclusivo está ativo e não eliminado.
+    const staffExclusivo = await Utilizador.findById(staffExclusivoId).lean();
+    if (!staffExclusivo || !staffExclusivo.ativo || staffExclusivo.eliminado_em) {
+      utilizadorAtribuido = null;
+      alertaTarefa = 'Staff exclusivo inativo ou eliminado';
+      console.warn(
+        `⚠️  [Smoobu] staff exclusivo ${staffExclusivoId} inativo/eliminado — tarefa ficará por_atribuir.`
+      );
+    } else {
+      // Verifica folgas no dia do check-out.
+      const diaSemana = range.start.getDay(); // 0=Dom, 1=Seg, ..., 6=Sáb
+      const folgaFixa =
+        Array.isArray(staffExclusivo.dias_folga) &&
+        staffExclusivo.dias_folga.includes(diaSemana);
+
+      // Folgas rotativas: verifica se há uma entrada com data no mesmo dia.
+      let folgaRotativa = false;
+      let motivoFolga = '';
+      if (Array.isArray(staffExclusivo.folgas_rotativas)) {
+        // Compara por dia de calendário (YYYY-MM-DD) para evitar problemas de fuso.
+        const diaCheckOutStr = range.start.toISOString().slice(0, 10);
+        for (const fr of staffExclusivo.folgas_rotativas) {
+          if (fr.data) {
+            const diaFolgaStr = new Date(fr.data).toISOString().slice(0, 10);
+            if (diaFolgaStr === diaCheckOutStr) {
+              folgaRotativa = true;
+              motivoFolga = fr.motivo || '';
+              break;
+            }
+          }
+        }
+      }
+
+      if (folgaFixa || folgaRotativa) {
+        utilizadorAtribuido = null;
+        const motivo = folgaRotativa && motivoFolga ? ` (${motivoFolga})` : '';
+        alertaTarefa = `Staff exclusivo de folga${motivo}`;
+        console.log(
+          `📋 [Smoobu] staff exclusivo ${staffExclusivoId} de folga no dia ` +
+            `${range.start.toISOString().slice(0, 10)} (fixa=${folgaFixa}, ` +
+            `rotativa=${folgaRotativa}) — tarefa criada com alerta.`
+        );
+      } else {
+        utilizadorAtribuido = staffExclusivoId;
+      }
+    }
+  } else {
+    // Sem staff exclusivo atribuído à propriedade.
+    alertaTarefa = 'Sem staff exclusivo atribuído à propriedade';
+    console.log(
+      `ℹ️  [Smoobu] propriedade "${propriedade.nome}" sem staff exclusivo — tarefa por_atribuir.`
     );
-    tentouAtribuir = true;
-  } catch (err) {
-    console.error(
-      '⚠️  [Smoobu] erro no load balancer (tarefa será criada sem atribuição):',
-      err.message
-    );
-    resultadoLoadBalancer = null;
   }
 
-  const utilizadorAtribuido = resultadoLoadBalancer?.utilizadorId ?? null;
-  const tempoViagemMinutos = Number(resultadoLoadBalancer?.tempoViagem) || 0;
-  const slaExcedido = tentouAtribuir && !utilizadorAtribuido;
-
-  // 6. Scheduler sequencial (hora de início) — best-effort.
+  // 6. Scheduler sequencial (hora de início) — só se há staff atribuído.
   let dataAgendada;
-  let tempoViagemScheduler = 0;
   if (utilizadorAtribuido) {
     try {
       const resultadoScheduler = await calcularInicioTarefaUtilizador(
@@ -451,7 +489,6 @@ async function criarTarefaPorReserva(
         Number(tempoLimpeza) || 45
       );
       dataAgendada = resultadoScheduler.data;
-      tempoViagemScheduler = Number(resultadoScheduler.tempoViagem) || 0;
     } catch (err) {
       // Fallback: 10:00 UTC (= 11:00 local UTC+1, Portugal inverno).
       dataAgendada = new Date(range.start);
@@ -462,9 +499,6 @@ async function criarTarefaPorReserva(
     dataAgendada = new Date(range.start);
     dataAgendada.setUTCHours(10, 0, 0, 0);
   }
-
-  const tempoViagemFinal =
-    tempoViagemScheduler > 0 ? tempoViagemScheduler : tempoViagemMinutos;
 
   // 7. Snapshot de checklist_dinamica do ModeloChecklist (best-effort).
   let checklistDinamicaWebhook = [];
@@ -491,14 +525,12 @@ async function criarTarefaPorReserva(
     }
   }
 
-  // 8. Estado inicial (3 possibilidades).
-  const estadoInicial = utilizadorAtribuido
-    ? 'atribuida'
-    : slaExcedido
-    ? 'nao_atribuida' // tentou atribuir mas TODOS excederam SLA 480min.
-    : 'por_atribuir'; // erro no load balancer (ainda não tentado).
+  // 8. Estado inicial (HF9 — sem load balancer, só 2 possibilidades).
+  //    'atribuida' se o staff exclusivo está disponível; 'por_atribuir' se
+  //    está de folga, inativo, ou sem staff exclusivo atribuído à propriedade.
+  const estadoInicial = utilizadorAtribuido ? 'atribuida' : 'por_atribuir';
 
-  // 9. Cria a Tarefa.
+  // 9. Cria a Tarefa (com alerta se aplicável).
   const novaTarefa = await Tarefa.create({
     empresa_id: empresaId,
     propriedade_id: propriedade._id,
@@ -506,9 +538,10 @@ async function criarTarefaPorReserva(
     utilizador_id: utilizadorAtribuido,
     data: dataAgendada,
     tempo_limpeza_minutos: Number(tempoLimpeza) || 45,
-    tempo_viagem_minutos: tempoViagemFinal,
+    tempo_viagem_minutos: 0, // HF9: sem load balancer, sem cálculo de viagem.
     tipo: 'limpeza',
     estado: estadoInicial,
+    alerta: alertaTarefa, // HF9: alerta de folga / sem staff exclusivo.
     checklist: propriedade.checklist || [],
     ...(checklistDinamicaWebhook.length > 0
       ? { checklist_dinamica: checklistDinamicaWebhook }
@@ -519,7 +552,8 @@ async function criarTarefaPorReserva(
   console.log(
     `🧹 [Smoobu] tarefa ${novaTarefa._id} criada (reserva ${reservaId}, ` +
       `propriedade "${propriedade.nome}", estado ${estadoInicial}` +
-      (utilizadorAtribuido ? `, staff ${utilizadorAtribuido})` : ').')
+      (utilizadorAtribuido ? `, staff ${utilizadorAtribuido}` : '') +
+      (alertaTarefa ? `, alerta="${alertaTarefa}"` : '') + ').'
   );
 
   // 10. Notifica o staff atribuído (fire-and-forget).

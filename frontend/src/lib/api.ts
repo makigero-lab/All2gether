@@ -209,6 +209,15 @@ export interface UtilizadorDTO {
   } | null;
   ativo: boolean;
   dias_folga?: number[];
+  // HF10 — Folgas rotativas: datas específicas (além das fixas semanais).
+  // Cada entrada é { data: string|Date, motivo: string }.
+  // O webhook Smoobu verifica se o staff exclusivo tem folga rotativa no
+  // dia do check-out e cria a tarefa com alerta se sim.
+  folgas_rotativas?: {
+    _id?: string;
+    data: string | Date;
+    motivo: string;
+  }[];
   telefone?: string;
   createdAt?: string;
   updatedAt?: string;

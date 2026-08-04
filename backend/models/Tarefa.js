@@ -88,6 +88,15 @@ const tarefaSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+    // Alerta automático gerado pelo webhook Smoobu (ex: "Staff exclusivo de folga").
+    // Preenchido quando a tarefa é criada mas não pode ser atribuída ao staff
+    // exclusivo da propriedade porque ele está de folga no dia do check-out.
+    // O gestor vê este alerta no painel e gere a substituição manualmente.
+    alerta: {
+      type: String,
+      default: null,
+      trim: true,
+    },
     // Data em que a tarefa foi concluída (para relatórios).
     concluida_em: {
       type: Date,

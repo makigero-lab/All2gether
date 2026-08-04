@@ -900,8 +900,9 @@ exports.atualizarPropriedade = async (req, res) => {
     }
 
     // Prompt 95 (Fase 1.5) — Funcionário preferencial (Algoritmo VIP).
-    // Aceita null/empty para remover; caso contrário valida que é um staff
-    // ativo da mesma empresa.
+    // HF9 — Regra 1-para-1 ESTRITA: ao associar um staff a esta propriedade,
+    // remove-o automaticamente de qualquer outra propriedade onde ele fosse
+    // o preferencial. Um staff só pode estar alocado a UMA propriedade.
     if (funcionario_preferencial_id !== undefined) {
       const valor = funcionario_preferencial_id === null || funcionario_preferencial_id === ''
         ? null
@@ -921,6 +922,22 @@ exports.atualizarPropriedade = async (req, res) => {
           return res.status(400).json({
             erro: 'Funcionário preferencial não encontrado (não é staff ativo desta empresa).',
           });
+        }
+        // HF9 — Remove este staff de qualquer OUTRA propriedade onde ele
+        // fosse o preferencial (garante 1-para-1).
+        const resultadoRemocao = await Propriedade.updateMany(
+          {
+            empresa_id: empresaId,
+            funcionario_preferencial_id: valor,
+            _id: { $ne: propriedade._id },
+          },
+          { $set: { funcionario_preferencial_id: null } }
+        );
+        if (resultadoRemocao.modifiedCount > 0) {
+          console.log(
+            `🔄 [HF9] staff ${valor} removido de ${resultadoRemocao.modifiedCount} ` +
+              `outra(s) propriedade(s) (regra 1-para-1).`
+          );
         }
       }
       propriedade.funcionario_preferencial_id = valor;
@@ -1198,7 +1215,7 @@ exports.atualizarMembroEquipa = async (req, res) => {
       return res.status(400).json({ erro: 'ID de utilizador inválido.' });
     }
 
-    const { nome, email, role, password, responsavel_id, dias_folga, telefone } = req.body || {};
+    const { nome, email, role, password, responsavel_id, dias_folga, telefone, folgas_rotativas } = req.body || {};
     if (
       nome === undefined &&
       email === undefined &&
@@ -1206,10 +1223,11 @@ exports.atualizarMembroEquipa = async (req, res) => {
       password === undefined &&
       responsavel_id === undefined &&
       dias_folga === undefined &&
-      telefone === undefined
+      telefone === undefined &&
+      folgas_rotativas === undefined
     ) {
       return res.status(400).json({
-        erro: 'Nada para atualizar. Envie nome, email, role, password, responsavel_id, dias_folga e/ou telefone.',
+        erro: 'Nada para atualizar. Envie nome, email, role, password, responsavel_id, dias_folga, folgas_rotativas e/ou telefone.',
       });
     }
 
@@ -1305,6 +1323,35 @@ exports.atualizarMembroEquipa = async (req, res) => {
         return res.status(400).json({ erro: 'dias_folga deve ser um array de inteiros (0-6).' });
       }
       utilizador.dias_folga = dias_folga.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6);
+    }
+
+    // --- folgas_rotativas (opcional: array de { data, motivo }) ---
+    // HF10 — Datas específicas de folga (além das fixas semanais).
+    // O frontend envia o array completo (substituição total, não append).
+    // Cada entrada: { data: "YYYY-MM-DD" | Date, motivo: string }.
+    // Validação: data deve ser válida; motivo é string (pode ser vazia).
+    if (folgas_rotativas !== undefined) {
+      if (!Array.isArray(folgas_rotativas)) {
+        return res.status(400).json({ erro: 'folgas_rotativas deve ser um array.' });
+      }
+      const folgasNormalizadas = [];
+      for (const fr of folgas_rotativas) {
+        if (!fr || typeof fr !== 'object') continue;
+        const dataObj = fr.data instanceof Date ? fr.data : new Date(fr.data);
+        if (isNaN(dataObj.getTime())) {
+          return res.status(400).json({
+            erro: 'folgas_rotativas: data inválida.',
+            detalhe: `Valor recebido: ${JSON.stringify(fr.data)}`,
+          });
+        }
+        folgasNormalizadas.push({
+          data: dataObj,
+          motivo: typeof fr.motivo === 'string' ? fr.motivo.trim().slice(0, 200) : '',
+        });
+      }
+      // Ordena por data (ascendente) para consistência.
+      folgasNormalizadas.sort((a, b) => a.data.getTime() - b.data.getTime());
+      utilizador.folgas_rotativas = folgasNormalizadas;
     }
 
     // --- telefone (opcional) ---

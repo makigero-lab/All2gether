@@ -84,12 +84,21 @@ function calcularTempoViagem(coordA, coordB) {
 
 /**
  * Calcula o intervalo do dia (UTC meia-noite a meia-noite) de uma data.
- * @param {Date} data
- * @returns {{ start: Date, end: Date }}
+ *
+ * Aceita tanto um objeto Date como uma string de data (ex: "YYYY-MM-DD"
+ * vinda do payload do Smoobu). Se for string, envolve-a em new Date()
+ * antes de chamar métodos getUTC* (senão: "getUTCFullYear is not a function").
+ *
+ * @param {Date|string} data
+ * @returns {{ start: Date, end: Date }|null} null se a data for inválida.
  */
 function obterRangeDia(data) {
+  // Garante que data é um objeto Date (aceita strings "YYYY-MM-DD").
+  const d = data instanceof Date ? data : new Date(data);
+  if (isNaN(d.getTime())) return null;
+
   const start = new Date(
-    Date.UTC(data.getUTCFullYear(), data.getUTCMonth(), data.getUTCDate())
+    Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
   );
   const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
   return { start, end };
