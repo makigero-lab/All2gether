@@ -535,9 +535,22 @@ exports.reportarAvaria = async (req, res) => {
       return res.status(400).json({ erro: 'ID de tarefa inválido.' });
     }
 
-    const { descricao } = req.body || {};
+    const { descricao, fotos } = req.body || {};
     if (!descricao || !String(descricao).trim()) {
       return res.status(400).json({ erro: 'Descrição da avaria é obrigatória.' });
+    }
+
+    // HF13 — fotos é opcional (array de strings: URLs ou base64).
+    // Limita a 5 fotos por avaria para evitar payloads excessivos.
+    let fotosNormalizadas = [];
+    if (fotos !== undefined && fotos !== null) {
+      if (!Array.isArray(fotos)) {
+        return res.status(400).json({ erro: 'fotos deve ser um array de strings (URLs ou base64).' });
+      }
+      fotosNormalizadas = fotos
+        .filter((f) => typeof f === 'string' && f.trim())
+        .slice(0, 5)
+        .map((f) => f.trim());
     }
 
     const tarefa = await Tarefa.findOne({
@@ -555,11 +568,17 @@ exports.reportarAvaria = async (req, res) => {
       return res.status(400).json({ erro: 'Não podes reportar avaria numa tarefa cancelada.' });
     }
 
-    // v1.39.0 — Guarda a avaria no array da tarefa original (auditoria).
+    // HF13 — Guarda a avaria no array da tarefa original (auditoria).
+    // Schema enriquecido: { descricao, fotos, resolvido, data_registo }.
     if (!Array.isArray(tarefa.avarias)) {
       tarefa.avarias = [];
     }
-    tarefa.avarias.push(String(descricao).trim());
+    tarefa.avarias.push({
+      descricao: String(descricao).trim(),
+      fotos: fotosNormalizadas,
+      resolvido: false,
+      data_registo: new Date(),
+    });
     await tarefa.save();
 
     // Cria uma NOVA tarefa de manutenção para a mesma propriedade,

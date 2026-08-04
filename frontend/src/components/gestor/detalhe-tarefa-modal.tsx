@@ -12,6 +12,8 @@ import {
   Users,
   AlertTriangle,
   StickyNote,
+  Camera,
+  CheckCircle2,
 } from "lucide-react";
 
 // Prompt Extra — parsearDataSegura para compatibilidade Safari/iOS.
@@ -35,6 +37,13 @@ import {
 import { DetalhesReservaCard } from "@/components/detalhes-reserva-card";
 
 /** Tarefa no formato devolvido pelo GET /api/gestor/tarefas (com populate). */
+export interface AvariaDTO {
+  descricao: string;
+  fotos?: string[];
+  resolvido?: boolean;
+  data_registo?: string | Date;
+}
+
 export interface TarefaDetalheGestor {
   _id: string;
   data: string;
@@ -43,7 +52,9 @@ export interface TarefaDetalheGestor {
   tempo_limpeza_minutos: number;
   observacoes?: string;
   observacoes_staff?: string;
-  avarias?: string[];
+  // HF13/HF14 — avarias enriquecidas: { descricao, fotos, resolvido, data_registo }.
+  // Retrocompatível: entries legacy (strings) são normalizadas pelo helper.
+  avarias?: AvariaDTO[] | string[];
   detalhes_reserva?: {
     checkin?: string | null;
     checkout?: string | null;
@@ -54,6 +65,37 @@ export interface TarefaDetalheGestor {
   tempo_viagem_minutos?: number | null;
   propriedade_id?: { nome: string; morada?: string; capacidade_hospedes?: number | null } | null;
   utilizador_id?: { nome: string } | null;
+}
+
+/**
+ * HF14 — Normaliza uma avaria (string legacy OU objeto rico) para objeto.
+ * Retrocompatibilidade: tarefas antigas tinham `avarias: ["descrição"]`;
+ * tarefas novas têm `avarias: [{ descricao, fotos, resolvido, data_registo }]`.
+ */
+function normalizarAvaria(a: AvariaDTO | string): AvariaDTO {
+  if (typeof a === "string") {
+    return { descricao: a, resolvido: false };
+  }
+  return a;
+}
+
+/**
+ * HF14 — Formata a data de registo da avaria para pt-PT (dd/MM/yyyy HH:mm).
+ */
+function formatarDataAvaria(data: string | Date | undefined): string {
+  if (!data) return "";
+  try {
+    const d = typeof data === "string" ? new Date(data) : data;
+    return d.toLocaleString("pt-PT", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return String(data);
+  }
 }
 
 const tipoIcon: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -254,7 +296,7 @@ export function DetalheTarefaModal({
               </Card>
             )}
 
-            {/* Avarias reportadas */}
+            {/* Avarias reportadas (HF14 — renderização rica com fotos + estado) */}
             {tarefa.avarias && tarefa.avarias.length > 0 && (
               <Card className="border-destructive/30">
                 <CardHeader className="pb-2">
@@ -264,15 +306,56 @@ export function DetalheTarefaModal({
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="pt-0">
-                  <ul className="space-y-1">
-                    {tarefa.avarias.map((a, i) => (
-                      <li
-                        key={i}
-                        className="rounded-md bg-destructive/5 px-3 py-2 text-sm"
-                      >
-                        {a}
-                      </li>
-                    ))}
+                  <ul className="space-y-3">
+                    {tarefa.avarias.map((a, i) => {
+                      const av = normalizarAvaria(a);
+                      return (
+                        <li
+                          key={i}
+                          className="rounded-md bg-destructive/5 px-3 py-2"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <p className="text-sm font-medium">
+                              {av.descricao}
+                            </p>
+                            {av.resolvido && (
+                              <Badge
+                                variant="secondary"
+                                className="shrink-0 gap-1 text-xs"
+                              >
+                                <CheckCircle2 className="h-3 w-3" />
+                                Resolvido
+                              </Badge>
+                            )}
+                          </div>
+                          {av.data_registo && (
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {formatarDataAvaria(av.data_registo)}
+                            </p>
+                          )}
+                          {av.fotos && av.fotos.length > 0 && (
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {av.fotos.map((foto, fi) => (
+                                <a
+                                  key={fi}
+                                  href={foto}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="block h-16 w-16 overflow-hidden rounded-md border"
+                                >
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img
+                                    src={foto}
+                                    alt={`Avaria ${i + 1} — foto ${fi + 1}`}
+                                    className="h-full w-full object-cover"
+                                  />
+                                </a>
+                              ))}
+                            </div>
+                          )}
+                        </li>
+                      );
+                    })}
                   </ul>
                 </CardContent>
               </Card>

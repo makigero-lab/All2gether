@@ -107,10 +107,21 @@ const tarefaSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
-    // v1.38.0 — Avarias reportadas pelo staff durante a limpeza.
-    // Array de strings (descrição do problema). Cada item é uma avaria.
+    // v1.38.0 / HF13 — Avarias reportadas pelo staff durante a limpeza.
+    // HF13: enriquecido de [String] para [{ descricao, fotos, resolvido,
+    // data_registo }]. Retrocompatível: strings antigas (legacy) são lidas
+    // pelo frontend como { descricao: <string>, resolvido: false }.
     avarias: {
-      type: [String],
+      type: [
+        {
+          descricao: { type: String, required: true, trim: true },
+          // URLs ou base64 das fotos (upload simplificado — o frontend pode
+          // enviar base64 ou URLs de object storage futuro).
+          fotos: { type: [String], default: [] },
+          resolvido: { type: Boolean, default: false },
+          data_registo: { type: Date, default: Date.now },
+        },
+      ],
       default: [],
     },
     // v1.55.0 (Prompt 77) — Checklist snapshot da propriedade no momento
