@@ -1719,3 +1719,39 @@ Stage Summary:
 - **Folgas rotativas implementadas:** novo campo `folgas_rotativas` no Utilizador + campo `alerta` na Tarefa. Webhook verifica folgas (fixas + rotativas) no dia do check-out e cria tarefa com `por_atribuir` + alerta se staff de folga.
 - **Load balancer removido do fluxo do webhook:** `determinarUtilizadorAtribuido` já não é chamado em `criarTarefaPorReserva`. A atribuição é 100% baseada no staff exclusivo da propriedade. O `utils/loadBalancer.js` mantém-se no código (usado por `tarefaController.autoAtribuirTarefas` e `jobs/caoGuarda.js`) mas não é usado pelo webhook.
 - **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat: corrige parse de data, implementa alocacao 1-para-1 e gestao de folgas`.
+
+---
+
+Task ID: HF10
+Agent: Z.ai Code (Eng. Software Principal)
+Task: Construir a Interface de Utilizador (UI) no painel do Gestor para gerir folgas rotativas do staff. A lógica de backend (campo `folgas_rotativas` no schema `Utilizador`) já estava implementada em HF9; faltava a UI para lhe dar vida.
+
+Work Log:
+- Re-clonado o repo em `dev` (`d655f42`); configurado `git config user.name "Makigero Lab"`.
+- **Análise prévia:** identifiquei 3 pontos de integração:
+  1. `frontend/src/lib/api.ts` — `UtilizadorDTO` (linha 197) não tinha `folgas_rotativas`.
+  2. `backend/controllers/gestorController.js` — `atualizarMembroEquipa` (linha 1208) não aceitava `folgas_rotativas` no destructuring do `req.body`.
+  3. `frontend/src/app/gestor/equipa/page.tsx` — modal de edição (linha 368 `abrirEdicao`, 384 `handleEditar`, 1082 secção `FolgasSemanaisCheckboxes`).
+- **Passo 1 — Tipos TypeScript (`lib/api.ts`):** adicionado `folgas_rotativas?: { _id?: string; data: string | Date; motivo: string }[]` ao `UtilizadorDTO`.
+- **Passo 2 — Backend (`gestorController.js` `atualizarMembroEquipa`):**
+  - Adicionado `folgas_rotativas` ao destructuring do `req.body`.
+  - Adicionado `folgas_rotativas === undefined` à verificação "nada para atualizar" + atualizada a mensagem de erro.
+  - Adicionado bloco de validação/guarda (após `dias_folga`): valida array, normaliza datas (`new Date(fr.data)`), trunca motivo a 200 chars, ordena por data ascendente, substituição total (não append). Erro 400 se data inválida.
+  - `node --check` ✓ · 111/111 testes ✓.
+- **Passo 3 — UI (`equipa/page.tsx`):**
+  - Import de `Calendar` adicionado ao lucide-react.
+  - `editForm` estendido com `folgas_rotativas: { _id?, data, motivo }[]`.
+  - Novo estado `novaFolga` (`{ data: "", motivo: "" }`) para o formulário de adição.
+  - `abrirEdicao` atualizado: normaliza datas ISO do backend para `YYYY-MM-DD` (formato do input `type="date"`); reset do `novaFolga`.
+  - `handleEditar` atualizado: envia `folgas_rotativas` no body do PUT (array completo, mapeado para `{ data, motivo }`).
+  - Novas funções: `adicionarFolgaRotativa()` (valida data obrigatória + evita duplicados + ordena) e `removerFolgaRotativa(data)` (filtra por data).
+  - Nova secção UI no modal de edição (após `FolgasSemanaisCheckboxes`): título com ícone `Calendar`, descrição explicativa, formulário (input date + input motivo + botão "Adicionar" com `Plus`), lista ordenada por data com `max-h-48 overflow-y-auto`, cada item mostra data formatada (`dd/MM/yyyy` via `date-fns` locale `pt`) + motivo + botão remover (`Trash2` com `aria-label`), datas passadas com `opacity-50` + "(passada)", estado vazio "Nenhuma folga específica agendada."
+- **Validação:** `tsc --noEmit` → 0 erros ✓; `next lint` → "No ESLint warnings or errors" ✓; backend `node --check` ✓ · `jest` → 111/111 testes ✓.
+- **Documentação atualizada:** `docs/FRONTEND.md` (changelog HF10) + esta entrada no `WORKLOG.md`.
+
+Stage Summary:
+- **UI funcional:** o gestor pode adicionar/remover folgas rotativas no modal de edição de staff com meia dúzia de cliques (data + motivo + Adicionar; lixeira para remover).
+- **Backend alinhado:** `PUT /api/gestor/equipa/:id` aceita `folgas_rotativas` (substituição total do array); valida datas; ordena por data; trunca motivo.
+- **Integração com HF9:** as folgas rotativas adicionadas aqui são lidas pelo webhook `criarTarefaPorReserva` (HF9) — se o staff exclusivo tiver folga rotativa no dia do check-out, a tarefa é criada com `estado: 'por_atribuir'` + `alerta: 'Staff exclusivo de folga (motivo)'`.
+- **Design system:** usa os mesmos componentes (Input, Button, Card, Dialog) + `date-fns` com locale `pt` já usado noutros sítios da página. Responsivo (flex-col no mobile, flex-row no sm+).
+- **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat(ui): cria interface de gestao de folgas rotativas para o staff`.
