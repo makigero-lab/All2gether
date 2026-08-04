@@ -235,13 +235,14 @@ function extrairDadosReserva(payload) {
  * e o chamador faz fallback para arrival.
  *
  * @param {string} reservaId - ID da reserva no Smoobu.
+ * @param {import('mongoose').Types.ObjectId} [empresaId] - para ler a chave da BD (HF6).
  * @returns {Promise<object|null>} { departure, arrival, pax, nome_hospede } ou null.
  */
-async function enriquecerReservaSmoobu(reservaId) {
-  const apiKey = process.env.SMOOBU_API_KEY;
+async function enriquecerReservaSmoobu(reservaId, empresaId) {
+  const { chave: apiKey } = await obterApiKeySmoobu(empresaId);
   if (!apiKey || !reservaId) {
     console.warn(
-      '⚠️  [Smoobu] enriquecerReservaSmoobu: SMOOBU_API_KEY em falta ou reservaId vazio — fallback para dados do webhook.'
+      '⚠️  [Smoobu] enriquecerReservaSmoobu: API key em falta ou reservaId vazio — fallback para dados do webhook.'
     );
     return null;
   }
@@ -702,9 +703,10 @@ async function atualizarTarefaPorReserva(
  * REST API do Smoobu. Fallback final: arrival.
  *
  * @param {object} payload - payload bruto do Smoobu.
+ * @param {import('mongoose').Types.ObjectId} [empresaId] - para resolver a API key (HF6).
  * @returns {Promise<Tarefa|{canceladas:number,total:number}|null>}
  */
-async function processarReservaSmoobu(payload) {
+async function processarReservaSmoobu(payload, empresaId) {
   const {
     action,
     smoobuPropId,
@@ -729,7 +731,7 @@ async function processarReservaSmoobu(payload) {
     (!dataCheckOutRaw || !detalhesReserva.nome_hospede);
 
   if (precisaEnriquecimento) {
-    const enriched = await enriquecerReservaSmoobu(reservaId);
+    const enriched = await enriquecerReservaSmoobu(reservaId, empresaId);
     if (enriched) {
       dataCheckOutFinal = enriched.departure || dataCheckOutRaw || null;
       detalhesFinal = {
@@ -792,7 +794,7 @@ async function processarReservaSmoobu(payload) {
  */
 async function processarWebhookSmoobu(payload, webhookLogId, empresaId) {
   try {
-    const resultado = await processarReservaSmoobu(payload);
+    const resultado = await processarReservaSmoobu(payload, empresaId);
 
     // Atualiza o WebhookLog para 'processado'.
     try {
@@ -847,12 +849,40 @@ async function processarWebhookSmoobu(payload, webhookLogId, empresaId) {
 const { obterCoordenadas } = require('../utils/geocoding');
 
 /**
- * Lê a API key do Smoobu (single-tenant satélite: env var global).
- * @returns {string|null}
+ * Lê a API key do Smoobu para uma empresa.
+ *
+ * HF6 — Descentralização: prioridade invertida.
+ *   1. Empresa.integracoes.smoobu.api_key (se `ativo: true`) — fonte de
+ *      verdade em produção (gestão via /api/gestor/configuracoes/integracoes).
+ *   2. process.env.SMOOBU_API_KEY — fallback (retrocompatibilidade / dev /
+ *      empresas sem chave configurada na BD).
+ *
+ * @param {import('mongoose').Types.ObjectId} [empresaId] - ID da empresa (do JWT).
+ * @returns {Promise<{ chave: string, origem: 'empresa' | 'env' | null }>}
+ *   Devolve `origem` para logging/diagnóstico (de onde veio a chave).
  */
-function obterApiKeySmoobu() {
-  const key = process.env.SMOOBU_API_KEY;
-  return key && key.trim() ? key.trim() : null;
+async function obterApiKeySmoobu(empresaId) {
+  // 1. Tenta ler da empresa (se integracao ativa e chave preenchida).
+  if (empresaId) {
+    try {
+      const Empresa = require('../models/Empresa');
+      const empresa = await Empresa.findById(empresaId)
+        .select('integracoes.smoobu')
+        .lean();
+      const smoobu = empresa?.integracoes?.smoobu;
+      if (smoobu?.ativo && smoobu.api_key && smoobu.api_key.trim()) {
+        return { chave: smoobu.api_key.trim(), origem: 'empresa' };
+      }
+    } catch {
+      // Se falhar a leitura da empresa, continua para o fallback.
+    }
+  }
+  // 2. Fallback: env var global (retrocompatibilidade / dev).
+  const envKey = process.env.SMOOBU_API_KEY;
+  if (envKey && envKey.trim()) {
+    return { chave: envKey.trim(), origem: 'env' };
+  }
+  return { chave: null, origem: null };
 }
 
 /**
@@ -970,11 +1000,12 @@ async function buscarApartamentosSmoobu(apiKey) {
  */
 async function getPropriedadesSmoobu(req, res) {
   try {
-    const apiKey = obterApiKeySmoobu();
+    const empresaId = req.user && req.user.empresa_id;
+    const { chave: apiKey } = await obterApiKeySmoobu(empresaId);
     if (!apiKey) {
       return res.status(400).json({
         erro:
-          'API Key do Smoobu não configurada. Define SMOOBU_API_KEY no Render.',
+          'API Key do Smoobu não configurada. Define-a em Configurações → Integrações, ou via env var SMOOBU_API_KEY.',
       });
     }
 
@@ -1025,11 +1056,11 @@ async function importarPropriedades(req, res) {
       return res.status(400).json({ erro: 'empresa_id em falta no token.' });
     }
 
-    const apiKey = obterApiKeySmoobu();
+    const { chave: apiKey } = await obterApiKeySmoobu(empresaId);
     if (!apiKey) {
       return res.status(400).json({
         erro:
-          'API Key do Smoobu não configurada. Define SMOOBU_API_KEY no Render.',
+          'API Key do Smoobu não configurada. Define-a em Configurações → Integrações, ou via env var SMOOBU_API_KEY.',
       });
     }
 
@@ -1178,6 +1209,294 @@ async function importarPropriedades(req, res) {
   }
 }
 
+/* ================================================================== */
+/* Sincronização em massa de Reservas (HF7)                           */
+/* ================================================================== */
+/*
+ * Recuperado do histórico Git (commit pré-F0 681f807, 2026-07-15) e
+ * adaptado ao HF6 (api_key lida da Empresa via obterApiKeySmoobu).
+ *
+ * Esta é a função que faltava: o "motor" de backfill que puxa TODAS as
+ * reservas futuras do Smoobu (REST API com paginação) e processa cada uma
+ * através do mesmo `processarReservaSmoobu` usado pelo webhook. É o que
+ * despoleta o botão "Sincronizar Reservas" no painel de Configurações e o
+ * cron job `sincronizacaoSmoobu`.
+ *
+ * Diferenças vs original (681f807):
+ *   - `obterApiKeySmoobu(empresaId)` agora devolve `{ chave, origem }` (HF6)
+ *     em vez de uma string direta — lê-se `.chave`.
+ *   - `processarReservaSmoobu` e `cancelarTarefaPorReserva` estão neste
+ *     próprio módulo (em vez de `require('./webhookController')`).
+ *   - `processarReservaSmoobu(payload, empresaId)` recebe `empresaId` (HF6)
+ *     para resolver a API key da BD ao enriquecer reservas.
+ *   - Adicionado `message` legível para toasts (compatibilidade com
+ *     `executarAcao` do frontend).
+ */
+
+/**
+ * POST /api/gestor/smoobu/sincronizar
+ *
+ * Vai buscar todas as reservas futuras (a partir de hoje) ao Smoobu via
+ * REST API (com paginação) e cria as tarefas correspondentes usando a mesma
+ * lógica do webhook (`processarReservaSmoobu` — idempotente).
+ *
+ * Fluxo:
+ *   1. Resolve a API key (Empresa.integracoes.smoobu via obterApiKeySmoobu).
+ *   2. Calcula a data de hoje (YYYY-MM-DD UTC) para não importar o passado.
+ *   3. Fetch a https://login.smoobu.com/api/reservations?arrivalFrom=YYYY-MM-DD&page=N
+ *      com paginação (lê todas as páginas).
+ *   4. Para cada reserva: mapeia para o formato do webhook, verifica
+ *      idempotência (Tarefa.findOne por smoobu_reserva_id), e chama
+ *      processarReservaSmoobu (ou cancelarTarefaPorReserva se a reserva
+ *      estiver cancelada no Smoobu).
+ *   5. Cada reserva é envolvida num try/catch — se uma falhar, as outras
+ *      continuam.
+ *   6. Devolve contadores: totalRecebidas, importadas, criadas, existentes,
+ *      erros, detalheErros + message legível.
+ *
+ * Resposta 200: { totalRecebidas, importadas, criadas, existentes, erros,
+ *                 detalheErros, message }
+ */
+async function sincronizarReservas(req, res) {
+  try {
+    const empresaId = req.user && req.user.empresa_id;
+    if (!empresaId) {
+      return res.status(400).json({ erro: 'empresa_id em falta no token.' });
+    }
+
+    const { chave: apiKey } = await obterApiKeySmoobu(empresaId);
+    if (!apiKey) {
+      return res.status(400).json({
+        erro:
+          'API Key do Smoobu não configurada. Define-a em Configurações → Integrações, ou via env var SMOOBU_API_KEY.',
+      });
+    }
+
+    // Data de hoje em YYYY-MM-DD (UTC) — não importamos o passado.
+    const agora = new Date();
+    const from = new Date(
+      Date.UTC(agora.getUTCFullYear(), agora.getUTCMonth(), agora.getUTCDate())
+    )
+      .toISOString()
+      .slice(0, 10);
+
+    // Fetch ao Smoobu com paginação.
+    // O parâmetro oficial é arrivalFrom (case-sensitive, 'F' maiúsculo).
+    // O array vem em body.bookings (oficial) ou body.reservations (variantes).
+    let currentPage = 1;
+    let totalPages = 1;
+    let todasReservas = [];
+
+    try {
+      while (currentPage <= totalPages) {
+        const url = `https://login.smoobu.com/api/reservations?arrivalFrom=${from}&page=${currentPage}`;
+        const respostaSmoobu = await fetch(url, {
+          method: 'GET',
+          headers: {
+            'Api-Key': apiKey,
+            Accept: 'application/json',
+          },
+          signal: AbortSignal.timeout(30000),
+        });
+
+        if (!respostaSmoobu.ok) {
+          const texto = await respostaSmoobu.text().catch(() => '');
+          const e = new Error(
+            `Smoobu devolveu erro ${respostaSmoobu.status}: ${
+              texto.slice(0, 200) || respostaSmoobu.statusText
+            }`
+          );
+          e.status = 502;
+          throw e;
+        }
+
+        const body = await respostaSmoobu.json();
+
+        const reservasPagina =
+          body?.bookings ??
+          body?.reservations ??
+          body?.data?.reservations ??
+          body?.data?.bookings ??
+          (Array.isArray(body) ? body : []);
+
+        todasReservas = todasReservas.concat(reservasPagina);
+
+        // Atualiza o total de páginas (se o Smoobu não enviar page_count, para no 1).
+        totalPages = body?.page_count || 1;
+        currentPage++;
+      }
+    } catch (err) {
+      if (err.status) {
+        return res.status(err.status).json({
+          erro: err.message,
+          ...(err.detalhe ? { detalhe: err.detalhe } : {}),
+        });
+      }
+      console.error('❌ [Smoobu] sincronizarReservas: fetch falhou:', err.message);
+      return res.status(502).json({
+        erro: 'Não foi possível ligar ao Smoobu.',
+        detalhe: err.message,
+      });
+    }
+
+    const reservas = todasReservas;
+    console.log(`📥 [Smoobu] sincronizarReservas: ${reservas.length} reservas recebidas (arrivalFrom=${from}).`);
+
+    if (!Array.isArray(reservas)) {
+      return res.status(502).json({
+        erro: 'Resposta do Smoobu não contém array "bookings" ou "reservations".',
+      });
+    }
+
+    let criadas = 0;
+    let existentes = 0;
+    let erros = 0;
+    const detalheErros = [];
+
+    for (const reserva of reservas) {
+      const reservaId =
+        reserva?.id ?? reserva?.reservationId ?? reserva?.reservation_id;
+
+      try {
+        // Verifica idempotência ANTES de chamar o processador (otimização:
+        // evita refazer o load balancer se a tarefa já existe). O processador
+        // também verifica, mas assim poupamos trabalho e conseguimos distinguir
+        // "criada" de "já existente" nos contadores.
+        let jaExistia = false;
+        if (reservaId) {
+          const existente = await Tarefa.findOne({
+            smoobu_reserva_id: String(reservaId),
+          }).lean();
+          if (existente) {
+            jaExistia = true;
+          }
+        }
+
+        // Mapeia a reserva do formato REST API para o formato do webhook.
+        // O processador espera: { action, data: { id, arrival, departure,
+        // apartment: { id, name }, guests, guestName, ... } }
+        //
+        // Cobertura exaustiva do nome do hóspede no formato REST API do
+        // Smoobu: guestName, guest_name, guest-name (kebab), guest.name,
+        // guest.firstName + guest.lastName, firstName + lastName,
+        // customerName, customer.name, bookedForName, name.
+        const hospedeNomeSmoobu =
+          reserva.guestName ??
+          reserva.guest_name ??
+          reserva['guest-name'] ??
+          reserva.guest?.name ??
+          (reserva.guest?.firstName || reserva.guest?.lastName
+            ? [reserva.guest?.firstName, reserva.guest?.lastName]
+                .filter(Boolean)
+                .join(' ')
+            : null) ??
+          (reserva.firstName || reserva.lastName
+            ? [reserva.firstName, reserva.lastName].filter(Boolean).join(' ')
+            : null) ??
+          reserva.customerName ??
+          reserva.customer?.name ??
+          reserva.bookedForName ??
+          reserva.name ??
+          null;
+
+        const payloadWebhook = {
+          action: 'newReservation',
+          data: {
+            id: reserva.id,
+            arrival: reserva.arrival ?? reserva.start_date ?? reserva.startDate,
+            departure: reserva.departure ?? reserva.end_date ?? reserva.endDate,
+            apartment: {
+              id:
+                reserva.apartment?.id ??
+                reserva.apartment_id ??
+                reserva.apartmentId,
+              name: reserva.apartment?.name ?? reserva.apartment_name,
+            },
+            // Campos extras para detalhes_reserva.
+            guests:
+              reserva.guests ?? reserva.numPeople ?? reserva.numberOfGuests ?? undefined,
+            adults: reserva.adults,
+            children: reserva.children,
+            guestName: hospedeNomeSmoobu ?? undefined,
+            firstName: reserva.firstName ?? reserva.first_name ?? undefined,
+            lastName: reserva.lastName ?? reserva.last_name ?? undefined,
+          },
+        };
+
+        // Se a reserva estiver cancelada no Smoobu (status = 'cancelled' ou
+        // variante), dispara o gatilho de cancelamento em vez de criar uma
+        // tarefa fantasma.
+        const statusReserva = String(
+          reserva.status ?? reserva.bookingStatus ?? ''
+        ).toLowerCase();
+        if (['cancelled', 'canceled', 'cancelada'].includes(statusReserva)) {
+          await cancelarTarefaPorReserva(reservaId);
+          // Conta como "existente" (não cria nova, não conta como erro).
+          existentes++;
+          continue;
+        }
+
+        const resultado = await processarReservaSmoobu(payloadWebhook, empresaId);
+
+        if (jaExistia) {
+          existentes++;
+        } else if (resultado) {
+          criadas++;
+        }
+        // resultado null = action ignorada ou reserva sem tarefa (não conta)
+      } catch (err) {
+        erros++;
+        detalheErros.push({
+          reservaId: reservaId != null ? String(reservaId) : null,
+          erro: err.message,
+        });
+        console.error(
+          `⚠️  [Smoobu] sincronizarReservas: reserva ${reservaId} falhou:`,
+          err.message
+        );
+        // Continua para a próxima reserva.
+      }
+    }
+
+    console.log(
+      `✅ [Smoobu] sincronizarReservas: ${reservas.length} recebidas, ${criadas} criadas, ` +
+        `${existentes} já existiam, ${erros} com erro.`
+    );
+
+    // Atualiza ultima_sincronizacao da empresa (HF6).
+    try {
+      const Empresa = require('../models/Empresa');
+      await Empresa.findByIdAndUpdate(empresaId, {
+        $set: { 'integracoes.smoobu.ultima_sincronizacao': new Date() },
+      });
+    } catch (updErr) {
+      console.warn(
+        '⚠️  [Smoobu] sincronizarReservas: falha ao atualizar ultima_sincronizacao (não bloqueia):',
+        updErr.message
+      );
+    }
+
+    // message legível para toasts (executarAcao do configuracoes/page.tsx).
+    let message = `${criadas} tarefa(s) criada(s)`;
+    if (existentes > 0) message += `, ${existentes} já existiam`;
+    if (erros > 0) message += `, ${erros} com erro`;
+    message += ` (de ${reservas.length} reservas).`;
+
+    return res.status(200).json({
+      totalRecebidas: reservas.length,
+      importadas: criadas + existentes,
+      criadas,
+      existentes,
+      erros,
+      detalheErros,
+      message,
+    });
+  } catch (err) {
+    console.error('❌ [Smoobu] sincronizarReservas: erro interno:', err.message);
+    return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
+  }
+}
+
 module.exports = {
   processarWebhookSmoobu,
   processarReservaSmoobu, // exportado para reprocesso manual / testes
@@ -1188,6 +1507,7 @@ module.exports = {
   atualizarTarefaPorReserva, // exportado para testes
   getPropriedadesSmoobu, // GET /api/gestor/smoobu/propriedades (dropdown)
   importarPropriedades, // POST /api/gestor/smoobu/propriedades (upsert em massa)
+  sincronizarReservas, // POST /api/gestor/smoobu/sincronizar (backfill em massa)
   extrairMoradaSmoobu, // exportado para testes
   obterApiKeySmoobu, // exportado para reutilização
 };

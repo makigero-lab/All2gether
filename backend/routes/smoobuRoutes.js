@@ -9,15 +9,20 @@
  * HF4: integrada a lógica de conversão de reservas em tarefas (controller
  *   smoobuController.js). Padrão anti-timeout do Smoobu: resposta 200
  *   IMEDIATA + processamento assíncrono via setImmediate.
+ * HF6: autenticação descentralizada — a chave é validada contra
+ *   `Empresa.integracoes.smoobu.api_key` (com `ativo: true`) em vez de
+ *   apenas contra a env var. Fallback a env var mantido para
+ *   retrocompatibilidade / dev. Permite multi-tenant no futuro (cada
+ *   empresa com a sua chave Smoobu).
  *
  * Segurança:
- *   - Autenticação via env var `SMOOOBU_API_KEY`. O Smoobu deve enviar a
- *     chave num dos headers suportados: `X-Smoobu-Api-Key`, `Api-Key` ou
- *     `Authorization: Bearer <key>` (flexível — o Smoobu permite configurar
- *     o header no painel).
- *   - Se a env var NÃO estiver definida, o endpoint aceita todos os pedidos
- *     (modo dev) mas emite um warning no log — em produção a env var TEM de
- *     estar definida para evitar aceitar payloads não autorizados.
+ *   - Autenticação: a chave recebida no header é comparada contra as chaves
+ *     das empresas ativas (integracoes.smoobu.api_key + ativo). Se nenhuma
+ *     empresa tiver chave configurada, cai no fallback da env var
+ *     `SMOOBU_API_KEY` (retrocompatibilidade). Se AMBAS falharem (sem
+ *     empresas com chave E sem env var), o endpoint fica em modo dev
+ *     (aceita + warning) — NÃO usar em produção.
+ *   - Headers suportados: `X-Smoobu-Api-Key`, `Api-Key`, `Authorization: Bearer`.
  *
  * Robustez (anti-crash):
  *   - O payload é sempre gravado em `WebhookLog` num bloco try/catch —
@@ -39,12 +44,13 @@
 const express = require('express');
 const WebhookLog = require('../models/WebhookLog');
 const Propriedade = require('../models/Propriedade');
+const Empresa = require('../models/Empresa');
 const { extrairDadosReserva } = require('../controllers/smoobuController');
 
 const router = express.Router();
 
-// Lida UMA VEZ no arranque. Se vazia, o endpoint fica em modo dev (sem auth).
-const SMOOBU_API_KEY = process.env.SMOOBU_API_KEY;
+// Fallback (retrocompatibilidade / dev). Lida UMA VEZ no arranque.
+const SMOOBU_API_KEY_ENV = process.env.SMOOBU_API_KEY;
 
 /**
  * Extrai a chave de API do pedido, procurando em vários headers comuns.
@@ -66,6 +72,58 @@ function extrairApiKey(req) {
   }
 
   return null;
+}
+
+/**
+ * HF6 — Valida a chave recebida contra as empresas ativas (descentralizada).
+ *
+ * Estratégia:
+ *   1. Procura uma empresa (ativa, não apagada) com
+ *      `integracoes.smoobu.api_key === chave && integracoes.smoobu.ativo === true`.
+ *      Se encontrar, devolve `{ empresaId, origem: 'empresa' }`.
+ *   2. Se nenhuma empresa tiver chave configurada (MAS há empresas), cai no
+ *      fallback da env var `SMOOBU_API_KEY` (retrocompatibilidade). Se bater,
+ *      devolve `{ empresaId: null, origem: 'env' }`.
+ *   3. Se AMBAS falharem (sem empresas com chave E sem env var), devolve
+ *      `{ empresaId: null, origem: 'dev' }` — modo dev (aceita + warning).
+ *
+ * @param {string} chaveRecebida - chave extraída do header.
+ * @returns {Promise<{ empresaId: import('mongoose').Types.ObjectId|null, origem: 'empresa'|'env'|'dev' }>}
+ */
+async function validarChaveSmoobu(chaveRecebida) {
+  // 1. Procura em empresas ativas com integração Smoobu ligada.
+  if (chaveRecebida) {
+    try {
+      const empresa = await Empresa.findOne({
+        ativa: true,
+        apagada: false,
+        'integracoes.smoobu.ativo': true,
+        'integracoes.smoobu.api_key': chaveRecebida,
+      })
+        .select('_id')
+        .lean();
+      if (empresa) {
+        return { empresaId: empresa._id, origem: 'empresa' };
+      }
+    } catch {
+      // Se a query falhar, cai para o fallback.
+    }
+  }
+
+  // 2. Fallback: env var global (retrocompatibilidade / dev).
+  if (SMOOBU_API_KEY_ENV && chaveRecebida && chaveRecebida === SMOOBU_API_KEY_ENV) {
+    return { empresaId: null, origem: 'env' };
+  }
+
+  // 3. Modo dev: sem empresas com chave E sem env var → aceita sem auth.
+  if (!SMOOBU_API_KEY_ENV) {
+    // Verifica se há ALGUMA empresa com chave configurada; se não houver
+    // nenhuma, é sinal de que o sistema ainda não foi configurado (dev).
+    return { empresaId: null, origem: 'dev' };
+  }
+
+  // 4. Chave recebida não bate com nenhuma empresa nem com a env var.
+  return { empresaId: null, origem: 'rejeitado' };
 }
 
 /**
@@ -95,47 +153,58 @@ async function resolverEmpresaIdDoPayload(payload) {
  *
  * Respostas:
  *   - 200: payload recebido e gravado (processamento decorre em background).
- *   - 401: autenticação falhou (SMOOBU_API_KEY definida mas chave recebida
- *          não corresponde). O payload rejeitado É gravado no WebhookLog
- *          (status='erro') para auditoria.
- *   - 200 + warning: SMOOBU_API_KEY não configurada (modo dev) — aceita mas
- *          avisa no log.
+ *   - 401: autenticação falhou (chave recebida não corresponde a nenhuma
+ *          empresa ativa nem à env var). O payload rejeitado É gravado no
+ *          WebhookLog (status='erro') para auditoria.
+ *   - 200 + warning: modo dev (sem empresas com chave E sem env var).
  */
 router.post('/webhook', async (req, res) => {
   const payloadRecebido = req.body;
   const timestampRececao = new Date().toISOString();
 
-  // 1. Autenticação.
-  if (SMOOBU_API_KEY) {
-    const chaveRecebida = extrairApiKey(req);
-    if (!chaveRecebida || chaveRecebida !== SMOOBU_API_KEY) {
-      console.warn(
-        '⚠️  [Smoobu Webhook] autenticação falhou (chave inválida/em falta).'
-      );
-      // Grava o payload rejeitado para auditoria (best-effort).
-      try {
-        await WebhookLog.create({
-          payload: payloadRecebido,
-          status: 'erro',
-          erro_msg:
-            'Autenticação falhou: SMOOBU_API_KEY inválida ou em falta no header.',
-        });
-      } catch (logErr) {
-        console.error(
-          '⚠️  [Smoobu Webhook] falha ao gravar WebhookLog (auth rejeitada):',
-          logErr.message
-        );
-      }
-      return res.status(401).json({ erro: 'Autenticação inválida.' });
-    }
-  } else {
+  // 1. Autenticação descentralizada (HF6).
+  const chaveRecebida = extrairApiKey(req);
+  const auth = await validarChaveSmoobu(chaveRecebida);
+
+  if (auth.origem === 'rejeitado') {
     console.warn(
-      '⚠️  [Smoobu Webhook] SMOOBU_API_KEY não configurada — a aceitar pedidos sem autenticação (modo dev).'
+      '⚠️  [Smoobu Webhook] autenticação falhou (chave inválida/em falta).'
+    );
+    try {
+      await WebhookLog.create({
+        payload: payloadRecebido,
+        status: 'erro',
+        erro_msg:
+          'Autenticação falhou: chave não corresponde a nenhuma empresa ativa nem à env var.',
+      });
+    } catch (logErr) {
+      console.error(
+        '⚠️  [Smoobu Webhook] falha ao gravar WebhookLog (auth rejeitada):',
+        logErr.message
+      );
+    }
+    return res.status(401).json({ erro: 'Autenticação inválida.' });
+  }
+
+  if (auth.origem === 'dev') {
+    console.warn(
+      '⚠️  [Smoobu Webhook] sem auth configurada (nem empresas com chave nem SMOOBU_API_KEY) — modo dev, a aceitar sem autenticação.'
+    );
+  } else if (auth.origem === 'env') {
+    console.log(
+      'ℹ️  [Smoobu Webhook] auth via env var SMOOBU_API_KEY (fallback — considera migrar para Configurações → Integrações).'
+    );
+  } else if (auth.origem === 'empresa') {
+    console.log(
+      `✅ [Smoobu Webhook] auth via empresa ${auth.empresaId} (integracoes.smoobu).`
     );
   }
 
-  // 2. Resolve empresa_id (best-effort, para o WebhookLog) — NÃO bloqueia.
-  const empresaId = await resolverEmpresaIdDoPayload(payloadRecebido);
+  // 2. Resolve empresa_id (prioridade: auth.empresaId > match por propriedade).
+  let empresaId = auth.empresaId;
+  if (!empresaId) {
+    empresaId = await resolverEmpresaIdDoPayload(payloadRecebido);
+  }
 
   // 3. Grava o payload no WebhookLog (best-effort — NUNCA crasha o pedido).
   let webhookLogId = null;
