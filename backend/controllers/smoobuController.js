@@ -415,14 +415,16 @@ async function criarTarefaPorReserva(
     propriedade.tempo_limpeza_minutos ??
     45;
 
-  // 5. Atribuição HÍBRIDA (HF11 — Many-to-One + Load Balancer).
+  // 5. Atribuição HÍBRIDA (HF11 — Many-to-One + Load Balancer + HF12 flexibilidade VIP).
   //    Estratégia:
   //      (a) Se a propriedade TEM funcionario_preferencial_id e ele NÃO está
-  //          de folga → atribui diretamente a ele.
+  //          de folga → atribui diretamente a ele. MAS (HF12) se o VIP só
+  //          conseguir começar depois das 14h (carga alta), faz fallback ao
+  //          LB para garantir que a casa fica pronta cedo.
   //      (b) Se a propriedade NÃO TEM staff exclusivo, OU se o staff exclusivo
-  //          está de folga/inativo → faz fallback para o Load Balancer
-  //          (determinarUtilizadorAtribuido) que procura alguém disponível na
-  //          equipa geral (com SLA, Haversine, Algoritmo VIP, ausências).
+  //          está de folga/inativo, OU se o VIP só começa tarde → faz fallback
+  //          para o Load Balancer (determinarUtilizadorAtribuido — HF12 com
+  //          Earliest Start Time).
   //      (c) Se o Load Balancer também não encontrar ninguém → por_atribuir
   //          (com alerta explicativo).
   //    Alertas (para o gestor intervir manualmente):
@@ -432,12 +434,22 @@ async function criarTarefaPorReserva(
   //        LB também falhou.
   //      - "Sem staff disponível (load balancer não encontrou ninguém)" — se a
   //        propriedade não tem preferencial e o LB falhou.
+  //      - "Staff exclusivo sobrecarregado (início após 14h) — redistribuído" —
+  //        se o VIP só começava tarde e o LB encontrou alguém mais cedo (alerta
+  //        informativo, não bloqueante).
+
+  // HF12 — Limiar de hora para fallback do VIP. Se o VIP só conseguir começar
+  // a tarefa depois desta hora, faz fallback ao LB para paralelizar.
+  // 14:00 local = 13:00 UTC (Portugal inverno UTC+1).
+  const VIP_LIMITE_HORA_UTC = 13; // 13:00 UTC = 14:00 local
+
   const staffExclusivoId = propriedade.funcionario_preferencial_id;
 
   let utilizadorAtribuido = null;
   let tempoViagemMinutos = 0;
   let alertaTarefa = null;
   let tentouLoadBalancer = false;
+  let vipSobrecarregado = false; // HF12: VIP só começava tarde → fallback ao LB
 
   // (a) Tenta atribuir ao staff exclusivo se existir e não estiver de folga.
   if (staffExclusivoId) {
@@ -482,13 +494,42 @@ async function criarTarefaPorReserva(
         // Guarda o motivo para o alerta caso o LB também falhe.
         alertaTarefa = `Staff exclusivo de folga${motivo}`;
       } else {
-        // Staff exclusivo disponível → atribui diretamente.
-        utilizadorAtribuido = staffExclusivoId;
+        // HF12 — Staff exclusivo disponível. Verifica se consegue começar cedo.
+        // Se só conseguir começar depois das 14h (carga alta), faz fallback ao LB.
+        try {
+          const resultadoSchedulerVIP = await calcularInicioTarefaUtilizador(
+            staffExclusivoId,
+            range.start,
+            propriedade.coordenadas,
+            Number(tempoLimpeza) || 45
+          );
+          const inicioVIP = resultadoSchedulerVIP.data;
+          const horaUTC = inicioVIP.getUTCHours();
+
+          if (horaUTC >= VIP_LIMITE_HORA_UTC) {
+            // VIP sobrecarregado — só começaria depois das 14h local.
+            vipSobrecarregado = true;
+            console.log(
+              `⏰ [HF12] staff exclusivo ${staffExclusivoId} só começaria às ` +
+                `${inicioVIP.toISOString()} (≥${VIP_LIMITE_HORA_UTC}:00 UTC = 14h local) ` +
+                `— fallback ao load balancer para paralelizar.`
+            );
+          } else {
+            // VIP disponível e começa cedo → atribui diretamente.
+            utilizadorAtribuido = staffExclusivoId;
+          }
+        } catch (err) {
+          // Se o scheduler falhar, atribui ao VIP anyway (não bloqueia).
+          console.warn(
+            `⚠️  [HF12] scheduler falhou para VIP ${staffExclusivoId}: ${err.message} — atribui ao VIP.`
+          );
+          utilizadorAtribuido = staffExclusivoId;
+        }
       }
     }
   }
 
-  // (b) Fallback ao Load Balancer se não há staff exclusivo ou ele está de folga.
+  // (b) Fallback ao Load Balancer se não há staff exclusivo ou ele está de folga/sobrecarregado.
   if (!utilizadorAtribuido) {
     tentouLoadBalancer = true;
     try {
@@ -497,19 +538,34 @@ async function criarTarefaPorReserva(
         range,
         propriedade.coordenadas,
         Number(tempoLimpeza) || 45,
-        propriedade._id
+        // HF12: NÃO passa propriedadeId ao LB quando o VIP está sobrecarregado,
+        // para o LB não voltar a atribuir ao VIP (o que anularia o fallback).
+        // O VIP só é respeitado pelo LB se for passado propriedadeId E o VIP
+        // não estiver sobrecarregado (caso normal). Aqui o VIP já foi avaliado
+        // e está sobrecarregado, pelo que o LB deve escolher outro staff.
+        vipSobrecarregado ? null : propriedade._id
       );
       if (resultadoLB) {
         utilizadorAtribuido = resultadoLB.utilizadorId;
         tempoViagemMinutos = Number(resultadoLB.tempoViagem) || 0;
         // Se o staff exclusivo estava de folga mas o LB encontrou substituto,
-        // limpa o alerta (a tarefa foi atribuída — não precisa de intervenção).
-        if (alertaTarefa) {
+        // limpa o alerta de folga (a tarefa foi atribuída — não precisa de intervenção).
+        if (alertaTarefa && !vipSobrecarregado) {
           console.log(
             `✅ [Smoobu] load balancer encontrou substituto ${utilizadorAtribuido} ` +
               `para a tarefa (staff exclusivo estava de folga).`
           );
           alertaTarefa = null;
+        }
+        // HF12: se o VIP estava sobrecarregado e o LB encontrou alguém, gera
+        // alerta informativo (não bloqueante) para o gestor saber que houve
+        // redistribuição.
+        if (vipSobrecarregado) {
+          alertaTarefa = `Staff exclusivo sobrecarregado (início após 14h) — redistribuído para ${utilizadorAtribuido}`;
+          console.log(
+            `✅ [HF12] load balancer redistribuiu tarefa para ${utilizadorAtribuido} ` +
+              `(VIP estava sobrecarregado).`
+          );
         }
       }
     } catch (err) {

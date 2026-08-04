@@ -1790,3 +1790,40 @@ Stage Summary:
 - **Alertas inteligentes:** só geram alerta os casos que realmente precisam de intervenção do gestor (LB falhou). Se o LB encontrou substituto, a tarefa é atribuída silenciosamente.
 - **Drop do índice legacy:** crítico para produção — sem o `dropIndex` no arranque, o MongoDB rejeitaria atribuir o mesmo staff a duas propriedades com `E11000 duplicate key` (o índice unique criado em HF9 persiste na BD mesmo depois de removido do schema).
 - **Próximo passo (este commit):** commit + push para `dev` com a mensagem `fix: implementa sistema hibrido de atribuicao e restaura load balancer`.
+
+---
+
+Task ID: HF12
+Agent: Z.ai Code (Eng. Software Principal)
+Task: Otimizar o `utils/loadBalancer.js` para paralelizar tarefas e evitar estrangulamento. Um funcionário recebia tarefas em cascata até às 16h enquanto outros ficavam livres desde o meio-dia. Nova métrica principal: Earliest Start Time (quem consegue começar mais cedo). Tie-breakers: 1º menos tarefas no dia, 2º Haversine. Flexibilidade VIP: fallback se VIP só começar depois das 14h.
+
+Work Log:
+- Re-clonado o repo em `dev` (`e4abf2f`); configurado `git config user.name "Makigero Lab"`.
+- **Análise do problema:** li `utils/loadBalancer.js` (223 linhas) + `calcularInicioTarefaUtilizador` em `utils/scheduler.js`. Causa raiz identificada: o `determinarUtilizadorAtribuido` escolhia o staff com **menor `cargaTotal`** (`cargaLimpeza + tempoViagem + tempoNovaTarefa`). Isto significa que o MESMO staff (com carga 0 ou baixa) continuava a receber tarefas até encher o SLA (480min = 8h), ficando em cascata até às 16h, enquanto outros com carga ligeiramente maior (mas ainda disponíveis) ficavam livres desde o meio-dia.
+- **`utils/loadBalancer.js` — reescrita do `determinarUtilizadorAtribuido`:**
+  - Nova métrica PRINCIPAL: **Earliest Start Time**. Para cada staff disponível, chama `calcularInicioTarefaUtilizador(utilizadorId, range.start, coordenadas, tempoNovaTarefa)` que calcula a data/hora mais cedo a que consegue começar (considera última tarefa do dia + tempo de viagem + proteção de almoço 13-14h). Vence quem conseguir começar MAIS CEDO.
+  - **Tie-breaker 1:** menos tarefas atribuídas nesse dia (nova função `contarTarefasDia` + aggregate `$group: { count: { $sum: 1 } }`). Entre dois staff com o mesmo Earliest Start Time, prefere quem tem MENOS tarefas (distribui o trabalho).
+  - **Tie-breaker 2:** menor tempo de viagem Haversine (mais perto geograficamente).
+  - Nova função `ehMelhorCandidato(candidato, atual)` compara por ordem: `earliestStart.getTime()` → `numTarefas` → `tempoViagem`.
+  - Pré-busca agregada de cargas + contagens em 2 queries paralelas (`Promise.all`) em vez de N queries por staff (performance).
+  - SLA 480min mantido (exclui quem excede `cargaComNova > CAPACIDADE_MAXIMA_MINUTOS`).
+  - VIP mantido (respeitado se passado `propriedadeId` — o VIP é avaliado ANTES do Earliest Start Time para preservar a preferência do gestor).
+  - Log do vencedor: `✅ [HF12] Load Balancer: staff X eleito (início=..., tarefas no dia=N, viagem=Mmin)`.
+- **`controllers/smoobuController.js` — flexibilidade VIP (HF12):**
+  - Quando o staff exclusivo (VIP) está disponível mas só consegue começar a tarefa depois das 14h local (13:00 UTC — carga alta), faz fallback ao LB para garantir que a casa fica pronta cedo.
+  - Constante `VIP_LIMITE_HORA_UTC = 13` (14h local = 13h UTC no inverno PT).
+  - Usa `calcularInicioTarefaUtilizador` para calcular o início do VIP; se `horaUTC >= 13`, marca `vipSobrecarregado = true` e faz fallback ao LB.
+  - **Crítico:** quando o VIP está sobrecarregado, NÃO passa `propriedadeId` ao LB (`vipSobrecarregado ? null : propriedade._id`) — caso contrário o LB voltaria a atribuir ao VIP (o `propriedadeId` ativa o algoritmo VIP dentro do LB), o que anularia o fallback.
+  - Alerta informativo: "Staff exclusivo sobrecarregado (início após 14h) — redistribuído para X" (não bloqueante — a tarefa foi atribuída a outra pessoa).
+  - Se o scheduler falhar para o VIP, atribui ao VIP anyway (não bloqueia).
+- **Validação:** `node --check` ✓ em `utils/loadBalancer.js` e `controllers/smoobuController.js`; `NODE_ENV=test npx jest` → **111/111 testes passam** ✓; frontend `npx tsc --noEmit` → 0 erros ✓; `npx next lint` → limpo ✓ (frontend não foi tocado, confirmei sem regressões).
+- **Documentação atualizada:** `docs/BACKEND.md` (changelog HF12) + esta entrada no `WORKLOG.md`.
+
+Stage Summary:
+- **Problema resolvido:** estrangulamento de horários. O LB agora paraleliza o trabalho — quem consegue começar mais cedo é escolhido, em vez de acumular no mesmo staff até às 16h.
+- **Nova métrica PRINCIPAL:** Earliest Start Time (via `calcularInicioTarefaUtilizador`). Vence quem começa mais cedo.
+- **Tie-breakers:** 1º menos tarefas no dia (load balancing real); 2º menor distância Haversine.
+- **Flexibilidade VIP:** se o VIP só começar depois das 14h (carga alta), fallback ao LB para garantir que a casa fica pronta cedo. O VIP só é respeitado se conseguir começar atempadamente.
+- **Performance:** pré-busca agregada de cargas + contagens em 2 queries paralelas (em vez de N por staff).
+- **Sem quebras:** 111/111 testes passam; VIP, SLA, ausências, folgas, scheduler e proteção de almoço todos mantidos.
+- **Próximo passo (este commit):** commit + push para `dev` com a mensagem `refactor: otimiza load balancer para paralelizar tarefas e priorizar inicio mais cedo`.
