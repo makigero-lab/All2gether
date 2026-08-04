@@ -5,7 +5,6 @@ import {
   Loader2,
   Save,
   Building2,
-  Calendar,
   Webhook,
   Clock,
   CheckCircle2,
@@ -251,15 +250,11 @@ export default function ConfiguracoesPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <p className="text-sm text-muted-foreground">Sincroniza dados com o Smoobu usando a API Key desta empresa.</p>
-            <Button variant="outline" className="w-full gap-2" onClick={() => executarAcao("Importar Propriedades", "/api/gestor/smoobu/propriedades")} disabled={actionLoading !== null}>
-              {actionLoading === "Importar Propriedades" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Building2 className="h-4 w-4" />}
-              Importar Propriedades
-            </Button>
-            <Button variant="outline" className="w-full gap-2" onClick={() => executarAcao("Sincronizar Reservas", "/api/gestor/smoobu/sincronizar")} disabled={actionLoading !== null}>
-              {actionLoading === "Sincronizar Reservas" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Calendar className="h-4 w-4" />}
-              Sincronizar Reservas
-            </Button>
+            <p className="text-sm text-muted-foreground">
+              O sistema é 100% reativo a webhooks — o Smoobu envia eventos que
+              são processados automaticamente. A API Key é usada para validar
+              a autenticidade dos webhooks recebidos.
+            </p>
             <Button variant="outline" className="w-full gap-2" onClick={() => executarAcao("Registrar Webhooks", "/api/admin/registrar-webhooks")} disabled={actionLoading !== null}>
               {actionLoading === "Registrar Webhooks" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Webhook className="h-4 w-4" />}
               Registrar Webhooks
@@ -267,7 +262,7 @@ export default function ConfiguracoesPage() {
             {/* Prompt 126 — Botão para abrir o modal de logs de sincronização Smoobu. */}
             <Button variant="outline" className="w-full gap-2" onClick={() => setMostrarLogs(true)}>
               <ScrollText className="h-4 w-4" />
-              Logs de Sincronização Smoobu
+              Logs de Webhooks Smoobu
             </Button>
           </CardContent>
         </Card>

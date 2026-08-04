@@ -203,10 +203,14 @@ if (require.main === module) {
       // move tarefas concluídas/canceladas com mais de 3 meses para o arquivo.
       iniciarArquivista();
 
-      // HF6 — Cron job "Sincronização Smoobu": a cada hora, verifica empresas
-      // com sincronização automática ligada e dispara a importação de
-      // propriedades (futuro: reservas) quando a frequência o dita.
-      iniciarSincronizacaoSmoobu();
+      // HF8 — Cron job "Sincronização Smoobu" DESATIVADO.
+      // O sistema é 100% reativo a webhooks (o Smoobu envia eventos que são
+      // processados automaticamente). A sincronização ativa (pull da REST API
+      // do Smoobu) foi removida do fluxo de produção porque causava 502s e não
+      // faz parte do fluxo original. A função `iniciarSincronizacaoSmoobu`
+      // mantém-se exportada para uso manual via API direta se necessário no
+      // futuro, mas NÃO é agendada.
+      // iniciarSincronizacaoSmoobu();
     })
     .catch((err) => {
       console.error('❌ Erro ao ligar ao MongoDB:', err.message);
