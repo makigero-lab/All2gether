@@ -187,6 +187,30 @@ export function GestorSidebar() {
               </Button>
             </div>
             <NavLinks />
+            {/* HF15 — Footer do menu mobile com notificações, tema e logout.
+                Antes o overlay mobile só tinha Brand + NavLinks — o logout
+                ficava inacessível em telemóveis/tablets. */}
+            <div className="mt-auto space-y-2 border-t p-4">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs text-muted-foreground">Notificações</span>
+                <NotificationBell />
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">Tema</span>
+                <ThemeToggle />
+              </div>
+              <Button
+                variant="ghost"
+                className="w-full justify-start gap-2 text-sm text-muted-foreground hover:text-destructive"
+                onClick={() => fazerLogout()}
+              >
+                <LogOut className="h-4 w-4" />
+                Terminar Sessão
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                © {new Date().getFullYear()} All2gether
+              </p>
+            </div>
           </div>
         </div>
       )}
