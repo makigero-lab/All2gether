@@ -33,6 +33,7 @@ const ausenciaRoutes = require('./routes/ausenciaRoutes');
 const relatorioRoutes = require('./routes/relatorioRoutes');
 const staffRoutes = require('./routes/staffRoutes');
 const smoobuRoutes = require('./routes/smoobuRoutes');
+const parceiroRoutes = require('./routes/parceiroRoutes');
 const { iniciarDailyBriefing } = require('./jobs/dailyBriefing');
 const { iniciarAgendaAmanha } = require('./jobs/agendaAmanha');
 const { iniciarCaoGuarda } = require('./jobs/caoGuarda');
@@ -127,6 +128,10 @@ app.use('/api/staff', staffRoutes);
 // Endpoint público (autentica via SMOOBU_API_KEY no header, NÃO via JWT).
 // O rate limiter global está ISENTO para esta rota (ver skip acima).
 app.use('/api/smoobu', smoobuRoutes);
+
+// HF17 (Fase 3) — Portal de Parceiros B2B (propriedades manuais + tarefas).
+// Protegido por auth + isParceiro.
+app.use('/api/parceiro', parceiroRoutes);
 
 /* ------------------------------------------------------------------ */
 /* Middleware global de tratamento de erros                            */

@@ -99,6 +99,23 @@ const propriedadeSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+    // HF17 (Fase 3) — Origem da propriedade: Smoobu (via webhook/importação)
+    // ou manual (criada pelo gestor ou por um parceiro B2B).
+    origem: {
+      type: String,
+      enum: ['smoobu', 'manual'],
+      default: 'manual',
+      index: true,
+    },
+    // HF17 — Se a propriedade foi criada por um parceiro B2B, este campo
+    // guarda o ID do utilizador-parceiro a quem pertence. Null para
+    // propriedades do Smoobu ou criadas pelo gestor internamente.
+    parceiro_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Utilizador',
+      default: null,
+      index: true,
+    },
   },
   { timestamps: true }
 );

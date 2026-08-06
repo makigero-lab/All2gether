@@ -55,6 +55,13 @@ const isGestor = requireRole('admin', 'gestor');
  */
 const isAdmin = requireRole('admin');
 
+/**
+ * isParceiro — só parceiro (utilizador externo B2B).
+ * Usado para: portal de parceiros (criar propriedades manuais, agendar limpezas).
+ * HF17 (Fase 3) — Portal de Parceiros.
+ */
+const isParceiro = requireRole('parceiro');
+
 // Atalhos legacy (compatibilidade — requireManager = isGestor).
 const requireManager = isGestor;
 const requireAdmin = isAdmin;
@@ -64,6 +71,7 @@ module.exports = {
   requireRole,
   isGestor,
   isAdmin,
+  isParceiro,
   // Legacy (não quebrar código existente)
   requireManager,
   requireAdmin,

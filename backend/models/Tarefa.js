@@ -38,6 +38,14 @@ const tarefaSchema = new mongoose.Schema(
       index: true,
       sparse: true,
     },
+    // HF17 (Fase 3) — Origem da tarefa: Smoobu (via webhook) ou manual
+    // (criada pelo gestor ou por um parceiro B2B no portal).
+    origem: {
+      type: String,
+      enum: ['smoobu', 'manual'],
+      default: 'manual',
+      index: true,
+    },
     utilizador_id: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Utilizador',

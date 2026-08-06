@@ -1965,3 +1965,36 @@ Stage Summary:
 - **Agrupamento minimiza deslocações:** se o staff já está na propriedade hoje (quartos diferentes do mesmo edifício), recebe 2h de bónus — evita enviar outra pessoa para o mesmo sítio.
 - **Sem quebras:** 111/111 testes passam; VIP, SLA, ausências, folgas, scheduler e proteção de almoço mantidos.
 - **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat(logistica): refatora load balancer com agrupamento diario, rotatividade, equidade semanal e google maps fallback`.
+
+---
+
+Task ID: HF17
+Agent: Z.ai Code (Eng. Software Principal)
+Task: Fase 3 — Arquitetura híbrida para propriedades manuais + novo role de parceiro (B2B). Independência do Smoobu e Portal de Parceiros.
+
+Work Log:
+- Re-clonado o repo em `dev` (`e9adf22`); configurado `git config user.name "Makigero Lab"`.
+- Lidos `models/Utilizador.js` (role enum), `middleware/requireRole.js` (isGestor/isAdmin), `models/Propriedade.js` (smoobu_id já tem sparse: true desde HF4), `models/Tarefa.js` (smoobu_reserva_id já tem sparse: true desde HF4). Confirmado que os sparse indexes já permitem múltiplos nulls sem violação.
+- **#1 — Novo role 'parceiro':**
+  - `models/Utilizador.js`: enum de role alargado para `['admin', 'gestor', 'staff', 'parceiro']`.
+  - `middleware/requireRole.js`: novo `const isParceiro = requireRole('parceiro')`; exportado.
+- **#2 — Propriedades Híbridas:**
+  - `models/Propriedade.js`: novos campos `origem` (enum ['smoobu','manual'], default 'manual') e `parceiro_id` (ObjectId ref Utilizador, default null, indexado).
+  - `smoobu_id` já tinha `sparse: true` — múltiplas propriedades manuais com `smoobu_id: null` não violam índices.
+- **#3 — Tarefas Híbridas:**
+  - `models/Tarefa.js`: novo campo `origem` (enum ['smoobu','manual'], default 'manual').
+  - `smoobu_reserva_id` já tinha `sparse: true`.
+- **#3 — Controller + Routes:**
+  - `controllers/parceiroController.js` (novo, ~200 linhas): 4 funções — `criarPropriedade` (POST: cria casa manual com `origem: 'manual'`, `smoobu_id: null`, `parceiro_id: req.user.id`, geocoding Nominatim best-effort); `listarPropriedades` (GET: filtra por `parceiro_id = req.user.id`); `criarTarefa` (POST: cria limpeza manual `origem: 'manual'`, `smoobu_reserva_id: null`, `estado: 'por_atribuir'`, valida que a propriedade pertence ao parceiro); `listarTarefas` (GET: lista tarefas das propriedades do parceiro).
+  - `routes/parceiroRoutes.js` (novo): 4 rotas com `auth + isParceiro`.
+  - `server.js`: `app.use('/api/parceiro', parceiroRoutes)` montado após `/api/smoobu`.
+- **Validação:** `node --check` ✓ em 7 ficheiros; `NODE_ENV=test npx jest` → **111/111 testes passam** ✓. Os nulls em `smoobu_id` e `smoobu_reserva_id` não quebram a BD (sparse indexes já existiam desde HF4).
+- **Documentação atualizada:** `docs/BACKEND.md` (changelog HF17) + esta entrada no `WORKLOG.md`.
+
+Stage Summary:
+- **Arquitetura híbrida:** o sistema agora suporta propriedades e tarefas tanto do Smoobu (via webhook) quanto manuais (criadas pelo gestor ou por parceiros B2B). O campo `origem` distingue a proveniência.
+- **Role 'parceiro':** utilizadores externos (B2B) podem criar as suas próprias casas e agendar limpezas espontâneas sem depender do Smoobu. Acesso protegido por `auth + isParceiro`.
+- **Segurança:** o parceiro só pode ver/gerir propriedades e tarefas que ele criou (filtro por `parceiro_id = req.user.id`). Validação de posse da propriedade antes de criar tarefa.
+- **Índices sparse:** `smoobu_id` e `smoobu_reserva_id` já tinham `sparse: true` desde HF4 — múltiplas propriedades/tarefas manuais com null não violam a BD.
+- **Sem quebras:** 111/111 testes passam; o load balancer, webhook, e todos os endpoints existentes continuam funcionais.
+- **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat(b2b): prepara arquitetura hibrida para propriedades manuais e novo role de parceiro`.
