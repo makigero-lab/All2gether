@@ -37,6 +37,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import {
   adminGet,
   adminPost,
@@ -383,6 +384,65 @@ export default function AdminTarefasPage() {
   const [cancelarTarget, setCancelarTarget] = useState<TarefaAdmin | null>(null);
   const [cancelarLoading, setCancelarLoading] = useState(false);
 
+  // HF18 — Modal "Nova Limpeza Espontânea".
+  // Endpoint: POST /api/gestor/tarefas/espontanea
+  // Payload: { propriedade_id, data, hora?, observacoes?, utilizador_id? }
+  // Origem: 'manual' (sem reserva Smoobu associada).
+  // Reaproveita as listas `propriedades` e `staff` já carregadas na página.
+  const [espontaneaOpen, setEspontaneaOpen] = useState(false);
+  const [espontaneaForm, setEspontaneaForm] = useState({
+    propriedade_id: "",
+    data: "",
+    hora: "",
+    observacoes: "",
+    utilizador_id: "",
+  });
+  const [espontaneaSubmitting, setEspontaneaSubmitting] = useState(false);
+  const [espontaneaErro, setEspontaneaErro] = useState<string | null>(null);
+
+  /** HF18 — Submete a limpeza espontânea via POST /api/gestor/tarefas/espontanea. */
+  async function handleSubmeterEspontanea(e: React.FormEvent) {
+    e.preventDefault();
+    setEspontaneaErro(null);
+
+    if (!espontaneaForm.propriedade_id || !espontaneaForm.data) {
+      setEspontaneaErro("Propriedade e Data são obrigatórias.");
+      return;
+    }
+
+    setEspontaneaSubmitting(true);
+    try {
+      await adminPost<{ tarefa: TarefaAdmin }>(
+        "/api/gestor/tarefas/espontanea",
+        {
+          propriedade_id: espontaneaForm.propriedade_id,
+          data: espontaneaForm.data,
+          // Hora opcional — só envia se preenchida.
+          hora: espontaneaForm.hora || undefined,
+          observacoes: espontaneaForm.observacoes.trim() || undefined,
+          // Utilizador opcional — se vazio, a tarefa fica "por_atribuir"
+          // (o gestor pode depois atribuir manualmente ou usar o LB).
+          utilizador_id: espontaneaForm.utilizador_id || undefined,
+        }
+      );
+
+      // Limpa o formulário e fecha o modal.
+      setEspontaneaForm({
+        propriedade_id: "",
+        data: "",
+        hora: "",
+        observacoes: "",
+        utilizador_id: "",
+      });
+      setEspontaneaOpen(false);
+      await carregar();
+    } catch (e) {
+      setEspontaneaErro(e instanceof Error ? e.message : "Erro ao criar limpeza espontânea.");
+    } finally {
+      setEspontaneaSubmitting(false);
+    }
+  }
+
   async function handleCancelar(t: TarefaAdmin) {
     setCancelarTarget(t);
   }
@@ -593,6 +653,27 @@ export default function AdminTarefasPage() {
           }}>
             <Plus className="h-4 w-4" />
             Nova Tarefa
+          </Button>
+          {/* HF18 — Botão "Nova Limpeza Espontânea" — abre um Dialog simples
+              para criar uma tarefa manual (origem: 'manual') sem reserva
+              Smoobu associada. Endpoint: POST /api/gestor/tarefas/espontanea. */}
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setEspontaneaOpen(true);
+              setEspontaneaErro(null);
+              setEspontaneaForm({
+                propriedade_id: "",
+                data: "",
+                hora: "",
+                observacoes: "",
+                utilizador_id: "",
+              });
+            }}
+            title="Cria uma limpeza avulsa (sem reserva Smoobu). Útil para limpezas extra solicitadas pelo proprietário ou parceiro."
+          >
+            <SprayCan className="h-4 w-4" />
+            <span className="hidden sm:inline">Limpeza Espontânea</span>
           </Button>
         </div>
       </div>
@@ -1121,6 +1202,188 @@ export default function AdminTarefasPage() {
             )}
           </Button>
         </DialogFooter>
+      </Dialog>
+
+      {/* HF18 — Modal "Nova Limpeza Espontânea" */}
+      <Dialog
+        open={espontaneaOpen}
+        onOpenChange={(o) => {
+          if (!espontaneaSubmitting) setEspontaneaOpen(o);
+        }}
+      >
+        <DialogHeader>
+          <div>
+            <DialogTitle className="flex items-center gap-2">
+              <SprayCan className="h-5 w-5 text-primary" />
+              Nova Limpeza Espontânea
+            </DialogTitle>
+            <DialogDescription>
+              Cria uma limpeza avulsa (sem reserva Smoobu associada). Útil
+              para limpezas extra solicitadas pelo proprietário ou parceiro
+              B2B. A tarefa fica com origem &ldquo;manual&rdquo;.
+            </DialogDescription>
+          </div>
+          <DialogClose
+            onClick={() => {
+              if (!espontaneaSubmitting) setEspontaneaOpen(false);
+            }}
+          />
+        </DialogHeader>
+        <form onSubmit={handleSubmeterEspontanea}>
+          <DialogContent className="space-y-4">
+            {/* Propriedade — reutiliza a lista `propriedades` já carregada. */}
+            <div className="space-y-1.5">
+              <label htmlFor="espontanea-propriedade" className="text-sm font-medium">
+                Propriedade <span className="text-destructive">*</span>
+              </label>
+              {propriedades.length === 0 ? (
+                <p className="text-xs text-amber-600 dark:text-amber-400">
+                  Não há propriedades carregadas. Cria uma propriedade primeiro
+                  (em Propriedades &gt; Adicionar Manual) e depois volta aqui.
+                </p>
+              ) : (
+                <select
+                  id="espontanea-propriedade"
+                  value={espontaneaForm.propriedade_id}
+                  onChange={(e) =>
+                    setEspontaneaForm((f) => ({
+                      ...f,
+                      propriedade_id: e.target.value,
+                    }))
+                  }
+                  required
+                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <option value="">Selecionar…</option>
+                  {propriedades
+                    .filter((p) => p.ativo)
+                    .map((p) => (
+                      <option key={p._id} value={p._id}>
+                        {p.nome}
+                      </option>
+                    ))}
+                </select>
+              )}
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              {/* Data (obrigatório) */}
+              <div className="space-y-1.5">
+                <label htmlFor="espontanea-data" className="text-sm font-medium">
+                  Data <span className="text-destructive">*</span>
+                </label>
+                <Input
+                  id="espontanea-data"
+                  type="date"
+                  value={espontaneaForm.data}
+                  onChange={(e) =>
+                    setEspontaneaForm((f) => ({ ...f, data: e.target.value }))
+                  }
+                  required
+                />
+              </div>
+              {/* Hora (opcional) */}
+              <div className="space-y-1.5">
+                <label htmlFor="espontanea-hora" className="text-sm font-medium">
+                  Hora (opcional)
+                </label>
+                <Input
+                  id="espontanea-hora"
+                  type="time"
+                  value={espontaneaForm.hora}
+                  onChange={(e) =>
+                    setEspontaneaForm((f) => ({ ...f, hora: e.target.value }))
+                  }
+                />
+              </div>
+            </div>
+
+            {/* Atribuir a Staff (opcional) */}
+            <div className="space-y-1.5">
+              <label htmlFor="espontanea-staff" className="text-sm font-medium">
+                Atribuir a Staff (opcional)
+              </label>
+              <select
+                id="espontanea-staff"
+                value={espontaneaForm.utilizador_id}
+                onChange={(e) =>
+                  setEspontaneaForm((f) => ({
+                    ...f,
+                    utilizador_id: e.target.value,
+                  }))
+                }
+                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <option value="">— Por atribuir (cria como &ldquo;por atribuir&rdquo;) —</option>
+                {staff.map((u) => (
+                  <option key={u._id} value={u._id}>
+                    {u.nome}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-muted-foreground">
+                Se não escolheres staff, a tarefa fica &ldquo;por
+                atribuir&rdquo;. Podes usar depois o botão{" "}
+                <strong>Auto-Atribuir Pendentes</strong> ou atribuir manualmente.
+              </p>
+            </div>
+
+            {/* Observações */}
+            <div className="space-y-1.5">
+              <label
+                htmlFor="espontanea-observacoes"
+                className="text-sm font-medium"
+              >
+                Observações
+              </label>
+              <Textarea
+                id="espontanea-observacoes"
+                value={espontaneaForm.observacoes}
+                onChange={(e) =>
+                  setEspontaneaForm((f) => ({
+                    ...f,
+                    observacoes: e.target.value,
+                  }))
+                }
+                rows={3}
+                placeholder="Ex.: Limpeza extra pedida pelo proprietário após checkout antecipado."
+              />
+            </div>
+
+            {espontaneaErro && (
+              <p className="flex items-center gap-2 text-sm text-destructive">
+                <AlertCircle className="h-4 w-4" />
+                {espontaneaErro}
+              </p>
+            )}
+          </DialogContent>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setEspontaneaOpen(false)}
+              disabled={espontaneaSubmitting}
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="submit"
+              disabled={espontaneaSubmitting || propriedades.length === 0}
+            >
+              {espontaneaSubmitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  A criar…
+                </>
+              ) : (
+                <>
+                  <SprayCan className="mr-2 h-4 w-4" />
+                  Criar
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </form>
       </Dialog>
 
       {/* Prompt 95 — Modal de detalhe da tarefa (card de detalhes_reserva) */}

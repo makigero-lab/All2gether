@@ -49,7 +49,7 @@ const {
   reprocessarWebhook,
   setupClienteZero,
 } = require('../controllers/gestorController');
-const { reportarAtrasoTarefa, criarTarefa, atribuirTarefa, reatribuirTarefa, atualizarEstadoTarefa, apagarTarefasFuturas, listarIndisponiveisData, autoAtribuirTarefas } = require('../controllers/tarefaController');
+const { reportarAtrasoTarefa, criarTarefa, atribuirTarefa, reatribuirTarefa, atualizarEstadoTarefa, apagarTarefasFuturas, listarIndisponiveisData, autoAtribuirTarefas, criarTarefaEspontanea } = require('../controllers/tarefaController');
 // CRUD de Modelos de Checklist (futuro: Modelos de Protocolo Clínico)
 const { listarModelos, criarModelo, obterModelo, atualizarModelo, apagarModelo } = require('../controllers/checklistController');
 // Smoobu — importação/sincronização de propriedades (HF5) + reservas (HF7).
@@ -129,6 +129,7 @@ router.post('/tarefas/:id/atraso', auth, isGestor, reportarAtrasoTarefa);
 
 // Gestão manual de tarefas.
 router.post('/tarefas', auth, isGestor, criarTarefa);
+router.post('/tarefas/espontanea', auth, isGestor, criarTarefaEspontanea);
 router.patch('/tarefas/:id/atribuir', auth, isGestor, atribuirTarefa);
 router.patch('/tarefas/:id/reatribuir', auth, isGestor, reatribuirTarefa);
 router.patch('/tarefas/:id/estado', auth, isGestor, atualizarEstadoTarefa);

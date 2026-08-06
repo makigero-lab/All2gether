@@ -1998,3 +1998,28 @@ Stage Summary:
 - **Índices sparse:** `smoobu_id` e `smoobu_reserva_id` já tinham `sparse: true` desde HF4 — múltiplas propriedades/tarefas manuais com null não violam a BD.
 - **Sem quebras:** 111/111 testes passam; o load balancer, webhook, e todos os endpoints existentes continuam funcionais.
 - **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat(b2b): prepara arquitetura hibrida para propriedades manuais e novo role de parceiro`.
+
+---
+
+Task ID: HF18
+Agent: Z.ai Code (Eng. Software Principal) + subagent full-stack
+Task: UI no gestor para propriedades manuais e tarefas espontâneas. Os parceiros não criam tarefas/propriedades — quem cria é o Gestor.
+
+Work Log:
+- Re-clonado o repo em `dev` (`3b2f15c`); configurado `git config user.name "Makigero Lab"`.
+- **Análise prévia:** `criarPropriedade` já existe no `gestorController.js` (aceita nome, morada, tempo_limpeza). `criarTarefa` existe no `tarefaController.js` (mas não define `origem` nem aceita `observacoes`). Frontend já tem formulários de criação em ambas as páginas mas sem a distinção "manual/espontânea".
+- **#1 Backend — `gestorController.js` `criarPropriedade`:** atualizado para aceitar `parceiro_id` opcional e definir `origem: 'manual'` no `Propriedade.create`.
+- **#1 Backend — `tarefaController.js` `criarTarefaEspontanea`:** nova função que cria tarefa com `origem: 'manual'`, `smoobu_reserva_id: null`, aceita `observacoes`, e `utilizador_id` opcional (se vier, atribui diretamente saltando o LB; se não, fica `por_atribuir`). Inclui normalização de data/hora (fuso Portugal), snapshot de checklist dinâmica, notificação ao staff (se atribuída), auditoria. Import `registarAuditoria` adicionado (estava em falta no ficheiro — bug latente corrigido).
+- **#1 Backend — `gestorRoutes.js`:** rota `POST /tarefas/espontanea` montada com `auth + isGestor + criarTarefaEspontanea`.
+- **#2 Frontend — `propriedades/page.tsx`:** botão "Adicionar Manual" (ícone `Building2`, `variant="secondary"`) + Dialog com formulário (Nome, Morada, Tempo de Limpeza) que faz `adminPost("/api/gestor/propriedades")`. Fecha modal e recarrega lista em caso de sucesso; mostra erro inline em caso de falha. Formulário existente não foi tocado.
+- **#3 Frontend — `tarefas/page.tsx`:** botão "Limpeza Espontânea" (ícone `SprayCan`, `variant="secondary"`) + Dialog com select de Propriedade (reutiliza estado `propriedades` já carregado), input de Data, input de Hora, Textarea de Observações, select opcional de Staff (reutiliza estado `staff`). Faz `adminPost("/api/gestor/tarefas/espontanea")`. Sem pedidos extra ao backend. Import `Textarea` adicionado. Formulário existente não foi tocado.
+- **Bug latente corrigido:** `tarefaController.js` usava `registarAuditoria` na linha 1354 (em `reatribuirTarefa`) mas não importava a função de `utils/auditoria`. Import adicionado — sem isto, a reatribuição de tarefas iria crashar com `ReferenceError: registarAuditoria is not defined`.
+- **Validação:** `node --check` ✓ em `gestorController.js`, `tarefaController.js`, `gestorRoutes.js`; `NODE_ENV=test npx jest` → **111/111 testes passam** ✓; frontend `npx tsc --noEmit` → 0 erros ✓; `npx next lint` → "No ESLint warnings or errors" ✓.
+- **Documentação atualizada:** `docs/BACKEND.md` (changelog HF18) + esta entrada no `WORKLOG.md`.
+
+Stage Summary:
+- **Regra de negócio corrigida:** os parceiros não criam nada diretamente — é o Gestor quem cria propriedades manuais e lança limpezas espontâneas.
+- **Backend:** `criarPropriedade` define `origem: 'manual'` + aceita `parceiro_id`; nova rota `POST /api/gestor/tarefas/espontanea` cria tarefas manuais com `observacoes` e atribuição opcional.
+- **Frontend:** dois novos botões + modais (Dialog) no painel do gestor — "Adicionar Manual" em propriedades e "Limpeza Espontânea" em tarefas. Ambos reutilizam dados já carregados (sem pedidos extra).
+- **Bug latente corrigido:** import de `registarAuditoria` em `tarefaController.js` (estava em falta desde o Prompt 75).
+- **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat(ui): cria interface no gestor para propriedades manuais e tarefas espontaneas`.

@@ -11,6 +11,7 @@ const Utilizador = require('../models/Utilizador');
 const Ausencia = require('../models/Ausencia');
 const { obterEmpresaId } = require('./gestorController');
 const { notificarUtilizador } = require('../utils/notificar');
+const { registarAuditoria } = require('../utils/auditoria');
 const {
   CAPACIDADE_MAXIMA_MINUTOS,
   calcularCargaDiaUtilizador,
@@ -1181,6 +1182,199 @@ exports.autoAtribuirTarefas = async (req, res) => {
     });
   } catch (err) {
     console.error('❌ autoAtribuirTarefas:', err.message);
+    return res.status(500).json({ erro: 'Erro interno do servidor.' });
+  }
+};
+
+
+/**
+ * HF18 — POST /api/gestor/tarefas/espontanea
+ *
+ * Cria uma limpeza manual/espontânea (origem: 'manual'). Diferente do
+ * criarTarefa (que é genérico), este endpoint:
+ *   - Sempre define origem: 'manual' e smoobu_reserva_id: null
+ *   - Aceita observacoes diretamente no body
+ *   - Se utilizador_id vier (opcional), atribui diretamente (salta o LB)
+ *   - Se não vier utilizador_id, fica 'por_atribuir' para o LB/gestor
+ *
+ * Body:
+ *   propriedade_id: String (obrigatório)
+ *   data: String "YYYY-MM-DD" ou ISO (obrigatório)
+ *   hora: String "HH:mm" (opcional)
+ *   observacoes: String (opcional)
+ *   utilizador_id: String (opcional — força atribuição)
+ *   tempo_limpeza_minutos: Number (opcional)
+ *   tipo: String (opcional, default 'limpeza')
+ */
+exports.criarTarefaEspontanea = async (req, res) => {
+  try {
+    const { ok, empresaId } = obterEmpresaId(req, res);
+    if (!ok) return;
+
+    const {
+      propriedade_id,
+      utilizador_id,
+      data,
+      hora,
+      observacoes,
+      tempo_limpeza_minutos,
+      tipo,
+    } = req.body || {};
+
+    if (!propriedade_id || !data) {
+      return res.status(400).json({
+        erro: 'Campos obrigatórios em falta: propriedade_id e data.',
+      });
+    }
+    if (!mongoose.isValidObjectId(propriedade_id)) {
+      return res.status(400).json({ erro: 'propriedade_id inválido.' });
+    }
+
+    // Valida tipo.
+    const TIPOS_VALIDOS = ['limpeza', 'check_in', 'check_out', 'manutencao', 'outro'];
+    if (tipo !== undefined && tipo !== null && !TIPOS_VALIDOS.includes(tipo)) {
+      return res.status(400).json({
+        erro: `Tipo inválido. Valores permitidos: ${TIPOS_VALIDOS.join(', ')}.`,
+      });
+    }
+
+    // Valida que a propriedade pertence à empresa.
+    const propriedade = await Propriedade.findOne({
+      _id: propriedade_id,
+      empresa_id: empresaId,
+    });
+    if (!propriedade) {
+      return res.status(404).json({
+        erro: 'Propriedade não encontrada (ou não pertence a esta empresa).',
+      });
+    }
+
+    // Normaliza a data (mesma lógica do criarTarefa).
+    let dataNormalizada;
+    const dataStr = String(data).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dataStr)) {
+      const horaStr = hora && /^\d{1,2}:\d{2}$/.test(String(hora).trim())
+        ? String(hora).trim().padStart(5, '0')
+        : '00:00';
+      const dataLocal = new Date(`${dataStr}T${horaStr}`);
+      const offsetStr = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Europe/Lisbon',
+        timeZoneName: 'shortOffset',
+      }).formatToParts(dataLocal).find((p) => p.type === 'timeZoneName')?.value || 'GMT+0';
+      const offsetMatch = offsetStr.match(/GMT([+-])(\d+)/);
+      const offsetMin = offsetMatch
+        ? (offsetMatch[1] === '+' ? 1 : -1) * parseInt(offsetMatch[2], 10) * 60
+        : 0;
+      dataNormalizada = new Date(dataLocal.getTime() - offsetMin * 60 * 1000);
+    } else {
+      dataNormalizada = new Date(dataStr);
+    }
+    if (isNaN(dataNormalizada.getTime())) {
+      return res.status(400).json({ erro: 'data inválida.' });
+    }
+
+    // Valida utilizador_id se vier (força atribuição, salta o LB).
+    let utilizadorValidado = null;
+    if (utilizador_id) {
+      if (!mongoose.isValidObjectId(utilizador_id)) {
+        return res.status(400).json({ erro: 'utilizador_id inválido.' });
+      }
+      const user = await Utilizador.findOne({
+        _id: utilizador_id,
+        empresa_id: empresaId,
+        role: { $in: ['staff', 'gestor'] },
+        ativo: true,
+        eliminado_em: null,
+      });
+      if (!user) {
+        return res.status(400).json({
+          erro: 'Utilizador não encontrado (ou não é staff/gestor ativo da empresa).',
+        });
+      }
+      utilizadorValidado = user._id;
+    }
+
+    // Checklist dinâmica (snapshot).
+    let checklistDinamica = [];
+    const tipoFinal = tipo || 'limpeza';
+    if (tipoFinal === 'limpeza' && propriedade.modelo_checklist_id) {
+      try {
+        const ModeloChecklist = require('../models/ModeloChecklist');
+        const modelo = await ModeloChecklist.findById(propriedade.modelo_checklist_id).lean();
+        if (modelo && Array.isArray(modelo.seccoes)) {
+          checklistDinamica = modelo.seccoes.map((sec) => ({
+            nome: sec.nome,
+            items: (sec.items || []).map((item) => ({
+              texto: item,
+              concluido: false,
+            })),
+          }));
+        }
+      } catch (chkErr) {
+        console.error('⚠️  criarTarefaEspontanea: erro ao injetar checklist:', chkErr.message);
+      }
+    }
+
+    const nova = await Tarefa.create({
+      empresa_id: empresaId,
+      propriedade_id,
+      smoobu_reserva_id: null, // tarefa manual — sem reserva Smoobu
+      origem: 'manual', // HF17 — origem manual
+      utilizador_id: utilizadorValidado,
+      data: dataNormalizada,
+      tempo_limpeza_minutos: Number(tempo_limpeza_minutos) || propriedade.tempo_limpeza_minutos || 45,
+      tipo: tipoFinal,
+      estado: utilizadorValidado ? 'atribuida' : 'por_atribuir',
+      observacoes: observacoes ? String(observacoes).trim() : '',
+      checklist: propriedade.checklist || [],
+      ...(checklistDinamica.length > 0 ? { checklist_dinamica: checklistDinamica } : {}),
+    });
+
+    // Notifica o staff se foi atribuído.
+    if (utilizadorValidado) {
+      try {
+        const tituloNotif = tipoFinal === 'manutencao'
+          ? '🛠️ Nova Manutenção Atribuída'
+          : '🧹 Nova Limpeza Atribuída';
+        const corpoNotif = tipoFinal === 'manutencao'
+          ? `Foste escalado para resolver uma avaria na ${propriedade.nome}.`
+          : `Foste escalado para limpar a ${propriedade.nome}.`;
+        notificarUtilizador(
+          String(utilizadorValidado),
+          tituloNotif,
+          corpoNotif,
+          '/staff',
+          { criarInApp: true, tipo: 'tarefa_atribuida' }
+        );
+      } catch (e) {
+        console.error('⚠️  notificar staff (espontanea):', e.message);
+      }
+    }
+
+    // Auditoria.
+    registarAuditoria({
+      utilizador_id: req.user.id,
+      utilizador_nome: req.user.nome || 'Gestor',
+      empresa_id: empresaId,
+      acao: 'criar',
+      recurso: 'tarefa',
+      recurso_id: nova._id,
+      descricao: `Tarefa espontânea criada para "${propriedade.nome}" (${dataNormalizada.toISOString().slice(0, 10)})`,
+      detalhes: { origem: 'manual', utilizador_id: utilizadorValidado, observacoes: observacoes?.slice(0, 100) },
+    });
+
+    console.log(
+      `🧹 [Espontânea] tarefa ${nova._id} criada (propriedade "${propriedade.nome}", ` +
+        `data=${dataNormalizada.toISOString()}, estado=${nova.estado}` +
+        (utilizadorValidado ? `, staff=${utilizadorValidado}` : ', por_atribuir') + ').'
+    );
+
+    return res.status(201).json({ tarefa: nova });
+  } catch (err) {
+    console.error('❌ criarTarefaEspontanea:', err.message);
+    if (err.name === 'ValidationError') {
+      return res.status(400).json({ erro: err.message });
+    }
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
   }
 };

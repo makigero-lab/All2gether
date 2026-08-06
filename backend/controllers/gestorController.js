@@ -225,7 +225,7 @@ exports.criarPropriedade = async (req, res) => {
     const { ok, empresaId } = obterEmpresaId(req, res);
     if (!ok) return;
 
-    const { nome, morada, tempo_limpeza_minutos } = req.body || {};
+    const { nome, morada, tempo_limpeza_minutos, parceiro_id } = req.body || {};
 
     // Validações de presença.
     if (!nome || !morada) {
@@ -274,6 +274,10 @@ exports.criarPropriedade = async (req, res) => {
       coordenadas,
       empresa_id: empresaId,
       tempo_limpeza_minutos: tempo,
+      origem: 'manual', // HF17 — propriedade manual (não do Smoobu)
+      ...(parceiro_id && mongoose.isValidObjectId(parceiro_id)
+        ? { parceiro_id: String(parceiro_id).trim() }
+        : {}),
       checklist: Array.isArray(req.body?.checklist)
         ? req.body.checklist.filter((s) => typeof s === 'string' && s.trim())
         : [],

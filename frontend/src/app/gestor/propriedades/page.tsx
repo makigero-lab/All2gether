@@ -262,6 +262,57 @@ export default function PropriedadesPage() {
 
   // Estado do modal de edição
   const [editando, setEditando] = useState<PropriedadeDTO | null>(null);
+
+  // HF18 — Estado do modal de "Adicionar Propriedade Manual"
+  // (fluxo simplificado: nome + morada + tempo de limpeza; origem: 'manual')
+  const [manualOpen, setManualOpen] = useState(false);
+  const [manualForm, setManualForm] = useState({
+    nome: "",
+    morada: "",
+    tempo_limpeza_minutos: "45",
+  });
+  const [manualSubmitting, setManualSubmitting] = useState(false);
+  const [manualErro, setManualErro] = useState<string | null>(null);
+
+  /** HF18 — Submete o formulário de propriedade manual (origem: 'manual'). */
+  async function handleSubmeterManual(e: React.FormEvent) {
+    e.preventDefault();
+    setManualErro(null);
+
+    if (!manualForm.nome.trim() || !manualForm.morada.trim()) {
+      setManualErro("Nome e Morada são obrigatórios.");
+      return;
+    }
+
+    const tempo = Number(manualForm.tempo_limpeza_minutos);
+    if (Number.isNaN(tempo) || tempo < 0) {
+      setManualErro("Tempo de Limpeza deve ser um número maior ou igual a 0.");
+      return;
+    }
+
+    setManualSubmitting(true);
+    try {
+      // HF18 — Payload simplificado. O backend define origem: 'manual'.
+      // Não enviamos smoobu_id (a propriedade não vem do Smoobu).
+      await adminPost<{ propriedade: PropriedadeDTO; warning?: string }>(
+        "/api/gestor/propriedades",
+        {
+          nome: manualForm.nome.trim(),
+          morada: manualForm.morada.trim(),
+          tempo_limpeza_minutos: tempo,
+        }
+      );
+      // Limpa o formulário e fecha o modal.
+      setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45" });
+      setManualOpen(false);
+      await carregar();
+    } catch (e) {
+      setManualErro(e instanceof Error ? e.message : "Erro ao criar propriedade.");
+    } finally {
+      setManualSubmitting(false);
+    }
+  }
+
   const [editForm, setEditForm] = useState({
     nome: "",
     smoobu_id: "",
@@ -500,6 +551,21 @@ export default function PropriedadesPage() {
           }}>
             <Plus className="h-4 w-4" />
             Nova Propriedade
+          </Button>
+          {/* HF18 — Botão "Adicionar Propriedade Manual" (origem: 'manual').
+              Ao contrário do formulário inline de "Nova Propriedade" (que
+              requer smoobu_id da lista importada), este abre um Dialog
+              simples com apenas nome + morada + tempo de limpeza. */}
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setManualOpen(true);
+              setManualErro(null);
+              setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45" });
+            }}
+          >
+            <Building2 className="h-4 w-4" />
+            <span className="hidden sm:inline">Adicionar Manual</span>
           </Button>
         </div>
       </div>
@@ -828,6 +894,121 @@ export default function PropriedadesPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* HF18 — Modal "Adicionar Propriedade Manual" */}
+      <Dialog
+        open={manualOpen}
+        onOpenChange={(o) => {
+          if (!manualSubmitting) setManualOpen(o);
+        }}
+      >
+        <DialogHeader>
+          <div>
+            <DialogTitle className="flex items-center gap-2">
+              <Building2 className="h-5 w-5 text-primary" />
+              Adicionar Propriedade Manual
+            </DialogTitle>
+            <DialogDescription>
+              Cria uma propriedade que não está sincronizada com o Smoobu
+              (origem: manual). Útil para casas geridas diretamente pelo
+              gestor ou por parceiros B2B.
+            </DialogDescription>
+          </div>
+          <DialogClose
+            onClick={() => {
+              if (!manualSubmitting) setManualOpen(false);
+            }}
+          />
+        </DialogHeader>
+        <form onSubmit={handleSubmeterManual}>
+          <DialogContent className="space-y-4">
+            <div className="space-y-1.5">
+              <label htmlFor="manual-nome" className="text-sm font-medium">
+                Nome <span className="text-destructive">*</span>
+              </label>
+              <Input
+                id="manual-nome"
+                value={manualForm.nome}
+                onChange={(e) =>
+                  setManualForm((f) => ({ ...f, nome: e.target.value }))
+                }
+                placeholder="Ex.: Apartamento Maré Alta"
+                required
+                autoFocus
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label htmlFor="manual-morada" className="text-sm font-medium">
+                Morada <span className="text-destructive">*</span>
+              </label>
+              <Input
+                id="manual-morada"
+                value={manualForm.morada}
+                onChange={(e) =>
+                  setManualForm((f) => ({ ...f, morada: e.target.value }))
+                }
+                placeholder="Ex.: Rua das Flores 12, Lisboa"
+                required
+              />
+              <p className="text-xs text-muted-foreground">
+                As coordenadas são calculadas automaticamente via Nominatim
+                (best-effort). Se a morada não for encontrada, a propriedade é
+                criada na mesma (sem coordenadas).
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <label
+                htmlFor="manual-tempo"
+                className="text-sm font-medium"
+              >
+                Tempo de Limpeza (minutos)
+              </label>
+              <Input
+                id="manual-tempo"
+                type="number"
+                min={0}
+                value={manualForm.tempo_limpeza_minutos}
+                onChange={(e) =>
+                  setManualForm((f) => ({
+                    ...f,
+                    tempo_limpeza_minutos: e.target.value,
+                  }))
+                }
+                placeholder="45"
+              />
+            </div>
+            {manualErro && (
+              <p className="flex items-center gap-2 text-sm text-destructive">
+                <AlertCircle className="h-4 w-4" />
+                {manualErro}
+              </p>
+            )}
+          </DialogContent>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setManualOpen(false)}
+              disabled={manualSubmitting}
+            >
+              Cancelar
+            </Button>
+            <Button type="submit" disabled={manualSubmitting}>
+              {manualSubmitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  A criar…
+                </>
+              ) : (
+                <>
+                  <Building2 className="mr-2 h-4 w-4" />
+                  Criar
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </form>
+      </Dialog>
 
       {/* Modal de Edição */}
       <Dialog
