@@ -24,6 +24,7 @@ import {
   Folder,
   Camera,
   X,
+  AlertCircle,
 } from "lucide-react";
 
 import { cn, parsearDataSegura } from "@/lib/utils";
@@ -130,6 +131,11 @@ export function DetalheTarefaClient({
   const [concluindo, setConcluindo] = useState(false);
   const [erroConcluir, setErroConcluir] = useState<string | null>(null);
 
+  // HF19 — Modal de conclusão com fotos obrigatórias
+  const [mostrarConcluir, setMostrarConcluir] = useState(false);
+  const [concluirFotos, setConcluirFotos] = useState<string[]>([]);
+  const [concluirResultado, setConcluirResultado] = useState<string | null>(null);
+
   // Modal de reportar atraso
   const [mostrarAtraso, setMostrarAtraso] = useState(false);
   const [minutosAtraso, setMinutosAtraso] = useState<number | null>(null);
@@ -214,19 +220,58 @@ export function DetalheTarefaClient({
     }
   };
 
-  const handleConcluir = async () => {
+  // HF19 — Abre o modal de conclusão (em vez de concluir diretamente).
+  const handleConcluir = () => {
     if (!todasMarcadas || concluida || concluindo) return;
+    setConcluirFotos([]);
+    setConcluirResultado(null);
+    setMostrarConcluir(true);
+  };
+
+  // HF19 — Processa a seleção de fotos para a conclusão (mesma lógica das avarias).
+  function handleSelecionarFotosConcluir(e: React.ChangeEvent<HTMLInputElement>) {
+    const ficheiros = Array.from(e.target.files || []);
+    if (ficheiros.length === 0) return;
+    const slotsDisponiveis = 5 - concluirFotos.length;
+    const ficheirosParaLer = ficheiros.slice(0, slotsDisponiveis);
+    for (const ficheiro of ficheirosParaLer) {
+      if (!ficheiro.type.startsWith("image/")) continue;
+      if (ficheiro.size > 2 * 1024 * 1024) continue;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64 = reader.result as string;
+        if (base64) {
+          setConcluirFotos((prev) => [...prev, base64].slice(0, 5));
+        }
+      };
+      reader.readAsDataURL(ficheiro);
+    }
+    e.target.value = "";
+  }
+
+  function removerFotoConcluir(index: number) {
+    setConcluirFotos((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  // HF19 — Confirma a conclusão: envia PATCH com fotos_conclusao obrigatórias.
+  async function handleConfirmarConclusao() {
+    if (concluirFotos.length === 0) return;
     setConcluindo(true);
     setErroConcluir(null);
-    // PATCH real para a rota do staff (v1.34.0) — envia observacoes_staff.
     try {
-      await fetch(`/api/staff/tarefas/${tarefa.id}/concluir`, {
+      const res = await fetch(`/api/staff/tarefas/${tarefa.id}/concluir`, {
         method: "PATCH",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ observacoes_staff: observacoes }),
+        body: JSON.stringify({
+          observacoes_staff: observacoes,
+          fotos_conclusao: concluirFotos,
+        }),
       });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.erro || `Erro ${res.status}`);
       setConcluida(true);
+      setMostrarConcluir(false);
       // Mostra a mensagem verde durante 1.2s antes de redirecionar.
       setTimeout(() => router.push("/staff"), 1200);
     } catch (e) {
@@ -236,7 +281,7 @@ export function DetalheTarefaClient({
     } finally {
       setConcluindo(false);
     }
-  };
+  }
 
   async function handleReportarAtraso() {
     if (minutosAtraso === null) return;
@@ -894,6 +939,126 @@ export function DetalheTarefaClient({
               )}
             </Button>
           )}
+        </DialogFooter>
+      </Dialog>
+
+      {/* HF19 — Modal de Conclusão com Fotos Obrigatórias */}
+      <Dialog
+        open={mostrarConcluir}
+        onOpenChange={(o) => {
+          if (!o && !concluindo) {
+            setMostrarConcluir(false);
+            setConcluirFotos([]);
+          }
+        }}
+      >
+        <DialogHeader>
+          <div>
+            <DialogTitle className="flex items-center gap-2">
+              <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+              Confirmar Conclusão
+            </DialogTitle>
+            <DialogDescription>
+              Tira pelo menos 1 foto da propriedade limpa para confirmar a
+              conclusão. (Máx. 5 fotos)
+            </DialogDescription>
+          </div>
+          <DialogClose onClick={() => !concluindo && setMostrarConcluir(false)} />
+        </DialogHeader>
+        <DialogContent className="space-y-4">
+          {/* Preview das fotos */}
+          {concluirFotos.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {concluirFotos.map((foto, idx) => (
+                <div
+                  key={idx}
+                  className="relative h-20 w-20 overflow-hidden rounded-md border"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={foto}
+                    alt={`Conclusão ${idx + 1}`}
+                    className="h-full w-full object-cover"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removerFotoConcluir(idx)}
+                    className="absolute right-0 top-0 rounded-bl-md bg-red-600 p-0.5 text-white hover:bg-red-700"
+                    aria-label="Remover foto"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Input de fotos */}
+          {concluirFotos.length < 5 && (
+            <label
+              htmlFor="concluir-fotos"
+              className="flex cursor-pointer items-center gap-2 rounded-md border border-dashed border-input bg-muted/30 px-3 py-2 text-sm text-muted-foreground hover:bg-muted/50"
+            >
+              <Camera className="h-4 w-4" />
+              {concluirFotos.length === 0
+                ? "Tirar foto / Anexar (obrigatório)"
+                : `Adicionar mais (${concluirFotos.length}/5)`}
+              <input
+                id="concluir-fotos"
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={handleSelecionarFotosConcluir}
+                className="hidden"
+              />
+            </label>
+          )}
+
+          {/* Aviso se não há fotos */}
+          {concluirFotos.length === 0 && (
+            <p className="text-sm text-destructive">
+              ⚠️ É obrigatório anexar pelo menos 1 foto para concluir.
+            </p>
+          )}
+
+          <p className="text-xs text-muted-foreground">
+            Máx. 5 fotos, até 2MB cada (JPG, PNG).
+          </p>
+
+          {erroConcluir && (
+            <p className="flex items-center gap-2 text-sm text-destructive">
+              <AlertCircle className="h-4 w-4" />
+              {erroConcluir}
+            </p>
+          )}
+        </DialogContent>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setMostrarConcluir(false)}
+            disabled={concluindo}
+          >
+            Cancelar
+          </Button>
+          <Button
+            type="button"
+            disabled={concluirFotos.length === 0 || concluindo}
+            onClick={handleConfirmarConclusao}
+            className="bg-emerald-600 text-white hover:bg-emerald-700"
+          >
+            {concluindo ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                A concluir…
+              </>
+            ) : (
+              <>
+                <CheckCircle2 className="mr-2 h-4 w-4" />
+                Confirmar Conclusão
+              </>
+            )}
+          </Button>
         </DialogFooter>
       </Dialog>
     </div>

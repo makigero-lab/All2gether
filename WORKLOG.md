@@ -2023,3 +2023,25 @@ Stage Summary:
 - **Frontend:** dois novos botões + modais (Dialog) no painel do gestor — "Adicionar Manual" em propriedades e "Limpeza Espontânea" em tarefas. Ambos reutilizam dados já carregados (sem pedidos extra).
 - **Bug latente corrigido:** import de `registarAuditoria` em `tarefaController.js` (estava em falta desde o Prompt 75).
 - **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat(ui): cria interface no gestor para propriedades manuais e tarefas espontaneas`.
+
+---
+
+Task ID: HF19
+Agent: Z.ai Code (Eng. Software Principal)
+Task: Fotos obrigatórias na conclusão de tarefas + cron job de limpeza de fotos aos 7 dias.
+
+Work Log:
+- Re-clonado o repo em `dev` (`6536e68`); configurado `git config user.name "Makigero Lab"`.
+- **#1 Backend — Schema:** `models/Tarefa.js` — novos campos `fotos_conclusao: [String]` (default []) e `data_conclusao: Date` (default null).
+- **#1 Backend — `staffController.js concluirTarefa`:** regra bloqueadora: se `fotos_conclusao` não for array ou estiver vazio → 400 "É obrigatório anexar pelo menos 1 foto". Limita a 5 fotos. Atualiza `estado`, `concluida_em`, `hora_conclusao`, `data_conclusao`, `fotos_conclusao`.
+- **#2 Frontend — `detalhe-tarefa-client.tsx`:** `handleConcluir` agora abre um modal (Dialog) em vez de chamar a API diretamente. Novas funções: `handleSelecionarFotosConcluir` (FileReader → base64, máx. 5, 2MB), `removerFotoConcluir(index)`, `handleConfirmarConclusao` (envia PATCH com `fotos_conclusao` + `observacoes_staff`). Modal com: preview thumbnails 80×80 + botão X, input file hidden com label custom (ícone Camera), aviso "⚠️ É obrigatório anexar pelo menos 1 foto", botão "Confirmar Conclusão" desativado se 0 fotos. Import `AlertCircle` adicionado.
+- **#3 Cron job — `jobs/limpezaFotos.js`:** corre `0 3 * * *` (03:00 diariamente). Procura tarefas `concluida` com `data_conclusao < agora - 7 dias` E que ainda têm fotos (`fotos_conclusao.0` existe OU `avarias.fotos.0` existe). Esvazia `fotos_conclusao = []` via `updateMany` e itera sobre `avarias[*].fotos = []` via `findById + save`. Log: `✅ [LimpezaFotos] N tarefa(s) limpa(s), M foto(s) removida(s)`. Montado em `server.js` após `iniciarArquivista()`.
+- **Teste atualizado:** `integration.test.js` — teste de conclusão agora envia `fotos_conclusao: ['data:image/png;base64,...']` + asserções `fotos_conclusao.toHaveLength(1)` e `data_conclusao.toBeTruthy()`.
+- **Validação:** `node --check` ✓ em `models/Tarefa.js`, `controllers/staffController.js`, `jobs/limpezaFotos.js`, `server.js`; `NODE_ENV=test npx jest` → **111/111 testes passam** ✓; frontend `npx tsc --noEmit` → 0 erros ✓; `npx next lint` → "No ESLint warnings or errors" ✓.
+- **Documentação atualizada:** `docs/BACKEND.md` (changelog HF19) + esta entrada no `WORKLOG.md`.
+
+Stage Summary:
+- **Fotos obrigatórias:** o staff não pode concluir uma tarefa sem anexar pelo menos 1 foto. O backend rejeita com 400 se o array estiver vazio. O frontend abre um modal com input de câmara/galeria antes de enviar o PATCH.
+- **Cron job de limpeza:** todos os dias às 03:00, as fotos (base64) de tarefas concluídas há mais de 7 dias são esvaziadas — otimiza o armazenamento (fotos base64 são volumosas). As descrições das avarias e outros dados são mantidos.
+- **Sem quebras:** 111/111 testes passam; o fluxo de conclusão existente foi adaptado (não removido).
+- **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat: fotos obrigatorias na conclusao e cronjob de limpeza aos 7 dias`.

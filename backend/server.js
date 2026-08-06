@@ -39,6 +39,7 @@ const { iniciarAgendaAmanha } = require('./jobs/agendaAmanha');
 const { iniciarCaoGuarda } = require('./jobs/caoGuarda');
 const { iniciarArquivista } = require('./jobs/arquivista');
 const { iniciarSincronizacaoSmoobu } = require('./jobs/sincronizacaoSmoobu');
+const { iniciarLimpezaFotos } = require('./jobs/limpezaFotos');
 const { configurarWebPush } = require('./utils/push');
 
 const app = express();
@@ -237,6 +238,11 @@ if (require.main === module) {
       // mantém-se exportada para uso manual via API direta se necessário no
       // futuro, mas NÃO é agendada.
       // iniciarSincronizacaoSmoobu();
+
+      // HF19 — Cron job "Limpeza de Fotos": todos os dias às 03:00,
+      // esvazia fotos_conclusao e avarias[*].fotos de tarefas concluídas
+      // há mais de 7 dias (otimização de armazenamento).
+      iniciarLimpezaFotos();
     })
     .catch((err) => {
       console.error('❌ Erro ao ligar ao MongoDB:', err.message);

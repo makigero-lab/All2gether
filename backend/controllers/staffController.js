@@ -482,11 +482,32 @@ exports.concluirTarefa = async (req, res) => {
       return res.status(400).json({ erro: 'Não podes concluir uma tarefa cancelada.' });
     }
 
-    // Atualiza estado + timestamps + observações do staff.
+    // HF19 — Fotos obrigatórias na conclusão.
+    // O staff tem de enviar pelo menos 1 foto (máx. 5) no req.body.fotos_conclusao.
+    const fotosConclusao = req.body?.fotos_conclusao;
+    if (!Array.isArray(fotosConclusao) || fotosConclusao.length === 0) {
+      return res.status(400).json({
+        erro: 'É obrigatório anexar pelo menos 1 foto para concluir a tarefa.',
+      });
+    }
+    // Limita a 5 fotos.
+    const fotosNormalizadas = fotosConclusao
+      .filter((f) => typeof f === 'string' && f.trim())
+      .slice(0, 5);
+
+    if (fotosNormalizadas.length === 0) {
+      return res.status(400).json({
+        erro: 'É obrigatório anexar pelo menos 1 foto válida para concluir a tarefa.',
+      });
+    }
+
+    // Atualiza estado + timestamps + observações do staff + fotos.
     const agora = new Date();
     tarefa.estado = 'concluida';
     tarefa.concluida_em = agora;
     tarefa.hora_conclusao = agora;
+    tarefa.data_conclusao = agora; // HF19 — para o cron job de limpeza
+    tarefa.fotos_conclusao = fotosNormalizadas; // HF19 — fotos da conclusão
 
     if (req.body?.observacoes_staff !== undefined) {
       tarefa.observacoes_staff = String(req.body.observacoes_staff || '');
