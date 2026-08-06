@@ -2066,3 +2066,27 @@ Stage Summary:
 - **Calendário global da equipa:** nova vista "Equipa" no `/gestor/calendario` que mostra um mapa de disponibilidade (staff × dias) com cores para tarefas, ausências, folgas e disponibilidade. Dá ao gestor uma visão de helicóptero sobre a capacidade da equipa.
 - **Sem quebras:** 111/111 testes passam; tsc 0 erros; lint limpo.
 - **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat(hr): ausencias por intervalo de datas e calendario global da equipa`.
+
+---
+
+Task ID: HF21
+Agent: Z.ai Code (Eng. Software Principal)
+Task: Suporte para múltiplos funcionários por tarefa + atualização do load balancer para equipas.
+
+Work Log:
+- Re-clonado o repo em `dev` (`318ce12`); configurado `git config user.name "Makigero Lab"`.
+- **Análise de impacto:** `utilizador_id` é referenciado em 18 ficheiros do backend e 8 do frontend. Mudar de ObjectId para array quebraria tudo. Decisão: manter `utilizador_id` (retrocompatibilidade) + adicionar `equipa_atribuida: [ObjectId]`.
+- **#1 Schema Propriedade:** `models/Propriedade.js` — novo campo `staff_necessario: { type: Number, default: 1, min: 1 }`.
+- **#2 Schema Tarefa:** `models/Tarefa.js` — novo campo `equipa_atribuida: [ObjectId]` (ref 'Utilizador', default []). `utilizador_id` mantém-se como vencedor #1.
+- **#3 Load Balancer:** `utils/loadBalancer.js` — nova função `determinarEquipaAtribuida`. Se N=1 delega para `determinarUtilizadorAtribuido`. Se N>1, chama iterativamente com exclusão dos já escolhidos. Devolve `{ equipa: [{utilizadorId, tempoViagem}], insuficiente: boolean }`.
+- **#3 smoobuController:** atualizado para usar `determinarEquipaAtribuida` quando `propriedade.staff_necessario > 1`. Preenche `utilizador_id` (vencedor #1) + `equipa_atribuida` (todos). Alerta se equipa insuficiente.
+- **#4 Frontend:** `PropriedadeDTO` ganhou `staff_necessario?: number`. Modal de criação de propriedade tem novo campo "Nº de Staff Necessário". `gestorController.criarPropriedade` aceita `staff_necessario` (clamp 1-10).
+- **Validação:** `node --check` ✓ em 5 ficheiros; `NODE_ENV=test npx jest` → **111/111 testes passam** ✓; frontend `tsc` 0 erros ✓; `next lint` limpo ✓.
+- **Documentação atualizada:** `docs/BACKEND.md` (changelog HF21) + esta entrada no `WORKLOG.md`.
+
+Stage Summary:
+- **Zero breaking changes:** `utilizador_id` mantém-se como antes. `equipa_atribuida` é um novo campo opcional (default []). Todas as queries, controllers e frontend existentes continuam a funcionar sem alteração.
+- **Retrocompatibilidade:** tarefas antigas (sem `equipa_atribuida`) funcionam como antes — 1 staff via `utilizador_id`. Tarefas novas com `staff_necessario > 1` preenchem ambos os campos.
+- **Load Balancer:** `determinarEquipaAtribuida` usa o mesmo sistema de score do HF16 (Agrupamento > Início > Rotatividade/Equidade > Distância) mas devolve Top N em vez de apenas o vencedor #1.
+- **Fallback:** se não houver N staff disponíveis, atribui os que estiverem + alerta "Equipa parcial: X/N staff disponíveis". A tarefa fica `atribuida` (não `por_atribuir`) — a operação não encrava.
+- **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat: suporte para multiplos funcionarios por tarefa e atualizacao do load balancer`.

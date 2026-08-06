@@ -116,6 +116,14 @@ const propriedadeSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+    // HF21 — Número de staff necessário para limpar esta propriedade.
+    // Se > 1, o load balancer atribui uma equipa (Top N) em vez de 1 pessoa.
+    // Default: 1 (comportamento original — 1 staff por tarefa).
+    staff_necessario: {
+      type: Number,
+      default: 1,
+      min: 1,
+    },
   },
   { timestamps: true }
 );

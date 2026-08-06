@@ -270,6 +270,7 @@ export default function PropriedadesPage() {
     nome: "",
     morada: "",
     tempo_limpeza_minutos: "45",
+    staff_necessario: "1",
   });
   const [manualSubmitting, setManualSubmitting] = useState(false);
   const [manualErro, setManualErro] = useState<string | null>(null);
@@ -300,10 +301,11 @@ export default function PropriedadesPage() {
           nome: manualForm.nome.trim(),
           morada: manualForm.morada.trim(),
           tempo_limpeza_minutos: tempo,
+          staff_necessario: Math.max(1, Math.min(10, Number(manualForm.staff_necessario) || 1)),
         }
       );
       // Limpa o formulário e fecha o modal.
-      setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45" });
+      setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1" });
       setManualOpen(false);
       await carregar();
     } catch (e) {
@@ -561,7 +563,7 @@ export default function PropriedadesPage() {
             onClick={() => {
               setManualOpen(true);
               setManualErro(null);
-              setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45" });
+              setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1" });
             }}
           >
             <Building2 className="h-4 w-4" />
@@ -977,6 +979,34 @@ export default function PropriedadesPage() {
                 placeholder="45"
               />
             </div>
+
+            {/* HF21 — Staff Necessário */}
+            <div className="space-y-1.5">
+              <label
+                htmlFor="manual-staff"
+                className="text-sm font-medium leading-none"
+              >
+                Nº de Staff Necessário
+              </label>
+              <Input
+                id="manual-staff"
+                type="number"
+                min={1}
+                max={10}
+                value={manualForm.staff_necessario}
+                onChange={(e) =>
+                  setManualForm((f) => ({
+                    ...f,
+                    staff_necessario: e.target.value,
+                  }))
+                }
+                placeholder="1"
+              />
+              <p className="text-xs text-muted-foreground">
+                Se &gt; 1, o sistema atribui uma equipa de N funcionários a esta propriedade.
+              </p>
+            </div>
+
             {manualErro && (
               <p className="flex items-center gap-2 text-sm text-destructive">
                 <AlertCircle className="h-4 w-4" />

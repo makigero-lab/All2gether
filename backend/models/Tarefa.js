@@ -52,6 +52,16 @@ const tarefaSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+    // HF21 — Equipa atribuída (múltiplos staff). Quando staff_necessario > 1
+    // na propriedade, o LB devolve Top N e este array é preenchido.
+    // utilizador_id mantém-se como o vencedor #1 (retrocompatibilidade).
+    // Se equipa_atribuida estiver vazia, a tarefa tem 1 staff (utilizador_id).
+    equipa_atribuida: {
+      type: [mongoose.Schema.Types.ObjectId],
+      ref: 'Utilizador',
+      default: [],
+      index: true,
+    },
     data: {
       type: Date,
       required: true,

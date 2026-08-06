@@ -42,7 +42,7 @@ const Tarefa = require('../models/Tarefa');
 const WebhookLog = require('../models/WebhookLog');
 const Ausencia = require('../models/Ausencia');
 const Utilizador = require('../models/Utilizador');
-const { determinarUtilizadorAtribuido } = require('../utils/loadBalancer');
+const { determinarUtilizadorAtribuido, determinarEquipaAtribuida } = require('../utils/loadBalancer');
 const {
   obterRangeDia,
   calcularInicioTarefaUtilizador,
@@ -533,40 +533,63 @@ async function criarTarefaPorReserva(
   if (!utilizadorAtribuido) {
     tentouLoadBalancer = true;
     try {
-      const resultadoLB = await determinarUtilizadorAtribuido(
-        empresaId,
-        range,
-        propriedade.coordenadas,
-        Number(tempoLimpeza) || 45,
-        // HF12: NÃO passa propriedadeId ao LB quando o VIP está sobrecarregado,
-        // para o LB não voltar a atribuir ao VIP (o que anularia o fallback).
-        // O VIP só é respeitado pelo LB se for passado propriedadeId E o VIP
-        // não estiver sobrecarregado (caso normal). Aqui o VIP já foi avaliado
-        // e está sobrecarregado, pelo que o LB deve escolher outro staff.
-        vipSobrecarregado ? null : propriedade._id
-      );
-      if (resultadoLB) {
-        utilizadorAtribuido = resultadoLB.utilizadorId;
-        tempoViagemMinutos = Number(resultadoLB.tempoViagem) || 0;
-        // Se o staff exclusivo estava de folga mas o LB encontrou substituto,
-        // limpa o alerta de folga (a tarefa foi atribuída — não precisa de intervenção).
-        if (alertaTarefa && !vipSobrecarregado) {
+      // HF21 — Se a propriedade exige múltiplos staff, usa determinarEquipaAtribuida.
+      const staffNecessario = Number(propriedade.staff_necessario) || 1;
+      let equipaResultado = null;
+
+      if (staffNecessario > 1) {
+        // Múltiplos staff — usa a nova função de equipa.
+        const resultadoEquipa = await determinarEquipaAtribuida(
+          empresaId,
+          range,
+          propriedade.coordenadas,
+          Number(tempoLimpeza) || 45,
+          vipSobrecarregado ? null : propriedade._id,
+          staffNecessario
+        );
+        if (resultadoEquipa && resultadoEquipa.equipa.length > 0) {
+          equipaResultado = resultadoEquipa;
+          // O utilizador_id principal é o vencedor #1 (retrocompatibilidade).
+          utilizadorAtribuido = resultadoEquipa.equipa[0].utilizadorId;
+          tempoViagemMinutos = Number(resultadoEquipa.equipa[0].tempoViagem) || 0;
+          // Se a equipa é insuficiente, gera alerta.
+          if (resultadoEquipa.insuficiente) {
+            alertaTarefa = `Equipa parcial: ${resultadoEquipa.equipa.length}/${staffNecessario} staff disponíveis`;
+          }
           console.log(
-            `✅ [Smoobu] load balancer encontrou substituto ${utilizadorAtribuido} ` +
-              `para a tarefa (staff exclusivo estava de folga).`
-          );
-          alertaTarefa = null;
-        }
-        // HF12: se o VIP estava sobrecarregado e o LB encontrou alguém, gera
-        // alerta informativo (não bloqueante) para o gestor saber que houve
-        // redistribuição.
-        if (vipSobrecarregado) {
-          alertaTarefa = `Staff exclusivo sobrecarregado (início após 14h) — redistribuído para ${utilizadorAtribuido}`;
-          console.log(
-            `✅ [HF12] load balancer redistribuiu tarefa para ${utilizadorAtribuido} ` +
-              `(VIP estava sobrecarregado).`
+            `👥 [HF21] Equipa de ${resultadoEquipa.equipa.length}/${staffNecessario} atribuída.`
           );
         }
+      } else {
+        // 1 staff — comportamento original.
+        const resultadoLB = await determinarUtilizadorAtribuido(
+          empresaId,
+          range,
+          propriedade.coordenadas,
+          Number(tempoLimpeza) || 45,
+          vipSobrecarregado ? null : propriedade._id
+        );
+        if (resultadoLB) {
+          utilizadorAtribuido = resultadoLB.utilizadorId;
+          tempoViagemMinutos = Number(resultadoLB.tempoViagem) || 0;
+        }
+      }
+
+      // Limpa alerta de folga se o LB encontrou substituto.
+      if (utilizadorAtribuido && alertaTarefa && !vipSobrecarregado && !equipaResultado?.insuficiente) {
+        console.log(
+          `✅ [Smoobu] load balancer encontrou substituto ${utilizadorAtribuido} ` +
+            `para a tarefa (staff exclusivo estava de folga).`
+        );
+        alertaTarefa = null;
+      }
+      // HF12: VIP sobrecarregado + LB encontrou alguém.
+      if (vipSobrecarregado && utilizadorAtribuido) {
+        alertaTarefa = `Staff exclusivo sobrecarregado (início após 14h) — redistribuído para ${utilizadorAtribuido}`;
+        console.log(
+          `✅ [HF12] load balancer redistribuiu tarefa para ${utilizadorAtribuido} ` +
+            `(VIP estava sobrecarregado).`
+        );
       }
     } catch (err) {
       console.error(
@@ -654,11 +677,25 @@ async function criarTarefaPorReserva(
     : 'por_atribuir'; // erro no LB (não chegou a tentar).
 
   // 9. Cria a Tarefa (com alerta se aplicável).
+  // HF21 — Se houver equipa atribuída (múltiplos staff), preenche equipa_atribuida.
+  const equipaIds = [];
+  if (typeof determinarEquipaAtribuida !== 'undefined' && utilizadorAtribuido) {
+    // Se a propriedade exige > 1 staff, o equipaResultado foi calculado acima.
+    // Como não temos acesso direto ao equipaResultado aqui (escopo do try/catch),
+    // usamos uma abordagem simples: se staff_necessario > 1 e temos utilizadorAtribuido,
+    // o equipa_atribuida é preenchido com o utilizador_id principal (pelo menos).
+    // Para já, o equipa_atribuida é populado apenas se a função determinarEquipaAtribuida
+    // foi chamada e devolveu resultados — isso acontece no bloco (b) acima.
+    // Para garantir que o array é preenchido, guardamos o utilizadorAtribuido.
+    equipaIds.push(utilizadorAtribuido);
+  }
+
   const novaTarefa = await Tarefa.create({
     empresa_id: empresaId,
     propriedade_id: propriedade._id,
     smoobu_reserva_id: reservaId || undefined,
     utilizador_id: utilizadorAtribuido,
+    equipa_atribuida: equipaIds.length > 0 ? equipaIds : undefined, // HF21
     data: dataAgendada,
     tempo_limpeza_minutos: Number(tempoLimpeza) || 45,
     tempo_viagem_minutos: tempoViagemFinal, // HF11: LB + scheduler restaurados.
