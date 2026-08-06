@@ -1923,3 +1923,45 @@ Stage Summary:
   - Staff: calendário, ausências e notificações têm agora botão logout no canto direito do header.
 - **Load Balancer (ponto 2):** já implementado em HF12 (commit `c700a8f`) — Earliest Start Time + tie-breakers. Sem alteração necessária.
 - **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat: corrige visibilidade do logout no mobile e otimiza load balancer para priorizar inicio mais cedo`.
+
+---
+
+Task ID: HF16
+Agent: Z.ai Code (Eng. Software Principal)
+Task: Fase 2 — Reescrita total do motor de distribuição de tarefas (loadBalancer.js) com 4 fatores: Agrupamento Diário, Google Maps, Equidade Semanal + Rotatividade, Earliest Start Time.
+
+Work Log:
+- Re-clonado o repo em `dev` (`1821515`); configurado `git config user.name "Makigero Lab"`.
+- Lidos `utils/loadBalancer.js` (HF12, 348 linhas), `utils/distancia.js` (63 linhas), `utils/scheduler.js` (242 linhas) para compreender a arquitetura atual.
+- **#2 — Google Maps Distance Matrix API (`distancia.js`):**
+  - Nova função `calcularTempoViagemReal(origem, destino)` — async, tenta `https://maps.googleapis.com/maps/api/distancematrix/json?mode=driving&units=metric` com `GOOGLE_MAPS_API_KEY`.
+  - Fallback silencioso para `tempoViagemHaversine` se: (a) env var não existir; (b) fetch falhar (5s `AbortSignal.timeout`); (c) resposta não tiver `status=OK`; (d) elemento não tiver `duration.value`.
+  - Cache em memória (`Map`) com TTL 5 min para evitar chamadas repetidas ao mesmo par de coordenadas.
+  - Nova função `tempoViagemHaversine(origem, destino)` extraída do scheduler (Haversine + 30km/h + cap 60min).
+  - `limparCacheDistancias()` exportado para testes.
+  - `distanciaHaversine` e `RAIO_TERRA_KM` mantidos (retrocompatibilidade).
+- **#1 — Agrupamento Diário (`loadBalancer.js`):**
+  - Nova função `temTarefaNaMesmaPropriedade(utilizadorId, propriedadeId, range)` — `Tarefa.countDocuments` com match de propriedade + utilizador + dia.
+  - Se verdadeiro, bónus de `PESO_CLUSTERING=120` min (2h) subtraído do score.
+- **#3 — Equidade Semanal + Rotatividade (`loadBalancer.js`):**
+  - Nova função `calcularCargaSemanal(empresaId, utilizadorId, dataReferencia)` — aggregate que soma `tempo_limpeza_minutos` da semana (segunda a domingo). Calcula início da semana retrocedendo `dia-1` dias (ou 6 se domingo). Penalização: `horasSemana * PESO_EQUIDADE_HORA(10)` min.
+  - Nova função `limpouPropriedadeOntem(utilizadorId, propriedadeId, dataReferencia)` — `Tarefa.countDocuments` no dia anterior. Se verdadeiro, penalização de `PESO_ROTATIVIDADE=30` min.
+  - Removida a lógica antiga de `contarTarefasDia` (tie-breaker por nº de tarefas no dia) — substituída por equidade semanal.
+- **#4 — Earliest Start Time (mantido do HF12):**
+  - `calcularInicioTarefaUtilizador` continua a ser chamado para cada staff.
+  - O `earliestStart` é convertido para "minutos desde meia-noite UTC" e usado como base do score.
+- **Score FINAL:** `minutos_início - bónus_clustering + penalização_equidade + penalização_rotação + tempo_viagem` (menor = melhor). Ordenação por score ascendente.
+- **Google Maps integrado no LB:** o tempo de viagem usado no score vem de `calcularTempoViagemReal` (Google Maps com fallback Haversine). Busca a última tarefa do staff para obter coordenadas da propriedade anterior.
+- **VIP, SLA, ausências, folgas:** todos mantidos sem alteração.
+- **Logs detalhados:** cada staff recebe um log com score + fatores decompostos (início, cluster, equidade, rotação, viagem + origem).
+- **Validação:** `node --check` ✓ em `utils/distancia.js` e `utils/loadBalancer.js`; `NODE_ENV=test npx jest` → **111/111 testes passam** ✓; frontend `tsc` 0 erros ✓; `next lint` limpo ✓.
+- **Documentação atualizada:** `docs/BACKEND.md` (changelog HF16) + esta entrada no `WORKLOG.md`.
+
+Stage Summary:
+- **4 fatores de scoring implementados (ordem de prioridade):** Agrupamento Diário (120 min bónus) > Início Mais Cedo (minutos desde meia-noite) > Rotatividade/Equidade Semanal (10 min/hora + 30 min se ontem) > Distância/Tempo de Viagem (Google Maps ou Haversine).
+- **Google Maps com fallback silencioso:** `GOOGLE_MAPS_API_KEY` opcional — sem ela, o sistema usa Haversine (30km/h, cap 60min) exatamente como antes. Com ela, usa tempo de condução real via Distance Matrix API (5s timeout, cache 5min).
+- **Equidade semanal substitui contagem diária:** quem tem menos horas na semana (seg-dom) ganha prioridade — distribui a carga ao longo da semana, não só do dia.
+- **Rotatividade força rotação de equipas:** se o staff limpou a propriedade ontem, recebe 30 min de penalização — encoraja que equipas diferentes façam o mesmo prédio em dias consecutivos.
+- **Agrupamento minimiza deslocações:** se o staff já está na propriedade hoje (quartos diferentes do mesmo edifício), recebe 2h de bónus — evita enviar outra pessoa para o mesmo sítio.
+- **Sem quebras:** 111/111 testes passam; VIP, SLA, ausências, folgas, scheduler e proteção de almoço mantidos.
+- **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat(logistica): refatora load balancer com agrupamento diario, rotatividade, equidade semanal e google maps fallback`.
