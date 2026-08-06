@@ -13,9 +13,11 @@ import {
   CircleDot,
   Check,
   X,
+  Plus,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -36,7 +38,9 @@ import {
   adminGet,
   adminDelete,
   adminPatch,
+  adminPost,
   type AusenciaDTO,
+  type UtilizadorDTO,
 } from "@/lib/api";
 import { parsearDataSegura } from "@/lib/utils";
 
@@ -129,6 +133,19 @@ export default function AusenciasPage() {
   const [aCancelar, setACancelar] = useState<AusenciaAmp | null>(null);
   const [cancelando, setCancelando] = useState(false);
 
+  // HF20 — Modal de criação de ausência (Date Range Picker).
+  const [mostrarForm, setMostrarForm] = useState(false);
+  const [formErro, setFormErro] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [equipa, setEquipa] = useState<UtilizadorDTO[]>([]);
+  const [form, setForm] = useState({
+    utilizador_id: "",
+    data_inicio: "",
+    data_fim: "",
+    tipo: "ferias" as TipoAusenciaAmp,
+    notas: "",
+  });
+
   const carregar = useCallback(async () => {
     setLoading(true);
     setErro(null);
@@ -208,6 +225,63 @@ export default function AusenciasPage() {
     }
   }
 
+  /** HF20 — Abre o modal de criação e carrega a equipa. */
+  async function abrirFormCriacao() {
+    setMostrarForm(true);
+    setFormErro(null);
+    setForm({
+      utilizador_id: "",
+      data_inicio: "",
+      data_fim: "",
+      tipo: "ferias",
+      notas: "",
+    });
+    // Carrega a equipa se ainda não foi carregada.
+    if (equipa.length === 0) {
+      try {
+        const data = await adminGet<{ utilizadores: UtilizadorDTO[] }>(
+          "/api/gestor/equipa"
+        );
+        setEquipa(
+          (data.utilizadores ?? []).filter(
+            (u) => u.role === "staff" && u.ativo
+          )
+        );
+      } catch {
+        // Não bloqueia — o select fica vazio.
+      }
+    }
+  }
+
+  /** HF20 — Submete a nova ausência (intervalo de datas). */
+  async function handleCriarAusencia() {
+    if (!form.utilizador_id || !form.data_inicio || !form.data_fim) {
+      setFormErro("Funcionário, Data de Início e Data de Fim são obrigatórios.");
+      return;
+    }
+    if (form.data_fim < form.data_inicio) {
+      setFormErro("Data de Fim não pode ser anterior à Data de Início.");
+      return;
+    }
+    setSubmitting(true);
+    setFormErro(null);
+    try {
+      await adminPost("/api/gestor/ausencias", {
+        utilizador_id: form.utilizador_id,
+        data_inicio: form.data_inicio,
+        data_fim: form.data_fim,
+        tipo: form.tipo,
+        notas: form.notas || undefined,
+      });
+      setMostrarForm(false);
+      await carregar();
+    } catch (e) {
+      setFormErro(e instanceof Error ? e.message : "Erro ao criar ausência.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
       {/* Cabeçalho */}
@@ -221,15 +295,21 @@ export default function AusenciasPage() {
             Todas as ausências da empresa (férias, doença, folgas, emergências).
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="icon"
-          onClick={carregar}
-          disabled={loading}
-          aria-label="Atualizar"
-        >
-          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button onClick={abrirFormCriacao}>
+            <Plus className="h-4 w-4" />
+            Nova Ausência
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={carregar}
+            disabled={loading}
+            aria-label="Atualizar"
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+          </Button>
+        </div>
       </div>
 
       {erro && (
@@ -517,6 +597,137 @@ export default function AusenciasPage() {
               <>
                 <X className="mr-2 h-4 w-4" />
                 Cancelar Ausência
+              </>
+            )}
+          </Button>
+        </DialogFooter>
+      </Dialog>
+
+      {/* HF20 — Modal de criação de ausência (Date Range Picker) */}
+      <Dialog
+        open={mostrarForm}
+        onOpenChange={(o) => !o && !submitting && setMostrarForm(false)}
+      >
+        <DialogHeader>
+          <div>
+            <DialogTitle className="flex items-center gap-2">
+              <Plus className="h-5 w-5 text-primary" />
+              Nova Ausência
+            </DialogTitle>
+            <DialogDescription>
+              Regista um período de férias, doença ou outra ausência para um
+              funcionário.
+            </DialogDescription>
+          </div>
+          <DialogClose onClick={() => !submitting && setMostrarForm(false)} />
+        </DialogHeader>
+        <DialogContent className="space-y-4">
+          {/* Funcionário */}
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Funcionário</label>
+            <select
+              value={form.utilizador_id}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, utilizador_id: e.target.value }))
+              }
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              <option value="">Selecionar funcionário…</option>
+              {equipa.map((u) => (
+                <option key={u._id} value={u._id}>
+                  {u.nome}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Data de Início + Data de Fim (Date Range Picker) */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Data de Início</label>
+              <Input
+                type="date"
+                value={form.data_inicio}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, data_inicio: e.target.value }))
+                }
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Data de Fim</label>
+              <Input
+                type="date"
+                value={form.data_fim}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, data_fim: e.target.value }))
+                }
+              />
+            </div>
+          </div>
+
+          {/* Tipo */}
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Tipo</label>
+            <select
+              value={form.tipo}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  tipo: e.target.value as TipoAusenciaAmp,
+                }))
+              }
+              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              <option value="ferias">Férias</option>
+              <option value="doenca">Doença</option>
+              <option value="outro">Outro</option>
+            </select>
+          </div>
+
+          {/* Notas */}
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Notas (opcional)</label>
+            <Input
+              type="text"
+              placeholder="Ex.: Férias pagas, baixa médica…"
+              value={form.notas}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, notas: e.target.value }))
+              }
+              maxLength={200}
+            />
+          </div>
+
+          {formErro && (
+            <p className="flex items-center gap-2 text-sm text-destructive">
+              <AlertCircle className="h-4 w-4" />
+              {formErro}
+            </p>
+          )}
+        </DialogContent>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setMostrarForm(false)}
+            disabled={submitting}
+          >
+            Cancelar
+          </Button>
+          <Button
+            type="button"
+            onClick={handleCriarAusencia}
+            disabled={submitting}
+          >
+            {submitting ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                A criar…
+              </>
+            ) : (
+              <>
+                <Plus className="mr-2 h-4 w-4" />
+                Criar Ausência
               </>
             )}
           </Button>

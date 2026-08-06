@@ -2045,3 +2045,24 @@ Stage Summary:
 - **Cron job de limpeza:** todos os dias às 03:00, as fotos (base64) de tarefas concluídas há mais de 7 dias são esvaziadas — otimiza o armazenamento (fotos base64 são volumosas). As descrições das avarias e outros dados são mantidos.
 - **Sem quebras:** 111/111 testes passam; o fluxo de conclusão existente foi adaptado (não removido).
 - **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat: fotos obrigatorias na conclusao e cronjob de limpeza aos 7 dias`.
+
+---
+
+Task ID: HF20
+Agent: Z.ai Code (Eng. Software Principal)
+Task: Módulo de RH — ausências por intervalo de datas + calendário global da equipa.
+
+Work Log:
+- Re-clonado o repo em `dev` (`4f05821`); configurado `git config user.name "Makigero Lab"`.
+- **Análise prévia:** `Ausencia.js` já suporta `data_inicio` + `data_fim` (intervalos) desde v1.8.0. `ausenciaController.registarAusencia` aceita intervalos. `loadBalancer.js` já filtra ausências aprovadas por `data_inicio <= range.start AND data_fim >= range.start`. Sem alterações de backend necessárias.
+- **#2 Frontend — `/gestor/ausencias/page.tsx`:** adicionado botão "Nova Ausência" (ícone `Plus`) + modal (Dialog) com Date Range Picker: select de Funcionário (carregado de `/api/gestor/equipa`), inputs `type="date"` para Data de Início e Data de Fim, select de Tipo, input de Notas. Validação `data_fim >= data_inicio`. Faz `adminPost("/api/gestor/ausencias", ...)`. Imports `Plus`, `Input`, `adminPost`, `UtilizadorDTO` adicionados. A página já existia (só listava/aprova) — agora também cria.
+- **#3 Frontend — `/gestor/calendario/page.tsx`:** adicionada terceira vista "Equipa" ao toggle existente. Novo componente `EquipaMapa` no fim do ficheiro: tabela com linhas = staff, colunas = dias do período (até 31). Cada célula tem cor: verde (disponível), azul (tarefas, mostra nº), vermelho (ausência), âmbar (folga fixa). Deteta estado por `utilizador_id + data` (tarefas), eventos `allDay` (ausências), `dias_folga` (folgas). Legenda visual. Import `Users` adicionado.
+- **Validação:** frontend `npx tsc --noEmit` → 0 erros ✓; `npx next lint` → "No ESLint warnings or errors" ✓; backend `NODE_ENV=test npx jest` → **111/111 testes passam** ✓ (backend não foi tocado).
+- **Documentação atualizada:** `docs/BACKEND.md` (changelog HF20) + esta entrada no `WORKLOG.md`.
+
+Stage Summary:
+- **Backend já suportava intervalos:** `Ausencia` tem `data_inicio`/`data_fim` desde v1.8.0. O `loadBalancer` já bloqueia atribuição durante todo o período. Sem alterações necessárias.
+- **Frontend ausências:** o gestor pode agora criar ausências (férias/doença/outro) por intervalo de datas diretamente no painel, sem precisar de ir à página de equipa.
+- **Calendário global da equipa:** nova vista "Equipa" no `/gestor/calendario` que mostra um mapa de disponibilidade (staff × dias) com cores para tarefas, ausências, folgas e disponibilidade. Dá ao gestor uma visão de helicóptero sobre a capacidade da equipa.
+- **Sem quebras:** 111/111 testes passam; tsc 0 erros; lint limpo.
+- **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat(hr): ausencias por intervalo de datas e calendario global da equipa`.
