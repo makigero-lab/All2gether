@@ -9,6 +9,7 @@ import {
   AlertCircle,
   RefreshCw,
   CheckCheck,
+  LogOut,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -21,6 +22,7 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { parsearDataSegura } from "@/lib/utils";
+import { fazerLogout } from "@/lib/auth";
 
 /**
  * Página /staff/notificacoes — Task 131.
@@ -139,21 +141,38 @@ export default function StaffNotificacoesPage() {
     <div className="mx-auto flex min-h-screen w-full max-w-md flex-col bg-muted/20">
       {/* Cabeçalho */}
       <header className="sticky top-0 z-10 border-b bg-background/95 px-5 pb-4 pt-6 backdrop-blur">
-        <Link
-          href="/staff"
-          prefetch
-          className="mb-3 inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Voltar
-        </Link>
-        <div className="flex items-center gap-2">
-          <Bell className="h-5 w-5 text-primary" />
-          <h1 className="text-xl font-semibold tracking-tight">Notificações</h1>
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1">
+            <Link
+              href="/staff"
+              prefetch
+              className="mb-3 inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Voltar
+            </Link>
+            <div className="flex items-center gap-2">
+              <Bell className="h-5 w-5 text-primary" />
+              <h1 className="text-xl font-semibold tracking-tight">Notificações</h1>
+            </div>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Histórico completo de notificações (lidas e não-lidas).
+            </p>
+          </div>
+          {/* HF15 — Logout sempre visível em mobile */}
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-muted-foreground hover:text-destructive"
+              onClick={() => fazerLogout()}
+              aria-label="Terminar sessão"
+              title="Terminar sessão"
+            >
+              <LogOut className="h-5 w-5" />
+            </Button>
+          </div>
         </div>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Histórico completo de notificações (lidas e não-lidas).
-        </p>
       </header>
 
       {/* Conteúdo */}

@@ -1894,3 +1894,32 @@ Stage Summary:
 - **GAP corrigido:** o `detalhe-tarefa-modal.tsx` agora renderiza o objeto rico de avarias (descrição + fotos + estado resolvido + data de registo), em vez de `{a}` como string. Retrocompatível com entries legacy.
 - **Notificação aos gestores:** já existia desde Prompt 88 (v1.65.0) — `reportarAvaria` chama `notificarUtilizador` para cada gestor ativo da empresa com mensagem "🛠️ Nova Avaria Reportada" + nome da propriedade. Não precisava de alteração.
 - **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat: corrige impersonacao, remove menu integracoes e cria sistema de avarias com notificacao`.
+
+---
+
+Task ID: HF15
+Agent: Z.ai Code (Eng. Software Principal)
+Task: 2 ajustes: (1) Corrigir visibilidade do logout em mobile (staff + gestor); (2) Otimizar Load Balancer com Earliest Start Time. Verificado que o ponto 2 já estava implementado em HF12 (commit c700a8f).
+
+Work Log:
+- Re-clonado o repo em `dev` (`882c99e`); configurado `git config user.name "Makigero Lab"`.
+- **Verificação do ponto 2 (Load Balancer):** confirmado que `utils/loadBalancer.js` já tem a métrica Earliest Start Time (HF12, commit `c700a8f`) com tie-breakers (1º menos tarefas no dia, 2º Haversine), folgas respeitadas, tempo de viagem mantido. Não precisa de alteração.
+- **Análise do ponto 1 (logout mobile):**
+  - **Gestor (`gestor-sidebar.tsx`):** o overlay mobile (menu hamburger, linhas 164-192) só tinha `Brand` + `NavLinks` — sem logout, sem notificações, sem theme toggle. No desktop (linhas 150-157) o logout está no fundo do sidebar, mas no mobile ficava inacessível.
+  - **Staff:** o logout só existia no header de `/staff/page.tsx` (Prompt 114). As páginas `/staff/calendario`, `/staff/ausencias`, `/staff/notificacoes` tinham header com "Voltar" + título mas **sem logout**.
+- **Correção gestor (`gestor-sidebar.tsx`):** adicionado bloco `mt-auto` no fundo do overlay mobile com os mesmos elementos do sidebar desktop: NotificationBell + ThemeToggle + botão "Terminar Sessão" (ícone `LogOut` + `fazerLogout()`) + copyright.
+- **Correção staff (3 páginas):**
+  - `/staff/calendario/page.tsx` — header reestruturado para `flex items-start justify-between` com botão logout no canto direito. Import `fazerLogout` adicionado.
+  - `/staff/ausencias/page.tsx` — mesmo padrão. Imports `LogOut` + `fazerLogout` adicionados.
+  - `/staff/notificacoes/page.tsx` — mesmo padrão. Imports `LogOut` + `fazerLogout` adicionados.
+  - `/staff/page.tsx` — já tinha logout (não alterado).
+- **Novo componente `components/staff/staff-header.tsx`:** criado para futura reutilização (header partilhado com logout + sino + botão voltar). Não foi aplicado retroativamente para evitar refactor grande das páginas existentes.
+- **Validação:** frontend `npx tsc --noEmit` → 0 erros ✓; `npx next lint` → "No ESLint warnings or errors" ✓; backend `NODE_ENV=test npx jest` → **111/111 testes passam** ✓ (backend não foi tocado).
+- **Documentação atualizada:** `docs/BACKEND.md` (changelog HF15) + esta entrada no `WORKLOG.md`.
+
+Stage Summary:
+- **Logout agora visível em todas as páginas mobile:**
+  - Gestor: menu hamburger (overlay) tem agora o bloco footer com logout + notificações + tema (igual ao sidebar desktop).
+  - Staff: calendário, ausências e notificações têm agora botão logout no canto direito do header.
+- **Load Balancer (ponto 2):** já implementado em HF12 (commit `c700a8f`) — Earliest Start Time + tie-breakers. Sem alteração necessária.
+- **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat: corrige visibilidade do logout no mobile e otimiza load balancer para priorizar inicio mais cedo`.

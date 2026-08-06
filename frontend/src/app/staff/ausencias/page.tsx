@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   Send,
   X,
+  LogOut,
 } from "lucide-react";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -32,6 +33,7 @@ import {
 } from "@/components/ui/dialog";
 import { adminPatch } from "@/lib/api";
 import { formatarDataSegura } from "@/lib/utils";
+import { fazerLogout } from "@/lib/auth";
 
 /* ------------------------------------------------------------------ */
 /* Tipos                                                               */
@@ -243,23 +245,40 @@ export default function StaffAusenciasPage() {
     <div className="mx-auto flex min-h-screen w-full max-w-md flex-col bg-muted/20">
       {/* Cabeçalho */}
       <header className="sticky top-0 z-10 border-b bg-background/95 px-5 pb-4 pt-6 backdrop-blur">
-        <Link
-          href="/staff"
-          prefetch
-          className="mb-3 inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Voltar
-        </Link>
-        <div className="flex items-center gap-2">
-          <CalendarOff className="h-5 w-5 text-primary" />
-          <h1 className="text-xl font-semibold tracking-tight">
-            Pedidos de Ausência
-          </h1>
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1">
+            <Link
+              href="/staff"
+              prefetch
+              className="mb-3 inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Voltar
+            </Link>
+            <div className="flex items-center gap-2">
+              <CalendarOff className="h-5 w-5 text-primary" />
+              <h1 className="text-xl font-semibold tracking-tight">
+                Pedidos de Ausência
+              </h1>
+            </div>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Pede férias ou reporta ausência. O admin aprova.
+            </p>
+          </div>
+          {/* HF15 — Logout sempre visível em mobile */}
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-muted-foreground hover:text-destructive"
+              onClick={() => fazerLogout()}
+              aria-label="Terminar sessão"
+              title="Terminar sessão"
+            >
+              <LogOut className="h-5 w-5" />
+            </Button>
+          </div>
         </div>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Pede férias ou reporta ausência. O admin aprova.
-        </p>
       </header>
 
       {/* Conteúdo */}
