@@ -124,6 +124,20 @@ const propriedadeSchema = new mongoose.Schema(
       default: 1,
       min: 1,
     },
+    // HF22 — Dias fixos de limpeza semanal (rotinas automáticas).
+    // Array de números (0=Dom, 1=Seg, ..., 6=Sáb — standard JS getDay()).
+    // O cron job geradorRotinas corre diariamente e, para cada propriedade
+    // que tenha o dia de amanhã neste array, cria uma tarefa automática.
+    dias_fixos_limpeza: {
+      type: [Number],
+      default: [],
+      validate: {
+        validator: function (arr) {
+          return arr.every((d) => Number.isInteger(d) && d >= 0 && d <= 6);
+        },
+        message: 'dias_fixos_limpeza: valores devem ser inteiros entre 0 (Dom) e 6 (Sáb).',
+      },
+    },
   },
   { timestamps: true }
 );

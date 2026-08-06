@@ -271,6 +271,7 @@ export default function PropriedadesPage() {
     morada: "",
     tempo_limpeza_minutos: "45",
     staff_necessario: "1",
+    dias_fixos_limpeza: [] as number[],
   });
   const [manualSubmitting, setManualSubmitting] = useState(false);
   const [manualErro, setManualErro] = useState<string | null>(null);
@@ -302,10 +303,11 @@ export default function PropriedadesPage() {
           morada: manualForm.morada.trim(),
           tempo_limpeza_minutos: tempo,
           staff_necessario: Math.max(1, Math.min(10, Number(manualForm.staff_necessario) || 1)),
+          dias_fixos_limpeza: manualForm.dias_fixos_limpeza.length > 0 ? manualForm.dias_fixos_limpeza : undefined,
         }
       );
       // Limpa o formulário e fecha o modal.
-      setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1" });
+      setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1", dias_fixos_limpeza: [] });
       setManualOpen(false);
       await carregar();
     } catch (e) {
@@ -563,7 +565,7 @@ export default function PropriedadesPage() {
             onClick={() => {
               setManualOpen(true);
               setManualErro(null);
-              setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1" });
+              setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1", dias_fixos_limpeza: [] });
             }}
           >
             <Building2 className="h-4 w-4" />
@@ -1005,6 +1007,55 @@ export default function PropriedadesPage() {
               <p className="text-xs text-muted-foreground">
                 Se &gt; 1, o sistema atribui uma equipa de N funcionários a esta propriedade.
               </p>
+            </div>
+
+            {/* HF22 — Dias Fixos de Limpeza (checkboxes) */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium leading-none">
+                Dias Fixos de Limpeza (opcional)
+              </label>
+              <p className="text-xs text-muted-foreground">
+                Seleciona os dias da semana em que esta propriedade deve ser
+                limpa automaticamente. O sistema cria as tarefas de madrugada.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { dia: 1, label: "Seg" },
+                  { dia: 2, label: "Ter" },
+                  { dia: 3, label: "Qua" },
+                  { dia: 4, label: "Qui" },
+                  { dia: 5, label: "Sex" },
+                  { dia: 6, label: "Sáb" },
+                  { dia: 0, label: "Dom" },
+                ].map(({ dia, label }) => {
+                  const checked = manualForm.dias_fixos_limpeza.includes(dia);
+                  return (
+                    <label
+                      key={dia}
+                      className={`flex cursor-pointer items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm transition-colors ${
+                        checked
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-input text-muted-foreground hover:bg-muted/50"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => {
+                          setManualForm((f) => ({
+                            ...f,
+                            dias_fixos_limpeza: e.target.checked
+                              ? [...f.dias_fixos_limpeza, dia].sort()
+                              : f.dias_fixos_limpeza.filter((d) => d !== dia),
+                          }));
+                        }}
+                        className="h-3.5 w-3.5"
+                      />
+                      {label}
+                    </label>
+                  );
+                })}
+              </div>
             </div>
 
             {manualErro && (

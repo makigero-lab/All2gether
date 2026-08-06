@@ -225,7 +225,7 @@ exports.criarPropriedade = async (req, res) => {
     const { ok, empresaId } = obterEmpresaId(req, res);
     if (!ok) return;
 
-    const { nome, morada, tempo_limpeza_minutos, parceiro_id, staff_necessario } = req.body || {};
+    const { nome, morada, tempo_limpeza_minutos, parceiro_id, staff_necessario, dias_fixos_limpeza } = req.body || {};
 
     // Validações de presença.
     if (!nome || !morada) {
@@ -279,6 +279,9 @@ exports.criarPropriedade = async (req, res) => {
         ? { parceiro_id: String(parceiro_id).trim() }
         : {}),
       staff_necessario: Math.max(1, Math.min(10, Number(staff_necessario) || 1)), // HF21
+      ...(Array.isArray(dias_fixos_limpeza)
+        ? { dias_fixos_limpeza: dias_fixos_limpeza.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6) }
+        : {}), // HF22
       checklist: Array.isArray(req.body?.checklist)
         ? req.body.checklist.filter((s) => typeof s === 'string' && s.trim())
         : [],

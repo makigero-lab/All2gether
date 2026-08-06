@@ -2090,3 +2090,24 @@ Stage Summary:
 - **Load Balancer:** `determinarEquipaAtribuida` usa o mesmo sistema de score do HF16 (Agrupamento > Início > Rotatividade/Equidade > Distância) mas devolve Top N em vez de apenas o vencedor #1.
 - **Fallback:** se não houver N staff disponíveis, atribui os que estiverem + alerta "Equipa parcial: X/N staff disponíveis". A tarefa fica `atribuida` (não `por_atribuir`) — a operação não encrava.
 - **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat: suporte para multiplos funcionarios por tarefa e atualizacao do load balancer`.
+
+---
+
+Task ID: HF22
+Agent: Z.ai Code (Eng. Software Principal)
+Task: Rotinas automáticas — dias fixos de limpeza nas propriedades + cron job gerador de tarefas.
+
+Work Log:
+- Re-clonado o repo em `dev` (`8619f78`); configurado `git config user.name "Makigero Lab"`.
+- **#1 Schema Propriedade:** `models/Propriedade.js` — novo campo `dias_fixos_limpeza: [Number]` (0=Dom, 1=Seg, ..., 6=Sáb) com validação de inteiros 0-6. `gestorController.criarPropriedade` aceita e filtra o campo.
+- **#2 Frontend:** `PropriedadeDTO` em `lib/api.ts` ganhou `dias_fixos_limpeza?: number[]`. `manualForm` estendido com `dias_fixos_limpeza: number[]`. Modal "Adicionar Propriedade Manual" tem novo grupo de 7 checkboxes (Seg-Dom) com toggle visual. Handler converte seleção em array ordenado. Resets atualizados.
+- **#3 Cron job:** `jobs/geradorRotinas.js` (novo, ~160 linhas) — corre `0 2 * * *` (02:00 diariamente). Descobre dia da semana de amanhã; procura propriedades ativas com esse dia no `dias_fixos_limpeza`; verifica idempotência (não duplica); cria tarefa (`origem: 'manual'`, `estado: 'por_atribuir'`); submete ao LB (`determinarEquipaAtribuida` se `staff_necessario > 1`, senão `determinarUtilizadorAtribuido`); se LB atribui, atualiza `utilizador_id` + `equipa_atribuida` + `estado: 'atribuida'`; se não, fica `por_atribuir`. Log detalhado. Montado em `server.js` após `iniciarLimpezaFotos()`.
+- **Validação:** `node --check` ✓ em 4 ficheiros; `NODE_ENV=test npx jest` → **111/111 testes passam** ✓; frontend `tsc` 0 erros ✓; `next lint` limpo ✓.
+- **Documentação atualizada:** `docs/BACKEND.md` (changelog HF22) + esta entrada no `WORKLOG.md`.
+
+Stage Summary:
+- **Rotinas automáticas completas:** o gestor configura dias fixos de limpeza nas propriedades (ex: Seg/Qua/Sex para um apartamento). O cron job corre às 02:00, cria as tarefas para amanhã, e submete-as ao Load Balancer automaticamente. Se o LB encontrar staff, a tarefa fica `atribuida`; se não, fica `por_atribuir` para o gestor resolver de manhã.
+- **Idempotência:** o job verifica se já existe tarefa para a propriedade+dia antes de criar — não duplica.
+- **Integração com HF21:** se `staff_necessario > 1`, o job usa `determinarEquipaAtribuida` (Top N) em vez de `determinarUtilizadorAtribuido` (1 staff).
+- **Sem quebras:** 111/111 testes; o campo `dias_fixos_limpeza` é opcional (default []) — propriedades existentes não são afetadas.
+- **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat(rotinas): implementa dias fixos de limpeza nas propriedades e cron job gerador de tarefas`.
