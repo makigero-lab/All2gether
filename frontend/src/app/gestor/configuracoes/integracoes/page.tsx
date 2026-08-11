@@ -27,6 +27,9 @@ import {
   Building2,
   Eye,
   EyeOff,
+  Download,
+  Trash2,
+  AlertTriangle,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -34,7 +37,16 @@ import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { adminGet, adminPut, adminPost } from "@/lib/api";
+import {
+  Dialog,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogClose,
+  DialogContent,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { adminGet, adminPut, adminPost, adminDelete } from "@/lib/api";
 
 type Toast = { tipo: "sucesso" | "erro"; msg: string } | null;
 
@@ -70,7 +82,6 @@ function formatarData(iso: string | null): string {
 export default function IntegracoesPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [importando, setImportando] = useState(false);
   const [toast, setToast] = useState<Toast>(null);
 
   // Estado do formulário.
@@ -81,6 +92,75 @@ export default function IntegracoesPage() {
   const [smoobuAtivo, setSmoobuAtivo] = useState(false);
   const [sincronizacaoAutomatica, setSincronizacaoAutomatica] = useState(false);
   const [frequenciaHoras, setFrequenciaHoras] = useState(24);
+
+  // HF24 — Estados para "Ações Manuais de Emergência" (movidas de /gestor/tarefas).
+  const [sincronizando, setSincronizando] = useState(false);
+  const [limpando, setLimpando] = useState(false);
+  const [importando, setImportando] = useState(false);
+  const [confirmarLimpar, setConfirmarLimpar] = useState(false);
+  const [resultadoEmergencia, setResultadoEmergencia] = useState<string | null>(null);
+
+  /** HF24 — Sincroniza reservas futuras do Smoobu (pull via REST API). */
+  async function handleSincronizar() {
+    setSincronizando(true);
+    setResultadoEmergencia(null);
+    try {
+      const res = await adminPost<{
+        totalRecebidas: number; criadas: number; existentes: number; erros: number;
+      }>("/api/gestor/smoobu/sincronizar", {});
+      let msg = `${res.criadas} tarefa(s) criada(s)`;
+      if (res.existentes > 0) msg += `, ${res.existentes} já existiam`;
+      if (res.erros > 0) msg += `, ${res.erros} com erro`;
+      setResultadoEmergencia(msg + ".");
+      showToast("sucesso", msg);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Erro ao sincronizar.";
+      setResultadoEmergencia(msg);
+      showToast("erro", `Sincronização falhou: ${msg}`);
+    } finally {
+      setSincronizando(false);
+    }
+  }
+
+  /** HF24 — Importa propriedades do Smoobu. */
+  async function handleImportar() {
+    setImportando(true);
+    setResultadoEmergencia(null);
+    try {
+      const res = await adminPost<{
+        criadas: number; atualizadas: number; existentes: number; erros: number; message?: string;
+      }>("/api/gestor/smoobu/propriedades", {});
+      const msg = res.message || `${res.criadas} importada(s), ${res.atualizadas} atualizada(s).`;
+      setResultadoEmergencia(msg);
+      showToast("sucesso", msg);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Erro ao importar.";
+      setResultadoEmergencia(msg);
+      showToast("erro", `Importação falhou: ${msg}`);
+    } finally {
+      setImportando(false);
+    }
+  }
+
+  /** HF24 — Limpa tarefas futuras (reset do calendário). */
+  async function handleLimparFuturas() {
+    setLimpando(true);
+    setConfirmarLimpar(false);
+    try {
+      const res = await adminDelete<{ mensagem: string; apagadas: number }>(
+        "/api/gestor/tarefas/futuras"
+      );
+      const msg = res.mensagem || `${res.apagadas} tarefa(s) apagada(s).`;
+      setResultadoEmergencia(msg);
+      showToast("sucesso", msg);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Erro ao apagar.";
+      setResultadoEmergencia(msg);
+      showToast("erro", `Limpeza falhou: ${msg}`);
+    } finally {
+      setLimpando(false);
+    }
+  }
 
   // Estado exibido (da BD).
   const [apiKeyMascarada, setApiKeyMascarada] = useState("");
@@ -500,6 +580,123 @@ export default function IntegracoesPage() {
           </p>
         </div>
       </div>
+
+      {/* HF24 — Ações Manuais de Emergência (movidas de /gestor/tarefas) */}
+      <Card className="border-destructive/30">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base text-destructive">
+            <AlertTriangle className="h-5 w-5" />
+            Ações Manuais de Emergência
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Estas ações afetam diretamente as tarefas e propriedades. Usa-as
+            apenas quando necessário (ex.: sincronização inicial, reset do
+            calendário, importação de propriedades).
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {/* Sincronizar Reservas */}
+            <Button
+              variant="outline"
+              onClick={handleSincronizar}
+              disabled={sincronizando}
+            >
+              {sincronizando ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4" />
+              )}
+              {sincronizando ? "A sincronizar…" : "Sincronizar Reservas"}
+            </Button>
+
+            {/* Importar Propriedades */}
+            <Button
+              variant="outline"
+              onClick={handleImportar}
+              disabled={importando}
+            >
+              {importando ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Building2 className="h-4 w-4" />
+              )}
+              {importando ? "A importar…" : "Importar Propriedades"}
+            </Button>
+
+            {/* Limpar Futuras */}
+            <Button
+              variant="outline"
+              className="border-destructive/40 text-destructive hover:bg-destructive/10"
+              onClick={() => setConfirmarLimpar(true)}
+              disabled={limpando}
+            >
+              {limpando ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4" />
+              )}
+              Limpar Futuras
+            </Button>
+          </div>
+
+          {resultadoEmergencia && (
+            <div className="rounded-md bg-muted/50 p-3 text-sm">
+              <span className="font-medium">Resultado: </span>
+              {resultadoEmergencia}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Dialog de confirmação: Limpar Futuras */}
+      <Dialog open={confirmarLimpar} onOpenChange={setConfirmarLimpar}>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Trash2 className="h-5 w-5 text-destructive" />
+            Limpar Tarefas Futuras
+          </DialogTitle>
+          <DialogDescription>
+            Isto vai apagar todas as tarefas não concluídas de hoje para a frente.
+            As concluídas e canceladas serão preservadas. Queres continuar?
+          </DialogDescription>
+          <DialogClose onClick={() => setConfirmarLimpar(false)} />
+        </DialogHeader>
+        <DialogContent className="space-y-2">
+          <p className="text-sm text-muted-foreground">
+            Depois de apagar, podes clicar em &ldquo;Sincronizar Reservas&rdquo; para recriar
+            as tarefas.
+          </p>
+        </DialogContent>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setConfirmarLimpar(false)}
+            disabled={limpando}
+          >
+            Cancelar
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            onClick={handleLimparFuturas}
+            disabled={limpando}
+          >
+            {limpando ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                A apagar…
+              </>
+            ) : (
+              <>
+                <Trash2 className="mr-2 h-4 w-4" />
+                Sim, apagar
+              </>
+            )}
+          </Button>
+        </DialogFooter>
+      </Dialog>
     </div>
   );
 }
