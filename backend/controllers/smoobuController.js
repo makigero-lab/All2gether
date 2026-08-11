@@ -415,13 +415,13 @@ async function criarTarefaPorReserva(
     propriedade.tempo_limpeza_minutos ??
     45;
 
-  // HF23 — Número de hóspedes para cálculo dinâmico de lavandaria.
-  // Tenta extrair do payload (adults + children ou guests); se vazio, usa a
-  // capacidade da propriedade.
-  let numHospedes = detalhesReserva.pax ?? null;
-  if (numHospedes == null) {
-    // pax já foi calculado em extrairDadosReserva (adults + children ou guests).
-    // Se ainda for null, usa a capacidade da propriedade.
+  // HF23/HF24 — Número de hóspedes para cálculo dinâmico de lavandaria.
+  // CRÍTICO: se pax for 0, null ou undefined (plataforma não enviou), faz
+  // fallback para a capacidade_hospedes da propriedade. O operador ?? só
+  // cobre null/undefined — precisamos de cobrir também 0 (falsy mas != null).
+  let numHospedes = detalhesReserva.pax;
+  if (numHospedes == null || numHospedes === 0) {
+    // pax veio vazio/zero — usa a capacidade da propriedade.
     numHospedes = propriedade.capacidade_hospedes ?? null;
   }
 
@@ -686,6 +686,20 @@ async function criarTarefaPorReserva(
     ? 'nao_atribuida' // LB tentou mas não encontrou ninguém.
     : 'por_atribuir'; // erro no LB (não chegou a tentar).
 
+  // HF24 — Motivo de não atribuição (para o gestor saber porquê).
+  let motivoNaoAtribuicao = null;
+  if (!utilizadorAtribuido) {
+    if (staffExclusivoId && !tentouLoadBalancer) {
+      // Staff exclusivo estava de folga/inativo e não chegou ao LB.
+      motivoNaoAtribuicao = alertaTarefa || 'Staff exclusivo indisponível';
+    } else if (tentouLoadBalancer) {
+      // LB tentou mas não encontrou ninguém.
+      motivoNaoAtribuicao = 'Nenhum staff disponível (todos ocupados, de folga ou de férias)';
+    } else {
+      motivoNaoAtribuicao = 'Erro no load balancer — atribuição não tentada';
+    }
+  }
+
   // 9. Cria a Tarefa (com alerta se aplicável).
   // HF21 — Se houver equipa atribuída (múltiplos staff), preenche equipa_atribuida.
   const equipaIds = [];
@@ -712,6 +726,7 @@ async function criarTarefaPorReserva(
     tipo: 'limpeza',
     estado: estadoInicial,
     alerta: alertaTarefa, // HF11: alerta se LB não encontrou substituto.
+    motivo_nao_atribuicao: motivoNaoAtribuicao, // HF24: motivo detalhado
     checklist: propriedade.checklist || [],
     ...(checklistDinamicaWebhook.length > 0
       ? { checklist_dinamica: checklistDinamicaWebhook }

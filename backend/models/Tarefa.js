@@ -115,6 +115,14 @@ const tarefaSchema = new mongoose.Schema(
       default: null,
       trim: true,
     },
+    // HF24 — Motivo detalhado de não atribuição (quando estado = 'por_atribuir'
+    // ou 'nao_atribuida'). Preenchido pelo load balancer com a razão exata:
+    // "Nenhum staff disponível", "Todos de folga/férias", "SLA excedido", etc.
+    motivo_nao_atribuicao: {
+      type: String,
+      default: null,
+      trim: true,
+    },
     // Data em que a tarefa foi concluída (para relatórios).
     concluida_em: {
       type: Date,

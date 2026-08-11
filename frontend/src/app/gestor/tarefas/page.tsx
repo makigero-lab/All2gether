@@ -602,39 +602,14 @@ export default function AdminTarefasPage() {
           >
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           </Button>
-          <Button
-            variant="outline"
-            onClick={handleSincronizarSmoobu}
-            disabled={sincronizando}
-            title="Vai buscar as reservas futuras ao Smoobu e cria as tarefas de limpeza. Idempotente — não cria duplicados."
-          >
-            {sincronizando ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Download className="h-4 w-4" />
-            )}
-            <span className="hidden sm:inline">
-              {sincronizando ? "A sincronizar…" : "Sincronizar Reservas"}
-            </span>
-          </Button>
-          <Button
-            variant="outline"
-            className="border-destructive/40 text-destructive hover:bg-destructive/10"
-            onClick={() => setConfirmarLimpar(true)}
-            disabled={limpando}
-            title="Apaga todas as tarefas não concluídas de hoje para a frente. Depois podes sincronizar novamente."
-          >
-            {limpando ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Trash2 className="h-4 w-4" />
-            )}
-            <span className="hidden sm:inline">Limpar Futuras</span>
-          </Button>
+          {/* HF24 — Botões "Sincronizar Reservas", "Limpar Futuras" e
+              "Importar do Smoobu" removidos da barra principal para não
+              confundir o gestor no dia a dia. Essas ações avançadas ficam
+              disponíveis em /gestor/configuracoes/integracoes. */}
           {/* v1.64.0 (Prompt 87) — Auto-Atribuir Pendentes (load balancer manual) */}
           <Button
             onClick={() => setConfirmarAutoAtribuir(true)}
-            disabled={autoAtribuindo || sincronizando || limpando}
+            disabled={autoAtribuindo}
             title="Corre o load balancer para atribuir automaticamente todas as tarefas futuras sem funcionário."
             className="bg-primary text-primary-foreground hover:bg-primary/90"
           >
