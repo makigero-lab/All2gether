@@ -1238,13 +1238,19 @@ describe('PATCH /api/staff/tarefas/:id/concluir', () => {
     const res = await request(app)
       .patch(`/api/staff/tarefas/${tarefaStaff._id}/concluir`)
       .set('Authorization', `Bearer ${staffConcluirToken}`)
-      .send({ observacoes_staff: 'Tudo limpo, sem problemas.' });
+      .send({
+        observacoes_staff: 'Tudo limpo, sem problemas.',
+        fotos_conclusao: ['data:image/png;base64,iVBORw0KGgo='], // HF19 — foto obrigatória
+      });
 
     expect(res.status).toBe(200);
     expect(res.body.tarefa.estado).toBe('concluida');
     expect(res.body.tarefa.hora_conclusao).toBeTruthy();
     expect(res.body.tarefa.concluida_em).toBeTruthy();
     expect(res.body.tarefa.observacoes_staff).toBe('Tudo limpo, sem problemas.');
+    // HF19 — fotos_conclusao guardadas + data_conclusao definida.
+    expect(res.body.tarefa.fotos_conclusao).toHaveLength(1);
+    expect(res.body.tarefa.data_conclusao).toBeTruthy();
   });
 
   it('tentar concluir tarefa já concluída → 400', async () => {

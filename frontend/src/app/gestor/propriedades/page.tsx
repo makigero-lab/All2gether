@@ -262,6 +262,61 @@ export default function PropriedadesPage() {
 
   // Estado do modal de edição
   const [editando, setEditando] = useState<PropriedadeDTO | null>(null);
+
+  // HF18 — Estado do modal de "Adicionar Propriedade Manual"
+  // (fluxo simplificado: nome + morada + tempo de limpeza; origem: 'manual')
+  const [manualOpen, setManualOpen] = useState(false);
+  const [manualForm, setManualForm] = useState({
+    nome: "",
+    morada: "",
+    tempo_limpeza_minutos: "45",
+    staff_necessario: "1",
+    dias_fixos_limpeza: [] as number[],
+  });
+  const [manualSubmitting, setManualSubmitting] = useState(false);
+  const [manualErro, setManualErro] = useState<string | null>(null);
+
+  /** HF18 — Submete o formulário de propriedade manual (origem: 'manual'). */
+  async function handleSubmeterManual(e: React.FormEvent) {
+    e.preventDefault();
+    setManualErro(null);
+
+    if (!manualForm.nome.trim() || !manualForm.morada.trim()) {
+      setManualErro("Nome e Morada são obrigatórios.");
+      return;
+    }
+
+    const tempo = Number(manualForm.tempo_limpeza_minutos);
+    if (Number.isNaN(tempo) || tempo < 0) {
+      setManualErro("Tempo de Limpeza deve ser um número maior ou igual a 0.");
+      return;
+    }
+
+    setManualSubmitting(true);
+    try {
+      // HF18 — Payload simplificado. O backend define origem: 'manual'.
+      // Não enviamos smoobu_id (a propriedade não vem do Smoobu).
+      await adminPost<{ propriedade: PropriedadeDTO; warning?: string }>(
+        "/api/gestor/propriedades",
+        {
+          nome: manualForm.nome.trim(),
+          morada: manualForm.morada.trim(),
+          tempo_limpeza_minutos: tempo,
+          staff_necessario: Math.max(1, Math.min(10, Number(manualForm.staff_necessario) || 1)),
+          dias_fixos_limpeza: manualForm.dias_fixos_limpeza.length > 0 ? manualForm.dias_fixos_limpeza : undefined,
+        }
+      );
+      // Limpa o formulário e fecha o modal.
+      setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1", dias_fixos_limpeza: [] });
+      setManualOpen(false);
+      await carregar();
+    } catch (e) {
+      setManualErro(e instanceof Error ? e.message : "Erro ao criar propriedade.");
+    } finally {
+      setManualSubmitting(false);
+    }
+  }
+
   const [editForm, setEditForm] = useState({
     nome: "",
     smoobu_id: "",
@@ -500,6 +555,21 @@ export default function PropriedadesPage() {
           }}>
             <Plus className="h-4 w-4" />
             Nova Propriedade
+          </Button>
+          {/* HF18 — Botão "Adicionar Propriedade Manual" (origem: 'manual').
+              Ao contrário do formulário inline de "Nova Propriedade" (que
+              requer smoobu_id da lista importada), este abre um Dialog
+              simples com apenas nome + morada + tempo de limpeza. */}
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setManualOpen(true);
+              setManualErro(null);
+              setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1", dias_fixos_limpeza: [] });
+            }}
+          >
+            <Building2 className="h-4 w-4" />
+            <span className="hidden sm:inline">Adicionar Manual</span>
           </Button>
         </div>
       </div>
@@ -828,6 +898,198 @@ export default function PropriedadesPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* HF18 — Modal "Adicionar Propriedade Manual" */}
+      <Dialog
+        open={manualOpen}
+        onOpenChange={(o) => {
+          if (!manualSubmitting) setManualOpen(o);
+        }}
+      >
+        <DialogHeader>
+          <div>
+            <DialogTitle className="flex items-center gap-2">
+              <Building2 className="h-5 w-5 text-primary" />
+              Adicionar Propriedade Manual
+            </DialogTitle>
+            <DialogDescription>
+              Cria uma propriedade que não está sincronizada com o Smoobu
+              (origem: manual). Útil para casas geridas diretamente pelo
+              gestor ou por parceiros B2B.
+            </DialogDescription>
+          </div>
+          <DialogClose
+            onClick={() => {
+              if (!manualSubmitting) setManualOpen(false);
+            }}
+          />
+        </DialogHeader>
+        <form onSubmit={handleSubmeterManual}>
+          <DialogContent className="space-y-4">
+            <div className="space-y-1.5">
+              <label htmlFor="manual-nome" className="text-sm font-medium">
+                Nome <span className="text-destructive">*</span>
+              </label>
+              <Input
+                id="manual-nome"
+                value={manualForm.nome}
+                onChange={(e) =>
+                  setManualForm((f) => ({ ...f, nome: e.target.value }))
+                }
+                placeholder="Ex.: Apartamento Maré Alta"
+                required
+                autoFocus
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label htmlFor="manual-morada" className="text-sm font-medium">
+                Morada <span className="text-destructive">*</span>
+              </label>
+              <Input
+                id="manual-morada"
+                value={manualForm.morada}
+                onChange={(e) =>
+                  setManualForm((f) => ({ ...f, morada: e.target.value }))
+                }
+                placeholder="Ex.: Rua das Flores 12, Lisboa"
+                required
+              />
+              <p className="text-xs text-muted-foreground">
+                As coordenadas são calculadas automaticamente via Nominatim
+                (best-effort). Se a morada não for encontrada, a propriedade é
+                criada na mesma (sem coordenadas).
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <label
+                htmlFor="manual-tempo"
+                className="text-sm font-medium"
+              >
+                Tempo de Limpeza (minutos)
+              </label>
+              <Input
+                id="manual-tempo"
+                type="number"
+                min={0}
+                value={manualForm.tempo_limpeza_minutos}
+                onChange={(e) =>
+                  setManualForm((f) => ({
+                    ...f,
+                    tempo_limpeza_minutos: e.target.value,
+                  }))
+                }
+                placeholder="45"
+              />
+            </div>
+
+            {/* HF21 — Staff Necessário */}
+            <div className="space-y-1.5">
+              <label
+                htmlFor="manual-staff"
+                className="text-sm font-medium leading-none"
+              >
+                Nº de Staff Necessário
+              </label>
+              <Input
+                id="manual-staff"
+                type="number"
+                min={1}
+                max={10}
+                value={manualForm.staff_necessario}
+                onChange={(e) =>
+                  setManualForm((f) => ({
+                    ...f,
+                    staff_necessario: e.target.value,
+                  }))
+                }
+                placeholder="1"
+              />
+              <p className="text-xs text-muted-foreground">
+                Se &gt; 1, o sistema atribui uma equipa de N funcionários a esta propriedade.
+              </p>
+            </div>
+
+            {/* HF22 — Dias Fixos de Limpeza (checkboxes) */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium leading-none">
+                Dias Fixos de Limpeza (opcional)
+              </label>
+              <p className="text-xs text-muted-foreground">
+                Seleciona os dias da semana em que esta propriedade deve ser
+                limpa automaticamente. O sistema cria as tarefas de madrugada.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { dia: 1, label: "Seg" },
+                  { dia: 2, label: "Ter" },
+                  { dia: 3, label: "Qua" },
+                  { dia: 4, label: "Qui" },
+                  { dia: 5, label: "Sex" },
+                  { dia: 6, label: "Sáb" },
+                  { dia: 0, label: "Dom" },
+                ].map(({ dia, label }) => {
+                  const checked = manualForm.dias_fixos_limpeza.includes(dia);
+                  return (
+                    <label
+                      key={dia}
+                      className={`flex cursor-pointer items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm transition-colors ${
+                        checked
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-input text-muted-foreground hover:bg-muted/50"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => {
+                          setManualForm((f) => ({
+                            ...f,
+                            dias_fixos_limpeza: e.target.checked
+                              ? [...f.dias_fixos_limpeza, dia].sort()
+                              : f.dias_fixos_limpeza.filter((d) => d !== dia),
+                          }));
+                        }}
+                        className="h-3.5 w-3.5"
+                      />
+                      {label}
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
+            {manualErro && (
+              <p className="flex items-center gap-2 text-sm text-destructive">
+                <AlertCircle className="h-4 w-4" />
+                {manualErro}
+              </p>
+            )}
+          </DialogContent>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setManualOpen(false)}
+              disabled={manualSubmitting}
+            >
+              Cancelar
+            </Button>
+            <Button type="submit" disabled={manualSubmitting}>
+              {manualSubmitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  A criar…
+                </>
+              ) : (
+                <>
+                  <Building2 className="mr-2 h-4 w-4" />
+                  Criar
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </form>
+      </Dialog>
 
       {/* Modal de Edição */}
       <Dialog

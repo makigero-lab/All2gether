@@ -99,6 +99,45 @@ const propriedadeSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+    // HF17 (Fase 3) — Origem da propriedade: Smoobu (via webhook/importação)
+    // ou manual (criada pelo gestor ou por um parceiro B2B).
+    origem: {
+      type: String,
+      enum: ['smoobu', 'manual'],
+      default: 'manual',
+      index: true,
+    },
+    // HF17 — Se a propriedade foi criada por um parceiro B2B, este campo
+    // guarda o ID do utilizador-parceiro a quem pertence. Null para
+    // propriedades do Smoobu ou criadas pelo gestor internamente.
+    parceiro_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Utilizador',
+      default: null,
+      index: true,
+    },
+    // HF21 — Número de staff necessário para limpar esta propriedade.
+    // Se > 1, o load balancer atribui uma equipa (Top N) em vez de 1 pessoa.
+    // Default: 1 (comportamento original — 1 staff por tarefa).
+    staff_necessario: {
+      type: Number,
+      default: 1,
+      min: 1,
+    },
+    // HF22 — Dias fixos de limpeza semanal (rotinas automáticas).
+    // Array de números (0=Dom, 1=Seg, ..., 6=Sáb — standard JS getDay()).
+    // O cron job geradorRotinas corre diariamente e, para cada propriedade
+    // que tenha o dia de amanhã neste array, cria uma tarefa automática.
+    dias_fixos_limpeza: {
+      type: [Number],
+      default: [],
+      validate: {
+        validator: function (arr) {
+          return arr.every((d) => Number.isInteger(d) && d >= 0 && d <= 6);
+        },
+        message: 'dias_fixos_limpeza: valores devem ser inteiros entre 0 (Dom) e 6 (Sáb).',
+      },
+    },
   },
   { timestamps: true }
 );

@@ -1923,3 +1923,191 @@ Stage Summary:
   - Staff: calendário, ausências e notificações têm agora botão logout no canto direito do header.
 - **Load Balancer (ponto 2):** já implementado em HF12 (commit `c700a8f`) — Earliest Start Time + tie-breakers. Sem alteração necessária.
 - **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat: corrige visibilidade do logout no mobile e otimiza load balancer para priorizar inicio mais cedo`.
+
+---
+
+Task ID: HF16
+Agent: Z.ai Code (Eng. Software Principal)
+Task: Fase 2 — Reescrita total do motor de distribuição de tarefas (loadBalancer.js) com 4 fatores: Agrupamento Diário, Google Maps, Equidade Semanal + Rotatividade, Earliest Start Time.
+
+Work Log:
+- Re-clonado o repo em `dev` (`1821515`); configurado `git config user.name "Makigero Lab"`.
+- Lidos `utils/loadBalancer.js` (HF12, 348 linhas), `utils/distancia.js` (63 linhas), `utils/scheduler.js` (242 linhas) para compreender a arquitetura atual.
+- **#2 — Google Maps Distance Matrix API (`distancia.js`):**
+  - Nova função `calcularTempoViagemReal(origem, destino)` — async, tenta `https://maps.googleapis.com/maps/api/distancematrix/json?mode=driving&units=metric` com `GOOGLE_MAPS_API_KEY`.
+  - Fallback silencioso para `tempoViagemHaversine` se: (a) env var não existir; (b) fetch falhar (5s `AbortSignal.timeout`); (c) resposta não tiver `status=OK`; (d) elemento não tiver `duration.value`.
+  - Cache em memória (`Map`) com TTL 5 min para evitar chamadas repetidas ao mesmo par de coordenadas.
+  - Nova função `tempoViagemHaversine(origem, destino)` extraída do scheduler (Haversine + 30km/h + cap 60min).
+  - `limparCacheDistancias()` exportado para testes.
+  - `distanciaHaversine` e `RAIO_TERRA_KM` mantidos (retrocompatibilidade).
+- **#1 — Agrupamento Diário (`loadBalancer.js`):**
+  - Nova função `temTarefaNaMesmaPropriedade(utilizadorId, propriedadeId, range)` — `Tarefa.countDocuments` com match de propriedade + utilizador + dia.
+  - Se verdadeiro, bónus de `PESO_CLUSTERING=120` min (2h) subtraído do score.
+- **#3 — Equidade Semanal + Rotatividade (`loadBalancer.js`):**
+  - Nova função `calcularCargaSemanal(empresaId, utilizadorId, dataReferencia)` — aggregate que soma `tempo_limpeza_minutos` da semana (segunda a domingo). Calcula início da semana retrocedendo `dia-1` dias (ou 6 se domingo). Penalização: `horasSemana * PESO_EQUIDADE_HORA(10)` min.
+  - Nova função `limpouPropriedadeOntem(utilizadorId, propriedadeId, dataReferencia)` — `Tarefa.countDocuments` no dia anterior. Se verdadeiro, penalização de `PESO_ROTATIVIDADE=30` min.
+  - Removida a lógica antiga de `contarTarefasDia` (tie-breaker por nº de tarefas no dia) — substituída por equidade semanal.
+- **#4 — Earliest Start Time (mantido do HF12):**
+  - `calcularInicioTarefaUtilizador` continua a ser chamado para cada staff.
+  - O `earliestStart` é convertido para "minutos desde meia-noite UTC" e usado como base do score.
+- **Score FINAL:** `minutos_início - bónus_clustering + penalização_equidade + penalização_rotação + tempo_viagem` (menor = melhor). Ordenação por score ascendente.
+- **Google Maps integrado no LB:** o tempo de viagem usado no score vem de `calcularTempoViagemReal` (Google Maps com fallback Haversine). Busca a última tarefa do staff para obter coordenadas da propriedade anterior.
+- **VIP, SLA, ausências, folgas:** todos mantidos sem alteração.
+- **Logs detalhados:** cada staff recebe um log com score + fatores decompostos (início, cluster, equidade, rotação, viagem + origem).
+- **Validação:** `node --check` ✓ em `utils/distancia.js` e `utils/loadBalancer.js`; `NODE_ENV=test npx jest` → **111/111 testes passam** ✓; frontend `tsc` 0 erros ✓; `next lint` limpo ✓.
+- **Documentação atualizada:** `docs/BACKEND.md` (changelog HF16) + esta entrada no `WORKLOG.md`.
+
+Stage Summary:
+- **4 fatores de scoring implementados (ordem de prioridade):** Agrupamento Diário (120 min bónus) > Início Mais Cedo (minutos desde meia-noite) > Rotatividade/Equidade Semanal (10 min/hora + 30 min se ontem) > Distância/Tempo de Viagem (Google Maps ou Haversine).
+- **Google Maps com fallback silencioso:** `GOOGLE_MAPS_API_KEY` opcional — sem ela, o sistema usa Haversine (30km/h, cap 60min) exatamente como antes. Com ela, usa tempo de condução real via Distance Matrix API (5s timeout, cache 5min).
+- **Equidade semanal substitui contagem diária:** quem tem menos horas na semana (seg-dom) ganha prioridade — distribui a carga ao longo da semana, não só do dia.
+- **Rotatividade força rotação de equipas:** se o staff limpou a propriedade ontem, recebe 30 min de penalização — encoraja que equipas diferentes façam o mesmo prédio em dias consecutivos.
+- **Agrupamento minimiza deslocações:** se o staff já está na propriedade hoje (quartos diferentes do mesmo edifício), recebe 2h de bónus — evita enviar outra pessoa para o mesmo sítio.
+- **Sem quebras:** 111/111 testes passam; VIP, SLA, ausências, folgas, scheduler e proteção de almoço mantidos.
+- **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat(logistica): refatora load balancer com agrupamento diario, rotatividade, equidade semanal e google maps fallback`.
+
+---
+
+Task ID: HF17
+Agent: Z.ai Code (Eng. Software Principal)
+Task: Fase 3 — Arquitetura híbrida para propriedades manuais + novo role de parceiro (B2B). Independência do Smoobu e Portal de Parceiros.
+
+Work Log:
+- Re-clonado o repo em `dev` (`e9adf22`); configurado `git config user.name "Makigero Lab"`.
+- Lidos `models/Utilizador.js` (role enum), `middleware/requireRole.js` (isGestor/isAdmin), `models/Propriedade.js` (smoobu_id já tem sparse: true desde HF4), `models/Tarefa.js` (smoobu_reserva_id já tem sparse: true desde HF4). Confirmado que os sparse indexes já permitem múltiplos nulls sem violação.
+- **#1 — Novo role 'parceiro':**
+  - `models/Utilizador.js`: enum de role alargado para `['admin', 'gestor', 'staff', 'parceiro']`.
+  - `middleware/requireRole.js`: novo `const isParceiro = requireRole('parceiro')`; exportado.
+- **#2 — Propriedades Híbridas:**
+  - `models/Propriedade.js`: novos campos `origem` (enum ['smoobu','manual'], default 'manual') e `parceiro_id` (ObjectId ref Utilizador, default null, indexado).
+  - `smoobu_id` já tinha `sparse: true` — múltiplas propriedades manuais com `smoobu_id: null` não violam índices.
+- **#3 — Tarefas Híbridas:**
+  - `models/Tarefa.js`: novo campo `origem` (enum ['smoobu','manual'], default 'manual').
+  - `smoobu_reserva_id` já tinha `sparse: true`.
+- **#3 — Controller + Routes:**
+  - `controllers/parceiroController.js` (novo, ~200 linhas): 4 funções — `criarPropriedade` (POST: cria casa manual com `origem: 'manual'`, `smoobu_id: null`, `parceiro_id: req.user.id`, geocoding Nominatim best-effort); `listarPropriedades` (GET: filtra por `parceiro_id = req.user.id`); `criarTarefa` (POST: cria limpeza manual `origem: 'manual'`, `smoobu_reserva_id: null`, `estado: 'por_atribuir'`, valida que a propriedade pertence ao parceiro); `listarTarefas` (GET: lista tarefas das propriedades do parceiro).
+  - `routes/parceiroRoutes.js` (novo): 4 rotas com `auth + isParceiro`.
+  - `server.js`: `app.use('/api/parceiro', parceiroRoutes)` montado após `/api/smoobu`.
+- **Validação:** `node --check` ✓ em 7 ficheiros; `NODE_ENV=test npx jest` → **111/111 testes passam** ✓. Os nulls em `smoobu_id` e `smoobu_reserva_id` não quebram a BD (sparse indexes já existiam desde HF4).
+- **Documentação atualizada:** `docs/BACKEND.md` (changelog HF17) + esta entrada no `WORKLOG.md`.
+
+Stage Summary:
+- **Arquitetura híbrida:** o sistema agora suporta propriedades e tarefas tanto do Smoobu (via webhook) quanto manuais (criadas pelo gestor ou por parceiros B2B). O campo `origem` distingue a proveniência.
+- **Role 'parceiro':** utilizadores externos (B2B) podem criar as suas próprias casas e agendar limpezas espontâneas sem depender do Smoobu. Acesso protegido por `auth + isParceiro`.
+- **Segurança:** o parceiro só pode ver/gerir propriedades e tarefas que ele criou (filtro por `parceiro_id = req.user.id`). Validação de posse da propriedade antes de criar tarefa.
+- **Índices sparse:** `smoobu_id` e `smoobu_reserva_id` já tinham `sparse: true` desde HF4 — múltiplas propriedades/tarefas manuais com null não violam a BD.
+- **Sem quebras:** 111/111 testes passam; o load balancer, webhook, e todos os endpoints existentes continuam funcionais.
+- **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat(b2b): prepara arquitetura hibrida para propriedades manuais e novo role de parceiro`.
+
+---
+
+Task ID: HF18
+Agent: Z.ai Code (Eng. Software Principal) + subagent full-stack
+Task: UI no gestor para propriedades manuais e tarefas espontâneas. Os parceiros não criam tarefas/propriedades — quem cria é o Gestor.
+
+Work Log:
+- Re-clonado o repo em `dev` (`3b2f15c`); configurado `git config user.name "Makigero Lab"`.
+- **Análise prévia:** `criarPropriedade` já existe no `gestorController.js` (aceita nome, morada, tempo_limpeza). `criarTarefa` existe no `tarefaController.js` (mas não define `origem` nem aceita `observacoes`). Frontend já tem formulários de criação em ambas as páginas mas sem a distinção "manual/espontânea".
+- **#1 Backend — `gestorController.js` `criarPropriedade`:** atualizado para aceitar `parceiro_id` opcional e definir `origem: 'manual'` no `Propriedade.create`.
+- **#1 Backend — `tarefaController.js` `criarTarefaEspontanea`:** nova função que cria tarefa com `origem: 'manual'`, `smoobu_reserva_id: null`, aceita `observacoes`, e `utilizador_id` opcional (se vier, atribui diretamente saltando o LB; se não, fica `por_atribuir`). Inclui normalização de data/hora (fuso Portugal), snapshot de checklist dinâmica, notificação ao staff (se atribuída), auditoria. Import `registarAuditoria` adicionado (estava em falta no ficheiro — bug latente corrigido).
+- **#1 Backend — `gestorRoutes.js`:** rota `POST /tarefas/espontanea` montada com `auth + isGestor + criarTarefaEspontanea`.
+- **#2 Frontend — `propriedades/page.tsx`:** botão "Adicionar Manual" (ícone `Building2`, `variant="secondary"`) + Dialog com formulário (Nome, Morada, Tempo de Limpeza) que faz `adminPost("/api/gestor/propriedades")`. Fecha modal e recarrega lista em caso de sucesso; mostra erro inline em caso de falha. Formulário existente não foi tocado.
+- **#3 Frontend — `tarefas/page.tsx`:** botão "Limpeza Espontânea" (ícone `SprayCan`, `variant="secondary"`) + Dialog com select de Propriedade (reutiliza estado `propriedades` já carregado), input de Data, input de Hora, Textarea de Observações, select opcional de Staff (reutiliza estado `staff`). Faz `adminPost("/api/gestor/tarefas/espontanea")`. Sem pedidos extra ao backend. Import `Textarea` adicionado. Formulário existente não foi tocado.
+- **Bug latente corrigido:** `tarefaController.js` usava `registarAuditoria` na linha 1354 (em `reatribuirTarefa`) mas não importava a função de `utils/auditoria`. Import adicionado — sem isto, a reatribuição de tarefas iria crashar com `ReferenceError: registarAuditoria is not defined`.
+- **Validação:** `node --check` ✓ em `gestorController.js`, `tarefaController.js`, `gestorRoutes.js`; `NODE_ENV=test npx jest` → **111/111 testes passam** ✓; frontend `npx tsc --noEmit` → 0 erros ✓; `npx next lint` → "No ESLint warnings or errors" ✓.
+- **Documentação atualizada:** `docs/BACKEND.md` (changelog HF18) + esta entrada no `WORKLOG.md`.
+
+Stage Summary:
+- **Regra de negócio corrigida:** os parceiros não criam nada diretamente — é o Gestor quem cria propriedades manuais e lança limpezas espontâneas.
+- **Backend:** `criarPropriedade` define `origem: 'manual'` + aceita `parceiro_id`; nova rota `POST /api/gestor/tarefas/espontanea` cria tarefas manuais com `observacoes` e atribuição opcional.
+- **Frontend:** dois novos botões + modais (Dialog) no painel do gestor — "Adicionar Manual" em propriedades e "Limpeza Espontânea" em tarefas. Ambos reutilizam dados já carregados (sem pedidos extra).
+- **Bug latente corrigido:** import de `registarAuditoria` em `tarefaController.js` (estava em falta desde o Prompt 75).
+- **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat(ui): cria interface no gestor para propriedades manuais e tarefas espontaneas`.
+
+---
+
+Task ID: HF19
+Agent: Z.ai Code (Eng. Software Principal)
+Task: Fotos obrigatórias na conclusão de tarefas + cron job de limpeza de fotos aos 7 dias.
+
+Work Log:
+- Re-clonado o repo em `dev` (`6536e68`); configurado `git config user.name "Makigero Lab"`.
+- **#1 Backend — Schema:** `models/Tarefa.js` — novos campos `fotos_conclusao: [String]` (default []) e `data_conclusao: Date` (default null).
+- **#1 Backend — `staffController.js concluirTarefa`:** regra bloqueadora: se `fotos_conclusao` não for array ou estiver vazio → 400 "É obrigatório anexar pelo menos 1 foto". Limita a 5 fotos. Atualiza `estado`, `concluida_em`, `hora_conclusao`, `data_conclusao`, `fotos_conclusao`.
+- **#2 Frontend — `detalhe-tarefa-client.tsx`:** `handleConcluir` agora abre um modal (Dialog) em vez de chamar a API diretamente. Novas funções: `handleSelecionarFotosConcluir` (FileReader → base64, máx. 5, 2MB), `removerFotoConcluir(index)`, `handleConfirmarConclusao` (envia PATCH com `fotos_conclusao` + `observacoes_staff`). Modal com: preview thumbnails 80×80 + botão X, input file hidden com label custom (ícone Camera), aviso "⚠️ É obrigatório anexar pelo menos 1 foto", botão "Confirmar Conclusão" desativado se 0 fotos. Import `AlertCircle` adicionado.
+- **#3 Cron job — `jobs/limpezaFotos.js`:** corre `0 3 * * *` (03:00 diariamente). Procura tarefas `concluida` com `data_conclusao < agora - 7 dias` E que ainda têm fotos (`fotos_conclusao.0` existe OU `avarias.fotos.0` existe). Esvazia `fotos_conclusao = []` via `updateMany` e itera sobre `avarias[*].fotos = []` via `findById + save`. Log: `✅ [LimpezaFotos] N tarefa(s) limpa(s), M foto(s) removida(s)`. Montado em `server.js` após `iniciarArquivista()`.
+- **Teste atualizado:** `integration.test.js` — teste de conclusão agora envia `fotos_conclusao: ['data:image/png;base64,...']` + asserções `fotos_conclusao.toHaveLength(1)` e `data_conclusao.toBeTruthy()`.
+- **Validação:** `node --check` ✓ em `models/Tarefa.js`, `controllers/staffController.js`, `jobs/limpezaFotos.js`, `server.js`; `NODE_ENV=test npx jest` → **111/111 testes passam** ✓; frontend `npx tsc --noEmit` → 0 erros ✓; `npx next lint` → "No ESLint warnings or errors" ✓.
+- **Documentação atualizada:** `docs/BACKEND.md` (changelog HF19) + esta entrada no `WORKLOG.md`.
+
+Stage Summary:
+- **Fotos obrigatórias:** o staff não pode concluir uma tarefa sem anexar pelo menos 1 foto. O backend rejeita com 400 se o array estiver vazio. O frontend abre um modal com input de câmara/galeria antes de enviar o PATCH.
+- **Cron job de limpeza:** todos os dias às 03:00, as fotos (base64) de tarefas concluídas há mais de 7 dias são esvaziadas — otimiza o armazenamento (fotos base64 são volumosas). As descrições das avarias e outros dados são mantidos.
+- **Sem quebras:** 111/111 testes passam; o fluxo de conclusão existente foi adaptado (não removido).
+- **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat: fotos obrigatorias na conclusao e cronjob de limpeza aos 7 dias`.
+
+---
+
+Task ID: HF20
+Agent: Z.ai Code (Eng. Software Principal)
+Task: Módulo de RH — ausências por intervalo de datas + calendário global da equipa.
+
+Work Log:
+- Re-clonado o repo em `dev` (`4f05821`); configurado `git config user.name "Makigero Lab"`.
+- **Análise prévia:** `Ausencia.js` já suporta `data_inicio` + `data_fim` (intervalos) desde v1.8.0. `ausenciaController.registarAusencia` aceita intervalos. `loadBalancer.js` já filtra ausências aprovadas por `data_inicio <= range.start AND data_fim >= range.start`. Sem alterações de backend necessárias.
+- **#2 Frontend — `/gestor/ausencias/page.tsx`:** adicionado botão "Nova Ausência" (ícone `Plus`) + modal (Dialog) com Date Range Picker: select de Funcionário (carregado de `/api/gestor/equipa`), inputs `type="date"` para Data de Início e Data de Fim, select de Tipo, input de Notas. Validação `data_fim >= data_inicio`. Faz `adminPost("/api/gestor/ausencias", ...)`. Imports `Plus`, `Input`, `adminPost`, `UtilizadorDTO` adicionados. A página já existia (só listava/aprova) — agora também cria.
+- **#3 Frontend — `/gestor/calendario/page.tsx`:** adicionada terceira vista "Equipa" ao toggle existente. Novo componente `EquipaMapa` no fim do ficheiro: tabela com linhas = staff, colunas = dias do período (até 31). Cada célula tem cor: verde (disponível), azul (tarefas, mostra nº), vermelho (ausência), âmbar (folga fixa). Deteta estado por `utilizador_id + data` (tarefas), eventos `allDay` (ausências), `dias_folga` (folgas). Legenda visual. Import `Users` adicionado.
+- **Validação:** frontend `npx tsc --noEmit` → 0 erros ✓; `npx next lint` → "No ESLint warnings or errors" ✓; backend `NODE_ENV=test npx jest` → **111/111 testes passam** ✓ (backend não foi tocado).
+- **Documentação atualizada:** `docs/BACKEND.md` (changelog HF20) + esta entrada no `WORKLOG.md`.
+
+Stage Summary:
+- **Backend já suportava intervalos:** `Ausencia` tem `data_inicio`/`data_fim` desde v1.8.0. O `loadBalancer` já bloqueia atribuição durante todo o período. Sem alterações necessárias.
+- **Frontend ausências:** o gestor pode agora criar ausências (férias/doença/outro) por intervalo de datas diretamente no painel, sem precisar de ir à página de equipa.
+- **Calendário global da equipa:** nova vista "Equipa" no `/gestor/calendario` que mostra um mapa de disponibilidade (staff × dias) com cores para tarefas, ausências, folgas e disponibilidade. Dá ao gestor uma visão de helicóptero sobre a capacidade da equipa.
+- **Sem quebras:** 111/111 testes passam; tsc 0 erros; lint limpo.
+- **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat(hr): ausencias por intervalo de datas e calendario global da equipa`.
+
+---
+
+Task ID: HF21
+Agent: Z.ai Code (Eng. Software Principal)
+Task: Suporte para múltiplos funcionários por tarefa + atualização do load balancer para equipas.
+
+Work Log:
+- Re-clonado o repo em `dev` (`318ce12`); configurado `git config user.name "Makigero Lab"`.
+- **Análise de impacto:** `utilizador_id` é referenciado em 18 ficheiros do backend e 8 do frontend. Mudar de ObjectId para array quebraria tudo. Decisão: manter `utilizador_id` (retrocompatibilidade) + adicionar `equipa_atribuida: [ObjectId]`.
+- **#1 Schema Propriedade:** `models/Propriedade.js` — novo campo `staff_necessario: { type: Number, default: 1, min: 1 }`.
+- **#2 Schema Tarefa:** `models/Tarefa.js` — novo campo `equipa_atribuida: [ObjectId]` (ref 'Utilizador', default []). `utilizador_id` mantém-se como vencedor #1.
+- **#3 Load Balancer:** `utils/loadBalancer.js` — nova função `determinarEquipaAtribuida`. Se N=1 delega para `determinarUtilizadorAtribuido`. Se N>1, chama iterativamente com exclusão dos já escolhidos. Devolve `{ equipa: [{utilizadorId, tempoViagem}], insuficiente: boolean }`.
+- **#3 smoobuController:** atualizado para usar `determinarEquipaAtribuida` quando `propriedade.staff_necessario > 1`. Preenche `utilizador_id` (vencedor #1) + `equipa_atribuida` (todos). Alerta se equipa insuficiente.
+- **#4 Frontend:** `PropriedadeDTO` ganhou `staff_necessario?: number`. Modal de criação de propriedade tem novo campo "Nº de Staff Necessário". `gestorController.criarPropriedade` aceita `staff_necessario` (clamp 1-10).
+- **Validação:** `node --check` ✓ em 5 ficheiros; `NODE_ENV=test npx jest` → **111/111 testes passam** ✓; frontend `tsc` 0 erros ✓; `next lint` limpo ✓.
+- **Documentação atualizada:** `docs/BACKEND.md` (changelog HF21) + esta entrada no `WORKLOG.md`.
+
+Stage Summary:
+- **Zero breaking changes:** `utilizador_id` mantém-se como antes. `equipa_atribuida` é um novo campo opcional (default []). Todas as queries, controllers e frontend existentes continuam a funcionar sem alteração.
+- **Retrocompatibilidade:** tarefas antigas (sem `equipa_atribuida`) funcionam como antes — 1 staff via `utilizador_id`. Tarefas novas com `staff_necessario > 1` preenchem ambos os campos.
+- **Load Balancer:** `determinarEquipaAtribuida` usa o mesmo sistema de score do HF16 (Agrupamento > Início > Rotatividade/Equidade > Distância) mas devolve Top N em vez de apenas o vencedor #1.
+- **Fallback:** se não houver N staff disponíveis, atribui os que estiverem + alerta "Equipa parcial: X/N staff disponíveis". A tarefa fica `atribuida` (não `por_atribuir`) — a operação não encrava.
+- **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat: suporte para multiplos funcionarios por tarefa e atualizacao do load balancer`.
+
+---
+
+Task ID: HF22
+Agent: Z.ai Code (Eng. Software Principal)
+Task: Rotinas automáticas — dias fixos de limpeza nas propriedades + cron job gerador de tarefas.
+
+Work Log:
+- Re-clonado o repo em `dev` (`8619f78`); configurado `git config user.name "Makigero Lab"`.
+- **#1 Schema Propriedade:** `models/Propriedade.js` — novo campo `dias_fixos_limpeza: [Number]` (0=Dom, 1=Seg, ..., 6=Sáb) com validação de inteiros 0-6. `gestorController.criarPropriedade` aceita e filtra o campo.
+- **#2 Frontend:** `PropriedadeDTO` em `lib/api.ts` ganhou `dias_fixos_limpeza?: number[]`. `manualForm` estendido com `dias_fixos_limpeza: number[]`. Modal "Adicionar Propriedade Manual" tem novo grupo de 7 checkboxes (Seg-Dom) com toggle visual. Handler converte seleção em array ordenado. Resets atualizados.
+- **#3 Cron job:** `jobs/geradorRotinas.js` (novo, ~160 linhas) — corre `0 2 * * *` (02:00 diariamente). Descobre dia da semana de amanhã; procura propriedades ativas com esse dia no `dias_fixos_limpeza`; verifica idempotência (não duplica); cria tarefa (`origem: 'manual'`, `estado: 'por_atribuir'`); submete ao LB (`determinarEquipaAtribuida` se `staff_necessario > 1`, senão `determinarUtilizadorAtribuido`); se LB atribui, atualiza `utilizador_id` + `equipa_atribuida` + `estado: 'atribuida'`; se não, fica `por_atribuir`. Log detalhado. Montado em `server.js` após `iniciarLimpezaFotos()`.
+- **Validação:** `node --check` ✓ em 4 ficheiros; `NODE_ENV=test npx jest` → **111/111 testes passam** ✓; frontend `tsc` 0 erros ✓; `next lint` limpo ✓.
+- **Documentação atualizada:** `docs/BACKEND.md` (changelog HF22) + esta entrada no `WORKLOG.md`.
+
+Stage Summary:
+- **Rotinas automáticas completas:** o gestor configura dias fixos de limpeza nas propriedades (ex: Seg/Qua/Sex para um apartamento). O cron job corre às 02:00, cria as tarefas para amanhã, e submete-as ao Load Balancer automaticamente. Se o LB encontrar staff, a tarefa fica `atribuida`; se não, fica `por_atribuir` para o gestor resolver de manhã.
+- **Idempotência:** o job verifica se já existe tarefa para a propriedade+dia antes de criar — não duplica.
+- **Integração com HF21:** se `staff_necessario > 1`, o job usa `determinarEquipaAtribuida` (Top N) em vez de `determinarUtilizadorAtribuido` (1 staff).
+- **Sem quebras:** 111/111 testes; o campo `dias_fixos_limpeza` é opcional (default []) — propriedades existentes não são afetadas.
+- **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat(rotinas): implementa dias fixos de limpeza nas propriedades e cron job gerador de tarefas`.

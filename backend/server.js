@@ -33,11 +33,14 @@ const ausenciaRoutes = require('./routes/ausenciaRoutes');
 const relatorioRoutes = require('./routes/relatorioRoutes');
 const staffRoutes = require('./routes/staffRoutes');
 const smoobuRoutes = require('./routes/smoobuRoutes');
+const parceiroRoutes = require('./routes/parceiroRoutes');
 const { iniciarDailyBriefing } = require('./jobs/dailyBriefing');
 const { iniciarAgendaAmanha } = require('./jobs/agendaAmanha');
 const { iniciarCaoGuarda } = require('./jobs/caoGuarda');
 const { iniciarArquivista } = require('./jobs/arquivista');
 const { iniciarSincronizacaoSmoobu } = require('./jobs/sincronizacaoSmoobu');
+const { iniciarLimpezaFotos } = require('./jobs/limpezaFotos');
+const { iniciarGeradorRotinas } = require('./jobs/geradorRotinas');
 const { configurarWebPush } = require('./utils/push');
 
 const app = express();
@@ -127,6 +130,10 @@ app.use('/api/staff', staffRoutes);
 // Endpoint público (autentica via SMOOBU_API_KEY no header, NÃO via JWT).
 // O rate limiter global está ISENTO para esta rota (ver skip acima).
 app.use('/api/smoobu', smoobuRoutes);
+
+// HF17 (Fase 3) — Portal de Parceiros B2B (propriedades manuais + tarefas).
+// Protegido por auth + isParceiro.
+app.use('/api/parceiro', parceiroRoutes);
 
 /* ------------------------------------------------------------------ */
 /* Middleware global de tratamento de erros                            */
@@ -232,6 +239,16 @@ if (require.main === module) {
       // mantém-se exportada para uso manual via API direta se necessário no
       // futuro, mas NÃO é agendada.
       // iniciarSincronizacaoSmoobu();
+
+      // HF19 — Cron job "Limpeza de Fotos": todos os dias às 03:00,
+      // esvazia fotos_conclusao e avarias[*].fotos de tarefas concluídas
+      // há mais de 7 dias (otimização de armazenamento).
+      iniciarLimpezaFotos();
+
+      // HF22 — Cron job "Gerador de Rotinas": todos os dias às 02:00,
+      // cria tarefas automáticas para propriedades com dias_fixos_limpeza
+      // configurados para o dia de amanhã. Submete ao Load Balancer.
+      iniciarGeradorRotinas();
     })
     .catch((err) => {
       console.error('❌ Erro ao ligar ao MongoDB:', err.message);

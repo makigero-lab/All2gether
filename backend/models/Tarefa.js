@@ -38,10 +38,28 @@ const tarefaSchema = new mongoose.Schema(
       index: true,
       sparse: true,
     },
+    // HF17 (Fase 3) — Origem da tarefa: Smoobu (via webhook) ou manual
+    // (criada pelo gestor ou por um parceiro B2B no portal).
+    origem: {
+      type: String,
+      enum: ['smoobu', 'manual'],
+      default: 'manual',
+      index: true,
+    },
     utilizador_id: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Utilizador',
       default: null,
+      index: true,
+    },
+    // HF21 — Equipa atribuída (múltiplos staff). Quando staff_necessario > 1
+    // na propriedade, o LB devolve Top N e este array é preenchido.
+    // utilizador_id mantém-se como o vencedor #1 (retrocompatibilidade).
+    // Se equipa_atribuida estiver vazia, a tarefa tem 1 staff (utilizador_id).
+    equipa_atribuida: {
+      type: [mongoose.Schema.Types.ObjectId],
+      ref: 'Utilizador',
+      default: [],
       index: true,
     },
     data: {
@@ -104,6 +122,20 @@ const tarefaSchema = new mongoose.Schema(
     },
     // v1.34.0 — Hora exata de conclusão (timestamp preciso, para auditoria).
     hora_conclusao: {
+      type: Date,
+      default: null,
+    },
+    // HF19 — Fotos obrigatórias na conclusão da tarefa.
+    // O staff tem de anexar pelo menos 1 foto (máx. 5) para concluir.
+    // Strings base64 ou URLs. O cron job limpezaFotos esvazia este array
+    // 7 dias após a conclusão para otimizar armazenamento.
+    fotos_conclusao: {
+      type: [String],
+      default: [],
+    },
+    // HF19 — Data de conclusão (igual a concluida_em, mas com nome explícito
+    // para o cron job de limpeza usar como referência).
+    data_conclusao: {
       type: Date,
       default: null,
     },

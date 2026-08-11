@@ -10,6 +10,7 @@ import {
   MapPin,
   Clock,
   User,
+  Users,
   X,
   Sparkles,
   Table,
@@ -331,7 +332,7 @@ export default function CalendarioOperacionalPage() {
   const [periodo, setPeriodo] = useState<PeriodoState | null>(null);
 
   // Prompt 99 — Toggle de vistas: "calendario" (FullCalendar) | "tabela" (Data Table).
-  const [vista, setVista] = useState<"calendario" | "tabela">("calendario");
+  const [vista, setVista] = useState<"calendario" | "tabela" | "equipa">("calendario");
   const [exportando, setExportando] = useState(false);
 
   // Modal de detalhe.
@@ -1066,6 +1067,20 @@ export default function CalendarioOperacionalPage() {
               <Table className="h-3.5 w-3.5" />
               Vista Tabela
             </button>
+            <button
+              type="button"
+              onClick={() => setVista("equipa")}
+              className={cn(
+                "flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors",
+                vista === "equipa"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+              aria-pressed={vista === "equipa"}
+            >
+              <Users className="h-3.5 w-3.5" />
+              Vista Equipa
+            </button>
           </div>
 
           {/* Prompt 99 — Exportar Excel (só relevante na Vista Tabela) */}
@@ -1329,6 +1344,16 @@ export default function CalendarioOperacionalPage() {
             <span>Clica numa linha para ver o detalhe.</span>
           </div>
         </div>
+      )}
+
+      {/* HF20 — Vista Equipa: mapa de disponibilidade por dia */}
+      {vista === "equipa" && (
+        <EquipaMapa
+          tarefas={tarefas}
+          equipa={equipa}
+          periodo={periodo}
+          loading={loading}
+        />
       )}
 
       {/* Legenda */}
@@ -1831,6 +1856,194 @@ export default function CalendarioOperacionalPage() {
           </Button>
         </DialogFooter>
       </Dialog>
+    </div>
+  );
+}
+
+/* ================================================================== */
+/* HF20 — Componente: EquipaMapa (vista de helicóptero da equipa)     */
+/* ================================================================== */
+/* Mostra uma tabela: linhas = staff, colunas = dias do período.
+ * Cada célula mostra: tarefas atribuídas (nº), folga rotativa,
+ * ausência aprovada (férias), ou "—" se disponível.
+ * Cores: verde (disponível), vermelho (ausência), âmbar (folga),
+ * azul (tarefas atribuídas).
+ */
+
+interface EquipaMapaProps {
+  tarefas: TarefaCalendario[];
+  equipa: UtilizadorDTO[];
+  periodo: PeriodoState | null;
+  loading: boolean;
+}
+
+function EquipaMapa({ tarefas, equipa, periodo, loading }: EquipaMapaProps) {
+  // Gera os dias do período (ou os próximos 14 dias se não houver período).
+  const dias = useMemo(() => {
+    const inicio = periodo?.inicio ? parsearDataSegura(periodo.inicio) : new Date();
+    const fim = periodo?.fim ? parsearDataSegura(periodo.fim) : new Date(Date.now() + 14 * 86400000);
+    if (!inicio || !fim) return [];
+    const lista: Date[] = [];
+    const d = new Date(inicio);
+    while (d <= fim) {
+      lista.push(new Date(d));
+      d.setDate(d.getDate() + 1);
+    }
+    return lista.slice(0, 31); // máx 31 dias para não sobrecarregar
+  }, [periodo]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
+        <Loader2 className="h-5 w-5 animate-spin" />
+        A carregar mapa da equipa…
+      </div>
+    );
+  }
+
+  if (equipa.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
+        <Users className="h-8 w-8 text-muted-foreground/50" />
+        <p className="text-sm text-muted-foreground">
+          Sem staff ativo na equipa.
+        </p>
+      </div>
+    );
+  }
+
+  // Para cada staff + dia, calcula o estado.
+  function estadoDia(staffId: string, dia: Date): {
+    tipo: "disponivel" | "ausencia" | "folga" | "tarefas";
+    label: string;
+    count: number;
+  } {
+    const diaStr = dia.toISOString().slice(0, 10);
+    const diaSemana = dia.getDay();
+
+    // Tarefas atribuídas nesse dia.
+    const tarefasDia = tarefas.filter((t) => {
+      if (!t.utilizador_id || t.utilizador_id._id !== staffId) return false;
+      const tData = parsearDataSegura(t.data);
+      if (!tData) return false;
+      return tData.toISOString().slice(0, 10) === diaStr;
+    });
+
+    if (tarefasDia.length > 0) {
+      return {
+        tipo: "tarefas",
+        label: `${tarefasDia.length} tarefa(s)`,
+        count: tarefasDia.length,
+      };
+    }
+
+    // Ausências (eventos de ausência no FullCalendar — têm title e allDay).
+    const ausente = tarefas.some((t) => {
+      if (!t.allDay) return false;
+      if (!t.utilizador_id || t.utilizador_id._id !== staffId) {
+        // Ausências não têm utilizador_id populado no formato de evento;
+        // verificamos pelo title que contém o nome do staff.
+        const staff = equipa.find((s) => s._id === staffId);
+        if (!staff) return false;
+        return t.title?.includes(staff.nome);
+      }
+      return false;
+    });
+
+    if (ausente) {
+      return { tipo: "ausencia", label: "Ausência", count: 0 };
+    }
+
+    // Folga fixa semanal.
+    const staff = equipa.find((s) => s._id === staffId);
+    if (staff?.dias_folga && staff.dias_folga.includes(diaSemana)) {
+      return { tipo: "folga", label: "Folga", count: 0 };
+    }
+
+    return { tipo: "disponivel", label: "—", count: 0 };
+  }
+
+  const corCelula: Record<string, string> = {
+    disponivel: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400",
+    ausencia: "bg-red-50 text-red-700 dark:bg-red-950/30 dark:text-red-400",
+    folga: "bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400",
+    tarefas: "bg-blue-50 text-blue-700 dark:bg-blue-950/30 dark:text-blue-400",
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Legenda */}
+      <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+        <span className="font-medium">Legenda:</span>
+        <span className="flex items-center gap-1.5">
+          <span className={`h-3 w-3 rounded ${corCelula.disponivel}`} />
+          Disponível
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className={`h-3 w-3 rounded ${corCelula.tarefas}`} />
+          Tarefas atribuídas
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className={`h-3 w-3 rounded ${corCelula.ausencia}`} />
+          Ausência/Férias
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className={`h-3 w-3 rounded ${corCelula.folga}`} />
+          Folga fixa
+        </span>
+      </div>
+
+      {/* Mapa */}
+      <div className="overflow-x-auto rounded-lg border bg-card">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b text-muted-foreground">
+              <th className="sticky left-0 z-10 bg-card px-3 py-2 text-left font-medium">
+                Staff
+              </th>
+              {dias.map((dia, i) => (
+                <th key={i} className="px-2 py-2 text-center font-medium min-w-[60px]">
+                  <div className="flex flex-col">
+                    <span className="text-[10px] uppercase">
+                      {format(dia, "EEE", { locale: pt })}
+                    </span>
+                    <span className="text-sm font-bold">
+                      {format(dia, "dd/MM")}
+                    </span>
+                  </div>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {equipa.map((staff) => (
+              <tr key={staff._id} className="hover:bg-muted/20">
+                <td className="sticky left-0 z-10 bg-card px-3 py-2 font-medium whitespace-nowrap">
+                  {staff.nome}
+                </td>
+                {dias.map((dia, i) => {
+                  const estado = estadoDia(staff._id, dia);
+                  return (
+                    <td
+                      key={i}
+                      className={`px-2 py-2 text-center ${corCelula[estado.tipo]}`}
+                      title={`${staff.nome} — ${format(dia, "dd/MM/yyyy")}: ${estado.label}`}
+                    >
+                      {estado.count > 0 ? estado.count : estado.label === "—" ? "" : estado.label[0]}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Resumo */}
+      <p className="text-xs text-muted-foreground">
+        {equipa.length} membro(s) da equipa · {dias.length} dia(s) no período.
+        Clica numa célula para ver detalhes (em breve).
+      </p>
     </div>
   );
 }

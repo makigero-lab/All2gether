@@ -190,6 +190,10 @@ export interface PropriedadeDTO {
   funcionario_preferencial_id?: string | null;
   // Prompt 133 — Referência ao ModeloChecklist (template dinâmico).
   modelo_checklist_id?: string | null;
+  // HF21 — Nº de staff necessário para limpar esta propriedade.
+  staff_necessario?: number;
+  // HF22 — Dias fixos de limpeza (0=Dom, 1=Seg, ..., 6=Sáb).
+  dias_fixos_limpeza?: number[];
   createdAt?: string;
   updatedAt?: string;
 }
