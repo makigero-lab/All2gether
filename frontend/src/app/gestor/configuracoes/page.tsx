@@ -12,6 +12,8 @@ import {
   Settings,
   ScrollText,
   RefreshCw,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -54,6 +56,7 @@ export default function ConfiguracoesPage() {
   const [temApiKey, setTemApiKey] = useState(false);
   const [editApiKey, setEditApiKey] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState("");
+  const [showApiKey, setShowApiKey] = useState(false);
 
   function showToast(tipo: "sucesso" | "erro", msg: string) {
     setToast({ tipo, msg });
@@ -216,7 +219,12 @@ export default function ConfiguracoesPage() {
                 <label className="text-sm font-medium">Smoobu API Key</label>
                 {editApiKey ? (
                   <div className="space-y-2">
-                    <Input type="password" value={apiKeyInput} onChange={(e) => setApiKeyInput(e.target.value)} placeholder="Cola aqui a API Key do Smoobu" autoComplete="off" />
+                    <div className="relative">
+                      <Input type={showApiKey ? "text" : "password"} value={apiKeyInput} onChange={(e) => setApiKeyInput(e.target.value)} placeholder="Cola aqui a API Key do Smoobu" autoComplete="off" className="pr-10" />
+                      <button type="button" onClick={() => setShowApiKey((v) => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" aria-label={showApiKey ? "Ocultar" : "Mostrar"}>
+                        {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
                     <Button type="button" variant="ghost" size="sm" onClick={() => { setEditApiKey(false); setApiKeyInput(""); }}>Cancelar</Button>
                   </div>
                 ) : (

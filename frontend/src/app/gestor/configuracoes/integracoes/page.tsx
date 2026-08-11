@@ -25,6 +25,8 @@ import {
   Plug,
   Power,
   Building2,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -75,6 +77,7 @@ export default function IntegracoesPage() {
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [editApiKey, setEditApiKey] = useState(false);
   const [limparChave, setLimparChave] = useState(false);
+  const [showApiKey, setShowApiKey] = useState(false);
   const [smoobuAtivo, setSmoobuAtivo] = useState(false);
   const [sincronizacaoAutomatica, setSincronizacaoAutomatica] = useState(false);
   const [frequenciaHoras, setFrequenciaHoras] = useState(24);
@@ -329,14 +332,25 @@ export default function IntegracoesPage() {
                 </div>
               ) : (
                 <div className="space-y-2">
-                  <Input
-                    id="api-key"
-                    type="password"
-                    placeholder="Cola aqui a API key do Smoobu"
-                    value={apiKeyInput}
-                    onChange={(e) => setApiKeyInput(e.target.value)}
-                    autoComplete="off"
-                  />
+                  <div className="relative">
+                    <Input
+                      id="api-key"
+                      type={showApiKey ? "text" : "password"}
+                      placeholder="Cola aqui a API key do Smoobu"
+                      value={apiKeyInput}
+                      onChange={(e) => setApiKeyInput(e.target.value)}
+                      autoComplete="off"
+                      className="pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowApiKey((v) => !v)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      aria-label={showApiKey ? "Ocultar" : "Mostrar"}
+                    >
+                      {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
                   <div className="flex gap-2">
                     <Button
                       type="button"

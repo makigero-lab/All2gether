@@ -21,6 +21,8 @@ import {
   X,
   CheckCircle2,
   User,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -267,6 +269,9 @@ function EquipaPage() {
   const [editErro, setEditErro] = useState<string | null>(null);
   // HF10 — Estado do formulário de nova folga rotativa.
   const [novaFolga, setNovaFolga] = useState({ data: "", motivo: "" });
+  // Toggle de visibilidade de password
+  const [showFormPassword, setShowFormPassword] = useState(false);
+  const [showEditPassword, setShowEditPassword] = useState(false);
 
   // Modal de confirmação de eliminação
   const [eliminando, setEliminando] = useState<UtilizadorDTO | null>(null);
@@ -717,16 +722,27 @@ function EquipaPage() {
                       <label htmlFor="password" className="text-sm font-medium">
                         Password
                       </label>
-                      <Input
-                        id="password"
-                        type="password"
-                        value={form.password}
-                        onChange={(e) =>
-                          setForm((f) => ({ ...f, password: e.target.value }))
-                        }
-                        placeholder="Mín. 6 caracteres"
-                        required
-                      />
+                      <div className="relative">
+                        <Input
+                          id="password"
+                          type={showFormPassword ? "text" : "password"}
+                          value={form.password}
+                          onChange={(e) =>
+                            setForm((f) => ({ ...f, password: e.target.value }))
+                          }
+                          placeholder="Mín. 6 caracteres"
+                          required
+                          className="pr-10"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowFormPassword((v) => !v)}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                          aria-label={showFormPassword ? "Ocultar password" : "Mostrar password"}
+                        >
+                          {showFormPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                      </div>
                     </div>
                     <div className="space-y-1.5">
                       <label htmlFor="telefone" className="text-sm font-medium">
@@ -1119,15 +1135,26 @@ function EquipaPage() {
                       (opcional)
                     </span>
                   </label>
-                  <Input
-                    id="edit-password"
-                    type="password"
-                    value={editForm.password}
-                    onChange={(e) =>
-                      setEditForm((f) => ({ ...f, password: e.target.value }))
-                    }
-                    placeholder="Deixa vazio para manter"
-                  />
+                  <div className="relative">
+                    <Input
+                      id="edit-password"
+                      type={showEditPassword ? "text" : "password"}
+                      value={editForm.password}
+                      onChange={(e) =>
+                        setEditForm((f) => ({ ...f, password: e.target.value }))
+                      }
+                      placeholder="Deixa vazio para manter"
+                      className="pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowEditPassword((v) => !v)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      aria-label={showEditPassword ? "Ocultar password" : "Mostrar password"}
+                    >
+                      {showEditPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
                   <p className="text-xs text-muted-foreground">
                     Útil para redefinir a password se o funcionário se esquecer.
                   </p>
