@@ -9,11 +9,9 @@ import {
   RefreshCw,
   UserCheck,
   SprayCan,
-  Download,
   CheckCircle2,
   Wrench,
   Filter,
-  Trash2,
   Sparkles,
   Eye,
 } from "lucide-react";
@@ -42,7 +40,6 @@ import {
   adminGet,
   adminPost,
   adminPatch,
-  adminDelete,
   type PropriedadeDTO,
   type UtilizadorDTO,
   type Role,
@@ -461,73 +458,6 @@ export default function AdminTarefasPage() {
     }
   }
 
-  // Estado da sincronização Smoobu (pull de reservas futuras via REST API).
-  const [sincronizando, setSincronizando] = useState(false);
-  const [sincronizacaoOk, setSincronizacaoOk] = useState<string | null>(null);
-
-  /** Sincroniza reservas futuras do Smoobu e recarrega a grelha. */
-  async function handleSincronizarSmoobu() {
-    setSincronizando(true);
-    setSincronizacaoOk(null);
-    setErro(null);
-    try {
-      const res = await adminPost<{
-        totalRecebidas: number;
-        importadas: number;
-        criadas: number;
-        existentes: number;
-        erros: number;
-        detalheErros: { reservaId: string | null; erro: string }[];
-      }>("/api/gestor/smoobu/sincronizar", {});
-
-      let msg = `Sincronização concluída! ${res.criadas} tarefa(s) gerada(s)`;
-      if (res.existentes > 0) msg += `, ${res.existentes} já existiam`;
-      if (res.erros > 0) msg += `, ${res.erros} com erro`;
-      msg += `.`;
-      setSincronizacaoOk(msg);
-
-      // Atualiza a grelha de tarefas para mostrar as novas.
-      await carregar();
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "";
-      // 504/502/timeout — a sincronização continua no backend mesmo sem o frontend.
-      if (msg.includes("504") || msg.includes("502") || msg.includes("Timeout") || msg.includes("fetch")) {
-        setSincronizacaoOk(
-          "⏳ A sincronização está a decorrer em segundo plano (o Smoobu tem muitas reservas). " +
-          "As tarefas aparecerão na lista daqui a 1-2 minutos. Clica em atualizar ↻."
-        );
-      } else {
-        setErro(
-          e instanceof Error
-            ? `Sincronização falhou: ${e.message}`
-            : "Erro ao sincronizar com o Smoobu."
-        );
-      }
-    } finally {
-      setSincronizando(false);
-    }
-  }
-
-  // v1.50.0 — Limpar tarefas futuras (reset do calendário).
-  const [limpando, setLimpando] = useState(false);
-  const [confirmarLimpar, setConfirmarLimpar] = useState(false);
-
-  async function handleLimparFuturas() {
-    setLimpando(true);
-    setConfirmarLimpar(false);
-    try {
-      const res = await adminDelete<{ mensagem: string; apagadas: number }>(
-        "/api/gestor/tarefas/futuras"
-      );
-      setSincronizacaoOk(res.mensagem || `${res.apagadas} tarefa(s) apagada(s).`);
-      await carregar();
-    } catch (e) {
-      setErro(e instanceof Error ? e.message : "Erro ao apagar tarefas.");
-    } finally {
-      setLimpando(false);
-    }
-  }
-
   // v1.64.0 (Prompt 87) — Auto-atribuição em lote (load balancer manual).
   const [autoAtribuindo, setAutoAtribuindo] = useState(false);
   const [confirmarAutoAtribuir, setConfirmarAutoAtribuir] = useState(false);
@@ -552,7 +482,7 @@ export default function AdminTarefasPage() {
             (res.orfas > 0
               ? `${res.orfas} continuam órfãs (sem staff disponível).`
               : "Nenhuma ficou órfã. ✅");
-      setSincronizacaoOk(msg);
+      setWarningToast(msg);
 
       // Atualiza a grelha para mostrar os blocos a mudarem de vermelho para as cores dos funcionários.
       await carregar();
@@ -826,24 +756,6 @@ export default function AdminTarefasPage() {
         </Card>
       )}
 
-      {/* Sucesso da sincronização Smoobu */}
-      {sincronizacaoOk && (
-        <Card className="border-emerald-500/50">
-          <CardContent className="flex items-center gap-3 p-4 text-sm text-emerald-600 dark:text-emerald-400">
-            <CheckCircle2 className="h-5 w-5 shrink-0" />
-            <span>{sincronizacaoOk}</span>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setSincronizacaoOk(null)}
-              className="ml-auto"
-            >
-              Fechar
-            </Button>
-          </CardContent>
-        </Card>
-      )}
-
       {/* v1.58.0 (Prompt 80, ponto 3) — Abas de filtragem por estado */}
       <Tabs value={abaEstado} onValueChange={(v) => setAbaEstado(v as AbaEstado)}>
         <TabsList className="grid w-full grid-cols-4 sm:inline-flex sm:w-auto">
@@ -1076,55 +988,6 @@ export default function AdminTarefasPage() {
           <Button variant="outline" onClick={() => setAtribuindo(null)} disabled={atribuirSubmitting}>Cancelar</Button>
           <Button onClick={handleAtribuir} disabled={!atribuirUserId || atribuirSubmitting}>
             {atribuirSubmitting ? <><Loader2 className="h-4 w-4 animate-spin" />A atribuir…</> : "Atribuir"}
-          </Button>
-        </DialogFooter>
-      </Dialog>
-
-      {/* Dialog de confirmação: Limpar Futuras */}
-      <Dialog open={confirmarLimpar} onOpenChange={setConfirmarLimpar}>
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Trash2 className="h-5 w-5 text-destructive" />
-            Limpar Tarefas Futuras
-          </DialogTitle>
-          <DialogDescription>
-            Isto vai apagar todas as tarefas não concluídas de hoje para a frente.
-            As concluídas e canceladas serão preservadas. Queres continuar?
-          </DialogDescription>
-          <DialogClose onClick={() => setConfirmarLimpar(false)} />
-        </DialogHeader>
-        <DialogContent className="space-y-2">
-          <p className="text-sm text-muted-foreground">
-            Depois de apagar, podes clicar em &ldquo;Sincronizar Reservas&rdquo; para recriar
-            as tarefas com o scheduler sequencial (horas reais).
-          </p>
-        </DialogContent>
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setConfirmarLimpar(false)}
-            disabled={limpando}
-          >
-            Cancelar
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            onClick={handleLimparFuturas}
-            disabled={limpando}
-          >
-            {limpando ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                A apagar…
-              </>
-            ) : (
-              <>
-                <Trash2 className="mr-2 h-4 w-4" />
-                Sim, apagar
-              </>
-            )}
           </Button>
         </DialogFooter>
       </Dialog>
