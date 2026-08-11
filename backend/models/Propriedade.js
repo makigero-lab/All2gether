@@ -138,6 +138,27 @@ const propriedadeSchema = new mongoose.Schema(
         message: 'dias_fixos_limpeza: valores devem ser inteiros entre 0 (Dom) e 6 (Sáb).',
       },
     },
+    // HF23 — Campos de gestão da propriedade.
+    nome_responsavel: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    contacto: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    frequencia_limpeza: {
+      type: String,
+      enum: ['semanal', 'quinzenal', 'mensal'],
+      default: 'semanal',
+    },
+    horario_limpeza: {
+      type: String,
+      default: '',
+      trim: true,
+    },
   },
   { timestamps: true }
 );
