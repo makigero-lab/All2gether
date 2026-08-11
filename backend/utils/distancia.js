@@ -110,12 +110,14 @@ function chaveCache(origem, destino) {
  *   - GOOGLE_MAPS_API_KEY não estiver definida
  *   - A chamada à API falhar (rede, timeout, 4xx/5xx)
  *   - A resposta não contiver dados válidos
+ *   - HF24: a data da tarefa for daqui a mais de 48h (otimização de custos)
  *
  * @param {{ lat: number, lng: number } | null} origem
  * @param {{ lat: number, lng: number } | null} destino
+ * @param {Date} [dataTarefa] - data da tarefa (para otimização de custos)
  * @returns {Promise<{ minutos: number, origem: 'google_maps' | 'haversine', distanciaKm: number }>}
  */
-async function calcularTempoViagemReal(origem, destino) {
+async function calcularTempoViagemReal(origem, destino, dataTarefa) {
   // Validação básica de coordenadas.
   if (
     !origem || !destino ||
@@ -135,6 +137,24 @@ async function calcularTempoViagemReal(origem, destino) {
       origem: 'haversine',
       distanciaKm,
     };
+  }
+
+  // HF24 — Otimização de custos: se a tarefa for daqui a mais de 48h,
+  // usa Haversine (linha reta) em vez de chamar a API do Google Maps.
+  // Reserva os pedidos à API apenas para tarefas de curto prazo (hoje e
+  // amanhã), onde a precisão do tempo de condução real é mais importante.
+  // Para tarefas futuras, Haversine é suficiente — o LB re-calculará quando
+  // a tarefa se aproximar (via auto-atribuição ou reatribuição manual).
+  if (dataTarefa) {
+    const agora = Date.now();
+    const limite = agora + 48 * 60 * 60 * 1000; // 48 horas
+    if (new Date(dataTarefa).getTime() > limite) {
+      return {
+        minutos: tempoViagemHaversine(origem, destino),
+        origem: 'haversine',
+        distanciaKm,
+      };
+    }
   }
 
   // Cache hit?

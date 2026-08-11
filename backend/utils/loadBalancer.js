@@ -310,9 +310,11 @@ async function determinarUtilizadorAtribuido(
           .lean();
 
         if (ultimaTarefa?.propriedade_id?.coordenadas) {
+          // HF24 — Passa a data da tarefa para otimização de custos Google Maps.
           const resultadoViagem = await calcularTempoViagemReal(
             ultimaTarefa.propriedade_id.coordenadas,
-            coordenadasNovaPropriedade
+            coordenadasNovaPropriedade,
+            range.start // data da tarefa
           );
           tempoViagem = resultadoViagem.minutos;
           origemViagem = resultadoViagem.origem;
