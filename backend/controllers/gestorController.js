@@ -1181,10 +1181,11 @@ exports.criarMembroEquipa = async (req, res) => {
     }
 
     // Validação do role (se vier, tem de ser um dos permitidos).
+    // HF27 — adicionado 'parceiro' (B2B externo que cria reservas manuais).
     const roleFinal = role || 'staff';
-    if (!['admin', 'gestor', 'staff'].includes(roleFinal)) {
+    if (!['admin', 'gestor', 'staff', 'parceiro'].includes(roleFinal)) {
       return res.status(400).json({
-        erro: 'Role inválido. Valores permitidos: admin, gestor, staff.',
+        erro: 'Role inválido. Valores permitidos: admin, gestor, staff, parceiro.',
       });
     }
 
@@ -1195,6 +1196,12 @@ exports.criarMembroEquipa = async (req, res) => {
         erro: 'Não é possível criar utilizadores com role "admin".',
       });
     }
+
+    // HF27 — Parceiros (B2B) são externos à equipa de limpezas:
+    //   - Não têm folgas semanais (dias_folga) — não são funcionários.
+    //   - Não têm responsável hierárquico (responsavel_id) — reportam à empresa.
+    //   - Forçamos estes campos a null/[] para evitar inconsistências.
+    const isParceiro = roleFinal === 'parceiro';
 
     // Validação de unicidade do email (único global).
     const emailNormalizado = String(email).toLowerCase().trim();
@@ -1207,8 +1214,9 @@ exports.criarMembroEquipa = async (req, res) => {
 
     // SEGURANÇA: Valida responsavel_id se vier — tem de ser admin/gestor
     // da mesma empresa.
+    // HF27 — Parceiros não têm responsável hierárquico (ignora o campo).
     let responsavelValidado = null;
-    if (responsavel_id) {
+    if (responsavel_id && !isParceiro) {
       if (!mongoose.isValidObjectId(responsavel_id)) {
         return res.status(400).json({ erro: 'responsavel_id inválido.' });
       }
@@ -1226,8 +1234,9 @@ exports.criarMembroEquipa = async (req, res) => {
     }
 
     // Valida dias_folga se vier (array de inteiros 0-6).
+    // HF27 — Parceiros não têm folgas semanais (ignora o campo, força []).
     let diasFolgaFinal = [];
-    if (dias_folga !== undefined && dias_folga !== null) {
+    if (dias_folga !== undefined && dias_folga !== null && !isParceiro) {
       if (!Array.isArray(dias_folga)) {
         return res.status(400).json({ erro: 'dias_folga deve ser um array de inteiros (0-6).' });
       }
@@ -1373,17 +1382,23 @@ exports.atualizarMembroEquipa = async (req, res) => {
     }
 
     // --- Role ---
+    // HF27 — adicionado 'parceiro' (B2B externo).
     if (role !== undefined) {
-      if (!['gestor', 'staff'].includes(role)) {
+      if (!['gestor', 'staff', 'parceiro'].includes(role)) {
         return res.status(400).json({
-          erro: 'Role inválido. Valores permitidos via edição: gestor, staff.',
+          erro: 'Role inválido. Valores permitidos via edição: gestor, staff, parceiro.',
         });
       }
       utilizador.role = role;
     }
 
+    // HF27 — Determina se o utilizador é (ou vai ficar) parceiro, para
+    // ignorar campos irrelevantes (responsavel_id, dias_folga, folgas_rotativas).
+    const isParceiroFinal = utilizador.role === 'parceiro';
+
     // --- Responsável (opcional: null = sem responsável) ---
-    if (responsavel_id !== undefined) {
+    // HF27 — Parceiros não têm responsável hierárquico (ignora o campo).
+    if (responsavel_id !== undefined && !isParceiroFinal) {
       if (responsavel_id === null || responsavel_id === '') {
         utilizador.responsavel_id = null;
       } else {
@@ -1411,11 +1426,16 @@ exports.atualizarMembroEquipa = async (req, res) => {
     }
 
     // --- dias_folga (opcional: array de inteiros 0-6) ---
+    // HF27 — Parceiros não têm folgas semanais (ignora o campo, força []).
     if (dias_folga !== undefined) {
-      if (!Array.isArray(dias_folga)) {
-        return res.status(400).json({ erro: 'dias_folga deve ser um array de inteiros (0-6).' });
+      if (isParceiroFinal) {
+        utilizador.dias_folga = [];
+      } else {
+        if (!Array.isArray(dias_folga)) {
+          return res.status(400).json({ erro: 'dias_folga deve ser um array de inteiros (0-6).' });
+        }
+        utilizador.dias_folga = dias_folga.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6);
       }
-      utilizador.dias_folga = dias_folga.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6);
     }
 
     // --- folgas_rotativas (opcional: array de { data, motivo }) ---
@@ -1423,28 +1443,32 @@ exports.atualizarMembroEquipa = async (req, res) => {
     // O frontend envia o array completo (substituição total, não append).
     // Cada entrada: { data: "YYYY-MM-DD" | Date, motivo: string }.
     // Validação: data deve ser válida; motivo é string (pode ser vazia).
+    // HF27 — Parceiros não têm folgas rotativas (força []).
     if (folgas_rotativas !== undefined) {
-      if (!Array.isArray(folgas_rotativas)) {
+      if (isParceiroFinal) {
+        utilizador.folgas_rotativas = [];
+      } else if (!Array.isArray(folgas_rotativas)) {
         return res.status(400).json({ erro: 'folgas_rotativas deve ser um array.' });
-      }
-      const folgasNormalizadas = [];
-      for (const fr of folgas_rotativas) {
-        if (!fr || typeof fr !== 'object') continue;
-        const dataObj = fr.data instanceof Date ? fr.data : new Date(fr.data);
-        if (isNaN(dataObj.getTime())) {
-          return res.status(400).json({
-            erro: 'folgas_rotativas: data inválida.',
-            detalhe: `Valor recebido: ${JSON.stringify(fr.data)}`,
+      } else {
+        const folgasNormalizadas = [];
+        for (const fr of folgas_rotativas) {
+          if (!fr || typeof fr !== 'object') continue;
+          const dataObj = fr.data instanceof Date ? fr.data : new Date(fr.data);
+          if (isNaN(dataObj.getTime())) {
+            return res.status(400).json({
+              erro: 'folgas_rotativas: data inválida.',
+              detalhe: `Valor recebido: ${JSON.stringify(fr.data)}`,
+            });
+          }
+          folgasNormalizadas.push({
+            data: dataObj,
+            motivo: typeof fr.motivo === 'string' ? fr.motivo.trim().slice(0, 200) : '',
           });
         }
-        folgasNormalizadas.push({
-          data: dataObj,
-          motivo: typeof fr.motivo === 'string' ? fr.motivo.trim().slice(0, 200) : '',
-        });
+        // Ordena por data (ascendente) para consistência.
+        folgasNormalizadas.sort((a, b) => a.data.getTime() - b.data.getTime());
+        utilizador.folgas_rotativas = folgasNormalizadas;
       }
-      // Ordena por data (ascendente) para consistência.
-      folgasNormalizadas.sort((a, b) => a.data.getTime() - b.data.getTime());
-      utilizador.folgas_rotativas = folgasNormalizadas;
     }
 
     // --- telefone (opcional) ---

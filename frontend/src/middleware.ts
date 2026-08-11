@@ -28,7 +28,7 @@ import type { NextRequest } from "next/server";
 
 const TOKEN_COOKIE = "all2gether_token";
 
-type Role = "admin" | "gestor" | "staff";
+type Role = "admin" | "gestor" | "staff" | "parceiro";
 
 interface JwtPayload {
   id?: string;
@@ -62,8 +62,10 @@ function rotaPorRole(role: Role): string {
   // no programa operacional (/gestor). O painel /admin deixou de fazer
   // sentido neste repositório dedicado. A auto-impersonação da empresa
   // principal é tratada no layout do gestor (<AutoImpersonarEmpresa/>).
+  // HF27 — Parceiros (B2B) têm portal próprio em /parceiro.
   if (role === "admin") return "/gestor";
   if (role === "gestor") return "/gestor";
+  if (role === "parceiro") return "/parceiro";
   return "/staff";
 }
 
@@ -75,15 +77,17 @@ export function middleware(req: NextRequest) {
 
   // --- Rotas privadas ---
   // (Rebrand SSO: /admin/* eliminado — gestão de empresas pertence à Nave-Mãe)
+  // HF27 — /parceiro/* é o portal B2B para parceiros externos.
   const isGestor = pathname === "/gestor" || pathname.startsWith("/gestor/");
   const isStaff = pathname === "/staff" || pathname.startsWith("/staff/");
+  const isParceiro = pathname === "/parceiro" || pathname.startsWith("/parceiro/");
 
   // Não aplicar proteção às rotas /api/* (são proxy routes, têm a sua própria lógica).
   if (pathname.startsWith("/api/")) {
     return NextResponse.next();
   }
 
-  if (isGestor || isStaff) {
+  if (isGestor || isStaff || isParceiro) {
     if (!autenticado) {
       const loginUrl = req.nextUrl.clone();
       loginUrl.pathname = "/login";
@@ -98,7 +102,8 @@ export function middleware(req: NextRequest) {
     // isGestor = requireRole('admin', 'gestor').
     const rotaErrada =
       (isGestor && role !== "gestor" && role !== "admin") ||
-      (isStaff && role !== "staff");
+      (isStaff && role !== "staff") ||
+      (isParceiro && role !== "parceiro");
     if (rotaErrada) {
       const url = req.nextUrl.clone();
       url.pathname = rotaEsperada;
@@ -122,5 +127,6 @@ export function middleware(req: NextRequest) {
 
 export const config = {
   // Rebrand SSO: /admin/:path* removido (páginas eliminadas).
-  matcher: ["/", "/login", "/gestor/:path*", "/staff/:path*"],
+  // HF27 — /parceiro/:path* adicionado (portal B2B).
+  matcher: ["/", "/login", "/gestor/:path*", "/staff/:path*", "/parceiro/:path*"],
 };

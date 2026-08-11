@@ -89,12 +89,14 @@ const ROLE_LABEL: Record<Role, string> = {
   admin: "Admin",
   gestor: "Gestor",
   staff: "Staff",
+  parceiro: "Parceiro",
 };
 
 const ROLE_VARIANT: Record<Role, "default" | "secondary" | "outline"> = {
   admin: "default",
   gestor: "secondary",
   staff: "outline",
+  parceiro: "outline",
 };
 
 const DIAS_SEMANA = [
@@ -760,7 +762,7 @@ function EquipaPage() {
                     </div>
                     <div className="space-y-1.5">
                       <label htmlFor="role" className="text-sm font-medium">
-                        Role
+                        Tipo de utilizador
                       </label>
                       <select
                         id="role"
@@ -770,41 +772,51 @@ function EquipaPage() {
                         }
                         className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                       >
-                        <option value="staff">Staff</option>
-                        <option value="gestor">Responsável</option>
-                        <option value="parceiro">Parceiro</option>
+                        <option value="staff">Staff (funcionário de limpezas)</option>
+                        <option value="gestor">Responsável (gere a equipa)</option>
+                        <option value="parceiro">Parceiro (B2B externo — cria reservas)</option>
                       </select>
+                      {form.role === "parceiro" && (
+                        <p className="text-xs text-muted-foreground">
+                          Parceiros são externos: não têm folgas semanais nem responsável hierárquico.
+                          Acedem ao portal B2B para criar reservas manuais nas suas propriedades.
+                        </p>
+                      )}
                     </div>
-                    <div className="space-y-1.5">
-                      <label htmlFor="responsavel" className="text-sm font-medium">
-                        Responsável{" "}
-                        <span className="font-normal text-muted-foreground">
-                          (opcional)
-                        </span>
-                      </label>
-                      <select
-                        id="responsavel"
-                        value={form.responsavel_id}
-                        onChange={(e) =>
-                          setForm((f) => ({ ...f, responsavel_id: e.target.value }))
-                        }
-                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                      >
-                        <option value="">— Sem responsável —</option>
-                        {responsaveisPossiveis.map((r) => (
-                          <option key={r._id} value={r._id}>
-                            {r.nome} ({ROLE_LABEL[r.role]})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                    {form.role !== "parceiro" && (
+                      <div className="space-y-1.5">
+                        <label htmlFor="responsavel" className="text-sm font-medium">
+                          Responsável{" "}
+                          <span className="font-normal text-muted-foreground">
+                            (opcional)
+                          </span>
+                        </label>
+                        <select
+                          id="responsavel"
+                          value={form.responsavel_id}
+                          onChange={(e) =>
+                            setForm((f) => ({ ...f, responsavel_id: e.target.value }))
+                          }
+                          className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        >
+                          <option value="">— Sem responsável —</option>
+                          {responsaveisPossiveis.map((r) => (
+                            <option key={r._id} value={r._id}>
+                              {r.nome} ({ROLE_LABEL[r.role]})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                   </div>
 
-                  {/* Folgas Semanais Fixas */}
-                  <FolgasSemanaisCheckboxes
-                    diasFolga={form.dias_folga}
-                    onChange={(dias) => setForm((f) => ({ ...f, dias_folga: dias }))}
-                  />
+                  {/* Folgas Semanais Fixas — só para staff/gestor (não parceiros) */}
+                  {form.role !== "parceiro" && (
+                    <FolgasSemanaisCheckboxes
+                      diasFolga={form.dias_folga}
+                      onChange={(dias) => setForm((f) => ({ ...f, dias_folga: dias }))}
+                    />
+                  )}
 
                   {formErro && (
                     <p className="flex items-center gap-2 text-sm text-destructive">
@@ -1087,7 +1099,7 @@ function EquipaPage() {
                 </div>
                 <div className="space-y-1.5">
                   <label htmlFor="edit-role" className="text-sm font-medium">
-                    Role
+                    Tipo de utilizador
                   </label>
                   <select
                     id="edit-role"
@@ -1097,39 +1109,47 @@ function EquipaPage() {
                     }
                     className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                   >
-                    <option value="staff">Staff</option>
-                    <option value="gestor">Responsável</option>
-                    <option value="parceiro">Parceiro</option>
+                    <option value="staff">Staff (funcionário de limpezas)</option>
+                    <option value="gestor">Responsável (gere a equipa)</option>
+                    <option value="parceiro">Parceiro (B2B externo — cria reservas)</option>
                   </select>
+                  {editForm.role === "parceiro" && (
+                    <p className="text-xs text-muted-foreground">
+                      Parceiros são externos: não têm folgas semanais nem responsável hierárquico.
+                      Acedem ao portal B2B para criar reservas manuais nas suas propriedades.
+                    </p>
+                  )}
                 </div>
-                <div className="space-y-1.5">
-                  <label htmlFor="edit-responsavel" className="text-sm font-medium">
-                    Responsável{" "}
-                    <span className="font-normal text-muted-foreground">
-                      (opcional)
-                    </span>
-                  </label>
-                  <select
-                    id="edit-responsavel"
-                    value={editForm.responsavel_id}
-                    onChange={(e) =>
-                      setEditForm((f) => ({
-                        ...f,
-                        responsavel_id: e.target.value,
-                      }))
-                    }
-                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                  >
-                    <option value="">— Sem responsável —</option>
-                    {responsaveisPossiveis
-                      .filter((r) => r._id !== editando?._id)
-                      .map((r) => (
-                        <option key={r._id} value={r._id}>
-                          {r.nome} ({ROLE_LABEL[r.role]})
-                        </option>
-                      ))}
-                  </select>
-                </div>
+                {editForm.role !== "parceiro" && (
+                  <div className="space-y-1.5">
+                    <label htmlFor="edit-responsavel" className="text-sm font-medium">
+                      Responsável{" "}
+                      <span className="font-normal text-muted-foreground">
+                        (opcional)
+                      </span>
+                    </label>
+                    <select
+                      id="edit-responsavel"
+                      value={editForm.responsavel_id}
+                      onChange={(e) =>
+                        setEditForm((f) => ({
+                          ...f,
+                          responsavel_id: e.target.value,
+                        }))
+                      }
+                      className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    >
+                      <option value="">— Sem responsável —</option>
+                      {responsaveisPossiveis
+                        .filter((r) => r._id !== editando?._id)
+                        .map((r) => (
+                          <option key={r._id} value={r._id}>
+                            {r.nome} ({ROLE_LABEL[r.role]})
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                )}
                 <div className="space-y-1.5">
                   <label htmlFor="edit-password" className="text-sm font-medium">
                     Nova Password{" "}
@@ -1162,15 +1182,18 @@ function EquipaPage() {
                   </p>
                 </div>
 
-                {/* Folgas Semanais Fixas */}
-                <FolgasSemanaisCheckboxes
-                  diasFolga={editForm.dias_folga}
-                  onChange={(dias) =>
-                    setEditForm((f) => ({ ...f, dias_folga: dias }))
-                  }
-                />
+                {/* Folgas Semanais Fixas — só para staff/gestor (não parceiros) */}
+                {editForm.role !== "parceiro" && (
+                  <FolgasSemanaisCheckboxes
+                    diasFolga={editForm.dias_folga}
+                    onChange={(dias) =>
+                      setEditForm((f) => ({ ...f, dias_folga: dias }))
+                    }
+                  />
+                )}
 
-                {/* HF10 — Folgas Específicas / Rotativas */}
+                {/* HF10 — Folgas Específicas / Rotativas — só para staff/gestor */}
+                {editForm.role !== "parceiro" && (
                 <div className="space-y-3 rounded-md border p-3">
                   <div className="flex items-center gap-2">
                     <Calendar className="h-4 w-4 text-primary" />
@@ -1282,6 +1305,7 @@ function EquipaPage() {
                     </ul>
                   )}
                 </div>
+                )}
 
                 {editErro && (
                   <p className="flex items-center gap-2 text-sm text-destructive">

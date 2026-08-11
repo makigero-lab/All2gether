@@ -34,7 +34,7 @@
  *   login page (após cookie definido) e pelo logout (após cookie limpo).
  */
 
-export type Role = "admin" | "gestor" | "staff";
+export type Role = "admin" | "gestor" | "staff" | "parceiro";
 
 export interface UtilizadorAuth {
   id: string;
@@ -184,10 +184,12 @@ export async function fazerLogout(): Promise<void> {
  *                        empresa principal é assumida automaticamente)
  * - gestor  -> /gestor  (Gestor de Operações — painel operacional)
  * - staff   -> /staff   (executante de limpezas)
+ * - parceiro -> /parceiro (B2B externo — portal de reservas manuais)
  */
 export function rotaPorRole(role: Role): string {
   if (role === "admin") return "/gestor";
   if (role === "gestor") return "/gestor";
+  if (role === "parceiro") return "/parceiro";
   return "/staff";
 }
 

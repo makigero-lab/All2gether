@@ -103,7 +103,7 @@ async function handleResponse<T>(res: Response): Promise<T> {
 /* Tipos que espelham os modelos do backend                            */
 /* ------------------------------------------------------------------ */
 
-export type Role = "admin" | "gestor" | "staff";
+export type Role = "admin" | "gestor" | "staff" | "parceiro";
 
 export type EstadoTarefa =
   | "por_atribuir"
