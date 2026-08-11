@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertCircle, Loader2 } from "lucide-react";
+import { AlertCircle, Loader2, ShieldCheck, LogOut } from "lucide-react";
 import { limparCacheAuth, lerUtilizador } from "@/lib/auth";
 
 /**
@@ -53,6 +53,8 @@ export function AutoImpersonarEmpresa() {
     "idle" | "a-impersonar" | "erro" | "concluido"
   >("idle");
   const [erro, setErro] = useState<string | null>(null);
+  const [userRole, setUserRole] = useState<string | null>(null);
+  const [aFazerLogout, setAFazerLogout] = useState(false);
 
   useEffect(() => {
     let cancelado = false;
@@ -66,6 +68,9 @@ export function AutoImpersonarEmpresa() {
           if (!cancelado) setEstado("concluido");
           return;
         }
+
+        // Guarda o role para o ecrã de erro saber se mostrar o botão de SuperAdmin.
+        if (!cancelado) setUserRole(user.role);
 
         // Se já foi auto-impersonado nesta sessão de browser, não repete.
         // Isto evita loops de impersonação quando o admin navega entre
@@ -193,7 +198,7 @@ export function AutoImpersonarEmpresa() {
     );
   }
 
-  // Erro: mostra mensagem clara (não recarrega — evita loop).
+  // Erro: mostra mensagem clara com logout real (evita loop de redirect).
   if (estado === "erro") {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-muted/30 px-4">
@@ -204,16 +209,64 @@ export function AutoImpersonarEmpresa() {
         <p className="max-w-md text-center text-xs text-muted-foreground">
           {erro}
         </p>
-        <button
-          type="button"
-          onClick={() => {
-            sessionStorage.removeItem("all2gether_auto_impersonado");
-            window.location.href = "/login";
-          }}
-          className="mt-2 rounded-md border border-border bg-background px-4 py-2 text-sm font-medium shadow-sm transition-colors hover:bg-muted"
-        >
-          Voltar ao login
-        </button>
+        <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+          {/* HF23 — Logout real: chama POST /api/auth/logout (limpa cookie httpOnly)
+              + limparCacheAuth() (limpa cache temporal) antes de redirecionar.
+              Sem isto, o token continua ativo e o middleware atira o user
+              de volta para /gestor, criando um loop infinito. */}
+          <button
+            type="button"
+            disabled={aFazerLogout}
+            onClick={async () => {
+              setAFazerLogout(true);
+              // Limpa flags de sessionStorage.
+              sessionStorage.removeItem("all2gether_auto_impersonado");
+              sessionStorage.removeItem("all2gether_impersonating");
+              // Limpa o cache de auth (o token vai ser destruído).
+              limparCacheAuth();
+              try {
+                // Chama o logout real no backend (limpa cookie httpOnly).
+                await fetch("/api/auth/logout", {
+                  method: "POST",
+                  credentials: "include",
+                }).catch(() => {});
+              } catch {
+                // Mesmo que o fetch falhe, o redirect funciona (o middleware
+                // bloqueia acesso sem cookie).
+              }
+              // Redirect hard para /login (não router.push — limpa estado).
+              window.location.href = "/login";
+            }}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-4 py-2 text-sm font-medium shadow-sm transition-colors hover:bg-muted disabled:opacity-60"
+          >
+            {aFazerLogout ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <LogOut className="h-4 w-4" />
+            )}
+            {aFazerLogout ? "A sair…" : "Voltar ao login"}
+          </button>
+
+          {/* HF23 — Rota de fuga para SuperAdmins: se o user é admin, oferece
+              um botão para ir diretamente para /admin (que é cross-tenant e
+              não precisa de impersonação). */}
+          {userRole === "admin" && (
+            <button
+              type="button"
+              onClick={() => {
+                // Limpa a flag de auto-impersonação (não repetir o loop).
+                sessionStorage.removeItem("all2gether_auto_impersonado");
+                limparCacheAuth();
+                // Redirect para /admin (não /gestor — evita o componente).
+                window.location.href = "/admin";
+              }}
+              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90"
+            >
+              <ShieldCheck className="h-4 w-4" />
+              Ir para o Painel de SuperAdmin
+            </button>
+          )}
+        </div>
       </div>
     );
   }
