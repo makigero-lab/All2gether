@@ -237,3 +237,147 @@ module.exports = {
   criarTarefa,
   listarTarefas,
 };
+
+/* ================================================================== */
+/* HF23 — Reservas Manuais (Portal do Parceiro)                       */
+/* ================================================================== */
+
+const ReservaManual = require('../models/ReservaManual');
+
+/**
+ * POST /api/parceiro/reservas
+ *
+ * Cria uma reserva manual. Se hospedes não for preenchido, usa a capacidade
+ * da propriedade. Gera automaticamente uma Tarefa de Limpeza para o dia de
+ * check-out (origem: 'manual', estado: 'por_atribuir').
+ *
+ * Body:
+ *   propriedade_id: String (obrigatório — tem de pertencer ao parceiro)
+ *   check_in: String "YYYY-MM-DD" (obrigatório)
+ *   check_out: String "YYYY-MM-DD" (obrigatório)
+ *   hospedes: Number (opcional — usa capacidade da propriedade se vazio)
+ *   observacoes: String (opcional)
+ */
+async function criarReserva(req, res) {
+  try {
+    const parceiroId = req.user && req.user.id;
+    const empresaId = req.user && req.user.empresa_id;
+    if (!parceiroId || !empresaId) {
+      return res.status(401).json({ erro: 'Não autenticado.' });
+    }
+
+    const { propriedade_id, check_in, check_out, hospedes, observacoes } = req.body || {};
+
+    if (!propriedade_id || !mongoose.isValidObjectId(propriedade_id)) {
+      return res.status(400).json({ erro: 'propriedade_id é obrigatório.' });
+    }
+    if (!check_in || !check_out) {
+      return res.status(400).json({ erro: 'check_in e check_out são obrigatórios.' });
+    }
+
+    // Valida que a propriedade pertence ao parceiro.
+    const propriedade = await Propriedade.findOne({
+      _id: propriedade_id,
+      parceiro_id: parceiroId,
+      ativo: true,
+    }).lean();
+
+    if (!propriedade) {
+      return res.status(404).json({
+        erro: 'Propriedade não encontrada (ou não pertence a este parceiro).',
+      });
+    }
+
+    // Hospedes: usa o valor enviado ou a capacidade da propriedade.
+    const numHospedes = hospedes != null ? Number(hospedes) : (propriedade.capacidade_hospedes ?? null);
+
+    // Cria a reserva.
+    const novaReserva = await ReservaManual.create({
+      propriedade_id: propriedade._id,
+      parceiro_id: parceiroId,
+      empresa_id: empresaId,
+      check_in: new Date(check_in),
+      check_out: new Date(check_out),
+      hospedes: numHospedes,
+      observacoes: observacoes ? String(observacoes).trim() : '',
+    });
+
+    // Gera a Tarefa de Limpeza para o dia de check-out.
+    const dataCheckOut = new Date(check_out);
+    // Normaliza para meia-noite UTC.
+    const dataTarefa = new Date(
+      Date.UTC(dataCheckOut.getUTCFullYear(), dataCheckOut.getUTCMonth(), dataCheckOut.getUTCDate())
+    );
+    dataTarefa.setUTCHours(10, 0, 0, 0); // 10:00 UTC default
+
+    const novaTarefa = await Tarefa.create({
+      empresa_id: empresaId,
+      propriedade_id: propriedade._id,
+      smoobu_reserva_id: null,
+      origem: 'manual',
+      utilizador_id: null,
+      equipa_atribuida: [],
+      data: dataTarefa,
+      tempo_limpeza_minutos: propriedade.tempo_limpeza_minutos || 45,
+      tipo: 'limpeza',
+      estado: 'por_atribuir',
+      observacoes: observacoes ? String(observacoes).trim() : '',
+      hospedes: numHospedes, // HF23
+      checklist: propriedade.checklist || [],
+      detalhes_reserva: {
+        checkin: String(check_in),
+        checkout: String(check_out),
+        pax: numHospedes,
+      },
+    });
+
+    // Associa a tarefa à reserva.
+    novaReserva.tarefa_gerada_id = novaTarefa._id;
+    await novaReserva.save();
+
+    console.log(
+      `📅 [Parceiro] reserva criada por parceiro ${parceiroId} para "${propriedade.nome}" ` +
+        `(check-out: ${dataTarefa.toISOString().slice(0, 10)}, hospedes: ${numHospedes}). ` +
+        `Tarefa ${novaTarefa._id} gerada.`
+    );
+
+    return res.status(201).json({ reserva: novaReserva, tarefa: novaTarefa });
+  } catch (err) {
+    console.error('❌ parceiroController.criarReserva:', err.message);
+    return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
+  }
+}
+
+/**
+ * GET /api/parceiro/reservas
+ *
+ * Lista as reservas do parceiro autenticado.
+ */
+async function listarReservas(req, res) {
+  try {
+    const parceiroId = req.user && req.user.id;
+    if (!parceiroId) {
+      return res.status(401).json({ erro: 'Não autenticado.' });
+    }
+
+    const reservas = await ReservaManual.find({ parceiro_id: parceiroId })
+      .populate('propriedade_id', 'nome morada')
+      .populate('tarefa_gerada_id', 'estado data')
+      .sort({ check_out: -1 })
+      .lean();
+
+    return res.status(200).json({ reservas });
+  } catch (err) {
+    console.error('❌ parceiroController.listarReservas:', err.message);
+    return res.status(500).json({ erro: 'Erro interno.' });
+  }
+}
+
+module.exports = {
+  criarPropriedade,
+  listarPropriedades,
+  criarTarefa,
+  listarTarefas,
+  criarReserva,
+  listarReservas,
+};

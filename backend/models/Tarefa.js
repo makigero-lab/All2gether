@@ -192,6 +192,13 @@ const tarefaSchema = new mongoose.Schema(
       // Nome do hóspede principal da reserva.
       nome_hospede: { type: String, default: null, trim: true },
     },
+    // HF23 — Número de hóspedes para cálculo dinâmico de lavandaria.
+    // Vem do payload do Smoobu (adults + children) ou da capacidade da propriedade.
+    hospedes: {
+      type: Number,
+      default: null,
+      min: 0,
+    },
   },
   { timestamps: true }
 );

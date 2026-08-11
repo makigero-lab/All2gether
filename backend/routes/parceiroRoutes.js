@@ -20,6 +20,8 @@ const {
   listarPropriedades,
   criarTarefa,
   listarTarefas,
+  criarReserva,
+  listarReservas,
 } = require('../controllers/parceiroController');
 
 const router = express.Router();
@@ -28,5 +30,8 @@ router.get('/propriedades', auth, isParceiro, listarPropriedades);
 router.post('/propriedades', auth, isParceiro, criarPropriedade);
 router.get('/tarefas', auth, isParceiro, listarTarefas);
 router.post('/tarefas', auth, isParceiro, criarTarefa);
+// HF23 — Reservas manuais
+router.get('/reservas', auth, isParceiro, listarReservas);
+router.post('/reservas', auth, isParceiro, criarReserva);
 
 module.exports = router;

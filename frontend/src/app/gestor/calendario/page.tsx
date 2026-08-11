@@ -1223,7 +1223,7 @@ export default function CalendarioOperacionalPage() {
           {mounted ? (
             <FullCalendar
               plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
-              initialView="dayGridMonth"
+              initialView="timeGridWeek"
               locale={ptLocale}
               timeZone="local"
               headerToolbar={{
@@ -1938,16 +1938,40 @@ function EquipaMapa({ tarefas, equipa, periodo, loading }: EquipaMapaProps) {
     }
 
     // Ausências (eventos de ausência no FullCalendar — têm title e allDay).
+    // HF23 — Bugfix: iterar correctamente o intervalo data_inicio → data_fim.
+    // Antes verificava só pelo title do staff, mas não checava se o dia
+    // estava dentro do intervalo. Agora verifica start/end do evento.
+    const diaTime = dia.getTime();
     const ausente = tarefas.some((t) => {
       if (!t.allDay) return false;
-      if (!t.utilizador_id || t.utilizador_id._id !== staffId) {
-        // Ausências não têm utilizador_id populado no formato de evento;
-        // verificamos pelo title que contém o nome do staff.
-        const staff = equipa.find((s) => s._id === staffId);
-        if (!staff) return false;
-        return t.title?.includes(staff.nome);
+      // Verifica se o dia está dentro do intervalo do evento (start ≤ dia < end+1).
+      // Os eventos allDay do FullCalendar usam start/end em formato ISO.
+      const startTime = t.start ? parsearDataSegura(t.start)?.getTime() : null;
+      if (startTime && diaTime < startTime) return false;
+      // Para o fim: o FullCalendar usa end exclusivo (dia seguinte ao último).
+      // Se não houver end, assume 1 dia (igual a start).
+      const endStr = t.end || t.start;
+      if (endStr) {
+        const endDate = parsearDataSegura(endStr);
+        if (endDate) {
+          const endTime = endDate.getTime();
+          if (endStr === t.start) {
+            // Evento de 1 dia: o dia tem de ser exatamente o start.
+            if (startTime && diaTime !== startTime) return false;
+          } else {
+            // Evento multi-dia: dia tem de ser < end.
+            if (diaTime >= endTime) return false;
+          }
+        }
       }
-      return false;
+      // Verifica se a ausência pertence a este staff.
+      if (t.utilizador_id && t.utilizador_id._id === staffId) {
+        return true;
+      }
+      // Fallback: verifica pelo title que contém o nome do staff.
+      const staff = equipa.find((s) => s._id === staffId);
+      if (!staff) return false;
+      return t.title?.includes(staff.nome);
     });
 
     if (ausente) {

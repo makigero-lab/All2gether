@@ -194,6 +194,11 @@ export interface PropriedadeDTO {
   staff_necessario?: number;
   // HF22 — Dias fixos de limpeza (0=Dom, 1=Seg, ..., 6=Sáb).
   dias_fixos_limpeza?: number[];
+  // HF23 — Campos de gestão da propriedade.
+  nome_responsavel?: string;
+  contato?: string;
+  frequencia_limpeza?: "semanal" | "quinzenal" | "mensal";
+  horario_limpeza?: string;
   createdAt?: string;
   updatedAt?: string;
 }

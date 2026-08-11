@@ -772,6 +772,7 @@ function EquipaPage() {
                       >
                         <option value="staff">Staff</option>
                         <option value="gestor">Responsável</option>
+                        <option value="parceiro">Parceiro</option>
                       </select>
                     </div>
                     <div className="space-y-1.5">
@@ -1098,6 +1099,7 @@ function EquipaPage() {
                   >
                     <option value="staff">Staff</option>
                     <option value="gestor">Responsável</option>
+                    <option value="parceiro">Parceiro</option>
                   </select>
                 </div>
                 <div className="space-y-1.5">

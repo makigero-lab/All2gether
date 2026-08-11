@@ -225,7 +225,7 @@ exports.criarPropriedade = async (req, res) => {
     const { ok, empresaId } = obterEmpresaId(req, res);
     if (!ok) return;
 
-    const { nome, morada, tempo_limpeza_minutos, parceiro_id, staff_necessario, dias_fixos_limpeza } = req.body || {};
+    const { nome, morada, tempo_limpeza_minutos, parceiro_id, staff_necessario, dias_fixos_limpeza, nome_responsavel, contacto, frequencia_limpeza, horario_limpeza } = req.body || {};
 
     // Validações de presença.
     if (!nome || !morada) {
@@ -282,6 +282,10 @@ exports.criarPropriedade = async (req, res) => {
       ...(Array.isArray(dias_fixos_limpeza)
         ? { dias_fixos_limpeza: dias_fixos_limpeza.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6) }
         : {}), // HF22
+      nome_responsavel: nome_responsavel ? String(nome_responsavel).trim().slice(0, 200) : '', // HF23
+      contacto: contacto ? String(contacto).trim().slice(0, 50) : '', // HF23
+      frequencia_limpeza: ['semanal', 'quinzenal', 'mensal'].includes(frequencia_limpeza) ? frequencia_limpeza : 'semanal', // HF23
+      horario_limpeza: horario_limpeza ? String(horario_limpeza).trim().slice(0, 100) : '', // HF23
       checklist: Array.isArray(req.body?.checklist)
         ? req.body.checklist.filter((s) => typeof s === 'string' && s.trim())
         : [],

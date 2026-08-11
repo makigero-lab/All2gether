@@ -415,6 +415,16 @@ async function criarTarefaPorReserva(
     propriedade.tempo_limpeza_minutos ??
     45;
 
+  // HF23 — Número de hóspedes para cálculo dinâmico de lavandaria.
+  // Tenta extrair do payload (adults + children ou guests); se vazio, usa a
+  // capacidade da propriedade.
+  let numHospedes = detalhesReserva.pax ?? null;
+  if (numHospedes == null) {
+    // pax já foi calculado em extrairDadosReserva (adults + children ou guests).
+    // Se ainda for null, usa a capacidade da propriedade.
+    numHospedes = propriedade.capacidade_hospedes ?? null;
+  }
+
   // 5. Atribuição HÍBRIDA (HF11 — Many-to-One + Load Balancer + HF12 flexibilidade VIP).
   //    Estratégia:
   //      (a) Se a propriedade TEM funcionario_preferencial_id e ele NÃO está
@@ -707,6 +717,7 @@ async function criarTarefaPorReserva(
       ? { checklist_dinamica: checklistDinamicaWebhook }
       : {}),
     detalhes_reserva: detalhesReserva || undefined,
+    hospedes: numHospedes, // HF23 — número de hóspedes para lavandaria
   });
 
   console.log(

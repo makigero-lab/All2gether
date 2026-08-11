@@ -548,28 +548,17 @@ export default function PropriedadesPage() {
               {checklistLoading ? "A aplicar…" : "Checklist Padrão"}
             </span>
           </Button>
-          <Button onClick={() => {
-            setMostrarForm((v) => !v);
-            setMoradaWarning(null);
-            setMoradaConfirmada(false);
-          }}>
-            <Plus className="h-4 w-4" />
-            Nova Propriedade
-          </Button>
-          {/* HF18 — Botão "Adicionar Propriedade Manual" (origem: 'manual').
-              Ao contrário do formulário inline de "Nova Propriedade" (que
-              requer smoobu_id da lista importada), este abre um Dialog
-              simples com apenas nome + morada + tempo de limpeza. */}
+          {/* HF23 — Botão "Nova Propriedade" (Smoobu) removido.
+              Mantém-se apenas o "Adicionar Manual". */}
           <Button
-            variant="secondary"
             onClick={() => {
               setManualOpen(true);
               setManualErro(null);
               setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1", dias_fixos_limpeza: [] });
             }}
           >
-            <Building2 className="h-4 w-4" />
-            <span className="hidden sm:inline">Adicionar Manual</span>
+            <Plus className="h-4 w-4" />
+            Adicionar
           </Button>
         </div>
       </div>
