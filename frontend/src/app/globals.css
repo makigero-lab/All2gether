@@ -419,6 +419,50 @@
 }
 
 /* --------------------------------------------------------------------------
+   HF26 — Tarefa órfã (staff de férias com tarefa atribuída)
+   Vermelho intenso + borda pulsante para destaque máximo. Indica que há
+   uma inconsistência: o staff tem ausência aprovada mas continua com tarefas.
+   -------------------------------------------------------------------------- */
+
+.fc-evt-orfao {
+  border: 2px solid #dc2626 !important;
+  border-left: 4px solid #991b1b !important;
+  background-color: #fee2e2 !important;
+  box-shadow: 0 0 0 1px rgba(220, 38, 38, 0.3);
+  animation: fc-orfao-pulse 2s ease-in-out infinite;
+}
+
+@keyframes fc-orfao-pulse {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(220, 38, 38, 0.3); }
+  50% { box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.45); }
+}
+
+.fc-evt-block--orfao {
+  border-left: 4px solid #991b1b !important;
+  background-color: #fee2e2 !important;
+  animation: fc-orfao-pulse 2s ease-in-out infinite;
+}
+
+.fc-evt-block__orphan-alert {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #991b1b;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.fc-evt-month--orfao {
+  border-left: 3px solid #991b1b !important;
+  background-color: #fee2e2 !important;
+  animation: fc-orfao-pulse 2s ease-in-out infinite;
+}
+
+.fc-evt-month--orfao .fc-evt-month__alert-tag {
+  background-color: #dc2626;
+  color: white;
+}
+
+/* --------------------------------------------------------------------------
    Ponto 2 — Banner contínuo para ausências (férias/doença)
    Roxo pastel suave com opacidade, atravessa os dias sem confundir com tarefas.
    -------------------------------------------------------------------------- */

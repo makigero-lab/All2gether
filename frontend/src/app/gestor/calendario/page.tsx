@@ -60,6 +60,9 @@ interface TarefaCalendario {
   // HF25 — estado da ausência (aprovada | pendente | pendente_emergencia).
   estado_ausencia?: string;
   justificacao?: string;
+  // HF26 — tarefa órfã (staff de férias com tarefa atribuída).
+  alerta_orfao?: boolean;
+  alerta_mensagem?: string;
   // Prompt 99 — Detalhes da reserva (para a coluna Reserva da Vista Tabela).
   detalhes_reserva?: {
     checkin?: string | null;
@@ -479,8 +482,15 @@ export default function CalendarioOperacionalPage() {
       const inicio = parsearDataSegura(t.data) ?? new Date();
       const semHoraReal = !temHoraReal(t.data);
       const paleta = paletaPorEstado(t.estado);
-      const classNames =
-        t.estado === "por_atribuir" || t.estado === "nao_atribuida"
+      // HF26 — Se a tarefa é órfã (staff de férias), força cor vermelha
+      // e adiciona classe de alerta, override da paleta por estado.
+      const isOrfao = !!t.alerta_orfao;
+      const paletaFinal = isOrfao
+        ? { bg: "#fee2e2", border: "#ef4444", text: "#991b1b", dot: "#dc2626" }
+        : paleta;
+      const classNames = isOrfao
+        ? ["fc-evt-orfao"]
+        : t.estado === "por_atribuir" || t.estado === "nao_atribuida"
           ? ["fc-evt-por-atribuir"]
           : [];
 
@@ -491,9 +501,9 @@ export default function CalendarioOperacionalPage() {
           title: t.propriedade_id?.nome ?? "—",
           start: inicio.toISOString().slice(0, 10),
           allDay: true,
-          backgroundColor: paleta.bg,
-          borderColor: paleta.border,
-          textColor: paleta.text,
+          backgroundColor: paletaFinal.bg,
+          borderColor: paletaFinal.border,
+          textColor: paletaFinal.text,
           extendedProps: t,
           classNames,
         } as EventInput];
@@ -527,11 +537,11 @@ export default function CalendarioOperacionalPage() {
         title: t.propriedade_id?.nome ?? "—",
         start: startLocal,
         end: endLocal,
-        backgroundColor: temConflito ? "#fef3c7" : paleta.bg,
-        borderColor: temConflito ? "#f59e0b" : paleta.border,
-        textColor: temConflito ? "#92400e" : paleta.text,
+        backgroundColor: isOrfao ? paletaFinal.bg : (temConflito ? "#fef3c7" : paleta.bg),
+        borderColor: isOrfao ? paletaFinal.border : (temConflito ? "#f59e0b" : paleta.border),
+        textColor: isOrfao ? paletaFinal.text : (temConflito ? "#92400e" : paleta.text),
         extendedProps: t,
-        classNames: temConflito ? [...classNames, "fc-evt-conflito"] : classNames,
+        classNames: isOrfao ? classNames : (temConflito ? [...classNames, "fc-evt-conflito"] : classNames),
       };
 
       // Prompt 137 — Evento A (A Viagem): só cria se tempo_viagem_minutos > 0.
@@ -646,6 +656,22 @@ export default function CalendarioOperacionalPage() {
 
     // --- Vista mensal: layout compacto em linha ---
     if (isMonthView) {
+      // HF26 — Tarefa órfã (staff de férias): destaque VERMELHO, prioritário.
+      if (t.alerta_orfao) {
+        const msg = t.alerta_mensagem ?? "Tarefa órfã";
+        return (
+          <div
+            className="fc-evt-month fc-evt-month--orfao"
+            title={`⚠️ ${msg} — ${titulo}${staff ? ` (${staff})` : ""}`}
+          >
+            <span className="fc-evt-month__alert-icon" aria-hidden>🚨</span>
+            <span className="fc-evt-month__title">
+              {emoji} {titulo}
+            </span>
+            <span className="fc-evt-month__alert-tag">Órfã</span>
+          </div>
+        );
+      }
       // Prompt 80, ponto 1 — destaque forte para por_atribuir na vista mensal.
       if (isPorAtribuir) {
         return (
@@ -674,16 +700,21 @@ export default function CalendarioOperacionalPage() {
     }
 
     // --- Vistas semanal/diária: bloco rico com título + subtítulo ---
+    const blockClass = t.alerta_orfao
+      ? "fc-evt-block fc-evt-block--orfao"
+      : isPorAtribuir
+        ? "fc-evt-block fc-evt-block--alert"
+        : "fc-evt-block";
     return (
-      <div className={isPorAtribuir ? "fc-evt-block fc-evt-block--alert" : "fc-evt-block"}>
+      <div className={blockClass}>
         <div className="fc-evt-block__header">
           <span
             className="fc-evt-block__dot"
-            style={{ backgroundColor: isFolga ? "#94a3b8" : paleta.dot }}
+            style={{ backgroundColor: t.alerta_orfao ? "#dc2626" : (isFolga ? "#94a3b8" : paleta.dot) }}
             aria-hidden
           />
           <span className="fc-evt-block__emoji" aria-hidden>
-            {emoji}
+            {t.alerta_orfao ? "🚨" : emoji}
           </span>
           <span className="fc-evt-block__time">{arg.timeText}</span>
         </div>
@@ -691,7 +722,11 @@ export default function CalendarioOperacionalPage() {
           {titulo}
         </div>
         <div className="fc-evt-block__subtitle">
-          {staff ? (
+          {t.alerta_orfao ? (
+            <span className="fc-evt-block__orphan-alert">
+              🚨 Órfã — {staff ? primeiroNome(staff) : "staff"} de férias
+            </span>
+          ) : staff ? (
             <>
               <User className="fc-evt-block__icon" />
               <span>{primeiroNome(staff)}</span>

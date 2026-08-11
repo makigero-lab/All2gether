@@ -740,6 +740,42 @@ exports.getDadosCalendario = async (req, res) => {
         };
       });
 
+      // HF26 — Deteta tarefas órfãs: tarefas atribuídas a staff que tem
+      // ausência APROVADA que cobre o dia da tarefa. Isto acontece quando:
+      //   (a) o webhook criou a tarefa depois da aprovação e o LB falhou
+      //       em filtrar (bug de empresa_id / utilizador_id / timezone);
+      //   (b) a desatribuição inicial da aprovação falhou;
+      //   (c) o gestor atribuiu manualmente ignorando o aviso.
+      // Marca a tarefa com `alerta_orfao: true` para o calendário mostrar
+      // um aviso visual vermelho e o gestor poder corrigir (Reaplicar).
+      if (ausenciasFiltradas.length > 0) {
+        // Constrói mapa: utilizador_id → lista de [data_inicio, data_fim].
+        const mapaAusencias = new Map();
+        for (const a of ausenciasFiltradas) {
+          const uid = String(a.utilizador_id._id);
+          if (!mapaAusencias.has(uid)) mapaAusencias.set(uid, []);
+          mapaAusencias.get(uid).push({
+            inicio: new Date(a.data_inicio).getTime(),
+            fim: new Date(a.data_fim).getTime() + 24 * 60 * 60 * 1000, // +1 dia (inclusive)
+          });
+        }
+        // Marca tarefas atribuídas cujo staff está de férias nesse dia.
+        for (const t of tarefasComViagem) {
+          if (!t.utilizador_id || !t.utilizador_id._id) continue;
+          const uid = String(t.utilizador_id._id);
+          const intervalos = mapaAusencias.get(uid);
+          if (!intervalos || intervalos.length === 0) continue;
+          const instante = new Date(t.data).getTime();
+          const estaAusente = intervalos.some(
+            (iv) => instante >= iv.inicio && instante < iv.fim
+          );
+          if (estaAusente) {
+            t.alerta_orfao = true;
+            t.alerta_mensagem = 'Staff de férias nesta data — tarefa órfã';
+          }
+        }
+      }
+
       // Junta tarefas + folgas fixas + ausências (aprovadas + pendentes) e
       // ordena por data. Prompt 139 — usa tarefasComViagem.
       const resultado = [
