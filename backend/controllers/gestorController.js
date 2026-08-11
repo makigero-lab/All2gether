@@ -623,8 +623,15 @@ exports.getDadosCalendario = async (req, res) => {
       // ----------------------------------------------------------------
       // v1.57.0 (Prompt 79) — Injeta ausências APROVADAS (férias/doença)
       // como eventos virtuais no calendário, para o gestor ver quem está
-      // indisponível em cada dia. Só ausências 'aprovada' (pendentes/
-      // rejeitadas não contam — não são garantidas).
+      // indisponível em cada dia.
+      //
+      // HF25 — Injeta também ausências PENDENTES / pendente_emergencia como
+      // eventos distintos (tipo 'ausencia_pendente'). Isto resolve o bug em
+      // que o gestor via staff com tarefas atribuídas durante um período de
+      // férias que "não aparecia no calendário" — a causa era a ausência
+      // estar pendente (não aprovada). O LB continua a só bloquear
+      // 'aprovada' (comportamento correto), mas agora o gestor VÊ o pedido
+      // pendente no calendário e sabe que tem de o aprovar.
       // ----------------------------------------------------------------
       const filtroAusencias = {
         empresa_id: empresaId,
@@ -644,13 +651,28 @@ exports.getDadosCalendario = async (req, res) => {
         .select('data_inicio data_fim tipo utilizador_id notas')
         .lean();
 
+      // HF25 — Busca também ausências pendentes (mesmo período, mesmo staff).
+      // Mostra-as como eventos distintos para o gestor poder aprovar a tempo.
+      const filtroAusenciasPendentes = {
+        ...filtroAusencias,
+        estado: { $in: ['pendente', 'pendente_emergencia'] },
+      };
+
+      const ausenciasPendentes = await Ausencia.find(filtroAusenciasPendentes)
+        .populate({ path: 'utilizador_id', select: 'nome eliminado_em' })
+        .select('data_inicio data_fim tipo utilizador_id notas justificacao')
+        .lean();
+
       // Filtra ausências cujo utilizador foi eliminado (soft delete) —
       // não devem aparecer no calendário.
       const ausenciasFiltradas = ausenciasAprovadas.filter(
         (a) => a.utilizador_id && !a.utilizador_id.eliminado_em
       );
+      const ausenciasPendentesFiltradas = ausenciasPendentes.filter(
+        (a) => a.utilizador_id && !a.utilizador_id.eliminado_em
+      );
 
-      // Converte cada ausência num evento virtual tipo 'ausencia'.
+      // Converte cada ausência APROVADA num evento virtual tipo 'ausencia'.
       // FullCalendar com allDay espera que `end` seja EXCLUSIVE (o dia
       // seguinte ao último dia de férias) para cobrir o bloco inteiro.
       const eventosAusencias = ausenciasFiltradas.map((a) => {
@@ -677,17 +699,55 @@ exports.getDadosCalendario = async (req, res) => {
             ? { _id: String(a.utilizador_id._id), nome: a.utilizador_id.nome }
             : null,
           estado: 'concluida', // ausência não é uma tarefa ativa
+          estado_ausencia: 'aprovada',
           tempo_limpeza_minutos: 0,
           propriedade_id: null,
           notas: a.notas || '',
         };
       });
 
-      // Junta tarefas + folgas fixas + ausências e ordena por data.
-      // Prompt 139 — usa tarefasComViagem (com tempo_viagem_minutos calculado).
-      const resultado = [...tarefasComViagem, ...diasFolga, ...eventosAusencias].sort(
-        (a, b) => new Date(a.data).getTime() - new Date(b.data).getTime()
-      );
+      // HF25 — Converte ausências PENDENTES em eventos 'ausencia_pendente'.
+      // Estilo visual distinto (âmbar/listrado) + sufixo "(Pendente)" para
+      // o gestor perceber imediatamente que precisa de aprovar.
+      const eventosAusenciasPendentes = ausenciasPendentesFiltradas.map((a) => {
+        const endExclusive = new Date(a.data_fim);
+        endExclusive.setDate(endExclusive.getDate() + 1); // +1 dia
+
+        const tituloPorTipo =
+          a.tipo === 'ferias' ? '🌴 Férias'
+          : a.tipo === 'doenca' ? '🤒 Doença'
+          : '📅 Ausência';
+        const sufixoEmergencia =
+          a.estado === 'pendente_emergencia' ? ' (Emergência)' : '';
+
+        return {
+          _id: `ausencia_pendente_${a._id}`,
+          tipo: 'ausencia_pendente',
+          data: new Date(a.data_inicio),
+          start: new Date(a.data_inicio),
+          end: endExclusive,
+          allDay: true,
+          title: `${tituloPorTipo}${sufixoEmergencia} (Pendente): ${a.utilizador_id?.nome ?? 'Staff'}`,
+          utilizador_id: a.utilizador_id
+            ? { _id: String(a.utilizador_id._id), nome: a.utilizador_id.nome }
+            : null,
+          estado: 'concluida',
+          estado_ausencia: a.estado, // 'pendente' | 'pendente_emergencia'
+          tempo_limpeza_minutos: 0,
+          propriedade_id: null,
+          notas: a.notas || '',
+          justificacao: a.justificacao || '',
+        };
+      });
+
+      // Junta tarefas + folgas fixas + ausências (aprovadas + pendentes) e
+      // ordena por data. Prompt 139 — usa tarefasComViagem.
+      const resultado = [
+        ...tarefasComViagem,
+        ...diasFolga,
+        ...eventosAusencias,
+        ...eventosAusenciasPendentes,
+      ].sort((a, b) => new Date(a.data).getTime() - new Date(b.data).getTime());
 
       return res.status(200).json({ tarefas: resultado });
     }

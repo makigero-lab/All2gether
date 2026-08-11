@@ -57,6 +57,9 @@ interface TarefaCalendario {
   tipo: string;
   estado: string;
   observacoes?: string;
+  // HF25 — estado da ausência (aprovada | pendente | pendente_emergencia).
+  estado_ausencia?: string;
+  justificacao?: string;
   // Prompt 99 — Detalhes da reserva (para a coluna Reserva da Vista Tabela).
   detalhes_reserva?: {
     checkin?: string | null;
@@ -100,6 +103,7 @@ const TIPO_LABEL: Record<string, string> = {
   check_in: "Check-in",
   check_out: "Check-out",
   ausencia: "Ausência",
+  ausencia_pendente: "Ausência (Pendente)",
 };
 
 /* ------------------------------------------------------------------ */
@@ -432,6 +436,27 @@ export default function CalendarioOperacionalPage() {
         } as EventInput];
       }
 
+      // HF25 — Ausência PENDENTE (pedido de férias/doença por aprovar).
+      // Banner âmbar listrado, distinto das aprovadas, para o gestor ver
+      // imediatamente que há um pedido a aguardar aprovação. Isto resolve
+      // o bug em que staff "em férias" aparecia com tarefas mas o calendário
+      // não mostrava nada — a ausência estava pendente (não aprovada).
+      if (t.tipo === "ausencia_pendente") {
+        return [{
+          id: t._id,
+          title: t.title ?? `Ausência (Pendente): ${t.utilizador_id?.nome ?? "Staff"}`,
+          start: t.start ?? t.data,
+          end: t.end,
+          allDay: true,
+          // Âmbar pastel com opacidade — sinal de atenção (precisa ação).
+          backgroundColor: "#fef3c7",
+          borderColor: "#f59e0b",
+          textColor: "#92400e",
+          extendedProps: t,
+          classNames: ["fc-evt-ausencia-pendente"],
+        } as EventInput];
+      }
+
       // Folga fixa semanal — bloco cinzento claro, todo o dia.
       if (t.tipo === "folga_fixa") {
         return [{
@@ -559,6 +584,8 @@ export default function CalendarioOperacionalPage() {
     const staff = t.utilizador_id?.nome ?? null;
     const isFolga = t.tipo === "folga_fixa";
     const isAusencia = t.tipo === "ausencia";
+    // HF25 — ausência pendente (pedido por aprovar).
+    const isAusenciaPendente = t.tipo === "ausencia_pendente";
     const isPorAtribuir = t.estado === "por_atribuir";
     const isViagem = !!t._isViagem;
 
@@ -597,6 +624,22 @@ export default function CalendarioOperacionalPage() {
       return (
         <div className="fc-evt-ausencia__content" title={bannerTitle}>
           <span className="fc-evt-ausencia__title">{bannerTitle}</span>
+        </div>
+      );
+    }
+
+    // HF25 — Ausência PENDENTE: banner âmbar com indicador de espera.
+    // Visualmente distinto das aprovadas para o gestor perceber que precisa
+    // de aprovar. Inclui a justificação no tooltip se existir.
+    if (isAusenciaPendente) {
+      const bannerTitle = t.title ?? `Ausência (Pendente): ${staff ?? "Staff"}`;
+      const tooltip = t.justificacao
+        ? `${bannerTitle}\nJustificação: ${t.justificacao}`
+        : bannerTitle;
+      return (
+        <div className="fc-evt-ausencia-pendente__content" title={tooltip}>
+          <span className="fc-evt-ausencia-pendente__pulse" aria-hidden>⏳</span>
+          <span className="fc-evt-ausencia-pendente__title">{bannerTitle}</span>
         </div>
       );
     }
@@ -902,7 +945,7 @@ export default function CalendarioOperacionalPage() {
 
     return tarefas
       .filter((t) => {
-        if (t.tipo === "ausencia" || t.tipo === "folga_fixa") return false;
+        if (t.tipo === "ausencia" || t.tipo === "ausencia_pendente" || t.tipo === "folga_fixa") return false;
 
         // Calcula a hora de fim da tarefa (início + tempo_limpeza_minutos).
         const inicio = (parsearDataSegura(t.data) ?? new Date(0)).getTime();
@@ -947,7 +990,7 @@ export default function CalendarioOperacionalPage() {
         `/api/gestor/calendario/dados?${params.toString()}`
       );
       const todasTarefas = (res.tarefas ?? [])
-        .filter((t) => t.tipo !== "ausencia" && t.tipo !== "folga_fixa")
+        .filter((t) => t.tipo !== "ausencia" && t.tipo !== "ausencia_pendente" && t.tipo !== "folga_fixa")
         .slice()
         .sort((a, b) => {
           try {

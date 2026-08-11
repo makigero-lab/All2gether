@@ -466,6 +466,70 @@
 }
 
 /* --------------------------------------------------------------------------
+   HF25 — Banner contínuo para ausências PENDENTES (férias/doença por aprovar)
+   Âmbar listrado com efeito de pulse no ícone, para sinalizar que precisa
+   de ação do gestor. Distinto das aprovadas (roxo) para não confundir.
+   -------------------------------------------------------------------------- */
+
+.fc-evt-ausencia-pendente {
+  /* Fundo âmbar pastel com riscas diagonais (pattern "atenção"). */
+  background-color: rgba(254, 243, 199, 0.9) !important;
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgba(245, 158, 11, 0.12),
+    rgba(245, 158, 11, 0.12) 6px,
+    transparent 6px,
+    transparent 12px
+  ) !important;
+  border-color: #f59e0b !important;
+  border-left: 3px solid #d97706 !important;
+  opacity: 0.95;
+}
+
+.fc-evt-ausencia-pendente:hover {
+  opacity: 1;
+}
+
+.fc-evt-ausencia-pendente__content {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+  width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  padding: 2px 6px;
+}
+
+.fc-evt-ausencia-pendente__pulse {
+  font-size: 0.7rem;
+  animation: fc-pulse-pendente 1.8s ease-in-out infinite;
+}
+
+@keyframes fc-pulse-pendente {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.fc-evt-ausencia-pendente__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #92400e;
+  font-style: italic;
+}
+
+/* Em vista mensal, mantém o mesmo tratamento visual das aprovadas. */
+.fc-daygrid-day-frame .fc-evt-ausencia-pendente {
+  border-radius: calc(var(--radius) - 1px);
+  margin-top: 1px;
+}
+
+/* --------------------------------------------------------------------------
    Prompt 137 — Blocos de Viagem (cinzento + tracejado)
    Distintos das tarefas reais para não confundir o gestor. Aparecem ANTES
    da tarefa de limpeza (início = hora_tarefa - tempo_viagem, fim = hora_tarefa).
