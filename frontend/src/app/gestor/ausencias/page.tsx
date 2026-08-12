@@ -241,7 +241,8 @@ export default function AusenciasPage() {
     setResultadoReaplicar(null);
     try {
       const res = await adminPost<{ mensagem: string; redistribuicao: { desatribuidas: number } }>(
-        `/api/gestor/ausencias/${a._id}/reaplicar`
+        `/api/gestor/ausencias/${a._id}/reaplicar`,
+        {}
       );
       setResultadoReaplicar(res.mensagem);
       // Recarrega para refletir as tarefas desatribuídas.
