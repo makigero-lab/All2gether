@@ -623,8 +623,15 @@ exports.getDadosCalendario = async (req, res) => {
       // ----------------------------------------------------------------
       // v1.57.0 (Prompt 79) — Injeta ausências APROVADAS (férias/doença)
       // como eventos virtuais no calendário, para o gestor ver quem está
-      // indisponível em cada dia. Só ausências 'aprovada' (pendentes/
-      // rejeitadas não contam — não são garantidas).
+      // indisponível em cada dia.
+      //
+      // HF25 — Injeta também ausências PENDENTES / pendente_emergencia como
+      // eventos distintos (tipo 'ausencia_pendente'). Isto resolve o bug em
+      // que o gestor via staff com tarefas atribuídas durante um período de
+      // férias que "não aparecia no calendário" — a causa era a ausência
+      // estar pendente (não aprovada). O LB continua a só bloquear
+      // 'aprovada' (comportamento correto), mas agora o gestor VÊ o pedido
+      // pendente no calendário e sabe que tem de o aprovar.
       // ----------------------------------------------------------------
       const filtroAusencias = {
         empresa_id: empresaId,
@@ -644,13 +651,28 @@ exports.getDadosCalendario = async (req, res) => {
         .select('data_inicio data_fim tipo utilizador_id notas')
         .lean();
 
+      // HF25 — Busca também ausências pendentes (mesmo período, mesmo staff).
+      // Mostra-as como eventos distintos para o gestor poder aprovar a tempo.
+      const filtroAusenciasPendentes = {
+        ...filtroAusencias,
+        estado: { $in: ['pendente', 'pendente_emergencia'] },
+      };
+
+      const ausenciasPendentes = await Ausencia.find(filtroAusenciasPendentes)
+        .populate({ path: 'utilizador_id', select: 'nome eliminado_em' })
+        .select('data_inicio data_fim tipo utilizador_id notas justificacao')
+        .lean();
+
       // Filtra ausências cujo utilizador foi eliminado (soft delete) —
       // não devem aparecer no calendário.
       const ausenciasFiltradas = ausenciasAprovadas.filter(
         (a) => a.utilizador_id && !a.utilizador_id.eliminado_em
       );
+      const ausenciasPendentesFiltradas = ausenciasPendentes.filter(
+        (a) => a.utilizador_id && !a.utilizador_id.eliminado_em
+      );
 
-      // Converte cada ausência num evento virtual tipo 'ausencia'.
+      // Converte cada ausência APROVADA num evento virtual tipo 'ausencia'.
       // FullCalendar com allDay espera que `end` seja EXCLUSIVE (o dia
       // seguinte ao último dia de férias) para cobrir o bloco inteiro.
       const eventosAusencias = ausenciasFiltradas.map((a) => {
@@ -677,17 +699,91 @@ exports.getDadosCalendario = async (req, res) => {
             ? { _id: String(a.utilizador_id._id), nome: a.utilizador_id.nome }
             : null,
           estado: 'concluida', // ausência não é uma tarefa ativa
+          estado_ausencia: 'aprovada',
           tempo_limpeza_minutos: 0,
           propriedade_id: null,
           notas: a.notas || '',
         };
       });
 
-      // Junta tarefas + folgas fixas + ausências e ordena por data.
-      // Prompt 139 — usa tarefasComViagem (com tempo_viagem_minutos calculado).
-      const resultado = [...tarefasComViagem, ...diasFolga, ...eventosAusencias].sort(
-        (a, b) => new Date(a.data).getTime() - new Date(b.data).getTime()
-      );
+      // HF25 — Converte ausências PENDENTES em eventos 'ausencia_pendente'.
+      // Estilo visual distinto (âmbar/listrado) + sufixo "(Pendente)" para
+      // o gestor perceber imediatamente que precisa de aprovar.
+      const eventosAusenciasPendentes = ausenciasPendentesFiltradas.map((a) => {
+        const endExclusive = new Date(a.data_fim);
+        endExclusive.setDate(endExclusive.getDate() + 1); // +1 dia
+
+        const tituloPorTipo =
+          a.tipo === 'ferias' ? '🌴 Férias'
+          : a.tipo === 'doenca' ? '🤒 Doença'
+          : '📅 Ausência';
+        const sufixoEmergencia =
+          a.estado === 'pendente_emergencia' ? ' (Emergência)' : '';
+
+        return {
+          _id: `ausencia_pendente_${a._id}`,
+          tipo: 'ausencia_pendente',
+          data: new Date(a.data_inicio),
+          start: new Date(a.data_inicio),
+          end: endExclusive,
+          allDay: true,
+          title: `${tituloPorTipo}${sufixoEmergencia} (Pendente): ${a.utilizador_id?.nome ?? 'Staff'}`,
+          utilizador_id: a.utilizador_id
+            ? { _id: String(a.utilizador_id._id), nome: a.utilizador_id.nome }
+            : null,
+          estado: 'concluida',
+          estado_ausencia: a.estado, // 'pendente' | 'pendente_emergencia'
+          tempo_limpeza_minutos: 0,
+          propriedade_id: null,
+          notas: a.notas || '',
+          justificacao: a.justificacao || '',
+        };
+      });
+
+      // HF26 — Deteta tarefas órfãs: tarefas atribuídas a staff que tem
+      // ausência APROVADA que cobre o dia da tarefa. Isto acontece quando:
+      //   (a) o webhook criou a tarefa depois da aprovação e o LB falhou
+      //       em filtrar (bug de empresa_id / utilizador_id / timezone);
+      //   (b) a desatribuição inicial da aprovação falhou;
+      //   (c) o gestor atribuiu manualmente ignorando o aviso.
+      // Marca a tarefa com `alerta_orfao: true` para o calendário mostrar
+      // um aviso visual vermelho e o gestor poder corrigir (Reaplicar).
+      if (ausenciasFiltradas.length > 0) {
+        // Constrói mapa: utilizador_id → lista de [data_inicio, data_fim].
+        const mapaAusencias = new Map();
+        for (const a of ausenciasFiltradas) {
+          const uid = String(a.utilizador_id._id);
+          if (!mapaAusencias.has(uid)) mapaAusencias.set(uid, []);
+          mapaAusencias.get(uid).push({
+            inicio: new Date(a.data_inicio).getTime(),
+            fim: new Date(a.data_fim).getTime() + 24 * 60 * 60 * 1000, // +1 dia (inclusive)
+          });
+        }
+        // Marca tarefas atribuídas cujo staff está de férias nesse dia.
+        for (const t of tarefasComViagem) {
+          if (!t.utilizador_id || !t.utilizador_id._id) continue;
+          const uid = String(t.utilizador_id._id);
+          const intervalos = mapaAusencias.get(uid);
+          if (!intervalos || intervalos.length === 0) continue;
+          const instante = new Date(t.data).getTime();
+          const estaAusente = intervalos.some(
+            (iv) => instante >= iv.inicio && instante < iv.fim
+          );
+          if (estaAusente) {
+            t.alerta_orfao = true;
+            t.alerta_mensagem = 'Staff de férias nesta data — tarefa órfã';
+          }
+        }
+      }
+
+      // Junta tarefas + folgas fixas + ausências (aprovadas + pendentes) e
+      // ordena por data. Prompt 139 — usa tarefasComViagem.
+      const resultado = [
+        ...tarefasComViagem,
+        ...diasFolga,
+        ...eventosAusencias,
+        ...eventosAusenciasPendentes,
+      ].sort((a, b) => new Date(a.data).getTime() - new Date(b.data).getTime());
 
       return res.status(200).json({ tarefas: resultado });
     }
@@ -1085,10 +1181,11 @@ exports.criarMembroEquipa = async (req, res) => {
     }
 
     // Validação do role (se vier, tem de ser um dos permitidos).
+    // HF27 — adicionado 'parceiro' (B2B externo que cria reservas manuais).
     const roleFinal = role || 'staff';
-    if (!['admin', 'gestor', 'staff'].includes(roleFinal)) {
+    if (!['admin', 'gestor', 'staff', 'parceiro'].includes(roleFinal)) {
       return res.status(400).json({
-        erro: 'Role inválido. Valores permitidos: admin, gestor, staff.',
+        erro: 'Role inválido. Valores permitidos: admin, gestor, staff, parceiro.',
       });
     }
 
@@ -1099,6 +1196,12 @@ exports.criarMembroEquipa = async (req, res) => {
         erro: 'Não é possível criar utilizadores com role "admin".',
       });
     }
+
+    // HF27 — Parceiros (B2B) são externos à equipa de limpezas:
+    //   - Não têm folgas semanais (dias_folga) — não são funcionários.
+    //   - Não têm responsável hierárquico (responsavel_id) — reportam à empresa.
+    //   - Forçamos estes campos a null/[] para evitar inconsistências.
+    const isParceiro = roleFinal === 'parceiro';
 
     // Validação de unicidade do email (único global).
     const emailNormalizado = String(email).toLowerCase().trim();
@@ -1111,8 +1214,9 @@ exports.criarMembroEquipa = async (req, res) => {
 
     // SEGURANÇA: Valida responsavel_id se vier — tem de ser admin/gestor
     // da mesma empresa.
+    // HF27 — Parceiros não têm responsável hierárquico (ignora o campo).
     let responsavelValidado = null;
-    if (responsavel_id) {
+    if (responsavel_id && !isParceiro) {
       if (!mongoose.isValidObjectId(responsavel_id)) {
         return res.status(400).json({ erro: 'responsavel_id inválido.' });
       }
@@ -1130,8 +1234,9 @@ exports.criarMembroEquipa = async (req, res) => {
     }
 
     // Valida dias_folga se vier (array de inteiros 0-6).
+    // HF27 — Parceiros não têm folgas semanais (ignora o campo, força []).
     let diasFolgaFinal = [];
-    if (dias_folga !== undefined && dias_folga !== null) {
+    if (dias_folga !== undefined && dias_folga !== null && !isParceiro) {
       if (!Array.isArray(dias_folga)) {
         return res.status(400).json({ erro: 'dias_folga deve ser um array de inteiros (0-6).' });
       }
@@ -1277,17 +1382,23 @@ exports.atualizarMembroEquipa = async (req, res) => {
     }
 
     // --- Role ---
+    // HF27 — adicionado 'parceiro' (B2B externo).
     if (role !== undefined) {
-      if (!['gestor', 'staff'].includes(role)) {
+      if (!['gestor', 'staff', 'parceiro'].includes(role)) {
         return res.status(400).json({
-          erro: 'Role inválido. Valores permitidos via edição: gestor, staff.',
+          erro: 'Role inválido. Valores permitidos via edição: gestor, staff, parceiro.',
         });
       }
       utilizador.role = role;
     }
 
+    // HF27 — Determina se o utilizador é (ou vai ficar) parceiro, para
+    // ignorar campos irrelevantes (responsavel_id, dias_folga, folgas_rotativas).
+    const isParceiroFinal = utilizador.role === 'parceiro';
+
     // --- Responsável (opcional: null = sem responsável) ---
-    if (responsavel_id !== undefined) {
+    // HF27 — Parceiros não têm responsável hierárquico (ignora o campo).
+    if (responsavel_id !== undefined && !isParceiroFinal) {
       if (responsavel_id === null || responsavel_id === '') {
         utilizador.responsavel_id = null;
       } else {
@@ -1315,11 +1426,16 @@ exports.atualizarMembroEquipa = async (req, res) => {
     }
 
     // --- dias_folga (opcional: array de inteiros 0-6) ---
+    // HF27 — Parceiros não têm folgas semanais (ignora o campo, força []).
     if (dias_folga !== undefined) {
-      if (!Array.isArray(dias_folga)) {
-        return res.status(400).json({ erro: 'dias_folga deve ser um array de inteiros (0-6).' });
+      if (isParceiroFinal) {
+        utilizador.dias_folga = [];
+      } else {
+        if (!Array.isArray(dias_folga)) {
+          return res.status(400).json({ erro: 'dias_folga deve ser um array de inteiros (0-6).' });
+        }
+        utilizador.dias_folga = dias_folga.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6);
       }
-      utilizador.dias_folga = dias_folga.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6);
     }
 
     // --- folgas_rotativas (opcional: array de { data, motivo }) ---
@@ -1327,28 +1443,32 @@ exports.atualizarMembroEquipa = async (req, res) => {
     // O frontend envia o array completo (substituição total, não append).
     // Cada entrada: { data: "YYYY-MM-DD" | Date, motivo: string }.
     // Validação: data deve ser válida; motivo é string (pode ser vazia).
+    // HF27 — Parceiros não têm folgas rotativas (força []).
     if (folgas_rotativas !== undefined) {
-      if (!Array.isArray(folgas_rotativas)) {
+      if (isParceiroFinal) {
+        utilizador.folgas_rotativas = [];
+      } else if (!Array.isArray(folgas_rotativas)) {
         return res.status(400).json({ erro: 'folgas_rotativas deve ser um array.' });
-      }
-      const folgasNormalizadas = [];
-      for (const fr of folgas_rotativas) {
-        if (!fr || typeof fr !== 'object') continue;
-        const dataObj = fr.data instanceof Date ? fr.data : new Date(fr.data);
-        if (isNaN(dataObj.getTime())) {
-          return res.status(400).json({
-            erro: 'folgas_rotativas: data inválida.',
-            detalhe: `Valor recebido: ${JSON.stringify(fr.data)}`,
+      } else {
+        const folgasNormalizadas = [];
+        for (const fr of folgas_rotativas) {
+          if (!fr || typeof fr !== 'object') continue;
+          const dataObj = fr.data instanceof Date ? fr.data : new Date(fr.data);
+          if (isNaN(dataObj.getTime())) {
+            return res.status(400).json({
+              erro: 'folgas_rotativas: data inválida.',
+              detalhe: `Valor recebido: ${JSON.stringify(fr.data)}`,
+            });
+          }
+          folgasNormalizadas.push({
+            data: dataObj,
+            motivo: typeof fr.motivo === 'string' ? fr.motivo.trim().slice(0, 200) : '',
           });
         }
-        folgasNormalizadas.push({
-          data: dataObj,
-          motivo: typeof fr.motivo === 'string' ? fr.motivo.trim().slice(0, 200) : '',
-        });
+        // Ordena por data (ascendente) para consistência.
+        folgasNormalizadas.sort((a, b) => a.data.getTime() - b.data.getTime());
+        utilizador.folgas_rotativas = folgasNormalizadas;
       }
-      // Ordena por data (ascendente) para consistência.
-      folgasNormalizadas.sort((a, b) => a.data.getTime() - b.data.getTime());
-      utilizador.folgas_rotativas = folgasNormalizadas;
     }
 
     // --- telefone (opcional) ---

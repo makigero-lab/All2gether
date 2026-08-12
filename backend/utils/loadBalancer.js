@@ -166,11 +166,27 @@ async function limpouPropriedadeOntem(utilizadorId, propriedadeId, dataReferenci
  *   3. Rotatividade/Equidade (penaliza quem tem + horas semanais / limpou ontem)
  *   4. Distância/Tempo de Viagem (Google Maps ou Haversine)
  *
+ * FIX (folgas/férias) — Filtros de indisponibilidade reforçados:
+ *   a) Folgas fixas semanais (Utilizador.dias_folga): compara o dia da
+ *      semana da tarefa contra o array [0=Dom ... 6=Sáb] de cada staff.
+ *      O dia da semana é calculado a partir de range.start (meia-noite UTC
+ *      do dia da tarefa, devolvido por obterRangeDia).
+ *   b) Ausências (coleção Ausencia): query por interseção de intervalos
+ *      (data_inicio < range.end AND data_fim >= range.start) que englobe
+ *      qualquer parte do dia da tarefa. Inclui estado 'aprovada' (férias/
+ *      doença confirmadas) E 'pendente_emergencia' (falta súbita do próprio
+ *      funcionário para o dia atual — ausência ativa mesmo sem aprovação).
+ *      Exclui 'pendente' (pedido normal não confirmado), 'rejeitada' e
+ *      'cancelada'.
+ *   c) Exclusão explícita via excluirStaffIds (Set) — usado pela versão de
+ *      equipas (determinarEquipaAtribuida) para não repetir o mesmo staff.
+ *
  * @param {import('mongoose').Types.ObjectId} empresaId
- * @param {{start: Date, end: Date}} range - intervalo do dia
+ * @param {{start: Date, end: Date}} range - intervalo do dia (start=meia-noite UTC, end=meia-noite do dia seguinte)
  * @param {{ lat: number, lng: number } | null} coordenadasNovaPropriedade
  * @param {number} tempoNovaTarefa - tempo_limpeza_minutos da nova tarefa
  * @param {import('mongoose').Types.ObjectId|null} [propriedadeId=null]
+ * @param {Set<string>|null} [excluirStaffIds=null] - IDs (string) a excluir do pool (usado pela versão de equipas)
  * @returns {Promise<{ utilizadorId, tempoViagem } | null>}
  */
 async function determinarUtilizadorAtribuido(
@@ -178,7 +194,8 @@ async function determinarUtilizadorAtribuido(
   range,
   coordenadasNovaPropriedade,
   tempoNovaTarefa,
-  propriedadeId = null
+  propriedadeId = null,
+  excluirStaffIds = null
 ) {
   // Procurar todos os Staff ativos da empresa.
   const staff = await Utilizador.find({
@@ -190,28 +207,68 @@ async function determinarUtilizadorAtribuido(
 
   if (staff.length === 0) return null;
 
-  // Filtro de Ausências aprovadas.
+  // ------------------------------------------------------------------
+  // FIX (folgas/férias) — Filtro de Ausências (interseção de intervalos).
+  // ------------------------------------------------------------------
+  // Antes: data_inicio <= range.start AND data_fim >= range.start.
+  //   → Falhava quando a ausência terminava no dia da tarefa com horário
+  //     inferior a range.start, ou quando range.start não era meia-noite.
+  // Agora: data_inicio < range.end AND data_fim >= range.start.
+  //   → Interseção de intervalos padrão: cobre qualquer parte do dia.
+  // Estados considerados ausência ATIVA:
+  //   - 'aprovada' — férias/doença confirmadas pelo gestor.
+  //   - 'pendente_emergencia' — falta súbita do próprio funcionário para o
+  //     dia atual (v1.26.0). É uma ausência real mesmo sem aprovação — se
+  //     o LB corre hoje, o staff está de facto indisponível.
+  // Exclui: 'pendente' (pedido normal não confirmado), 'rejeitada', 'cancelada'.
   const ausentes = await Ausencia.find({
     utilizador_id: { $in: staff.map((s) => s._id) },
-    estado: 'aprovada',
-    data_inicio: { $lte: range.start },
+    estado: { $in: ['aprovada', 'pendente_emergencia'] },
+    data_inicio: { $lt: range.end },
     data_fim: { $gte: range.start },
   }).distinct('utilizador_id');
 
   const setAusentes = new Set(ausentes.map(String));
 
-  // Filtro de Folgas Fixas Semanais.
+  // ------------------------------------------------------------------
+  // FIX (folgas/férias) — Filtro de Folgas Fixas Semanais (dias_folga).
+  // ------------------------------------------------------------------
+  // diaSemana é calculado a partir de range.start (meia-noite UTC do dia
+  // da tarefa). Utilizador.dias_folga é um array de inteiros 0-6
+  // (0=Dom, 1=Seg, ..., 6=Sáb) que representa os dias fixos de folga
+  // semanal do funcionário. Se o dia da tarefa estiver neste array,
+  // o staff é excluído do pool (não precisa de ausência marcada manual).
   const diaSemana = range.start.getDay();
 
+  // Set de exclusão explícita (versão de equipas — staff já escolhidos).
+  const setExcluidos = excluirStaffIds instanceof Set ? excluirStaffIds : null;
+
   const disponiveis = staff.filter((s) => {
-    if (setAusentes.has(String(s._id))) return false;
-    if (s.dias_folga && Array.isArray(s.dias_folga) && s.dias_folga.includes(diaSemana)) {
+    const idStr = String(s._id);
+    // (c) Exclusão explícita (versão de equipas).
+    if (setExcluidos && setExcluidos.has(idStr)) return false;
+    // (b) Ausência ativa (férias/doença/emergência) que cobre o dia.
+    if (setAusentes.has(idStr)) return false;
+    // (a) Folga fixa semanal — dia da semana da tarefa no array dias_folga.
+    if (
+      Array.isArray(s.dias_folga) &&
+      s.dias_folga.length > 0 &&
+      s.dias_folga.includes(diaSemana)
+    ) {
       return false;
     }
     return true;
   });
 
-  if (disponiveis.length === 0) return null;
+  if (disponiveis.length === 0) {
+    console.log(
+      `⚠️  [FIX folgas] Nenhum staff disponível para o dia ${range.start.toISOString().slice(0, 10)} ` +
+        `(diaSemana=${diaSemana}). ` +
+        `Total staff=${staff.length}, ausentes=${setAusentes.size}, ` +
+        `excluídos explicitamente=${setExcluidos ? setExcluidos.size : 0}.`
+    );
+    return null;
+  }
 
   // ----------------------------------------------------------------
   // Algoritmo VIP (funcionário preferencial) — preservado.
@@ -444,63 +501,40 @@ async function determinarEquipaAtribuida(
     return { equipa: [resultado], insuficiente: false };
   }
 
-  // Para N > 1: reusa a lógica de scoring mas devolve Top N.
-  // Como o determinarUtilizadorAtribuido já ordena internamente, precisamos
-  // de refatorar para aceder aos candidatos ordenados. Em vez de duplicar
-  // toda a lógica, chamamos a função base e depois ajustamos.
+  // Para N > 1: chama determinarUtilizadorAtribuido N vezes, passando um
+  // Set de IDs já escolhidos (excluirStaffIds) a cada iteração. Isto garante
+  // que o score é recalculado para cada staff restante (a carga muda quando
+  // atribuímos a alguém) E que nunca se repete o mesmo staff.
   //
-  // Abordagem pragmática: chama determinarUtilizadorAtribuido N vezes,
-  // excluindo os já escolhidos a cada iteração. Isto garante que o score
-  // é recalculado para cada staff restante (a carga muda quando atribuímos
-  // a alguém). Mais lento mas mais correto do que devolver N do mesmo sort.
+  // FIX (folgas/férias) — A exclusão é feita DENTRO de
+  // determinarUtilizadorAtribuido (filtro de dias_folga + query Ausencia +
+  // excluirStaffIds), pelo que a versão de equipas herda automaticamente o
+  // mesmo rigor de filtragem da versão de 1 staff.
 
   const equipa = [];
   const staffExcluidos = new Set();
 
   for (let i = 0; i < numStaffNecessario; i++) {
-    // Tenta atribuir ao próximo melhor staff (excluindo os já escolhidos).
-    // Como determinarUtilizadorAtribuido não suporta exclusão, usamos uma
-    // abordagem simplificada: chamamos a função base e se o vencedor já
-    // foi escolhido, tentamos o próximo. Para isto, precisamos de uma
-    // versão interna que devolva todos os candidatos ordenados.
-    //
-    // SOLUÇÃO: em vez de refatorar determinarUtilizadorAtribuido, fazemos
-    // uma versão inline que devolve a lista ordenada. Para evitar duplicação
-    // massiva de código, usamos um wrapper que chama a função base e
-    // depois re-ordena.
-    //
-    // NOTA: Esta é uma versão V1 — funciona corretamente mas pode não ser
-    // a mais eficiente. Para N=2 ou N=3 (casos reais), é perfeitamente
-    // aceitável. Para N grande (>5), considerar otimização.
-
     const resultado = await determinarUtilizadorAtribuido(
       empresaId,
       range,
       coordenadasNovaPropriedade,
       tempoNovaTarefa,
-      propriedadeId
+      propriedadeId,
+      staffExcluidos // ← FIX: exclui os já escolhidos + filtra folgas/férias
     );
 
     if (!resultado) {
-      // Não há mais staff disponível.
-      break;
-    }
-
-    const staffIdStr = String(resultado.utilizadorId);
-
-    if (staffExcluidos.has(staffIdStr)) {
-      // O LB devolveu o mesmo staff (porque a carga dele ainda é a menor).
-      // Isto acontece porque não estamos a simular a atribuição na BD.
-      // Para contornar, precisamos de excluir este staff da próxima chamada.
-      // Como não há parâmetro de exclusão, paramos aqui — os N reais
-      // podem ser menos do que o pedido.
+      // Não há mais staff disponível (todos os restantes estão de folga/
+      // férias ou excederam o SLA). Atribuição parcial.
       console.log(
-        `⚠️  [HF21] determinarEquipaAtribuida: LB devolveu o mesmo staff ${staffIdStr} ` +
-          `(${i + 1}/${numStaffNecessario}). Atribuição parcial.`
+        `⚠️  [HF21] determinarEquipaAtribuida: sem staff disponível para o slot ` +
+          `${i + 1}/${numStaffNecessario} (restantes de folga/férias/SLA). Atribuição parcial.`
       );
       break;
     }
 
+    const staffIdStr = String(resultado.utilizadorId);
     staffExcluidos.add(staffIdStr);
     equipa.push(resultado);
 

@@ -6,7 +6,7 @@ import { Loader2 } from "lucide-react";
 import { fazerLogout, lerUtilizador, limparCacheAuth, type Role } from "@/lib/auth";
 
 interface RouteGuardProps {
-  /** Role exigida para esta área ("admin" | "gestor" | "staff"). */
+  /** Role exigida para esta área ("admin" | "gestor" | "staff" | "parceiro"). */
   role: Role;
   children: React.ReactNode;
 }
@@ -68,10 +68,13 @@ export function RouteGuard({ role, children }: RouteGuardProps) {
 
       // Role errado → redirect HARD para o painel certo desse role.
       if (!roleAutorizado) {
+        // HF27 — Parceiros (B2B) têm portal próprio em /parceiro.
         const destino =
           user.role === "admin" || user.role === "gestor"
             ? "/gestor"
-            : "/staff";
+            : user.role === "parceiro"
+              ? "/parceiro"
+              : "/staff";
         window.location.href = destino;
         return;
       }

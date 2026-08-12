@@ -296,11 +296,16 @@ exports.criarUtilizadorEmpresa = async (req, res) => {
       });
     }
 
-    if (!['gestor', 'staff'].includes(roleFinal)) {
+    if (!['gestor', 'staff', 'parceiro'].includes(roleFinal)) {
       return res.status(400).json({
-        erro: 'Role inválido. Valores permitidos: gestor, staff.',
+        erro: 'Role inválido. Valores permitidos: gestor, staff, parceiro.',
       });
     }
+
+    // HF27 — Parceiros (B2B) são externos à equipa de limpezas:
+    //   - Não têm folgas semanais (dias_folga) — não são funcionários.
+    //   - Forçamos dias_folga a [] para evitar inconsistências.
+    const isParceiro = roleFinal === 'parceiro';
 
     // Validação de unicidade do email (único global).
     const emailNormalizado = String(email).toLowerCase().trim();
@@ -312,8 +317,9 @@ exports.criarUtilizadorEmpresa = async (req, res) => {
     }
 
     // Valida dias_folga se vier (array de inteiros 0-6).
+    // HF27 — Parceiros não têm folgas semanais (ignora o campo, força []).
     let diasFolgaFinal = [];
-    if (dias_folga !== undefined && dias_folga !== null) {
+    if (dias_folga !== undefined && dias_folga !== null && !isParceiro) {
       if (!Array.isArray(dias_folga)) {
         return res.status(400).json({ erro: 'dias_folga deve ser um array de inteiros (0-6).' });
       }

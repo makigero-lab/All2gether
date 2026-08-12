@@ -592,14 +592,23 @@ async function desatribuirTarefasPeriodo(utilizadorId, inicio, fim) {
   // fim do dia = meia-noite do dia seguinte (para query <).
   const fimDia = new Date(fim.getTime() + 24 * 60 * 60 * 1000);
 
-  // Procura tarefas atribuídas no período (não concluídas nem canceladas).
+  // Procura tarefas atribuídas no período.
+  // HF26 — Antes só desatribuía 'atribuida'. Agora desatribui também
+  // 'em_curso' (caso raro em que o staff começou mas ficou de férias a meio
+  // — o gestor deve poder reatribuir). NUNCA mexe em 'concluida' nem
+  // 'cancelada' (histórico preservado).
   const tarefas = await Tarefa.find({
     utilizador_id: utilizadorId,
     data: { $gte: inicio, $lt: fimDia },
-    estado: 'atribuida',
+    estado: { $in: ['atribuida', 'em_curso'] },
   });
 
   if (tarefas.length === 0) {
+    console.log(
+      `ℹ️ [desatribuirTarefasPeriodo] 0 tarefas para desatribuir ` +
+        `(utilizador=${utilizadorId}, período=${inicio.toISOString().slice(0, 10)} ` +
+        `a ${fim.toISOString().slice(0, 10)}).`
+    );
     return { total: 0, desatribuidas: 0 };
   }
 
@@ -611,8 +620,237 @@ async function desatribuirTarefasPeriodo(utilizadorId, inicio, fim) {
     desatribuidas++;
   }
 
+  console.log(
+    `📤 [desatribuirTarefasPeriodo] ${desatribuidas} tarefa(s) desatribuída(s) ` +
+      `(utilizador=${utilizadorId}, período=${inicio.toISOString().slice(0, 10)} ` +
+      `a ${fim.toISOString().slice(0, 10)}).`
+  );
+
   return { total: tarefas.length, desatribuidas };
 }
+
+/* ------------------------------------------------------------------ */
+/* HF26 — Reaplicar ausência (forçar desatribuição)                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * POST /api/gestor/ausencias/:id/reaplicar
+ *
+ * Re-executa desatribuirTarefasPeriodo para uma ausência JÁ aprovada.
+ *
+ * Caso de uso: o gestor aprovou a ausência, mas as tarefas continuam
+ * atribuídas ao staff (ex.: webhook criou tarefas depois da aprovação
+ * e o LB falhou em filtrar, ou a desatribuição inicial falhou). Este
+ * endpoint permite "reaplicar" a ausência sem ter de a cancelar e recriar.
+ *
+ * Resposta 200: { mensagem, redistribuicao, ausencia }
+ */
+exports.reaplicarAusencia = async (req, res) => {
+  try {
+    const { ok, empresaId } = obterEmpresaId(req, res);
+    if (!ok) return;
+
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ erro: 'ID de ausência inválido.' });
+    }
+
+    const ausencia = await Ausencia.findOne({ _id: id, empresa_id: empresaId });
+    if (!ausencia) {
+      return res.status(404).json({
+        erro: 'Ausência não encontrada (ou não pertence a esta empresa).',
+      });
+    }
+
+    if (ausencia.estado !== 'aprovada') {
+      return res.status(400).json({
+        erro: `Só se podem reaplicar ausências aprovadas (atual: ${ausencia.estado}).`,
+      });
+    }
+
+    // Re-executa a desatribuição no período da ausência.
+    const redistribuicao = await desatribuirTarefasPeriodo(
+      ausencia.utilizador_id,
+      ausencia.data_inicio,
+      ausencia.data_fim
+    );
+
+    const utilizador = await Utilizador.findById(ausencia.utilizador_id).select('nome').lean();
+
+    registarAuditoria({
+      utilizador_id: req.user.id,
+      utilizador_nome: req.user.nome || 'Admin',
+      empresa_id: empresaId,
+      acao: 'reaplicar_ausencia',
+      recurso: 'ausencia',
+      recurso_id: ausencia._id,
+      descricao: `Ausência reaplicada para "${utilizador?.nome ?? '?'}": ${redistribuicao.desatribuidas} tarefa(s) desatribuída(s).`,
+      detalhes: {
+        utilizador_id: String(ausencia.utilizador_id),
+        data_inicio: ausencia.data_inicio,
+        data_fim: ausencia.data_fim,
+        redistribuicao,
+      },
+    });
+
+    return res.status(200).json({
+      mensagem:
+        redistribuicao.desatribuidas > 0
+          ? `Ausência reaplicada. ${redistribuicao.desatribuidas} tarefa(s) desatribuída(s).`
+          : 'Ausência reaplicada. Não havia tarefas atribuídas no período (já estavam corretas).',
+      redistribuicao,
+      ausencia,
+    });
+  } catch (err) {
+    console.error('❌ reaplicarAusencia:', err.message);
+    return res.status(500).json({ erro: 'Erro interno do servidor.' });
+  }
+};
+
+/* ------------------------------------------------------------------ */
+/* HF26 — Diagnóstico de ausências (auditoria de estado)               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * GET /api/gestor/ausencias/diagnostico/:utilizadorId
+ *
+ * Auditoria completa do estado de ausências de um utilizador.
+ *
+ * Retorna:
+ *   - dados do utilizador (incluindo empresa_id e eliminado_em)
+ *   - empresa_id do gestor autenticado (para comparar)
+ *   - todas as ausências do utilizador (SEM filtro de empresa — para
+ *     detetar mismatch de empresa_id)
+ *   - tarefas atribuídas ao utilizador no período de cada ausência
+ *   - diagnóstico automático (causa provável se houver inconsistência)
+ *
+ * Caso de uso: o gestor vê staff com tarefas atribuídas durante férias
+ * "aprovadas" que não aparecem no calendário. Este endpoint permite
+ * identificar a causa raiz (empresa errada, utilizador recriado, datas
+ * erradas, etc.).
+ *
+ * Resposta 200: { utilizador, empresaGestor, ausencias, diagnostico }
+ */
+exports.diagnosticoAusencia = async (req, res) => {
+  try {
+    const { ok, empresaId } = obterEmpresaId(req, res);
+    if (!ok) return;
+
+    const { utilizadorId } = req.params;
+    if (!mongoose.isValidObjectId(utilizadorId)) {
+      return res.status(400).json({ erro: 'utilizadorId inválido.' });
+    }
+
+    // Busca o utilizador SEM filtro de empresa (para detetar mismatch).
+    const utilizador = await Utilizador.findById(utilizadorId)
+      .select('nome email role empresa_id eliminado_em ativo')
+      .lean();
+
+    if (!utilizador) {
+      return res.status(404).json({
+        erro: 'Utilizador não encontrado (pode ter sido eliminado permanentemente).',
+      });
+    }
+
+    // Busca TODAS as ausências do utilizador (sem filtro de empresa).
+    const ausencias = await Ausencia.find({ utilizador_id: utilizadorId })
+      .sort({ data_inicio: -1 })
+      .select('empresa_id data_inicio data_fim tipo estado createdAt updatedAt')
+      .lean();
+
+    // Para cada ausência, conta as tarefas atribuídas no período.
+    const ausenciasComTarefas = await Promise.all(
+      ausencias.map(async (a) => {
+        const fimDia = new Date(a.data_fim.getTime() + 24 * 60 * 60 * 1000);
+        const tarefasAtribuidas = await Tarefa.countDocuments({
+          utilizador_id: utilizadorId,
+          data: { $gte: a.data_inicio, $lt: fimDia },
+          estado: { $in: ['atribuida', 'em_curso'] },
+        });
+        return {
+          ...a,
+          data_inicio: a.data_inicio.toISOString().slice(0, 10),
+          data_fim: a.data_fim.toISOString().slice(0, 10),
+          tarefas_atribuidas_no_periodo: tarefasAtribuidas,
+          empresa_match: String(a.empresa_id) === String(empresaId),
+        };
+      })
+    );
+
+    // Diagnóstico automático.
+    const diagnostico = [];
+    const empresaMatch = String(utilizador.empresa_id) === String(empresaId);
+    if (!empresaMatch) {
+      diagnostico.push({
+        severidade: 'critica',
+        mensagem: `MISMATCH DE EMPRESA: o utilizador pertence à empresa ${utilizador.empresa_id} mas o gestor autenticado está na empresa ${empresaId}. As ausências e tarefas só aparecem para a empresa correta.`,
+      });
+    }
+    if (utilizador.eliminado_em) {
+      diagnostico.push({
+        severidade: 'critica',
+        mensagem: `Utilizador ELIMINADO (soft delete em ${utilizador.eliminado_em.toISOString().slice(0, 10)}). Foi provavelmente recriado com outro _id — as ausências antigas não se aplicam ao novo utilizador.`,
+      });
+    }
+    if (!utilizador.ativo) {
+      diagnostico.push({
+        severidade: 'aviso',
+        mensagem: 'Utilizador inativo. Não deveria receber tarefas (o LB filtra por ativo=true).',
+      });
+    }
+
+    const aprovadas = ausenciasComTarefas.filter((a) => a.estado === 'aprovada');
+    if (aprovadas.length === 0) {
+      diagnostico.push({
+        severidade: 'aviso',
+        mensagem: 'Nenhuma ausência APROVADA encontrada para este utilizador. Pendentes não bloqueiam o LB nem aparecem no calendário.',
+      });
+    } else {
+      for (const a of aprovadas) {
+        if (!a.empresa_match) {
+          diagnostico.push({
+            severidade: 'critica',
+            mensagem: `Ausência aprovada (${a.data_inicio} a ${a.data_fim}) pertence a OUTRA empresa (${a.empresa_id}). Não aparecerá no calendário nem bloqueará o LB para a empresa atual.`,
+          });
+        }
+        if (a.tarefas_atribuidas_no_periodo > 0) {
+          diagnostico.push({
+            severidade: 'critica',
+            mensagem: `Ausência aprovada (${a.data_inicio} a ${a.data_fim}) com ${a.tarefas_atribuidas_no_periodo} tarefa(s) atribuída(s) no período. Inconsistência: o LB deveria ter bloqueado. Usa o botão "Reaplicar" para forçar a desatribuição.`,
+          });
+        }
+      }
+    }
+
+    if (diagnostico.length === 0) {
+      diagnostico.push({
+        severidade: 'ok',
+        mensagem: 'Tudo consistente. Ausências aprovadas sem tarefas atribuídas no período.',
+      });
+    }
+
+    return res.status(200).json({
+      utilizador: {
+        _id: String(utilizador._id),
+        nome: utilizador.nome,
+        email: utilizador.email,
+        role: utilizador.role,
+        empresa_id: String(utilizador.empresa_id),
+        eliminado_em: utilizador.eliminado_em
+          ? utilizador.eliminado_em.toISOString().slice(0, 10)
+          : null,
+        ativo: utilizador.ativo,
+      },
+      empresaGestor: String(empresaId),
+      empresaMatch,
+      ausencias: ausenciasComTarefas,
+      diagnostico,
+    });
+  } catch (err) {
+    console.error('❌ diagnosticoAusencia:', err.message);
+    return res.status(500).json({ erro: 'Erro interno do servidor.' });
+  }
+};
 
 // Exporta o helper para reutilização (registarBaixaProlongada, falta súbita).
 exports.desatribuirTarefasPeriodo = desatribuirTarefasPeriodo;

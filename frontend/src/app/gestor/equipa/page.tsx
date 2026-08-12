@@ -89,12 +89,14 @@ const ROLE_LABEL: Record<Role, string> = {
   admin: "Admin",
   gestor: "Gestor",
   staff: "Staff",
+  parceiro: "Parceiro",
 };
 
 const ROLE_VARIANT: Record<Role, "default" | "secondary" | "outline"> = {
   admin: "default",
   gestor: "secondary",
   staff: "outline",
+  parceiro: "outline",
 };
 
 const DIAS_SEMANA = [
@@ -293,8 +295,11 @@ function EquipaPage() {
     (u) => u.role === "gestor"
   );
 
-  // IDs dos utilizadores com ausência aprovada para hoje (para mostrar badge).
-  const [ausentesHoje, setAusentesHoje] = useState<Set<string>>(new Set());
+  // FIX (férias visíveis) — Mapa de utilizador_id -> tipo de ausência ativa
+  // para hoje ('ferias' | 'doenca' | 'outro'). Usado para mostrar o badge
+  // vermelho "De Férias" (ou "Doente"/"Ausente" consoante o tipo) na tabela
+  // de staff. Antes era um Set<string> que não distinguia o tipo.
+  const [ausentesHoje, setAusentesHoje] = useState<Record<string, string>>({});
 
   /** Carrega os utilizadores da API + ausências aprovadas para hoje. */
   const carregar = useCallback(async () => {
@@ -311,24 +316,27 @@ function EquipaPage() {
             data_inicio: string;
             data_fim: string;
             estado: string;
+            tipo: string;
           }[];
         }>("/api/gestor/ausencias?estado=aprovada"),
       ]);
       setUtilizadores(data.utilizadores ?? []);
 
-      // Filtra as ausências aprovadas que cobrem hoje.
+      // Filtra as ausências aprovadas que cobrem hoje e guarda o TIPO
+      // (ferias/doenca/outro) para mostrar o badge correto.
       const hojeUTC = new Date(
         Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth(), hoje.getUTCDate())
       );
-      const setAusentes = new Set<string>();
+      const mapaAusentes: Record<string, string> = {};
       for (const a of ausenciasRes.ausencias ?? []) {
         const ini = parsearDataSegura(a.data_inicio);
         const fim = parsearDataSegura(a.data_fim);
         if (ini && fim && hojeUTC >= ini && hojeUTC <= fim && a.utilizador_id) {
-          setAusentes.add(a.utilizador_id);
+          // Guarda o tipo da ausência (default 'ferias' se não vier na resposta).
+          mapaAusentes[a.utilizador_id] = a.tipo || "ferias";
         }
       }
-      setAusentesHoje(setAusentes);
+      setAusentesHoje(mapaAusentes);
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Erro ao carregar equipa.");
     } finally {
@@ -760,7 +768,7 @@ function EquipaPage() {
                     </div>
                     <div className="space-y-1.5">
                       <label htmlFor="role" className="text-sm font-medium">
-                        Role
+                        Tipo de utilizador
                       </label>
                       <select
                         id="role"
@@ -770,41 +778,51 @@ function EquipaPage() {
                         }
                         className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                       >
-                        <option value="staff">Staff</option>
-                        <option value="gestor">Responsável</option>
-                        <option value="parceiro">Parceiro</option>
+                        <option value="staff">Staff (funcionário de limpezas)</option>
+                        <option value="gestor">Responsável (gere a equipa)</option>
+                        <option value="parceiro">Parceiro (B2B externo — cria reservas)</option>
                       </select>
+                      {form.role === "parceiro" && (
+                        <p className="text-xs text-muted-foreground">
+                          Parceiros são externos: não têm folgas semanais nem responsável hierárquico.
+                          Acedem ao portal B2B para criar reservas manuais nas suas propriedades.
+                        </p>
+                      )}
                     </div>
-                    <div className="space-y-1.5">
-                      <label htmlFor="responsavel" className="text-sm font-medium">
-                        Responsável{" "}
-                        <span className="font-normal text-muted-foreground">
-                          (opcional)
-                        </span>
-                      </label>
-                      <select
-                        id="responsavel"
-                        value={form.responsavel_id}
-                        onChange={(e) =>
-                          setForm((f) => ({ ...f, responsavel_id: e.target.value }))
-                        }
-                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                      >
-                        <option value="">— Sem responsável —</option>
-                        {responsaveisPossiveis.map((r) => (
-                          <option key={r._id} value={r._id}>
-                            {r.nome} ({ROLE_LABEL[r.role]})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                    {form.role !== "parceiro" && (
+                      <div className="space-y-1.5">
+                        <label htmlFor="responsavel" className="text-sm font-medium">
+                          Responsável{" "}
+                          <span className="font-normal text-muted-foreground">
+                            (opcional)
+                          </span>
+                        </label>
+                        <select
+                          id="responsavel"
+                          value={form.responsavel_id}
+                          onChange={(e) =>
+                            setForm((f) => ({ ...f, responsavel_id: e.target.value }))
+                          }
+                          className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        >
+                          <option value="">— Sem responsável —</option>
+                          {responsaveisPossiveis.map((r) => (
+                            <option key={r._id} value={r._id}>
+                              {r.nome} ({ROLE_LABEL[r.role]})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                   </div>
 
-                  {/* Folgas Semanais Fixas */}
-                  <FolgasSemanaisCheckboxes
-                    diasFolga={form.dias_folga}
-                    onChange={(dias) => setForm((f) => ({ ...f, dias_folga: dias }))}
-                  />
+                  {/* Folgas Semanais Fixas — só para staff/gestor (não parceiros) */}
+                  {form.role !== "parceiro" && (
+                    <FolgasSemanaisCheckboxes
+                      diasFolga={form.dias_folga}
+                      onChange={(dias) => setForm((f) => ({ ...f, dias_folga: dias }))}
+                    />
+                  )}
 
                   {formErro && (
                     <p className="flex items-center gap-2 text-sm text-destructive">
@@ -890,17 +908,31 @@ function EquipaPage() {
                     </thead>
                     <tbody className="divide-y">
                       {utilizadoresPagina.map((u) => {
-                        const ausenteHoje = ausentesHoje.has(u._id);
+                        // FIX (férias visíveis) — tipo de ausência ativa hoje
+                        // ('ferias' | 'doenca' | 'outro' | undefined).
+                        const ausenteTipo = ausentesHoje[u._id];
                         return (
-                        <tr key={u._id} className={`hover:bg-muted/30 ${ausenteHoje ? "opacity-65" : ""}`}>
+                        <tr key={u._id} className={`hover:bg-muted/30 ${ausenteTipo ? "opacity-65" : ""}`}>
                           <td className="px-4 py-3 font-medium">
                             <div className="flex items-center gap-2">
                               {u.nome}
-                              {ausenteHoje && (
+                              {ausenteTipo === "ferias" && (
                                 <Badge variant="destructive" className="text-[10px]">
-                                  Ausente Hoje
+                                  De Férias
                                 </Badge>
                               )}
+                              {ausenteTipo === "doenca" && (
+                                <Badge variant="destructive" className="text-[10px]">
+                                  Doente
+                                </Badge>
+                              )}
+                              {ausenteTipo &&
+                                ausenteTipo !== "ferias" &&
+                                ausenteTipo !== "doenca" && (
+                                  <Badge variant="destructive" className="text-[10px]">
+                                    Ausente
+                                  </Badge>
+                                )}
                             </div>
                           </td>
                           <td className="px-4 py-3 text-muted-foreground">
@@ -1087,7 +1119,7 @@ function EquipaPage() {
                 </div>
                 <div className="space-y-1.5">
                   <label htmlFor="edit-role" className="text-sm font-medium">
-                    Role
+                    Tipo de utilizador
                   </label>
                   <select
                     id="edit-role"
@@ -1097,39 +1129,47 @@ function EquipaPage() {
                     }
                     className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                   >
-                    <option value="staff">Staff</option>
-                    <option value="gestor">Responsável</option>
-                    <option value="parceiro">Parceiro</option>
+                    <option value="staff">Staff (funcionário de limpezas)</option>
+                    <option value="gestor">Responsável (gere a equipa)</option>
+                    <option value="parceiro">Parceiro (B2B externo — cria reservas)</option>
                   </select>
+                  {editForm.role === "parceiro" && (
+                    <p className="text-xs text-muted-foreground">
+                      Parceiros são externos: não têm folgas semanais nem responsável hierárquico.
+                      Acedem ao portal B2B para criar reservas manuais nas suas propriedades.
+                    </p>
+                  )}
                 </div>
-                <div className="space-y-1.5">
-                  <label htmlFor="edit-responsavel" className="text-sm font-medium">
-                    Responsável{" "}
-                    <span className="font-normal text-muted-foreground">
-                      (opcional)
-                    </span>
-                  </label>
-                  <select
-                    id="edit-responsavel"
-                    value={editForm.responsavel_id}
-                    onChange={(e) =>
-                      setEditForm((f) => ({
-                        ...f,
-                        responsavel_id: e.target.value,
-                      }))
-                    }
-                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                  >
-                    <option value="">— Sem responsável —</option>
-                    {responsaveisPossiveis
-                      .filter((r) => r._id !== editando?._id)
-                      .map((r) => (
-                        <option key={r._id} value={r._id}>
-                          {r.nome} ({ROLE_LABEL[r.role]})
-                        </option>
-                      ))}
-                  </select>
-                </div>
+                {editForm.role !== "parceiro" && (
+                  <div className="space-y-1.5">
+                    <label htmlFor="edit-responsavel" className="text-sm font-medium">
+                      Responsável{" "}
+                      <span className="font-normal text-muted-foreground">
+                        (opcional)
+                      </span>
+                    </label>
+                    <select
+                      id="edit-responsavel"
+                      value={editForm.responsavel_id}
+                      onChange={(e) =>
+                        setEditForm((f) => ({
+                          ...f,
+                          responsavel_id: e.target.value,
+                        }))
+                      }
+                      className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    >
+                      <option value="">— Sem responsável —</option>
+                      {responsaveisPossiveis
+                        .filter((r) => r._id !== editando?._id)
+                        .map((r) => (
+                          <option key={r._id} value={r._id}>
+                            {r.nome} ({ROLE_LABEL[r.role]})
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                )}
                 <div className="space-y-1.5">
                   <label htmlFor="edit-password" className="text-sm font-medium">
                     Nova Password{" "}
@@ -1162,15 +1202,18 @@ function EquipaPage() {
                   </p>
                 </div>
 
-                {/* Folgas Semanais Fixas */}
-                <FolgasSemanaisCheckboxes
-                  diasFolga={editForm.dias_folga}
-                  onChange={(dias) =>
-                    setEditForm((f) => ({ ...f, dias_folga: dias }))
-                  }
-                />
+                {/* Folgas Semanais Fixas — só para staff/gestor (não parceiros) */}
+                {editForm.role !== "parceiro" && (
+                  <FolgasSemanaisCheckboxes
+                    diasFolga={editForm.dias_folga}
+                    onChange={(dias) =>
+                      setEditForm((f) => ({ ...f, dias_folga: dias }))
+                    }
+                  />
+                )}
 
-                {/* HF10 — Folgas Específicas / Rotativas */}
+                {/* HF10 — Folgas Específicas / Rotativas — só para staff/gestor */}
+                {editForm.role !== "parceiro" && (
                 <div className="space-y-3 rounded-md border p-3">
                   <div className="flex items-center gap-2">
                     <Calendar className="h-4 w-4 text-primary" />
@@ -1282,6 +1325,7 @@ function EquipaPage() {
                     </ul>
                   )}
                 </div>
+                )}
 
                 {editErro && (
                   <p className="flex items-center gap-2 text-sm text-destructive">

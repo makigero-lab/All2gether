@@ -57,6 +57,12 @@ interface TarefaCalendario {
   tipo: string;
   estado: string;
   observacoes?: string;
+  // HF25 — estado da ausência (aprovada | pendente | pendente_emergencia).
+  estado_ausencia?: string;
+  justificacao?: string;
+  // HF26 — tarefa órfã (staff de férias com tarefa atribuída).
+  alerta_orfao?: boolean;
+  alerta_mensagem?: string;
   // Prompt 99 — Detalhes da reserva (para a coluna Reserva da Vista Tabela).
   detalhes_reserva?: {
     checkin?: string | null;
@@ -100,6 +106,7 @@ const TIPO_LABEL: Record<string, string> = {
   check_in: "Check-in",
   check_out: "Check-out",
   ausencia: "Ausência",
+  ausencia_pendente: "Ausência (Pendente)",
 };
 
 /* ------------------------------------------------------------------ */
@@ -432,6 +439,27 @@ export default function CalendarioOperacionalPage() {
         } as EventInput];
       }
 
+      // HF25 — Ausência PENDENTE (pedido de férias/doença por aprovar).
+      // Banner âmbar listrado, distinto das aprovadas, para o gestor ver
+      // imediatamente que há um pedido a aguardar aprovação. Isto resolve
+      // o bug em que staff "em férias" aparecia com tarefas mas o calendário
+      // não mostrava nada — a ausência estava pendente (não aprovada).
+      if (t.tipo === "ausencia_pendente") {
+        return [{
+          id: t._id,
+          title: t.title ?? `Ausência (Pendente): ${t.utilizador_id?.nome ?? "Staff"}`,
+          start: t.start ?? t.data,
+          end: t.end,
+          allDay: true,
+          // Âmbar pastel com opacidade — sinal de atenção (precisa ação).
+          backgroundColor: "#fef3c7",
+          borderColor: "#f59e0b",
+          textColor: "#92400e",
+          extendedProps: t,
+          classNames: ["fc-evt-ausencia-pendente"],
+        } as EventInput];
+      }
+
       // Folga fixa semanal — bloco cinzento claro, todo o dia.
       if (t.tipo === "folga_fixa") {
         return [{
@@ -454,8 +482,15 @@ export default function CalendarioOperacionalPage() {
       const inicio = parsearDataSegura(t.data) ?? new Date();
       const semHoraReal = !temHoraReal(t.data);
       const paleta = paletaPorEstado(t.estado);
-      const classNames =
-        t.estado === "por_atribuir" || t.estado === "nao_atribuida"
+      // HF26 — Se a tarefa é órfã (staff de férias), força cor vermelha
+      // e adiciona classe de alerta, override da paleta por estado.
+      const isOrfao = !!t.alerta_orfao;
+      const paletaFinal = isOrfao
+        ? { bg: "#fee2e2", border: "#ef4444", text: "#991b1b", dot: "#dc2626" }
+        : paleta;
+      const classNames = isOrfao
+        ? ["fc-evt-orfao"]
+        : t.estado === "por_atribuir" || t.estado === "nao_atribuida"
           ? ["fc-evt-por-atribuir"]
           : [];
 
@@ -466,9 +501,9 @@ export default function CalendarioOperacionalPage() {
           title: t.propriedade_id?.nome ?? "—",
           start: inicio.toISOString().slice(0, 10),
           allDay: true,
-          backgroundColor: paleta.bg,
-          borderColor: paleta.border,
-          textColor: paleta.text,
+          backgroundColor: paletaFinal.bg,
+          borderColor: paletaFinal.border,
+          textColor: paletaFinal.text,
           extendedProps: t,
           classNames,
         } as EventInput];
@@ -502,11 +537,11 @@ export default function CalendarioOperacionalPage() {
         title: t.propriedade_id?.nome ?? "—",
         start: startLocal,
         end: endLocal,
-        backgroundColor: temConflito ? "#fef3c7" : paleta.bg,
-        borderColor: temConflito ? "#f59e0b" : paleta.border,
-        textColor: temConflito ? "#92400e" : paleta.text,
+        backgroundColor: isOrfao ? paletaFinal.bg : (temConflito ? "#fef3c7" : paleta.bg),
+        borderColor: isOrfao ? paletaFinal.border : (temConflito ? "#f59e0b" : paleta.border),
+        textColor: isOrfao ? paletaFinal.text : (temConflito ? "#92400e" : paleta.text),
         extendedProps: t,
-        classNames: temConflito ? [...classNames, "fc-evt-conflito"] : classNames,
+        classNames: isOrfao ? classNames : (temConflito ? [...classNames, "fc-evt-conflito"] : classNames),
       };
 
       // Prompt 137 — Evento A (A Viagem): só cria se tempo_viagem_minutos > 0.
@@ -559,6 +594,8 @@ export default function CalendarioOperacionalPage() {
     const staff = t.utilizador_id?.nome ?? null;
     const isFolga = t.tipo === "folga_fixa";
     const isAusencia = t.tipo === "ausencia";
+    // HF25 — ausência pendente (pedido por aprovar).
+    const isAusenciaPendente = t.tipo === "ausencia_pendente";
     const isPorAtribuir = t.estado === "por_atribuir";
     const isViagem = !!t._isViagem;
 
@@ -601,8 +638,40 @@ export default function CalendarioOperacionalPage() {
       );
     }
 
+    // HF25 — Ausência PENDENTE: banner âmbar com indicador de espera.
+    // Visualmente distinto das aprovadas para o gestor perceber que precisa
+    // de aprovar. Inclui a justificação no tooltip se existir.
+    if (isAusenciaPendente) {
+      const bannerTitle = t.title ?? `Ausência (Pendente): ${staff ?? "Staff"}`;
+      const tooltip = t.justificacao
+        ? `${bannerTitle}\nJustificação: ${t.justificacao}`
+        : bannerTitle;
+      return (
+        <div className="fc-evt-ausencia-pendente__content" title={tooltip}>
+          <span className="fc-evt-ausencia-pendente__pulse" aria-hidden>⏳</span>
+          <span className="fc-evt-ausencia-pendente__title">{bannerTitle}</span>
+        </div>
+      );
+    }
+
     // --- Vista mensal: layout compacto em linha ---
     if (isMonthView) {
+      // HF26 — Tarefa órfã (staff de férias): destaque VERMELHO, prioritário.
+      if (t.alerta_orfao) {
+        const msg = t.alerta_mensagem ?? "Limpeza órfã";
+        return (
+          <div
+            className="fc-evt-month fc-evt-month--orfao"
+            title={`⚠️ ${msg} — ${titulo}${staff ? ` (${staff})` : ""}`}
+          >
+            <span className="fc-evt-month__alert-icon" aria-hidden>🚨</span>
+            <span className="fc-evt-month__title">
+              {emoji} {titulo}
+            </span>
+            <span className="fc-evt-month__alert-tag">Órfã</span>
+          </div>
+        );
+      }
       // Prompt 80, ponto 1 — destaque forte para por_atribuir na vista mensal.
       if (isPorAtribuir) {
         return (
@@ -631,16 +700,21 @@ export default function CalendarioOperacionalPage() {
     }
 
     // --- Vistas semanal/diária: bloco rico com título + subtítulo ---
+    const blockClass = t.alerta_orfao
+      ? "fc-evt-block fc-evt-block--orfao"
+      : isPorAtribuir
+        ? "fc-evt-block fc-evt-block--alert"
+        : "fc-evt-block";
     return (
-      <div className={isPorAtribuir ? "fc-evt-block fc-evt-block--alert" : "fc-evt-block"}>
+      <div className={blockClass}>
         <div className="fc-evt-block__header">
           <span
             className="fc-evt-block__dot"
-            style={{ backgroundColor: isFolga ? "#94a3b8" : paleta.dot }}
+            style={{ backgroundColor: t.alerta_orfao ? "#dc2626" : (isFolga ? "#94a3b8" : paleta.dot) }}
             aria-hidden
           />
           <span className="fc-evt-block__emoji" aria-hidden>
-            {emoji}
+            {t.alerta_orfao ? "🚨" : emoji}
           </span>
           <span className="fc-evt-block__time">{arg.timeText}</span>
         </div>
@@ -648,7 +722,11 @@ export default function CalendarioOperacionalPage() {
           {titulo}
         </div>
         <div className="fc-evt-block__subtitle">
-          {staff ? (
+          {t.alerta_orfao ? (
+            <span className="fc-evt-block__orphan-alert">
+              🚨 Órfã — {staff ? primeiroNome(staff) : "staff"} de férias
+            </span>
+          ) : staff ? (
             <>
               <User className="fc-evt-block__icon" />
               <span>{primeiroNome(staff)}</span>
@@ -902,7 +980,7 @@ export default function CalendarioOperacionalPage() {
 
     return tarefas
       .filter((t) => {
-        if (t.tipo === "ausencia" || t.tipo === "folga_fixa") return false;
+        if (t.tipo === "ausencia" || t.tipo === "ausencia_pendente" || t.tipo === "folga_fixa") return false;
 
         // Calcula a hora de fim da tarefa (início + tempo_limpeza_minutos).
         const inicio = (parsearDataSegura(t.data) ?? new Date(0)).getTime();
@@ -947,7 +1025,7 @@ export default function CalendarioOperacionalPage() {
         `/api/gestor/calendario/dados?${params.toString()}`
       );
       const todasTarefas = (res.tarefas ?? [])
-        .filter((t) => t.tipo !== "ausencia" && t.tipo !== "folga_fixa")
+        .filter((t) => t.tipo !== "ausencia" && t.tipo !== "ausencia_pendente" && t.tipo !== "folga_fixa")
         .slice()
         .sort((a, b) => {
           try {
@@ -1016,11 +1094,11 @@ export default function CalendarioOperacionalPage() {
               setMostrarNovaTarefa(true);
             }}
             disabled={loading}
-            title="Cria uma tarefa manualmente (limpeza, manutenção, etc.)."
+            title="Cria uma limpeza manualmente (limpeza, manutenção, etc.)."
             className="gap-2"
           >
             <Plus className="h-4 w-4" />
-            Nova Tarefa
+            Nova Limpeza
           </Button>
           {/* v1.64.0 (Prompt 87) — Auto-Atribuir Pendentes */}
           <Button
@@ -1101,7 +1179,7 @@ export default function CalendarioOperacionalPage() {
         </div>
         <p className="text-sm text-muted-foreground">
           Vista mensal, semanal e diária de todas as tarefas de limpeza. Filtra por
-          propriedade, staff ou estado. Clica numa tarefa para ver o detalhe e reatribuir.
+          propriedade, staff ou estado. Clica numa limpeza para ver o detalhe e reatribuir.
           Alterna para a Vista Tabela e exporta para Excel.
         </p>
       </div>
@@ -1402,8 +1480,8 @@ export default function CalendarioOperacionalPage() {
         onOpenChange={(o) => !o && setTarefaSelecionada(null)}
       >
         <DialogHeader>
-          <DialogTitle>Detalhe da Tarefa</DialogTitle>
-          <DialogDescription>Informação da tarefa e reatribuição rápida.</DialogDescription>
+          <DialogTitle>Detalhe da Limpeza</DialogTitle>
+          <DialogDescription>Informação da limpeza e reatribuição rápida.</DialogDescription>
           <DialogClose onClick={() => setTarefaSelecionada(null)} />
         </DialogHeader>
         {tarefaSelecionada && (
@@ -1491,24 +1569,31 @@ export default function CalendarioOperacionalPage() {
                 className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <option value="">— Selecionar staff —</option>
-                {equipa
-                  // NÃO mostrar os staff indisponíveis no dropdown (férias/
-                  // doença/ausência nesse dia). Antes eram mostrados como
-                  // option disabled; agora são omitidos para a lista só
-                  // conter quem pode realmente receber a tarefa.
-                  .filter(
-                    (u) => !indisponiveis.some((i) => i.utilizador_id === u._id)
-                  )
-                  .map((u) => (
-                    <option key={u._id} value={u._id}>
+                {equipa.map((u) => {
+                  // FIX (folgas/férias) — Em vez de OMITIR os staff
+                  // indisponíveis (férias/doença/ausência nesse dia), mostramos
+                  // TODOS no dropdown com a option disabled e a label
+                  // " [Indisponível]" ao lado do nome. Assim o gestor vê quem
+                  // existe mas não consegue selecionar quem está de folga/férias.
+                  const indisponivel = indisponiveis.some(
+                    (i) => i.utilizador_id === u._id
+                  );
+                  return (
+                    <option
+                      key={u._id}
+                      value={indisponivel ? "" : u._id}
+                      disabled={indisponivel}
+                    >
                       {u.nome}
+                      {indisponivel ? " — [Indisponível]" : ""}
                     </option>
-                  ))}
+                  );
+                })}
               </select>
-              {/* Aviso visual de staff indisponível (omitidos da lista) */}
+              {/* Aviso visual de staff indisponível (mostrados como disabled) */}
               {indisponiveis.length > 0 && (
                 <p className="text-xs text-amber-600 dark:text-amber-400">
-                  ⚠️ {indisponiveis.length} membro(s) da equipa está(ão) de férias/ausência neste dia e foram omitidos da lista.
+                  ⚠️ {indisponiveis.length} membro(s) da equipa está(ão) de folga/férias neste dia e apareceram como [Indisponível] na lista (não selecionáveis).
                 </p>
               )}
             </div>
@@ -1566,7 +1651,7 @@ export default function CalendarioOperacionalPage() {
             }
             title={
               tarefaSelecionada?.estado === "concluida"
-                ? "Tarefa concluída — não pode ser reatribuída."
+                ? "Limpeza concluída — não pode ser reatribuída."
                 : undefined
             }
           >
@@ -1632,12 +1717,12 @@ export default function CalendarioOperacionalPage() {
         </DialogFooter>
       </Dialog>
 
-      {/* Prompt 113 — Dialog: Nova Tarefa Manual */}
+      {/* Prompt 113 — Dialog: Nova Limpeza Manual */}
       <Dialog open={mostrarNovaTarefa} onOpenChange={setMostrarNovaTarefa}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Plus className="h-5 w-5 text-primary" />
-            Nova Tarefa
+            Nova Limpeza
           </DialogTitle>
           <DialogDescription>
             Cria uma tarefa manual no calendário. A data é tratada como local
@@ -1796,7 +1881,7 @@ export default function CalendarioOperacionalPage() {
             ) : (
               <>
                 <Plus className="mr-2 h-4 w-4" />
-                Criar Tarefa
+                Criar Limpeza
               </>
             )}
           </Button>
@@ -1844,7 +1929,7 @@ export default function CalendarioOperacionalPage() {
               setConflitoModal(null);
             }}
           >
-            Voltar Atrás (Cancelar Tarefa)
+            Voltar Atrás (Cancelar Limpeza)
           </Button>
           <Button
             type="button"
@@ -1852,7 +1937,7 @@ export default function CalendarioOperacionalPage() {
             className="bg-amber-600 hover:bg-amber-700"
             onClick={() => setConflitoModal(null)}
           >
-            Manter Tarefa
+            Manter Limpeza
           </Button>
         </DialogFooter>
       </Dialog>
@@ -2005,7 +2090,7 @@ function EquipaMapa({ tarefas, equipa, periodo, loading }: EquipaMapaProps) {
         </span>
         <span className="flex items-center gap-1.5">
           <span className={`h-3 w-3 rounded ${corCelula.tarefas}`} />
-          Tarefas atribuídas
+          Limpezas atribuídas
         </span>
         <span className="flex items-center gap-1.5">
           <span className={`h-3 w-3 rounded ${corCelula.ausencia}`} />

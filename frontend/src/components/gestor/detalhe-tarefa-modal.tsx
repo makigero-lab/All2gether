@@ -189,10 +189,10 @@ export function DetalheTarefaModal({
         <div>
           <DialogTitle className="flex items-center gap-2">
             {tarefa && <Icon className="h-5 w-5 text-primary" />}
-            Detalhe da Tarefa
+            Detalhe da Limpeza
           </DialogTitle>
           <DialogDescription>
-            Informação completa da tarefa e da reserva associada.
+            Informação completa da limpeza e da reserva associada.
           </DialogDescription>
         </div>
         <DialogClose onClick={() => onOpenChange(false)} />
