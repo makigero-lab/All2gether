@@ -89,7 +89,7 @@ export default function ParceiroTarefasPage() {
           Tarefas de Limpeza
         </h1>
         <p className="text-sm text-muted-foreground">
-          Tarefas geradas automaticamente a partir das tuas reservas (vista apenas de leitura).
+          Limpezas geradas automaticamente a partir das tuas reservas (vista apenas de leitura).
         </p>
       </div>
 

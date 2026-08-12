@@ -252,7 +252,7 @@ export default function RelatoriosPage() {
       const diff = tempoReal - tempoEstimado;
 
       const kpisHtml = [
-        '<div class="kpi"><div class="label">Total Tarefas</div><div class="value">' + (r.totalTarefas ?? 0) + '</div></div>',
+        '<div class="kpi"><div class="label">Total Limpezas</div><div class="value">' + (r.totalTarefas ?? 0) + '</div></div>',
         '<div class="kpi"><div class="label">Concluidas</div><div class="value">' + (r.concluidas ?? 0) + '</div><div class="sub">' + Math.round((r.concluidas / Math.max(1, r.totalTarefas)) * 100) + '%</div></div>',
         '<div class="kpi"><div class="label">Tempo Medio</div><div class="value">' + (Math.round((tempoEstimado / 60) * 10) / 10) + 'h</div></div>',
         '<div class="kpi"><div class="label">Diff Real</div><div class="value">' + (diff === 0 ? '—' : (diff > 0 ? '+' : '') + (Math.round(diff / 60 * 10) / 10) + 'h') + '</div></div>',
@@ -270,7 +270,7 @@ export default function RelatoriosPage() {
 
       const maxProp = Math.max(1, ...data.porPropriedade.map(x => x.total));
       const propHtml = data.porPropriedade.length > 0
-        ? '<h2>Tarefas por Propriedade</h2><table><thead><tr><th>Propriedade</th><th>Total</th><th>Concluidas</th><th>Volume</th></tr></thead><tbody>' +
+        ? '<h2>Limpezas por Propriedade</h2><table><thead><tr><th>Propriedade</th><th>Total</th><th>Concluidas</th><th>Volume</th></tr></thead><tbody>' +
           data.porPropriedade.slice(0, 15).map(p => {
             const largura = Math.round((p.total / maxProp) * 100);
             return '<tr><td>' + p.nome + '</td><td>' + p.total + '</td><td>—</td><td><div class="barra-container"><div class="barra" style="width:' + largura + '%"></div></div></td></tr>';
@@ -577,7 +577,7 @@ export default function RelatoriosPage() {
                 Evolução diária
               </CardTitle>
               <CardDescription>
-                Tarefas agendadas vs. concluídas por dia.
+                Limpezas agendadas vs. concluídas por dia.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -721,7 +721,7 @@ export default function RelatoriosPage() {
           <Card>
             <CardHeader>
               <CardTitle>Carga por propriedade</CardTitle>
-              <CardDescription>Tarefas e carga total (minutos) por propriedade.</CardDescription>
+              <CardDescription>Limpezas e carga total (minutos) por propriedade.</CardDescription>
             </CardHeader>
             <CardContent>
               {data.porPropriedade.length === 0 ? (
@@ -734,7 +734,7 @@ export default function RelatoriosPage() {
                     <thead>
                       <tr className="border-b text-left text-muted-foreground">
                         <th className="py-2 pr-4 font-medium">Propriedade</th>
-                        <th className="py-2 pr-4 text-right font-medium">Tarefas</th>
+                        <th className="py-2 pr-4 text-right font-medium">Limpezas</th>
                         <th className="py-2 pr-4 text-right font-medium">Carga</th>
                         <th className="py-2 text-right font-medium">% do total</th>
                       </tr>

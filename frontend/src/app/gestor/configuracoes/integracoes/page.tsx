@@ -654,7 +654,7 @@ export default function IntegracoesPage() {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Trash2 className="h-5 w-5 text-destructive" />
-            Limpar Tarefas Futuras
+            Limpar Limpezas Futuras
           </DialogTitle>
           <DialogDescription>
             Isto vai apagar todas as tarefas não concluídas de hoje para a frente.

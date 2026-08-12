@@ -136,7 +136,7 @@ export default function AdminDashboardPage() {
     ? [
         { label: "Propriedades", value: `${data.propriedadesAtivas}/${data.totalPropriedades}`, icon: Building2 },
         { label: "Staff ativo", value: data.membrosEquipaAtivos, icon: Users },
-        { label: "Tarefas hoje", value: data.tarefasHoje, icon: ClipboardList },
+        { label: "Limpezas hoje", value: data.tarefasHoje, icon: ClipboardList },
         { label: "Por atribuir", value: data.tarefasPorAtribuir, icon: AlertCircle },
         { label: "Concluídas", value: data.tarefasConcluidasHoje, icon: CheckCircle2 },
       ]

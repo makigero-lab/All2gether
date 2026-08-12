@@ -658,7 +658,7 @@ export default function CalendarioOperacionalPage() {
     if (isMonthView) {
       // HF26 — Tarefa órfã (staff de férias): destaque VERMELHO, prioritário.
       if (t.alerta_orfao) {
-        const msg = t.alerta_mensagem ?? "Tarefa órfã";
+        const msg = t.alerta_mensagem ?? "Limpeza órfã";
         return (
           <div
             className="fc-evt-month fc-evt-month--orfao"
@@ -1094,11 +1094,11 @@ export default function CalendarioOperacionalPage() {
               setMostrarNovaTarefa(true);
             }}
             disabled={loading}
-            title="Cria uma tarefa manualmente (limpeza, manutenção, etc.)."
+            title="Cria uma limpeza manualmente (limpeza, manutenção, etc.)."
             className="gap-2"
           >
             <Plus className="h-4 w-4" />
-            Nova Tarefa
+            Nova Limpeza
           </Button>
           {/* v1.64.0 (Prompt 87) — Auto-Atribuir Pendentes */}
           <Button
@@ -1179,7 +1179,7 @@ export default function CalendarioOperacionalPage() {
         </div>
         <p className="text-sm text-muted-foreground">
           Vista mensal, semanal e diária de todas as tarefas de limpeza. Filtra por
-          propriedade, staff ou estado. Clica numa tarefa para ver o detalhe e reatribuir.
+          propriedade, staff ou estado. Clica numa limpeza para ver o detalhe e reatribuir.
           Alterna para a Vista Tabela e exporta para Excel.
         </p>
       </div>
@@ -1480,8 +1480,8 @@ export default function CalendarioOperacionalPage() {
         onOpenChange={(o) => !o && setTarefaSelecionada(null)}
       >
         <DialogHeader>
-          <DialogTitle>Detalhe da Tarefa</DialogTitle>
-          <DialogDescription>Informação da tarefa e reatribuição rápida.</DialogDescription>
+          <DialogTitle>Detalhe da Limpeza</DialogTitle>
+          <DialogDescription>Informação da limpeza e reatribuição rápida.</DialogDescription>
           <DialogClose onClick={() => setTarefaSelecionada(null)} />
         </DialogHeader>
         {tarefaSelecionada && (
@@ -1569,24 +1569,31 @@ export default function CalendarioOperacionalPage() {
                 className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <option value="">— Selecionar staff —</option>
-                {equipa
-                  // NÃO mostrar os staff indisponíveis no dropdown (férias/
-                  // doença/ausência nesse dia). Antes eram mostrados como
-                  // option disabled; agora são omitidos para a lista só
-                  // conter quem pode realmente receber a tarefa.
-                  .filter(
-                    (u) => !indisponiveis.some((i) => i.utilizador_id === u._id)
-                  )
-                  .map((u) => (
-                    <option key={u._id} value={u._id}>
+                {equipa.map((u) => {
+                  // FIX (folgas/férias) — Em vez de OMITIR os staff
+                  // indisponíveis (férias/doença/ausência nesse dia), mostramos
+                  // TODOS no dropdown com a option disabled e a label
+                  // " [Indisponível]" ao lado do nome. Assim o gestor vê quem
+                  // existe mas não consegue selecionar quem está de folga/férias.
+                  const indisponivel = indisponiveis.some(
+                    (i) => i.utilizador_id === u._id
+                  );
+                  return (
+                    <option
+                      key={u._id}
+                      value={indisponivel ? "" : u._id}
+                      disabled={indisponivel}
+                    >
                       {u.nome}
+                      {indisponivel ? " — [Indisponível]" : ""}
                     </option>
-                  ))}
+                  );
+                })}
               </select>
-              {/* Aviso visual de staff indisponível (omitidos da lista) */}
+              {/* Aviso visual de staff indisponível (mostrados como disabled) */}
               {indisponiveis.length > 0 && (
                 <p className="text-xs text-amber-600 dark:text-amber-400">
-                  ⚠️ {indisponiveis.length} membro(s) da equipa está(ão) de férias/ausência neste dia e foram omitidos da lista.
+                  ⚠️ {indisponiveis.length} membro(s) da equipa está(ão) de folga/férias neste dia e apareceram como [Indisponível] na lista (não selecionáveis).
                 </p>
               )}
             </div>
@@ -1644,7 +1651,7 @@ export default function CalendarioOperacionalPage() {
             }
             title={
               tarefaSelecionada?.estado === "concluida"
-                ? "Tarefa concluída — não pode ser reatribuída."
+                ? "Limpeza concluída — não pode ser reatribuída."
                 : undefined
             }
           >
@@ -1710,12 +1717,12 @@ export default function CalendarioOperacionalPage() {
         </DialogFooter>
       </Dialog>
 
-      {/* Prompt 113 — Dialog: Nova Tarefa Manual */}
+      {/* Prompt 113 — Dialog: Nova Limpeza Manual */}
       <Dialog open={mostrarNovaTarefa} onOpenChange={setMostrarNovaTarefa}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Plus className="h-5 w-5 text-primary" />
-            Nova Tarefa
+            Nova Limpeza
           </DialogTitle>
           <DialogDescription>
             Cria uma tarefa manual no calendário. A data é tratada como local
@@ -1874,7 +1881,7 @@ export default function CalendarioOperacionalPage() {
             ) : (
               <>
                 <Plus className="mr-2 h-4 w-4" />
-                Criar Tarefa
+                Criar Limpeza
               </>
             )}
           </Button>
@@ -1922,7 +1929,7 @@ export default function CalendarioOperacionalPage() {
               setConflitoModal(null);
             }}
           >
-            Voltar Atrás (Cancelar Tarefa)
+            Voltar Atrás (Cancelar Limpeza)
           </Button>
           <Button
             type="button"
@@ -1930,7 +1937,7 @@ export default function CalendarioOperacionalPage() {
             className="bg-amber-600 hover:bg-amber-700"
             onClick={() => setConflitoModal(null)}
           >
-            Manter Tarefa
+            Manter Limpeza
           </Button>
         </DialogFooter>
       </Dialog>
@@ -2083,7 +2090,7 @@ function EquipaMapa({ tarefas, equipa, periodo, loading }: EquipaMapaProps) {
         </span>
         <span className="flex items-center gap-1.5">
           <span className={`h-3 w-3 rounded ${corCelula.tarefas}`} />
-          Tarefas atribuídas
+          Limpezas atribuídas
         </span>
         <span className="flex items-center gap-1.5">
           <span className={`h-3 w-3 rounded ${corCelula.ausencia}`} />

@@ -2111,3 +2111,33 @@ Stage Summary:
 - **Integração com HF21:** se `staff_necessario > 1`, o job usa `determinarEquipaAtribuida` (Top N) em vez de `determinarUtilizadorAtribuido` (1 staff).
 - **Sem quebras:** 111/111 testes; o campo `dias_fixos_limpeza` é opcional (default []) — propriedades existentes não são afetadas.
 - **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat(rotinas): implementa dias fixos de limpeza nas propriedades e cron job gerador de tarefas`.
+
+---
+
+Task ID: FIX-FOLGAS-FERIAS-LIMPEZAS
+Agent: Z.ai Code (Eng. Software Principal)
+Task: Bugfix crítico do load balancer (folgas/férias), UI de férias visíveis, filtro no modal de reatribuição, renomeação de "Tarefas" para "Limpezas" e importação de clientes.
+
+Work Log:
+- Re-clonado o repo em `dev` (`6d8bca1`); configurado `git config user.name "Makigero Lab"`.
+- **#1 Bugfix `backend/utils/loadBalancer.js`:** `determinarUtilizadorAtribuido` e `determinarEquipaAtribuida` reforçados:
+  - Query de `Ausencia` mudou de comparação pontual (`data_inicio <= range.start AND data_fim >= range.start`) para **interseção de intervalos** (`data_inicio < range.end AND data_fim >= range.start`) — cobre qualquer parte do dia da tarefa.
+  - Estados de ausência considerados ATIVOS: `aprovada` + `pendente_emergencia` (falta súbita do próprio funcionário para o dia atual). Excluem-se `pendente`, `rejeitada`, `cancelada`.
+  - Filtro de `dias_folga` (folgas fixas semanais) mantido e documentado: o dia da semana da tarefa (`range.start.getDay()`) é comparado contra o array `[0=Dom ... 6=Sáb]` de cada staff.
+  - Novo parâmetro `excluirStaffIds: Set<string>|null` em `determinarUtilizadorAtribuido` — usado pela versão de equipas para não repetir o mesmo staff.
+  - `determinarEquipaAtribuida` refactorizada: em vez do hack de `break` quando o LB devolvia o mesmo staff, agora passa o `Set` acumulado a cada iteração. Herda automaticamente o mesmo rigor de filtragem.
+- **#2 Modal de reatribuição manual:** `frontend/src/app/gestor/tarefas/page.tsx` (modal "Atribuir") e `frontend/src/app/gestor/calendario/page.tsx` (modal "Detalhe + Reatribuir") alterados — em vez de OMITIR os staff indisponíveis (férias/doença/ausência), agora mostram TODOS no `<select>` com `disabled` e a label " — [Indisponível]" ao lado do nome. A mensagem de aviso âmbar foi atualizada para refletir o novo comportamento.
+- **#3 Badge "De Férias" na Equipa:** `frontend/src/app/gestor/equipa/page.tsx` — o estado `ausentesHoje` evoluiu de `Set<string>` para `Record<string, string>` (id → tipo). A API `/api/gestor/ausencias?estado=aprovada` já devolve o `tipo` (ferias/doenca/outro). O badge na tabela de staff agora distingue: "De Férias" (vermelho/destructive) para `tipo === 'ferias'`, "Doente" para `doenca`, "Ausente" para outros. Mantém-se a opacidade 65 para ausentes.
+- **#4 Renomeação "Tarefas" → "Limpezas":** labels visíveis atualizadas em ~12 ficheiros do frontend (sidebar, dashboard, página de limpezas, calendário, relatórios, notificações, detalhe-tarefa-modal, parceiro, integrações). Convenção: "Limpezas" no menu/títulos/h1; "Limpeza" (singular) em botões/ações individuais (Nova Limpeza, Criar Limpeza, Atribuir Limpeza, Cancelar Limpeza, Detalhe da Limpeza, Manter Limpeza, Concluir Limpeza). **Referências técnicas preservadas:** rotas de API (`/api/gestor/tarefas`), tipos TypeScript (`TarefaMock`, `TarefaAdmin`), variáveis (`tarefas` state) e modelos Mongoose (`Tarefa.js`) NÃO foram mexidos — só as labels visíveis ao utilizador.
+- **#5 Importação de clientes:** criado `backend/scripts/importarClientes.js` (one-off). Liga ao MongoDB, faz loop num JSON embutido de 6 clientes, cria Empresas (find-or-create por nome case-insensitive) e Propriedades. Mapeamento: `titulo`→`nome`, `morada`→`morada`, `empresa`→find/create `Empresa`, `nome_responsavel`→`nome_responsavel`, `contacto`→`contacto`, `frequencia`+`gps`→`observacoes` (notas). Corrido localmente com MongoDB 7.0.14: **3 empresas criadas** (Particulares, All2gether, Sweet Apartments - Rui Leal) e **6 propriedades criadas**, 0 erros. Ficheiro **apagado** antes do commit (conforme instruções).
+- **#6 Recuperação de password do Admin:** corrido `node backend/seed-admin.js` com MongoDB local. Empresa-sistema "All2gether (Sistema)" criada. Super Admin criado: email `admin@makigero.com`, password aleatória gerada e impressa uma única vez (registo no relatório ao utilizador). SSO (Autocell) não usa esta password — é fallback de emergência.
+- **Documentação atualizada:** `docs/BACKEND.md` (secção 3.2 — nota "FIX (folgas/férias)") + esta entrada no `WORKLOG.md`.
+
+Stage Summary:
+- **Load Balancer robusto:** o bug que permitia atribuir tarefas a staff de folga/férias foi corrigido na raiz. A query de ausências agora usa interseção de intervalos (cobre todo o dia, não só `range.start`) e inclui `pendente_emergencia`. A versão de equipas herdou o mesmo rigor via `excluirStaffIds`.
+- **UI coerente com a regra de negócio:** os modais de reatribuição já não omitem staff — mostram-nos como `[Indisponível]` (disabled), dando ao gestor visibilidade total de quem existe mas não pode ser selecionado.
+- **Férias visíveis na equipa:** o gestor vê imediatamente quem está "De Férias" / "Doente" / "Ausente" hoje, com badge vermelho, na listagem de equipa.
+- **Rebranding "Tarefas" → "Limpezas":** toda a UI visível ao utilizador foi renomeada, mantendo a coerência técnica (rotas/tipos/variáveis intactos). O módulo chama-se agora "Limpezas" no menu e nas páginas.
+- **Dados importados:** 6 propriedades e 3 empresas novas na BD local (script one-off, apagado do repo).
+- **Admin recuperado:** Super Admin `admin@makigero.com` com password aleatória (fornecida ao utilizador).
+- **Próximo passo (este commit):** commit + push para `dev` com a mensagem `fix: corrige lb de folgas, ui de ferias, muda para limpezas e importa clientes`.

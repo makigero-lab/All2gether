@@ -295,8 +295,11 @@ function EquipaPage() {
     (u) => u.role === "gestor"
   );
 
-  // IDs dos utilizadores com ausência aprovada para hoje (para mostrar badge).
-  const [ausentesHoje, setAusentesHoje] = useState<Set<string>>(new Set());
+  // FIX (férias visíveis) — Mapa de utilizador_id -> tipo de ausência ativa
+  // para hoje ('ferias' | 'doenca' | 'outro'). Usado para mostrar o badge
+  // vermelho "De Férias" (ou "Doente"/"Ausente" consoante o tipo) na tabela
+  // de staff. Antes era um Set<string> que não distinguia o tipo.
+  const [ausentesHoje, setAusentesHoje] = useState<Record<string, string>>({});
 
   /** Carrega os utilizadores da API + ausências aprovadas para hoje. */
   const carregar = useCallback(async () => {
@@ -313,24 +316,27 @@ function EquipaPage() {
             data_inicio: string;
             data_fim: string;
             estado: string;
+            tipo: string;
           }[];
         }>("/api/gestor/ausencias?estado=aprovada"),
       ]);
       setUtilizadores(data.utilizadores ?? []);
 
-      // Filtra as ausências aprovadas que cobrem hoje.
+      // Filtra as ausências aprovadas que cobrem hoje e guarda o TIPO
+      // (ferias/doenca/outro) para mostrar o badge correto.
       const hojeUTC = new Date(
         Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth(), hoje.getUTCDate())
       );
-      const setAusentes = new Set<string>();
+      const mapaAusentes: Record<string, string> = {};
       for (const a of ausenciasRes.ausencias ?? []) {
         const ini = parsearDataSegura(a.data_inicio);
         const fim = parsearDataSegura(a.data_fim);
         if (ini && fim && hojeUTC >= ini && hojeUTC <= fim && a.utilizador_id) {
-          setAusentes.add(a.utilizador_id);
+          // Guarda o tipo da ausência (default 'ferias' se não vier na resposta).
+          mapaAusentes[a.utilizador_id] = a.tipo || "ferias";
         }
       }
-      setAusentesHoje(setAusentes);
+      setAusentesHoje(mapaAusentes);
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Erro ao carregar equipa.");
     } finally {
@@ -902,17 +908,31 @@ function EquipaPage() {
                     </thead>
                     <tbody className="divide-y">
                       {utilizadoresPagina.map((u) => {
-                        const ausenteHoje = ausentesHoje.has(u._id);
+                        // FIX (férias visíveis) — tipo de ausência ativa hoje
+                        // ('ferias' | 'doenca' | 'outro' | undefined).
+                        const ausenteTipo = ausentesHoje[u._id];
                         return (
-                        <tr key={u._id} className={`hover:bg-muted/30 ${ausenteHoje ? "opacity-65" : ""}`}>
+                        <tr key={u._id} className={`hover:bg-muted/30 ${ausenteTipo ? "opacity-65" : ""}`}>
                           <td className="px-4 py-3 font-medium">
                             <div className="flex items-center gap-2">
                               {u.nome}
-                              {ausenteHoje && (
+                              {ausenteTipo === "ferias" && (
                                 <Badge variant="destructive" className="text-[10px]">
-                                  Ausente Hoje
+                                  De Férias
                                 </Badge>
                               )}
+                              {ausenteTipo === "doenca" && (
+                                <Badge variant="destructive" className="text-[10px]">
+                                  Doente
+                                </Badge>
+                              )}
+                              {ausenteTipo &&
+                                ausenteTipo !== "ferias" &&
+                                ausenteTipo !== "doenca" && (
+                                  <Badge variant="destructive" className="text-[10px]">
+                                    Ausente
+                                  </Badge>
+                                )}
                             </div>
                           </td>
                           <td className="px-4 py-3 text-muted-foreground">

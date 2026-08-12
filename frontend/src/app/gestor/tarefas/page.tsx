@@ -502,9 +502,9 @@ export default function AdminTarefasPage() {
       {/* Cabeçalho */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="hidden flex-col gap-1 lg:flex">
-          <h1 className="text-2xl font-bold tracking-tight">Tarefas</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Limpezas</h1>
           <p className="text-sm text-muted-foreground">
-            Gestão manual de tarefas de limpeza.
+            Gestão manual de limpezas.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -557,7 +557,7 @@ export default function AdminTarefasPage() {
             setConflitoForcar(false);
           }}>
             <Plus className="h-4 w-4" />
-            Nova Tarefa
+            Nova Limpeza
           </Button>
           {/* HF18 — Botão "Nova Limpeza Espontânea" — abre um Dialog simples
               para criar uma tarefa manual (origem: 'manual') sem reserva
@@ -607,7 +607,7 @@ export default function AdminTarefasPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <SprayCan className="h-5 w-5 text-primary" />
-              Nova Tarefa Manual
+              Nova Limpeza Manual
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -714,7 +714,7 @@ export default function AdminTarefasPage() {
                   ) : conflitoForcar ? (
                     "Forçar Agendamento"
                   ) : (
-                    "Criar Tarefa"
+                    "Criar Limpeza"
                   )}
                 </Button>
                 <Button
@@ -797,21 +797,21 @@ export default function AdminTarefasPage() {
         <CardContent className="p-0">
           {loading ? (
             <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
-              <Loader2 className="h-5 w-5 animate-spin" />A carregar tarefas…
+              <Loader2 className="h-5 w-5 animate-spin" />A carregar limpezas…
             </div>
           ) : tarefasFiltradas.length === 0 ? (
             <div className="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">
               <ClipboardList className="h-10 w-10 opacity-40" />
               <p className="text-sm">
                 {soAvarias
-                  ? "Sem tarefas com avarias reportadas."
+                  ? "Sem limpezas com avarias reportadas."
                   : abaEstado === "por_atribuir"
-                  ? "Sem tarefas por atribuir. Tudo sob controlo! ✅"
+                  ? "Sem limpezas por atribuir. Tudo sob controlo! ✅"
                   : abaEstado === "pendentes"
-                  ? "Sem tarefas pendentes."
+                  ? "Sem limpezas pendentes."
                   : abaEstado === "concluidas"
-                  ? "Sem tarefas concluídas."
-                  : "Sem tarefas."}
+                  ? "Sem limpezas concluídas."
+                  : "Sem limpezas."}
               </p>
             </div>
           ) : (
@@ -947,7 +947,7 @@ export default function AdminTarefasPage() {
       <Dialog open={atribuindo !== null} onOpenChange={(o) => !o && setAtribuindo(null)}>
         <DialogHeader>
           <div>
-            <DialogTitle>Atribuir Tarefa</DialogTitle>
+            <DialogTitle>Atribuir Limpeza</DialogTitle>
             <DialogDescription>
               {atribuindo?.propriedade_id?.nome} — {atribuindo ? formatarData(atribuindo.data) : ""}
             </DialogDescription>
@@ -963,23 +963,30 @@ export default function AdminTarefasPage() {
               className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <option value="">Selecionar…</option>
-              {staff
-                // v1.59.0 → ajuste: NÃO mostrar os staff indisponíveis no
-                // dropdown (férias/doença/ausência nesse dia). Antes eram
-                // mostrados como option disabled; agora são omitidos para a
-                // lista só conter quem pode realmente receber a tarefa.
-                .filter(
-                  (u) => !indisponiveis.some((i) => i.utilizador_id === u._id)
-                )
-                .map((u) => (
-                  <option key={u._id} value={u._id}>
+              {staff.map((u) => {
+                // FIX (folgas/férias) — Em vez de OMITIR os staff
+                // indisponíveis (férias/doença/ausência nesse dia), mostramos
+                // TODOS no dropdown com a option disabled e a label
+                // " [Indisponível]" ao lado do nome. Assim o gestor vê quem
+                // existe mas não consegue selecionar quem está de folga/férias.
+                const indisponivel = indisponiveis.some(
+                  (i) => i.utilizador_id === u._id
+                );
+                return (
+                  <option
+                    key={u._id}
+                    value={indisponivel ? "" : u._id}
+                    disabled={indisponivel}
+                  >
                     {u.nome}
+                    {indisponivel ? " — [Indisponível]" : ""}
                   </option>
-                ))}
+                );
+              })}
             </select>
             {indisponiveis.length > 0 && (
               <p className="text-xs text-amber-600 dark:text-amber-400">
-                ⚠️ {indisponiveis.length} membro(s) da equipa está(ão) de férias/ausência neste dia e foram omitidos da lista.
+                ⚠️ {indisponiveis.length} membro(s) da equipa está(ão) de folga/férias neste dia e apareceram como [Indisponível] na lista (não selecionáveis).
               </p>
             )}
           </div>
@@ -1224,23 +1231,23 @@ export default function AdminTarefasPage() {
         </form>
       </Dialog>
 
-      {/* Prompt 95 — Modal de detalhe da tarefa (card de detalhes_reserva) */}
+      {/* Prompt 95 — Modal de detalhe da limpeza (card de detalhes_reserva) */}
       <DetalheTarefaModal
         tarefa={detalheTarefa}
         open={detalheTarefa !== null}
         onOpenChange={(o) => !o && setDetalheTarefa(null)}
       />
 
-      {/* Prompt 127 — Dialog de confirmação para Cancelar Tarefa */}
+      {/* Prompt 127 — Dialog de confirmação para Cancelar Limpeza */}
       <Dialog open={cancelarTarget !== null} onOpenChange={(o) => !o && setCancelarTarget(null)}>
         <DialogHeader>
           <div>
             <DialogTitle className="flex items-center gap-2 text-destructive">
               <AlertCircle className="h-5 w-5" />
-              Cancelar Tarefa
+              Cancelar Limpeza
             </DialogTitle>
             <DialogDescription>
-              Tens a certeza que queres cancelar a tarefa de{" "}
+              Tens a certeza que queres cancelar a limpeza de{" "}
               <strong>{cancelarTarget?.propriedade_id?.nome ?? "Propriedade"}</strong>?
               Esta ação não pode ser desfeita.
             </DialogDescription>
@@ -1249,19 +1256,19 @@ export default function AdminTarefasPage() {
         </DialogHeader>
         <DialogContent>
           <p className="text-sm text-muted-foreground">
-            A tarefa será marcada como <strong>cancelada</strong> e deixará de
+            A limpeza será marcada como <strong>cancelada</strong> e deixará de
             aparecer no calendário. O staff atribuído será notificado.
           </p>
         </DialogContent>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => setCancelarTarget(null)} disabled={cancelarLoading}>
-            Manter Tarefa
+            Manter Limpeza
           </Button>
           <Button type="button" variant="destructive" onClick={confirmarCancelamento} disabled={cancelarLoading}>
             {cancelarLoading ? (
               <><Loader2 className="mr-2 h-4 w-4 animate-spin" />A cancelar…</>
             ) : (
-              <><AlertCircle className="mr-2 h-4 w-4" />Sim, Cancelar Tarefa</>
+              <><AlertCircle className="mr-2 h-4 w-4" />Sim, Cancelar Limpeza</>
             )}
           </Button>
         </DialogFooter>

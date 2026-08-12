@@ -51,7 +51,7 @@ interface NavItem {
 const gestorNavItems: NavItem[] = [
   { label: "Dashboard", href: "/gestor", icon: LayoutDashboard },
   { label: "Calendário", href: "/gestor/calendario", icon: CalendarRange },
-  { label: "Tarefas", href: "/gestor/tarefas", icon: ClipboardList },
+  { label: "Limpezas", href: "/gestor/tarefas", icon: ClipboardList },
   { label: "Propriedades", href: "/gestor/propriedades", icon: Building2 },
   { label: "Equipa", href: "/gestor/equipa", icon: Users },
   { label: "Ausências / Férias", href: "/gestor/ausencias", icon: CalendarOff },

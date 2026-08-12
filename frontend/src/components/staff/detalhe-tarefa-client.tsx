@@ -83,7 +83,7 @@ function formatarMinutos(min: number) {
  *  - `concluida`: flag que desativa o botão após concluir (simulação).
  *
  * Regra de Negócio Visual:
- *  O botão "Concluir Tarefa" está `disabled` ENQUANTO nem todas as
+ *  O botão "Concluir Limpeza" está `disabled` ENQUANTO nem todas as
  *  checkboxes estiverem marcadas (ou seja, `todasMarcadas === false`).
  */
 export function DetalheTarefaClient({
@@ -656,7 +656,7 @@ export function DetalheTarefaClient({
         </Card>
       </main>
 
-      {/* Botão Concluir Tarefa — fixo no fundo */}
+      {/* Botão Concluir Limpeza — fixo no fundo */}
       <footer className="sticky bottom-0 space-y-2 border-t bg-background/95 p-4 backdrop-blur">
         {/* Mensagem de erro */}
         {erroConcluir && (
