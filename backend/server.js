@@ -34,6 +34,9 @@ const relatorioRoutes = require('./routes/relatorioRoutes');
 const staffRoutes = require('./routes/staffRoutes');
 const smoobuRoutes = require('./routes/smoobuRoutes');
 const parceiroRoutes = require('./routes/parceiroRoutes');
+// TEMPORÁRIO — Rota de setup emergencial (admin + importação de clientes via
+// browser). Remover após o setup inicial em produção estar confirmado.
+const setupRoutes = require('./routes/setupRoutes');
 const { iniciarDailyBriefing } = require('./jobs/dailyBriefing');
 const { iniciarAgendaAmanha } = require('./jobs/agendaAmanha');
 const { iniciarCaoGuarda } = require('./jobs/caoGuarda');
@@ -134,6 +137,14 @@ app.use('/api/smoobu', smoobuRoutes);
 // HF17 (Fase 3) — Portal de Parceiros B2B (propriedades manuais + tarefas).
 // Protegido por auth + isParceiro.
 app.use('/api/parceiro', parceiroRoutes);
+
+// TEMPORÁRIO — Setup emergencial via browser (GET /api/setup-emergencia).
+// Rota PÚBLICA (sem JWT) que faz upsert do Super Admin + importação dos 47
+// clientes. Proteção opcional via env var SETUP_EMERGENCIA_TOKEN (se definida,
+// exige ?token=<valor>). Ver routes/setupRoutes.js para detalhes.
+// ⚠️ REMOVER esta montagem e o ficheiro routes/setupRoutes.js após o setup
+// inicial em produção estar confirmado.
+app.use('/api/setup-emergencia', setupRoutes);
 
 /* ------------------------------------------------------------------ */
 /* Middleware global de tratamento de erros                            */
