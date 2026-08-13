@@ -198,9 +198,12 @@ exports.getPropriedades = async (req, res) => {
     const { ok, empresaId } = obterEmpresaId(req, res);
     if (!ok) return;
 
-    const propriedades = await Propriedade.find({ empresa_id: empresaId }).sort(
-      { nome: 1 }
-    );
+    // FIX (parceiro associado relacional) — Popula parceiro_id com o nome do
+    // parceiro para o frontend mostrar no Badge sem precisar de extrair das
+    // observações (lógica legacy improvisada).
+    const propriedades = await Propriedade.find({ empresa_id: empresaId })
+      .populate({ path: 'parceiro_id', select: 'nome email role' })
+      .sort({ nome: 1 });
 
     return res.status(200).json({ propriedades });
   } catch (err) {
@@ -1076,7 +1079,7 @@ exports.atualizarPropriedade = async (req, res) => {
       });
     }
 
-    const { nome, morada, tempo_limpeza_minutos, funcionario_preferencial_id, modelo_checklist_id, observacoes, morada_estruturada } = req.body || {};
+    const { nome, morada, tempo_limpeza_minutos, funcionario_preferencial_id, modelo_checklist_id, observacoes, morada_estruturada, parceiro_id } = req.body || {};
 
     // Tem de haver pelo menos um campo para atualizar.
     if (
@@ -1180,6 +1183,32 @@ exports.atualizarPropriedade = async (req, res) => {
     // Aceita string vazia para limpar o campo.
     if (observacoes !== undefined) {
       propriedade.observacoes = String(observacoes).trim().slice(0, 2000);
+    }
+
+    // FIX (parceiro associado relacional) — Associa/desassocia parceiro B2B.
+    // Aceita null/string vazia para remover; caso contrário valida que é um
+    // utilizador com role 'parceiro' da mesma empresa.
+    if (parceiro_id !== undefined) {
+      const valor = parceiro_id === null || parceiro_id === ''
+        ? null
+        : String(parceiro_id).trim();
+      if (valor !== null) {
+        if (!mongoose.isValidObjectId(valor)) {
+          return res.status(400).json({ erro: 'parceiro_id inválido.' });
+        }
+        const parceiro = await Utilizador.findOne({
+          _id: valor,
+          empresa_id: empresaId,
+          role: 'parceiro',
+          eliminado_em: null,
+        }).lean();
+        if (!parceiro) {
+          return res.status(400).json({
+            erro: 'Parceiro não encontrado (não é um utilizador com role "parceiro" desta empresa).',
+          });
+        }
+      }
+      propriedade.parceiro_id = valor;
     }
 
     // v1.34.0: atualiza checklist (array de strings).

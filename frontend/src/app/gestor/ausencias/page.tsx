@@ -14,8 +14,6 @@ import {
   Check,
   X,
   Plus,
-  RotateCcw,
-  Bug,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -136,9 +134,9 @@ export default function AusenciasPage() {
   const [aCancelar, setACancelar] = useState<AusenciaAmp | null>(null);
   const [cancelando, setCancelando] = useState(false);
 
-  // HF26 — Reaplicar ausência (forçar desatribuição de tarefas).
-  const [reaplicandoId, setReaplicandoId] = useState<string | null>(null);
-  const [resultadoReaplicar, setResultadoReaplicar] = useState<string | null>(null);
+  // FIX (limpeza UI) — Estados `reaplicandoId` e `resultadoReaplicar` removidos.
+  // A funcionalidade de reaplicar ausência foi removida da UI (era utilitário
+  // de desenvolvimento). A reatribuição automática agora corre ao aprovar.
 
   // HF20 — Modal de criação de ausência (Date Range Picker).
   const [mostrarForm, setMostrarForm] = useState(false);
@@ -264,49 +262,6 @@ export default function AusenciasPage() {
     }
   }
 
-  /** HF26 — Reaplicar ausência aprovada (POST .../reaplicar).
-   *  Re-desatribui as tarefas do período da ausência. Útil quando o gestor
-   *  aprovou mas as tarefas continuam atribuídas (ex.: webhook criou depois
-   *  e o LB falhou, ou a desatribuição inicial falhou).
-   */
-  async function handleReaplicar(a: AusenciaAmp) {
-    setReaplicandoId(a._id);
-    setResultadoReaplicar(null);
-    try {
-      const res = await adminPost<{ mensagem: string; redistribuicao: { desatribuidas: number } }>(
-        `/api/gestor/ausencias/${a._id}/reaplicar`,
-        {}
-      );
-      setResultadoReaplicar(res.mensagem);
-      // Recarrega para refletir as tarefas desatribuídas.
-      await carregar();
-    } catch (e) {
-      setErro(e instanceof Error ? e.message : "Erro ao reaplicar ausência.");
-    } finally {
-      setReaplicandoId(null);
-    }
-  }
-
-  /** HF26 — Diagnóstico de ausências (GET .../diagnostico/:utilizadorId).
-   *  Abre numa janela modal o estado completo do utilizador para debug.
-   */
-  async function handleDiagnostico(utilizadorId: string, nome: string) {
-    try {
-      const res = await adminGet<{
-        utilizador: { nome: string; email: string; empresa_id: string; eliminado_em: string | null; ativo: boolean };
-        empresaGestor: string;
-        empresaMatch: boolean;
-        ausencias: Array<{ estado: string; data_inicio: string; data_fim: string; empresa_id: string; empresa_match: boolean; tarefas_atribuidas_no_periodo: number }>;
-        diagnostico: Array<{ severidade: string; mensagem: string }>;
-      }>(`/api/gestor/ausencias/diagnostico/${utilizadorId}`);
-      const msgs = res.diagnostico.map((d) => `[${d.severidade.toUpperCase()}] ${d.mensagem}`).join("\n\n");
-      // eslint-disable-next-line no-alert
-      alert(`Diagnóstico de "${nome}":\n\nEmpresa do gestor: ${res.empresaGestor}\nEmpresa do utilizador: ${res.utilizador.empresa_id}\nMatch: ${res.empresaMatch ? "SIM" : "NÃO"}\nEliminado: ${res.utilizador.eliminado_em ?? "não"}\nAtivo: ${res.utilizador.ativo ? "sim" : "não"}\n\nAusências (${res.ausencias.length}):\n${res.ausencias.map((a) => `- ${a.estado} ${a.data_inicio}→${a.data_fim} | empresa=${a.empresa_match ? "OK" : "DIFERENTE"} | tarefas=${a.tarefas_atribuidas_no_periodo}`).join("\n")}\n\nDiagnóstico:\n\n${msgs}`);
-    } catch (e) {
-      setErro(e instanceof Error ? e.message : "Erro ao diagnosticar ausência.");
-    }
-  }
-
   /** HF20 — Abre o modal de criação e carrega a equipa. */
   async function abrirFormCriacao() {
     setMostrarForm(true);
@@ -418,60 +373,11 @@ export default function AusenciasPage() {
 
         <TabsContent value="ausencias" className="space-y-4 mt-4">
 
-      {/* HF26 — Banner de resultado de "Reaplicar ausência" */}
-      {resultadoReaplicar && (
-        <Card className="border-violet-300 bg-violet-50">
-          <CardContent className="flex items-center gap-2 p-4 text-sm text-violet-900">
-            <Check className="h-4 w-4 shrink-0" />
-            <span className="flex-1">{resultadoReaplicar}</span>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 px-2 text-violet-700 hover:bg-violet-100"
-              onClick={() => setResultadoReaplicar(null)}
-              aria-label="Fechar"
-            >
-              <X className="h-3.5 w-3.5" />
-            </Button>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* HF26 — Diagnóstico de ausências (debug) */}
-      <Card className="border-amber-200 bg-amber-50/50">
-        <CardContent className="flex flex-col gap-2 p-4 text-sm sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-2 text-amber-900">
-            <Bug className="h-4 w-4 shrink-0" />
-            <span className="font-medium">Diagnóstico de ausências</span>
-            <span className="text-amber-700/80">
-              — verifica se há mismatch de empresa, utilizador recriado ou tarefas órfãs
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <select
-              className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-              defaultValue=""
-              onChange={(e) => {
-                const v = e.target.value;
-                if (!v) return;
-                const [id, nome] = v.split("|");
-                void handleDiagnostico(id, nome);
-                e.target.value = "";
-              }}
-              aria-label="Selecionar funcionário para diagnóstico"
-            >
-              <option value="" disabled>
-                Selecionar funcionário…
-              </option>
-              {equipa.map((u) => (
-                <option key={u._id} value={`${u._id}|${u.nome}`}>
-                  {u.nome}
-                </option>
-              ))}
-            </select>
-          </div>
-        </CardContent>
-      </Card>
+      {/* FIX (limpeza UI) — Banner de "Reaplicar ausência" e Card de "Diagnóstico
+          de ausências" removidos. Eram utilitários técnicos de desenvolvimento
+          e testes que não devem estar presentes em produção. A funcionalidade
+          de reaplicar ausência continua disponível via API
+          (POST /api/gestor/ausencias/:id/reaplicar) se for necessário. */}
 
       {/* Tabela de ausências */}
       <Card>
@@ -570,25 +476,10 @@ export default function AusenciasPage() {
                                 </Button>
                               </>
                             )}
-                            {/* HF26 — Reaplicar ausência aprovada (forçar desatribuição).
-                                Útil quando as tarefas continuam atribuídas apesar de aprovada. */}
-                            {a.estado === "aprovada" && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 text-violet-600 hover:text-violet-700 hover:bg-violet-50"
-                                onClick={() => handleReaplicar(a)}
-                                disabled={reaplicandoId === a._id}
-                                aria-label="Reaplicar ausência"
-                                title="Reaplicar (forçar desatribuição de tarefas do período)"
-                              >
-                                {reaplicandoId === a._id ? (
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                ) : (
-                                  <RotateCcw className="h-4 w-4" />
-                                )}
-                              </Button>
-                            )}
+                            {/* FIX (limpeza UI) — Botão "Reaplicar ausência" removido.
+                                Era utilitário técnico de desenvolvimento. A funcionalidade
+                                de reatribuição automática agora corre ao aprovar a ausência
+                                (sem necessidade de reaplicar manualmente). */}
                             {/* Prompt 131b — Cancelar (soft cancel).
                                 Só para pendentes ou aprovadas (não rejeitadas/canceladas).
                                 Usa X icon com cor âmbar para distinguir do Rejeitar (vermelho). */}

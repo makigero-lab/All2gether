@@ -103,10 +103,30 @@ function useRoleLabel(): string {
   return label;
 }
 
+/**
+ * FIX (configs restritas a admin) — Hook que devolve o role do utilizador
+ * atual. Usado para filtrar itens da sidebar que são exclusivos do admin
+ * (ex: "Configurações"). O gestor não vê nem acede a /gestor/configuracoes.
+ */
+function useUserRole(): Role | null {
+  const [role, setRole] = useState<Role | null>(null);
+  useEffect(() => {
+    let cancelado = false;
+    (async () => {
+      const user = await lerUtilizador();
+      if (cancelado) return;
+      setRole(user?.role ?? null);
+    })();
+    return () => { cancelado = true; };
+  }, []);
+  return role;
+}
+
 export function GestorSidebar() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const roleLabel = useRoleLabel();
+  const userRole = useUserRole();
 
   const basePath = "/gestor";
 
@@ -115,7 +135,18 @@ export function GestorSidebar() {
 
   const NavLinks = () => (
     <nav className="flex flex-col gap-1 px-3 py-4">
-      {gestorNavItems.map((item) => {
+      {/* FIX (configs restritas a admin) — Filtra itens exclusivos do admin.
+          "Configurações" só aparece para role === 'admin'. O gestor não vê
+          nem acede a /gestor/configuracoes (exclusivo do Super Admin). */}
+      {gestorNavItems
+        .filter((item) => {
+          // "Configurações" é exclusivo do admin.
+          if (item.href === "/gestor/configuracoes" && userRole !== "admin") {
+            return false;
+          }
+          return true;
+        })
+        .map((item) => {
         const active = isActive(item.href);
         const Icon = item.icon;
         return (
