@@ -34,6 +34,7 @@ const {
   criarPropriedade,
   atualizarPropriedade,
   alternarEstadoPropriedade,
+  eliminarPropriedade,
   getTarefas,
   getDadosCalendario,
   getEquipa,
@@ -68,6 +69,8 @@ router.get('/propriedades', auth, isGestor, getPropriedades);
 router.post('/propriedades', auth, isGestor, criarPropriedade);
 router.put('/propriedades/:id', auth, isGestor, atualizarPropriedade);
 router.patch('/propriedades/:id/estado', auth, isGestor, alternarEstadoPropriedade);
+// FIX (hard-delete para admin) — DELETE com ?hard=true para hard-delete (só admin).
+router.delete('/propriedades/:id', auth, isGestor, eliminarPropriedade);
 
 // Aplica um checklist padrão a TODAS as propriedades ativas da empresa.
 router.post('/propriedades/default-checklist', auth, isGestor, async (req, res) => {

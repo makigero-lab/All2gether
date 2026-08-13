@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Plus, Building2, Loader2, AlertCircle, RefreshCw, Power, Pencil, Download, CheckCircle2, ListChecks } from "lucide-react";
+import { Plus, Building2, Loader2, AlertCircle, RefreshCw, Power, Pencil, Trash2, CheckCircle2, ListChecks } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,10 +26,12 @@ import {
   adminPost,
   adminPatch,
   adminPut,
+  adminDelete,
   type PropriedadeDTO,
   type UtilizadorDTO,
   type ModeloChecklistDTO,
 } from "@/lib/api";
+import { lerUtilizador, type Role } from "@/lib/auth";
 
 /**
  * Página de Propriedades — Painel de Administração.
@@ -63,6 +65,37 @@ export default function PropriedadesPage() {
   >([]);
   const [smoobuLoading, setSmoobuLoading] = useState(false);
   const [smoobuErro, setSmoobuErro] = useState<string | null>(null);
+
+  // FIX (hard-delete para admin) — Role do utilizador atual (para mostrar o
+  // botão "Eliminar Definitivamente" apenas para admin).
+  const [userRole, setUserRole] = useState<Role | null>(null);
+  useEffect(() => {
+    let cancelado = false;
+    (async () => {
+      const user = await lerUtilizador();
+      if (!cancelado) setUserRole(user?.role ?? null);
+    })();
+    return () => { cancelado = true; };
+  }, []);
+
+  // FIX (hard-delete para admin) — Estado do Dialog de confirmação de hard-delete.
+  const [eliminandoProp, setEliminandoProp] = useState<PropriedadeDTO | null>(null);
+  const [eliminandoSubmitting, setEliminandoSubmitting] = useState(false);
+
+  /** FIX (hard-delete para admin) — Elimina definitivamente a propriedade. */
+  async function handleEliminarDefinitivamente() {
+    if (!eliminandoProp) return;
+    setEliminandoSubmitting(true);
+    try {
+      await adminDelete(`/api/gestor/propriedades/${eliminandoProp._id}?hard=true`);
+      setEliminandoProp(null);
+      await carregar();
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Erro ao eliminar propriedade.");
+    } finally {
+      setEliminandoSubmitting(false);
+    }
+  }
 
   /** Carrega as propriedades da API. */
   const carregar = useCallback(async () => {
@@ -556,21 +589,11 @@ export default function PropriedadesPage() {
           >
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           </Button>
-          <Button
-            variant="outline"
-            onClick={handleImportarPropriedades}
-            disabled={sincronizando}
-            title="Importa apartamentos do Smoobu para a tua empresa. Morada fica 'A definir' para preencher depois."
-          >
-            {sincronizando ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Download className="h-4 w-4" />
-            )}
-            <span className="hidden sm:inline">
-              {sincronizando ? "A importar…" : "Importar do Smoobu"}
-            </span>
-          </Button>
+          {/* FIX (relocação do botão Smoobu) — Botão "Importar do Smoobu"
+              removido desta página. A funcionalidade foi migrada para a página
+              /gestor/configuracoes/integracoes (secção "Ações Manuais de
+              Emergência"). Aqui mantém-se apenas o "Checklist Padrão" e o
+              "Adicionar" manual. */}
           {/* Prompt 113 — Aplicar checklist padrão a todas as propriedades */}
           <Button
             variant="outline"
@@ -943,6 +966,21 @@ export default function PropriedadesPage() {
                           >
                             <Power className="h-4 w-4" />
                           </Button>
+                          {/* FIX (hard-delete para admin) — Botão "Eliminar
+                              Definitivamente" visível EXCLUSIVAMENTE para
+                              role === 'admin'. Faz hard-delete (?hard=true). */}
+                          {userRole === "admin" && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-destructive hover:text-destructive"
+                              onClick={() => setEliminandoProp(p)}
+                              aria-label={`Eliminar definitivamente ${p.nome}`}
+                              title="Eliminar Definitivamente (admin)"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -1470,6 +1508,58 @@ export default function PropriedadesPage() {
             </Button>
           </DialogFooter>
         </form>
+      </Dialog>
+
+      {/* FIX (hard-delete para admin) — Dialog de confirmação de hard-delete. */}
+      <Dialog open={eliminandoProp !== null} onOpenChange={(o) => !o && setEliminandoProp(null)}>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-destructive">
+            <Trash2 className="h-5 w-5" />
+            Eliminar Definitivamente
+          </DialogTitle>
+          <DialogDescription>
+            Tens a certeza que queres eliminar definitivamente a propriedade{" "}
+            <strong>{eliminandoProp?.nome}</strong>?
+          </DialogDescription>
+          <DialogClose onClick={() => setEliminandoProp(null)} />
+        </DialogHeader>
+        <DialogContent className="space-y-3">
+          <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm">
+            <p className="font-medium text-destructive">⚠️ Ação irreversível!</p>
+            <p className="mt-1 text-muted-foreground">
+              Esta operação apaga permanentemente a propriedade da base de dados
+              e <strong>todas as tarefas futuras</strong> a ela associadas
+              (não concluídas/canceladas). As tarefas concluídas e canceladas
+              são preservadas para auditoria.
+            </p>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Se só quiseres desativar a propriedade (preservando os dados),
+              usa o botão "Desativar" (Power) em vez deste.
+            </p>
+          </div>
+        </DialogContent>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setEliminandoProp(null)}
+            disabled={eliminandoSubmitting}
+          >
+            Cancelar
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            onClick={handleEliminarDefinitivamente}
+            disabled={eliminandoSubmitting}
+          >
+            {eliminandoSubmitting ? (
+              <><Loader2 className="mr-2 h-4 w-4 animate-spin" />A eliminar…</>
+            ) : (
+              <><Trash2 className="mr-2 h-4 w-4" />Sim, eliminar definitivamente</>
+            )}
+          </Button>
+        </DialogFooter>
       </Dialog>
     </div>
   );

@@ -2164,3 +2164,26 @@ Stage Summary:
 - **Soft-delete com desatribuição:** inativar um funcionário desatribui automaticamente todas as suas tarefas futuras (voltam a "Por Atribuir"). Calendário e Tarefas não mostram staff inativo nos dropdowns.
 - **Sem regressões:** 111/111 testes Jest passam; tsc frontend 0 erros; node --check backend OK.
 - **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat: parceiros isolados, soft-delete com desatribuicao futura, moradas estruturadas e correcoes admin`.
+
+---
+
+Task ID: AUTO-REATRIBUICAO-HARDDELETE-FOLGAS
+Agent: Z.ai Code (Eng. Software Principal)
+Task: Auto-reatribuição em férias, hard-delete para admin, agrupamento de folgas e ajustes UI.
+
+Work Log:
+- **#1 Hard-Delete para admin em Propriedades:** `backend/controllers/gestorController.js` — nova função `eliminarPropriedade` (DELETE `/api/gestor/propriedades/:id`). Sem `?hard=true`: soft-delete (marca `ativo=false` + desatribui tarefas futuras). Com `?hard=true`: HARD DELETE (apaga propriedade + tarefas futuras não concluídas). Verificação extra `req.user.role === 'admin'` para hard-delete. Rota `router.delete('/propriedades/:id', ...)` adicionada a `gestorRoutes.js`. Frontend: `propriedades/page.tsx` — botão "Eliminar Definitivamente" (Trash2) visível exclusivamente para `userRole === 'admin'` (via `lerUtilizador()`). Dialog de confirmação com aviso de irreversibilidade. Imports atualizados (`Trash2`, `adminDelete`, `lerUtilizador`).
+- **#2 Relocação do botão Smoobu:** `propriedades/page.tsx` — botão "Importar do Smoobu" removido do cabeçalho. A funcionalidade já existe em `/gestor/configuracoes/integracoes` (secção "Ações Manuais de Emergência" + botão inline no card Smoobu). Import `Download` removido (não usado).
+- **#3 Aprovação de Ausências com Reatribuição Automática Inteligente (CRÍTICO):** `backend/controllers/ausenciaController.js` — nova função `reatribuirTarefasPeriodo(empresaId, utilizadorId, inicio, fim)` que, após `desatribuirTarefasPeriodo`, executa o load balancer (`determinarUtilizadorAtribuido`) para cada tarefa desatribuída, excluindo o utilizador ausente via `excluirStaffIds`. Se encontrar staff elegível (ATIVO, sem folga/férias, com menor carga), reatribui automaticamente + recalcula hora via scheduler. Se não houver ninguém, mantém `por_atribuir`. `aprovarRejeitarAusencia` e `reaplicarAusencia` atualizados para chamar `reatribuirTarefasPeriodo` (best-effort com try/catch — a aprovação não falha se a reatribuição tiver erro). Resposta JSON enriquecida com `redistribuicao.reatribuicao = { total, reatribuidas, orfas }`. Frontend: `calendario/page.tsx` — função `estadoDia` reordenada para dar prioridade ABSOLUTA a ausências (vermelho) sobre tarefas (azul) — o gestor vê imediatamente quem está de férias, mesmo que o staff tenha tarefas atribuídas nesse dia.
+- **#4 Limpeza de Botões Duplicados:** `tarefas/page.tsx` — botão "Auto-Atribuir Pendentes" removido da página de Limpezas. A funcionalidade mantém-se exclusivamente na página do Calendário (`/gestor/calendario`) para evitar duplicação.
+- **#5 Gestão de Folgas no Ecrã de Ausências:** `ausencias/page.tsx` — import de `Tabs` adicionado. Página envolvida em `<Tabs defaultValue="ausencias">` com 2 separadores: "Ausências" (conteúdo existente) e "Dias de Folga" (novo Card que lista staff ativo + respetivos `dias_folga` como Badges "Seg", "Ter", etc.). Função `carregarFolgas()` faz fetch de `/api/gestor/equipa` e filtra `role === 'staff' && ativo`. Link para `/gestor/equipa` para editar folgas.
+- **Documentação atualizada:** esta entrada no `WORKLOG.md`.
+
+Stage Summary:
+- **Auto-reatribuição inteligente:** ao aprovar férias/doença, o sistema não apenas desatribui as tarefas — tenta reatribuí-las automaticamente a outro staff disponível, respeitando folgas, ausências, SLA de 8h e tempo de viagem. Se não houver ninguém, a tarefa fica "Por Atribuir" para o gestor resolver manualmente.
+- **Hard-delete para admin:** o Super Admin pode eliminar propriedades definitivamente (botão exclusivo para `role === 'admin'`), apagando também as tarefas futuras associadas. Soft-delete (desativar) mantém-se como padrão para gestores.
+- **Calendário com prioridade visual:** ausências (vermelho) têm prioridade absoluta sobre tarefas (azul) na vista Equipa — o gestor vê imediatamente quem está de férias, mesmo que o staff tenha tarefas atribuídas nesse dia.
+- **Botões limpos:** "Importar Smoobu" removido de Propriedades (já em Integrações). "Auto-Atribuir Pendentes" removido de Limpezas (mantém-se no Calendário).
+- **Folgas visíveis:** novo separador "Dias de Folga" na página de Ausências lista todos os staff ativos com os seus dias de folga fixos.
+- **Sem regressões:** 111/111 testes Jest passam; tsc frontend 0 erros; node --check backend OK.
+- **Próximo passo (este commit):** commit + push para `dev` com a mensagem `fix: auto-reatribuicao em ferias, hard-delete para admin, agrupa folgas e ajustes ui`.

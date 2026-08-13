@@ -916,6 +916,129 @@ exports.alternarEstadoPropriedade = async (req, res) => {
 };
 
 /**
+ * DELETE /api/gestor/propriedades/:id?hard=true
+ * FIX (hard-delete para admin) — Elimina uma propriedade.
+ *
+ * Comportamento:
+ *   - Sem ?hard=true (soft-delete padrão): marca `ativo = false` (preserva dados
+ *     para auditoria). É o comportamento padrão para gestores.
+ *   - Com ?hard=true (HARD DELETE): remove fisicamente o documento da BD
+ *     (findByIdAndDelete). Exclusivo para admin — o middleware isGestor já
+ *     permite admin, mas a verificação extra `req.user.role === 'admin'` é
+ *     feita aqui para garantir que só admin pode hard-delete.
+ *
+ * Em ambos os casos, desatribui as tarefas futuras associadas (passam a
+ * 'por_atribuir' se soft-delete, ou são apagadas se hard-delete — mas como
+ * as tarefas têm referência propriedade_id, o hard-delete da propriedade deixa
+ * as tarefas órfãs; por isso, no hard-delete, APAGAMOS também as tarefas
+ * futuras dessa propriedade para evitar inconsistência).
+ *
+ * Resposta 200: { mensagem, propriedade_id, hard_delete: boolean }
+ */
+exports.eliminarPropriedade = async (req, res) => {
+  try {
+    const { ok, empresaId } = obterEmpresaId(req, res);
+    if (!ok) return;
+
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ erro: 'ID de propriedade inválido.' });
+    }
+
+    const propriedade = await Propriedade.findOne({ _id: id, empresa_id: empresaId });
+    if (!propriedade) {
+      return res.status(404).json({
+        erro: 'Propriedade não encontrada (ou não pertence a esta empresa).',
+      });
+    }
+
+    const hardDelete = req.query.hard === 'true';
+
+    // FIX (hard-delete para admin) — Só admin pode hard-delete.
+    if (hardDelete && req.user && req.user.role !== 'admin') {
+      return res.status(403).json({
+        erro: 'Apenas o Super Admin pode eliminar propriedades definitivamente (hard-delete).',
+      });
+    }
+
+    if (hardDelete) {
+      // HARD DELETE: apaga a propriedade E as tarefas futuras associadas
+      // (para evitar tarefas órfãs com propriedade_id inexistente).
+      const hojeInicio = new Date();
+      hojeInicio.setUTCHours(0, 0, 0, 0);
+
+      const tarefasApagadas = await Tarefa.deleteMany({
+        propriedade_id: id,
+        empresa_id: empresaId,
+        data: { $gte: hojeInicio },
+        estado: { $nin: ['concluida', 'cancelada'] },
+      });
+
+      await Propriedade.deleteOne({ _id: id, empresa_id: empresaId });
+
+      registarAuditoria({
+        utilizador_id: req.user.id,
+        utilizador_nome: req.user.nome || 'Admin',
+        empresa_id: empresaId,
+        acao: 'eliminar',
+        recurso: 'propriedade',
+        recurso_id: id,
+        descricao: `Propriedade "${propriedade.nome}" eliminada DEFINITIVAMENTE (hard-delete) + ${tarefasApagadas.deletedCount} tarefa(s) futura(s) apagada(s).`,
+      });
+
+      console.log(
+        `🗑️ [eliminarPropriedade] HARD DELETE: "${propriedade.nome}" (${id}) ` +
+          `+ ${tarefasApagadas.deletedCount} tarefa(s) futura(s) apagada(s).`
+      );
+
+      return res.status(200).json({
+        mensagem: `Propriedade "${propriedade.nome}" eliminada definitivamente. ${tarefasApagadas.deletedCount} tarefa(s) futura(s) apagada(s).`,
+        propriedade_id: id,
+        hard_delete: true,
+        tarefas_apagadas: tarefasApagadas.deletedCount,
+      });
+    }
+
+    // SOFT DELETE (padrão): marca inativo.
+    propriedade.ativo = false;
+    await propriedade.save();
+
+    // Desatribui tarefas futuras (igual ao alternarEstadoPropriedade).
+    const hojeInicio = new Date();
+    hojeInicio.setUTCHours(0, 0, 0, 0);
+    const resultadoTarefas = await Tarefa.updateMany(
+      {
+        propriedade_id: id,
+        empresa_id: empresaId,
+        data: { $gte: hojeInicio },
+        estado: { $in: ['atribuida', 'em_curso'] },
+      },
+      { $set: { utilizador_id: null, estado: 'por_atribuir' } }
+    );
+
+    registarAuditoria({
+      utilizador_id: req.user.id,
+      utilizador_nome: req.user.nome || 'Admin',
+      empresa_id: empresaId,
+      acao: 'desativar',
+      recurso: 'propriedade',
+      recurso_id: id,
+      descricao: `Propriedade "${propriedade.nome}" desativada (soft-delete) + ${resultadoTarefas.modifiedCount} tarefa(s) desatribuída(s).`,
+    });
+
+    return res.status(200).json({
+      mensagem: `Propriedade "${propriedade.nome}" desativada. ${resultadoTarefas.modifiedCount} tarefa(s) futura(s) desatribuída(s).`,
+      propriedade_id: id,
+      hard_delete: false,
+      tarefas_desatribuidas: resultadoTarefas.modifiedCount,
+    });
+  } catch (err) {
+    console.error('❌ eliminarPropriedade:', err.message);
+    return res.status(500).json({ erro: 'Erro interno do servidor.' });
+  }
+};
+
+/**
  * PUT /api/gestor/propriedades/:id
  * Atualiza os dados de uma propriedade/sala (nome, morada,
  * tempo_limpeza_minutos). Se a morada mudar, re-faz geocoding para

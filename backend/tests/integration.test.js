@@ -743,10 +743,15 @@ describe('Fluxo de aprovação de ausências', () => {
     expect(res.body.redistribuicao).toBeTruthy();
     expect(res.body.redistribuicao.desatribuidas).toBeGreaterThanOrEqual(1);
 
-    // A tarefa foi DESATRIBUÍDA: utilizador_id = null + estado 'por_atribuir'.
+    // A tarefa foi DESATRIBUÍDA do staff original.
+    // FIX (auto-reatribuição) — Com a reatribuição automática, a tarefa pode
+    // ter sido reatribuída a outro staff disponível (se houver) ou ficado
+    // 'por_atribuir' (se não houver). Ambos os casos são válidos.
     const depois = await Tarefa.findById(tarefaAtribuida._id);
-    expect(depois.utilizador_id).toBeNull();
-    expect(depois.estado).toBe('por_atribuir');
+    // Não deve continuar atribuída ao staff original (que está de férias).
+    expect(String(depois.utilizador_id ?? '')).not.toBe(staffId);
+    // Estado deve ser 'atribuida' (se reatribuída) ou 'por_atribuir' (se órfã).
+    expect(['atribuida', 'por_atribuir']).toContain(depois.estado);
   });
 
   it('admin rejeita ausência → 200 + só atualiza estado (não mexe em tarefas)', async () => {
