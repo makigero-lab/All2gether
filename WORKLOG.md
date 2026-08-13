@@ -2211,3 +2211,24 @@ Stage Summary:
 - **Navegação universal:** URLs usam o endpoint universal `https://www.google.com/maps/search/?api=1&query=...` que abre a app nativa do Google Maps no mobile e o web app no desktop.
 - **Sem regressões:** 111/111 testes Jest passam; tsc frontend 0 erros; node --check backend OK.
 - **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat: google maps integration, auto-reatribuicao em ferias, hard-delete para admin e ajustes ui`.
+
+---
+
+Task ID: PARCEIRO-RELACIONAL-SMOOBU-CONFIGS-LIMPEZA
+Agent: Z.ai Code (Eng. Software Principal)
+Task: Associação relacional de parceiros, status Smoobu real, configs restritas a admin e limpeza de UI.
+
+Work Log:
+- **#1 Associação Relacional de Parceiros:** `backend/controllers/gestorController.js` — `getPropriedades` agora faz `.populate('parceiro_id', 'nome email role')` para o frontend ter o nome do parceiro. `atualizarPropriedade` aceita `parceiro_id` (valida que é role 'parceiro' da empresa). `PropriedadeDTO` em `lib/api.ts` atualizado com `parceiro_id?: string | { _id, nome, email, role } | null`. Frontend: `propriedades/page.tsx` — Badge na tabela usa `parceiro_id.nome` (populado) em vez de extrair das `observacoes` (lógica legacy removida). Select de parceiro adicionado aos formulários de criação (`manualForm`) e edição (`editForm`), buscando a lista de `GET /api/gestor/parceiros`. `abrirEdicao` extrai o ID do parceiro (string ou objeto populado).
+- **#2 Status Smoobu Real:** `backend/routes/gestorRoutes.js` — `GET /api/gestor/configuracoes/integracoes` agora devolve `smoobu_ativo: boolean` (true se chave na BD OU env var `SMOOBU_API_KEY`). Frontend: `configuracoes/integracoes/page.tsx` — `IntegracoesConfig` atualizado com `smoobu_ativo?`. `carregar()` usa `data.smoobu_ativo ?? data.smoobu.configurado` como fonte de verdade para o estado da integração (bolinha verde "Configurada" vs "Por configurar").
+- **#3 Configurações Restritas a Admin:** `frontend/src/components/gestor/gestor-sidebar.tsx` — novo hook `useUserRole()` que lê o role via `lerUtilizador()`. `NavLinks` agora filtra o item "Configurações" (`/gestor/configuracoes`) — só aparece se `userRole === 'admin'`. O gestor não vê nem acede a Configurações (exclusivo do Super Admin).
+- **#4 Limpeza de UI (Remoção de Ferramentas de Dev):** `frontend/src/app/gestor/ausencias/page.tsx` — removidos completamente: Card de "Diagnóstico de ausências" (com select de funcionário + `handleDiagnostico`), Banner de resultado de "Reaplicar ausência" (com `resultadoReaplicar`), Botão "Reaplicar ausência" na tabela (com `handleReaplicar` + `reaplicandoId`). Estados e funções mortos removidos. Imports `RotateCcw` e `Bug` removidos. A funcionalidade de reaplicar ausência continua disponível via API (`POST /api/gestor/ausencias/:id/reaplicar`) e a reatribuição automática agora corre ao aprovar a ausência (implementado no commit anterior).
+- **Documentação atualizada:** esta entrada no `WORKLOG.md`.
+
+Stage Summary:
+- **Parceiro relacional:** propriedades agora associam parceiros via `parceiro_id` (ObjectId, ref: 'Utilizador') em vez da lógica improvisada de escrever nas observações. Badge mostra o nome do parceiro populado pelo backend. Select nos formulários para escolher parceiro.
+- **Status Smoobu real:** a UI mostra "Configurada" quando a chave existe na BD OU na env var (não mais "não configurada" falsamente). Usa `smoobu_ativo` do backend como fonte de verdade.
+- **Configs restritas:** o menu "Configurações" só aparece para `role === 'admin'`. O gestor não vê nem acede a `/gestor/configuracoes`.
+- **UI limpa:** ferramentas de dev (Diagnóstico, Reaplicar) removidas da página de Ausências. Produção sem utilitários técnicos.
+- **Sem regressões:** 111/111 testes Jest; tsc 0 erros; ESLint 0 erros.
+- **Próximo passo (este commit):** commit + push para `dev` com a mensagem `fix: associa parceiro relacional, status smoobu real, configs restritas a admin e limpa dev UI`.

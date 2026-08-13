@@ -62,6 +62,11 @@ interface IntegracoesConfig {
     frequencia_horas: number;
   };
   env_var_ativa: boolean;
+  // FIX (status smoobu real) — Estado real da integração Smoobu (chave na BD
+  // OU env var). O frontend usa este booleano para mostrar a bolinha verde.
+  smoobu_ativo?: boolean;
+  // FIX (google maps integration) — Indica se o Google Maps está configurado.
+  google_maps_ativo?: boolean;
 }
 
 function formatarData(iso: string | null): string {
@@ -180,12 +185,16 @@ export default function IntegracoesPage() {
         "/api/gestor/configuracoes/integracoes"
       );
       setApiKeyMascarada(data.smoobu.api_key_mascarada || "");
-      setTemApiKey(data.smoobu.configurado || false);
+      // FIX (status smoobu real) — setTemApiKey movido para depois (usa smoobu_ativo).
       setSmoobuAtivo(data.smoobu.ativo || false);
       setUltimaSincronizacao(data.smoobu.ultima_sincronizacao || null);
       setSincronizacaoAutomatica(data.rotinas.sincronizacao_automatica || false);
       setFrequenciaHoras(data.rotinas.frequencia_horas || 24);
       setEnvVarAtiva(data.env_var_ativa || false);
+      // FIX (status smoobu real) — Usa smoobu_ativo (chave na BD OU env var)
+      // como fonte de verdade para o estado da integração. Se smoobu_ativo
+      // estiver definido, usa-o; senão fallback para smoobu.configurado.
+      setTemApiKey(data.smoobu_ativo ?? data.smoobu.configurado ?? false);
       setEditApiKey(false);
       setLimparChave(false);
       setApiKeyInput("");

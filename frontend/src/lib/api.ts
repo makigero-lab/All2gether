@@ -200,9 +200,14 @@ export interface PropriedadeDTO {
   frequencia_limpeza?: "semanal" | "quinzenal" | "mensal";
   horario_limpeza?: string;
   // FIX (parceiro associado) — Observações livres da propriedade (notas
-  // internas do gestor). Pode conter a linha "Parceiro Associado: [nome]"
-  // adicionada pela rota de migração. O frontend extrai esta linha para o Badge.
+  // internas do gestor). A lógica legacy de "Parceiro Associado: [nome]"
+  // foi substituída por parceiro_id (relacional), mas o campo mantém-se
+  // para notas livres gerais.
   observacoes?: string;
+  // FIX (parceiro associado relacional) — ID do parceiro B2B associado.
+  // Populado pelo backend com { _id, nome, email, role } para o frontend
+  // mostrar no Badge sem extrair das observações.
+  parceiro_id?: string | { _id: string; nome: string; email: string; role: string } | null;
   // FIX (morada estruturada) — Morada decomposta (rua, codigo_postal, cidade).
   // Retrocompatível: se vazio, o frontend faz fallback para `morada` (string única).
   morada_estruturada?: {

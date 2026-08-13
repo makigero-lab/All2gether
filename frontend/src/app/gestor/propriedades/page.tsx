@@ -283,6 +283,8 @@ export default function PropriedadesPage() {
     morada_rua: "",
     morada_codigo_postal: "",
     morada_cidade: "",
+    // FIX (parceiro associado relacional) — ID do parceiro B2B associado.
+    parceiro_id: "",
   });
   const [manualSubmitting, setManualSubmitting] = useState(false);
   const [manualErro, setManualErro] = useState<string | null>(null);
@@ -327,10 +329,14 @@ export default function PropriedadesPage() {
           dias_fixos_limpeza: manualForm.dias_fixos_limpeza.length > 0 ? manualForm.dias_fixos_limpeza : undefined,
           // FIX (parceiro associado) — observacoes (notas internas).
           observacoes: manualForm.observacoes.trim() || undefined,
+          // FIX (parceiro associado relacional) — ID do parceiro B2B.
+          ...(manualForm.parceiro_id.trim()
+            ? { parceiro_id: manualForm.parceiro_id.trim() }
+            : {}),
         }
       );
       // Limpa o formulário e fecha o modal.
-      setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1", dias_fixos_limpeza: [], observacoes: "", morada_rua: "", morada_codigo_postal: "", morada_cidade: "" });
+      setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1", dias_fixos_limpeza: [], observacoes: "", morada_rua: "", morada_codigo_postal: "", morada_cidade: "", parceiro_id: "" });
       setManualOpen(false);
       await carregar();
     } catch (e) {
@@ -353,6 +359,8 @@ export default function PropriedadesPage() {
     morada_rua: "",
     morada_codigo_postal: "",
     morada_cidade: "",
+    // FIX (parceiro associado relacional) — ID do parceiro B2B associado.
+    parceiro_id: "",
   });
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editErro, setEditErro] = useState<string | null>(null);
@@ -411,20 +419,26 @@ export default function PropriedadesPage() {
   // Prompt 95 — Lista de staff da empresa (para o select de funcionário
   // preferencial no modal de edição). Carregada uma vez ao montar.
   const [staffList, setStaffList] = useState<UtilizadorDTO[]>([]);
+  // FIX (parceiro associado relacional) — Lista de parceiros da empresa
+  // (para o select de associação nos formulários de criação/edição).
+  const [parceirosList, setParceirosList] = useState<UtilizadorDTO[]>([]);
   useEffect(() => {
     (async () => {
       try {
-        const data = await adminGet<{ utilizadores: UtilizadorDTO[] }>(
-          "/api/gestor/equipa"
-        );
+        const [staffRes, parceirosRes] = await Promise.all([
+          adminGet<{ utilizadores: UtilizadorDTO[] }>("/api/gestor/equipa"),
+          adminGet<{ utilizadores: UtilizadorDTO[] }>("/api/gestor/parceiros"),
+        ]);
         // Só interessa staff ativo (o backend valida isto ao gravar).
         setStaffList(
-          (data.utilizadores ?? []).filter(
+          (staffRes.utilizadores ?? []).filter(
             (u) => u.role === "staff" && u.ativo
           )
         );
+        // FIX (parceiro associado relacional) — Carrega parceiros para o select.
+        setParceirosList(parceirosRes.utilizadores ?? []);
       } catch {
-        // Silencioso — o select aparece vazio mas não bloqueia a edição.
+        // Silencioso — os selects aparecem vazios mas não bloqueiam a edição.
       }
     })();
   }, []);
@@ -446,6 +460,12 @@ export default function PropriedadesPage() {
       morada_rua: p.morada_estruturada?.rua ?? "",
       morada_codigo_postal: p.morada_estruturada?.codigo_postal ?? "",
       morada_cidade: p.morada_estruturada?.cidade ?? "",
+      // FIX (parceiro associado relacional) — Extrai o ID do parceiro
+      // (pode ser string ou objeto populado { _id, nome, ... }).
+      parceiro_id:
+        p.parceiro_id && typeof p.parceiro_id === "object"
+          ? p.parceiro_id._id
+          : (p.parceiro_id as string) ?? "",
     });
     setEditErro(null);
     // Prompt 126 — Reset dos avisos de morada ao abrir o modal.
@@ -513,6 +533,11 @@ export default function PropriedadesPage() {
             editForm.modelo_checklist_id.trim() || null,
           // FIX (parceiro associado) — observacoes (notas internas).
           observacoes: editForm.observacoes.trim(),
+          // FIX (parceiro associado relacional) — ID do parceiro B2B.
+          // String vazia → null no backend (remove associação).
+          ...(editForm.parceiro_id.trim()
+            ? { parceiro_id: editForm.parceiro_id.trim() }
+            : { parceiro_id: null }),
           forcar_morada: editMoradaConfirmada || undefined,
         }
       );
@@ -589,7 +614,7 @@ export default function PropriedadesPage() {
             onClick={() => {
               setManualOpen(true);
               setManualErro(null);
-              setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1", dias_fixos_limpeza: [], observacoes: "", morada_rua: "", morada_codigo_postal: "", morada_cidade: "" });
+              setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1", dias_fixos_limpeza: [], observacoes: "", morada_rua: "", morada_codigo_postal: "", morada_cidade: "", parceiro_id: "" });
             }}
           >
             <Plus className="h-4 w-4" />
@@ -870,22 +895,27 @@ export default function PropriedadesPage() {
                               👥 {p.capacidade_hospedes}
                             </Badge>
                           )}
-                          {/* FIX (parceiro associado) — Badge do parceiro associado.
-                              Extrai o nome da linha "Parceiro Associado: [nome]"
-                              das observações. Se não houver, mostra "All2gether". */}
+                          {/* FIX (parceiro associado relacional) — Badge do
+                              parceiro associado. Usa parceiro_id populado pelo
+                              backend (novo campo relacional). Se não houver,
+                              mostra "All2gether". */}
                           <Badge
                             variant="secondary"
                             className="text-[10px]"
                             title={
-                              p.observacoes?.match(/Parceiro Associado:\s*(.+)/i)?.[1]?.trim()
-                                ? `Parceiro Associado: ${p.observacoes.match(/Parceiro Associado:\s*(.+)/i)![1].trim()}`
+                              p.parceiro_id && typeof p.parceiro_id === "object"
+                                ? `Parceiro Associado: ${p.parceiro_id.nome}`
                                 : "Propriedade All2gether"
                             }
                           >
                             {(() => {
-                              const match = p.observacoes?.match(/Parceiro Associado:\s*(.+)/i);
-                              const nomeParceiro = match?.[1]?.trim();
-                              return nomeParceiro || "All2gether";
+                              // FIX (parceiro associado relacional) — Se
+                              // parceiro_id estiver populado (objeto), usa o nome.
+                              // Senão, fallback para "All2gether".
+                              if (p.parceiro_id && typeof p.parceiro_id === "object") {
+                                return p.parceiro_id.nome || "All2gether";
+                              }
+                              return "All2gether";
                             })()}
                           </Badge>
                           {p.morada === "A definir" && (
@@ -1100,8 +1130,29 @@ export default function PropriedadesPage() {
                 className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
               <p className="text-xs text-muted-foreground">
-                Notas livres do gestor. Se contiver a linha &quot;Parceiro Associado:
-                [nome]&quot;, o nome é extraído e mostrado no Badge da listagem.
+                Notas livres do gestor (ex: frequência, instruções especiais).
+              </p>
+            </div>
+            {/* FIX (parceiro associado relacional) — Select de parceiro B2B. */}
+            <div className="space-y-1.5">
+              <label htmlFor="manual-parceiro" className="text-sm font-medium">
+                Parceiro Associado (opcional)
+              </label>
+              <select
+                id="manual-parceiro"
+                value={manualForm.parceiro_id}
+                onChange={(e) =>
+                  setManualForm((f) => ({ ...f, parceiro_id: e.target.value }))
+                }
+                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <option value="">Nenhum (propriedade All2gether)</option>
+                {parceirosList.map((p) => (
+                  <option key={p._id} value={p._id}>{p.nome}</option>
+                ))}
+              </select>
+              <p className="text-xs text-muted-foreground">
+                Associa esta propriedade a um parceiro B2B. O nome aparece no Badge da listagem.
               </p>
             </div>
             <div className="space-y-1.5">
@@ -1355,8 +1406,29 @@ export default function PropriedadesPage() {
                 className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
               <p className="text-xs text-muted-foreground">
-                Notas livres do gestor. Se contiver a linha &quot;Parceiro Associado:
-                [nome]&quot;, o nome é extraído e mostrado no Badge da listagem.
+                Notas livres do gestor (ex: frequência, instruções especiais).
+              </p>
+            </div>
+            {/* FIX (parceiro associado relacional) — Select de parceiro B2B. */}
+            <div className="space-y-1.5">
+              <label htmlFor="edit-parceiro" className="text-sm font-medium">
+                Parceiro Associado
+              </label>
+              <select
+                id="edit-parceiro"
+                value={editForm.parceiro_id}
+                onChange={(e) =>
+                  setEditForm((f) => ({ ...f, parceiro_id: e.target.value }))
+                }
+                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <option value="">Nenhum (propriedade All2gether)</option>
+                {parceirosList.map((p) => (
+                  <option key={p._id} value={p._id}>{p.nome}</option>
+                ))}
+              </select>
+              <p className="text-xs text-muted-foreground">
+                Associa esta propriedade a um parceiro B2B. O nome aparece no Badge da listagem.
               </p>
             </div>
             <div className="space-y-1.5">
