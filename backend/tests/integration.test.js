@@ -28,6 +28,14 @@ const Propriedade = require('../models/Propriedade');
 const Utilizador = require('../models/Utilizador');
 const Tarefa = require('../models/Tarefa');
 const WebhookLog = require('../models/WebhookLog');
+// FIX (testes determinísticos) — Mock do geocoding (Nominatim/OSM) para evitar
+// chamadas de rede externa nos testes de integração. Sem isto, os testes que
+// criam propriedades (POST /api/gestor/propriedades) penduravam no timeout de
+// 5s do Jest porque o Nominatim devolvia vazio ou demorava >5s a responder.
+// O mock devolve coordenadas fixas de Lisboa (38.7223, -9.1393) para qualquer
+// morada — os testes não validam coordenadas reais, só que a propriedade é
+// criada com sucesso.
+const geocoding = require('../utils/geocoding');
 
 let mongod;
 let empresaId;
@@ -43,6 +51,14 @@ beforeAll(async () => {
   mongod = await MongoMemoryServer.create();
   const uri = mongod.getUri();
   await mongoose.connect(uri);
+
+  // FIX (testes determinísticos) — Mock do geocoding para evitar chamadas de
+  // rede ao Nominatim nos testes. Devolve coordenadas de Lisboa para qualquer
+  // morada. Restorado no afterAll.
+  jest.spyOn(geocoding, 'obterCoordenadas').mockResolvedValue({
+    lat: 38.7223,
+    lng: -9.1393,
+  });
 
   // Semeia a empresa + admin base.
   const empresa = await Empresa.create({ nome: 'Empresa Teste' });
@@ -67,6 +83,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  // Restaura todos os mocks (incluindo geocoding.obterCoordenadas).
+  jest.restoreAllMocks();
   await mongoose.disconnect();
   if (mongod) await mongod.stop();
 });
