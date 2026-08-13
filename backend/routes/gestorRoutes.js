@@ -34,6 +34,7 @@ const {
   criarPropriedade,
   atualizarPropriedade,
   alternarEstadoPropriedade,
+  eliminarPropriedade,
   getTarefas,
   getDadosCalendario,
   getEquipa,
@@ -48,6 +49,8 @@ const {
   getWebhooks,
   reprocessarWebhook,
   setupClienteZero,
+  // FIX (gestão de parceiros) — novo controller para listar parceiros B2B.
+  getParceiros,
 } = require('../controllers/gestorController');
 const { reportarAtrasoTarefa, criarTarefa, atribuirTarefa, reatribuirTarefa, atualizarEstadoTarefa, apagarTarefasFuturas, listarIndisponiveisData, autoAtribuirTarefas, criarTarefaEspontanea } = require('../controllers/tarefaController');
 // CRUD de Modelos de Checklist (futuro: Modelos de Protocolo Clínico)
@@ -66,6 +69,8 @@ router.get('/propriedades', auth, isGestor, getPropriedades);
 router.post('/propriedades', auth, isGestor, criarPropriedade);
 router.put('/propriedades/:id', auth, isGestor, atualizarPropriedade);
 router.patch('/propriedades/:id/estado', auth, isGestor, alternarEstadoPropriedade);
+// FIX (hard-delete para admin) — DELETE com ?hard=true para hard-delete (só admin).
+router.delete('/propriedades/:id', auth, isGestor, eliminarPropriedade);
 
 // Aplica um checklist padrão a TODAS as propriedades ativas da empresa.
 router.post('/propriedades/default-checklist', auth, isGestor, async (req, res) => {
@@ -147,6 +152,8 @@ router.get('/tarefas/indisponiveis', auth, isGestor, listarIndisponiveisData);
 // Gestão de equipa (utilizadores) da empresa. PROTEGIDO por JWT.
 router.get('/equipa', auth, isGestor, getEquipa);
 router.post('/equipa', auth, isGestor, criarMembroEquipa);
+// FIX (gestão de parceiros) — rota dedicada para parceiros B2B.
+router.get('/parceiros', auth, isGestor, getParceiros);
 router.put('/equipa/:id', auth, isGestor, atualizarMembroEquipa);
 router.patch('/equipa/:id/estado', auth, isGestor, alternarEstadoMembro);
 router.delete('/equipa/:id', auth, isGestor, eliminarMembroEquipa);
@@ -305,6 +312,10 @@ router.get('/configuracoes/integracoes', auth, isGestor, async (req, res) => {
       // Indica se a env var fallback está ativa (para o frontend mostrar aviso
       // de que a chave da BD tem prioridade).
       env_var_ativa: Boolean(process.env.SMOOBU_API_KEY),
+      // FIX (google maps integration) — Indica se o Google Maps está configurado
+      // (env var GOOGLE_MAPS_API_KEY no Render). O frontend usa este booleano
+      // para mostrar/ocultar botões "Abrir no Google Maps" e links de navegação.
+      google_maps_ativo: require('../utils/geocoding').googleMapsAtivo(),
     });
   } catch (err) {
     return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });

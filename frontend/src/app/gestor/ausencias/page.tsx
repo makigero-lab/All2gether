@@ -27,6 +27,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
   DialogHeader,
@@ -152,6 +153,36 @@ export default function AusenciasPage() {
     notas: "",
   });
 
+  // FIX (gestão de folgas) — Estado para a secção "Dias de Folga".
+  // Lista os staff ativos com os seus dias_folga fixos (0=Dom, 6=Sáb).
+  const [folgasStaff, setFolgasStaff] = useState<UtilizadorDTO[]>([]);
+  const [folgasLoading, setFolgasLoading] = useState(false);
+  const [folgasErro, setFolgasErro] = useState<string | null>(null);
+
+  /** FIX (gestão de folgas) — Carrega staff ativo com dias_folga. */
+  async function carregarFolgas() {
+    setFolgasLoading(true);
+    setFolgasErro(null);
+    try {
+      const data = await adminGet<{ utilizadores: UtilizadorDTO[] }>(
+        "/api/gestor/equipa"
+      );
+      // Só staff ativo (não gestor/admin/parceiro, não inativo).
+      setFolgasStaff(
+        (data.utilizadores ?? []).filter(
+          (u) => u.role === "staff" && u.ativo
+        )
+      );
+    } catch (e) {
+      setFolgasErro(e instanceof Error ? e.message : "Erro ao carregar folgas.");
+    } finally {
+      setFolgasLoading(false);
+    }
+  }
+
+  /** Nomes dos dias da semana (0=Dom, 6=Sáb). */
+  const DIA_SEMANA_NOMES = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+
   const carregar = useCallback(async () => {
     setLoading(true);
     setErro(null);
@@ -170,6 +201,8 @@ export default function AusenciasPage() {
 
   useEffect(() => {
     carregar();
+    // FIX (gestão de folgas) — Carrega também as folgas ao montar a página.
+    carregarFolgas();
   }, [carregar]);
 
   async function handleEliminar() {
@@ -369,6 +402,21 @@ export default function AusenciasPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* FIX (gestão de folgas) — Separador entre "Ausências" e "Dias de Folga". */}
+      <Tabs defaultValue="ausencias" className="w-full">
+        <TabsList className="grid w-full grid-cols-2 sm:w-auto sm:inline-flex">
+          <TabsTrigger value="ausencias" className="gap-1.5">
+            <CalendarOff className="h-4 w-4" />
+            Ausências
+          </TabsTrigger>
+          <TabsTrigger value="folgas" className="gap-1.5">
+            <CalendarX className="h-4 w-4" />
+            Dias de Folga
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="ausencias" className="space-y-4 mt-4">
 
       {/* HF26 — Banner de resultado de "Reaplicar ausência" */}
       {resultadoReaplicar && (
@@ -578,6 +626,82 @@ export default function AusenciasPage() {
           )}
         </CardContent>
       </Card>
+
+        </TabsContent>
+
+        {/* FIX (gestão de folgas) — Separador "Dias de Folga". */}
+        <TabsContent value="folgas" className="space-y-4 mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <CalendarX className="h-5 w-5 text-primary" />
+                Folgas Fixas da Equipa
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground mb-4">
+                Lista de funcionários ativos (staff) e os respetivos dias de
+                folga fixos semanais. Para editar, vai à página{" "}
+                <a href="/gestor/equipa" className="text-primary underline">
+                  Equipa
+                </a>
+                .
+              </p>
+
+              {folgasLoading ? (
+                <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />A carregar…
+                </div>
+              ) : folgasErro ? (
+                <div className="flex items-center gap-2 py-8 text-sm text-destructive">
+                  <AlertCircle className="h-4 w-4" />{folgasErro}
+                </div>
+              ) : folgasStaff.length === 0 ? (
+                <div className="py-8 text-center text-sm text-muted-foreground">
+                  Não há staff ativo na equipa.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b bg-muted/40 text-left">
+                        <th className="px-4 py-3 font-medium">Nome</th>
+                        <th className="px-4 py-3 font-medium">Dias de Folga</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {folgasStaff.map((staff) => {
+                        const folgas = staff.dias_folga ?? [];
+                        return (
+                          <tr key={staff._id} className="hover:bg-muted/30">
+                            <td className="px-4 py-3 font-medium">{staff.nome}</td>
+                            <td className="px-4 py-3">
+                              {folgas.length === 0 ? (
+                                <span className="text-muted-foreground">—</span>
+                              ) : (
+                                <div className="flex flex-wrap gap-1.5">
+                                  {folgas
+                                    .slice()
+                                    .sort((a, b) => a - b)
+                                    .map((dia) => (
+                                      <Badge key={dia} variant="outline" className="text-xs">
+                                        {DIA_SEMANA_NOMES[dia] ?? `?${dia}`}
+                                      </Badge>
+                                    ))}
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       {/* Modal de confirmação de eliminação */}
       <Dialog

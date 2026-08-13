@@ -26,9 +26,15 @@ const propriedadeSchema = new mongoose.Schema(
       trim: true,
     },
     // Morada completa da propriedade (para geocoding e otimização de rotas).
+    // FIX (morada estruturada) — Deixou de ser `required`. As novas propriedades
+    // são criadas via `morada_estruturada` (rua/codigo_postal/cidade). O campo
+    // `morada` (string única) mantém-se para retrocompatibilidade das 46
+    // propriedades existentes. O virtual `moradaCompleta` concatena os 3 campos
+    // estruturados OU faz fallback para `morada`.
     morada: {
       type: String,
-      required: true,
+      required: false,
+      default: '',
       trim: true,
     },
     // Coordenadas geográficas (preenchidas automaticamente via geocoding
@@ -72,10 +78,28 @@ const propriedadeSchema = new mongoose.Schema(
       index: true,
     },
     // Prompt 125 — Observações livres da propriedade (notas internas do gestor).
+    // FIX (parceiro associado) — Este campo guarda também a linha
+    // "Parceiro Associado: [nome]" adicionada pela rota de migração
+    // /api/fix-migracao. O frontend extrai esta linha para mostrar o Badge
+    // do parceiro na listagem de propriedades.
     observacoes: {
       type: String,
       default: '',
       trim: true,
+    },
+    // FIX (morada estruturada) — Morada decomposta em campos estruturados
+    // (rua, codigo_postal, cidade) para melhor UX e geocoding. Retrocompatível:
+    // o campo `morada` (string única) mantém-se para as 46 propriedades
+    // existentes que foram importadas antes desta alteração. A lógica:
+    //   - Criar/Editar via form: preenche rua/codigo_postal/cidade.
+    //   - Se morada_estruturada tiver pelo menos `rua`, usa-a para geocoding
+    //     e para display. Senão, fallback para `morada` (string única).
+    //   - O getter virtual `moradaCompleta` (ver baixo) concatena os 3 campos
+    //     ou faz fallback para `morada`.
+    morada_estruturada: {
+      rua: { type: String, default: '', trim: true },
+      codigo_postal: { type: String, default: '', trim: true },
+      cidade: { type: String, default: '', trim: true },
     },
     // v1.61.0 (Prompt 84) — Capacidade máxima de hóspedes (definida manualmente
     // ou vinda de integrações externas). Usada para estimar tempo
@@ -162,5 +186,32 @@ const propriedadeSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+/* ------------------------------------------------------------------ */
+/* Virtual — moradaCompleta                                           */
+/* ------------------------------------------------------------------ */
+// FIX (morada estruturada) — Devolve a morada completa como string, seja ela
+// estruturada (rua + codigo_postal + cidade) ou legada (campo `morada`).
+// Usado pelo frontend para display e pelo geocoder para obter coordenadas.
+// Prioridade: morada_estruturada.rua > morada (legado) > string vazia.
+propriedadeSchema.virtual('moradaCompleta').get(function () {
+  const me = this.morada_estruturada;
+  if (me && me.rua && String(me.rua).trim()) {
+    const partes = [me.rua.trim()];
+    if (me.codigo_postal && String(me.codigo_postal).trim()) {
+      partes.push(me.codigo_postal.trim());
+    }
+    if (me.cidade && String(me.cidade).trim()) {
+      partes.push(me.cidade.trim());
+    }
+    return partes.join(', ');
+  }
+  // Fallback para morada legada (string única).
+  return this.morada || '';
+});
+
+// Garante que os virtuals são serializados em toJSON/toObject.
+propriedadeSchema.set('toJSON', { virtuals: true });
+propriedadeSchema.set('toObject', { virtuals: true });
 
 module.exports = mongoose.model('Propriedade', propriedadeSchema);

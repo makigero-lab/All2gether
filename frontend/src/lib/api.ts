@@ -199,6 +199,20 @@ export interface PropriedadeDTO {
   contato?: string;
   frequencia_limpeza?: "semanal" | "quinzenal" | "mensal";
   horario_limpeza?: string;
+  // FIX (parceiro associado) — Observações livres da propriedade (notas
+  // internas do gestor). Pode conter a linha "Parceiro Associado: [nome]"
+  // adicionada pela rota de migração. O frontend extrai esta linha para o Badge.
+  observacoes?: string;
+  // FIX (morada estruturada) — Morada decomposta (rua, codigo_postal, cidade).
+  // Retrocompatível: se vazio, o frontend faz fallback para `morada` (string única).
+  morada_estruturada?: {
+    rua: string;
+    codigo_postal: string;
+    cidade: string;
+  };
+  // FIX (morada estruturada) — Virtual do backend: morada completa concatenada.
+  // Pode não estar presente se o backend não enviar virtuals (mas toJSON está configurado).
+  moradaCompleta?: string;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -228,6 +242,9 @@ export interface UtilizadorDTO {
     motivo: string;
   }[];
   telefone?: string;
+  // FIX (gestão de parceiros) — NIF e observações livres do utilizador.
+  nif?: string;
+  observacoes?: string;
   createdAt?: string;
   updatedAt?: string;
 }

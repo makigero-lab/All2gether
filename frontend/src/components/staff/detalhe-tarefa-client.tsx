@@ -25,9 +25,10 @@ import {
   Camera,
   X,
   AlertCircle,
+  Navigation,
 } from "lucide-react";
 
-import { cn, parsearDataSegura } from "@/lib/utils";
+import { cn, parsearDataSegura, googleMapsUrl } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
@@ -428,7 +429,25 @@ export function DetalheTarefaClient({
           {tarefa.endereco && (
             <span className="flex min-w-0 items-center gap-1">
               <MapPin className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate">{tarefa.endereco}</span>
+              <span className="truncate flex-1">{tarefa.endereco}</span>
+              {/* FIX (google maps integration) — Botão "Abrir no Google Maps"
+                  para navegação direta à propriedade. */}
+              {(() => {
+                const url = googleMapsUrl(tarefa.endereco);
+                if (!url) return null;
+                return (
+                  <a
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex shrink-0 items-center gap-1 rounded text-primary hover:underline"
+                    title="Abrir no Google Maps"
+                    aria-label="Abrir no Google Maps"
+                  >
+                    <Navigation className="h-3.5 w-3.5" />
+                  </a>
+                );
+              })()}
             </span>
           )}
         </div>

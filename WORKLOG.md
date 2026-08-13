@@ -2141,3 +2141,73 @@ Stage Summary:
 - **Dados importados:** 6 propriedades e 3 empresas novas na BD local (script one-off, apagado do repo).
 - **Admin recuperado:** Super Admin `admin@makigero.com` com password aleatória (fornecida ao utilizador).
 - **Próximo passo (este commit):** commit + push para `dev` com a mensagem `fix: corrige lb de folgas, ui de ferias, muda para limpezas e importa clientes`.
+
+---
+
+Task ID: PARCEIROS-SOFTDELETE-MORADAS-ADMIN
+Agent: Z.ai Code (Eng. Software Principal)
+Task: Isolamento de parceiros, soft-delete com desatribuição futura, moradas estruturadas e correções de acesso direto do admin.
+
+Work Log:
+- **#1 Correção do Perfil Admin (Frontend):** `frontend/src/components/gestor/gestor-sidebar.tsx` — saudação hardcoded "Gestor" substituída por `useRoleLabel()` hook que chama `lerUtilizador()` e mostra "Admin" ou "Gestor" dinamicamente (Brand + cabeçalho mobile). Item "Configurações" (`/gestor/configuracoes`) adicionado ao `gestorNavItems` com ícone `Settings`. Item "Parceiros" (`/gestor/parceiros`) também adicionado com ícone `Handshake`. Imports atualizados.
+- **#2 Badge de Parceiro Associado + Observações:** `frontend/src/app/gestor/propriedades/page.tsx` — Badge `secondary` na `<td>` "Nome" que extrai o nome da linha "Parceiro Associado: [nome]" das `observacoes` (regex `/Parceiro Associado:\s*(.+)/i`); se não houver, mostra "All2gether". Campo `observacoes` (textarea) adicionado aos formulários manual e de edição. `PropriedadeDTO` em `lib/api.ts` ganhou `observacoes?: string`. Backend: `criarPropriedade` e `atualizarPropriedade` em `gestorController.js` atualizados para processar `observacoes` (destructure + assign).
+- **#3 Morada Estruturada:** `backend/models/Propriedade.js` — novo sub-documento `morada_estruturada: { rua, codigo_postal, cidade }`. Campo `morada` deixou de ser `required` (retrocompatibilidade: as 46 propriedades legadas continuam a usar `morada` string única). Virtual `moradaCompleta` concatenado os 3 campos ou faz fallback para `morada`. `toJSON`/`toObject` com `virtuals: true`. Backend: `criarPropriedade` e `atualizarPropriedade` aceitam `morada_estruturada` e usam-na para geocoding (prioridade sobre `morada`). Frontend: `PropriedadeDTO` ganhou `morada_estruturada?` + `moradaCompleta?`. Forms (manual + edição) têm 3 inputs (rua/codigo_postal/cidade) em grid 3-col. Tabela mostra morada estruturada se existir, senão fallback para `morada`.
+- **#4 Gestão Autónoma de Parceiros:** `backend/controllers/gestorController.js` — novo `getParceiros` (lista utilizadores com `role: 'parceiro'`, mostra ativos E inativos para reativação). `getEquipa` atualizado para excluir parceiros (`role: { $nin: ['admin', 'parceiro'] }`). Nova rota `GET /api/gestor/parceiros` em `gestorRoutes.js`. Nova página `frontend/src/app/gestor/parceiros/page.tsx` (~470 linhas) com tabela (Nome, Email, Telefone, NIF, Observações, Estado), Dialog de criação e Dialog de edição. Item "Parceiros" adicionado à sidebar. Schema `Utilizador.js` ganhou campos `nif` (String) e `observacoes` (String). `criarMembroEquipa` e `atualizarMembroEquipa` processam `nif` + `observacoes`. `UtilizadorDTO` em `lib/api.ts` ganhou `nif?` + `observacoes?`.
+- **#5 Soft-Delete com Desatribuição (CRÍTICO):** `backend/controllers/gestorController.js` — `alternarEstadoMembro` atualizado: ao inativar staff/gestor, chama `desatribuirTarefasPeriodo(utilizadorId, hoje, +1ano)` do `ausenciaController` para desatribuir TODAS as tarefas futuras (estados `atribuida`/`em_curso` → `por_atribuir` + `utilizador_id = null`). Devolve `tarefas_desatribuidas` na resposta JSON. Botão "Eliminar" (`<Trash2>`) removido da página de Equipa — soft-delete é feito via "Inativar" (`<Power>`). `getEquipa` removido o filtro `ativo: true` (mostra inativos para reativação). Calendário (`calendario/page.tsx:375`) e Tarefas (`tarefas/page.tsx:265`) já filtram `u.role === "staff" && u.ativo === true` client-side — staff inativo não aparece nos dropdowns de reatribuição. Teste `GET /api/gestor/equipa exclui admin e utilizadores inativos` atualizado para refletir o novo comportamento (inativos aparecem).
+- **Documentação atualizada:** `docs/BACKEND.md` (notas sobre morada estruturada, soft-delete com desatribuição, parceiros isolados) + esta entrada no `WORKLOG.md`.
+
+Stage Summary:
+- **Acesso direto do admin:** saudação dinâmica (Admin/Gestor) na sidebar + item "Configurações" visível para todos. Admin aterra direto na vista operacional sem impersonação.
+- **Propriedades com Badge e Observações:** cada propriedade mostra um Badge com o nome do parceiro associado (extraído das observações) ou "All2gether". Campo observacoes visível e editável nos formulários.
+- **Morada estruturada:** novas propriedades usam rua/codigo_postal/cidade (geocoding mais preciso). 46 propriedades legadas continuam a funcionar (fallback para `morada` string única).
+- **Parceiros isolados:** página dedicada `/gestor/parceiros` com CRUD completo (incluindo NIF + observacoes). Equipa lista apenas staff/gestor.
+- **Soft-delete com desatribuição:** inativar um funcionário desatribui automaticamente todas as suas tarefas futuras (voltam a "Por Atribuir"). Calendário e Tarefas não mostram staff inativo nos dropdowns.
+- **Sem regressões:** 111/111 testes Jest passam; tsc frontend 0 erros; node --check backend OK.
+- **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat: parceiros isolados, soft-delete com desatribuicao futura, moradas estruturadas e correcoes admin`.
+
+---
+
+Task ID: AUTO-REATRIBUICAO-HARDDELETE-FOLGAS
+Agent: Z.ai Code (Eng. Software Principal)
+Task: Auto-reatribuição em férias, hard-delete para admin, agrupamento de folgas e ajustes UI.
+
+Work Log:
+- **#1 Hard-Delete para admin em Propriedades:** `backend/controllers/gestorController.js` — nova função `eliminarPropriedade` (DELETE `/api/gestor/propriedades/:id`). Sem `?hard=true`: soft-delete (marca `ativo=false` + desatribui tarefas futuras). Com `?hard=true`: HARD DELETE (apaga propriedade + tarefas futuras não concluídas). Verificação extra `req.user.role === 'admin'` para hard-delete. Rota `router.delete('/propriedades/:id', ...)` adicionada a `gestorRoutes.js`. Frontend: `propriedades/page.tsx` — botão "Eliminar Definitivamente" (Trash2) visível exclusivamente para `userRole === 'admin'` (via `lerUtilizador()`). Dialog de confirmação com aviso de irreversibilidade. Imports atualizados (`Trash2`, `adminDelete`, `lerUtilizador`).
+- **#2 Relocação do botão Smoobu:** `propriedades/page.tsx` — botão "Importar do Smoobu" removido do cabeçalho. A funcionalidade já existe em `/gestor/configuracoes/integracoes` (secção "Ações Manuais de Emergência" + botão inline no card Smoobu). Import `Download` removido (não usado).
+- **#3 Aprovação de Ausências com Reatribuição Automática Inteligente (CRÍTICO):** `backend/controllers/ausenciaController.js` — nova função `reatribuirTarefasPeriodo(empresaId, utilizadorId, inicio, fim)` que, após `desatribuirTarefasPeriodo`, executa o load balancer (`determinarUtilizadorAtribuido`) para cada tarefa desatribuída, excluindo o utilizador ausente via `excluirStaffIds`. Se encontrar staff elegível (ATIVO, sem folga/férias, com menor carga), reatribui automaticamente + recalcula hora via scheduler. Se não houver ninguém, mantém `por_atribuir`. `aprovarRejeitarAusencia` e `reaplicarAusencia` atualizados para chamar `reatribuirTarefasPeriodo` (best-effort com try/catch — a aprovação não falha se a reatribuição tiver erro). Resposta JSON enriquecida com `redistribuicao.reatribuicao = { total, reatribuidas, orfas }`. Frontend: `calendario/page.tsx` — função `estadoDia` reordenada para dar prioridade ABSOLUTA a ausências (vermelho) sobre tarefas (azul) — o gestor vê imediatamente quem está de férias, mesmo que o staff tenha tarefas atribuídas nesse dia.
+- **#4 Limpeza de Botões Duplicados:** `tarefas/page.tsx` — botão "Auto-Atribuir Pendentes" removido da página de Limpezas. A funcionalidade mantém-se exclusivamente na página do Calendário (`/gestor/calendario`) para evitar duplicação.
+- **#5 Gestão de Folgas no Ecrã de Ausências:** `ausencias/page.tsx` — import de `Tabs` adicionado. Página envolvida em `<Tabs defaultValue="ausencias">` com 2 separadores: "Ausências" (conteúdo existente) e "Dias de Folga" (novo Card que lista staff ativo + respetivos `dias_folga` como Badges "Seg", "Ter", etc.). Função `carregarFolgas()` faz fetch de `/api/gestor/equipa` e filtra `role === 'staff' && ativo`. Link para `/gestor/equipa` para editar folgas.
+- **Documentação atualizada:** esta entrada no `WORKLOG.md`.
+
+Stage Summary:
+- **Auto-reatribuição inteligente:** ao aprovar férias/doença, o sistema não apenas desatribui as tarefas — tenta reatribuí-las automaticamente a outro staff disponível, respeitando folgas, ausências, SLA de 8h e tempo de viagem. Se não houver ninguém, a tarefa fica "Por Atribuir" para o gestor resolver manualmente.
+- **Hard-delete para admin:** o Super Admin pode eliminar propriedades definitivamente (botão exclusivo para `role === 'admin'`), apagando também as tarefas futuras associadas. Soft-delete (desativar) mantém-se como padrão para gestores.
+- **Calendário com prioridade visual:** ausências (vermelho) têm prioridade absoluta sobre tarefas (azul) na vista Equipa — o gestor vê imediatamente quem está de férias, mesmo que o staff tenha tarefas atribuídas nesse dia.
+- **Botões limpos:** "Importar Smoobu" removido de Propriedades (já em Integrações). "Auto-Atribuir Pendentes" removido de Limpezas (mantém-se no Calendário).
+- **Folgas visíveis:** novo separador "Dias de Folga" na página de Ausências lista todos os staff ativos com os seus dias de folga fixos.
+- **Sem regressões:** 111/111 testes Jest passam; tsc frontend 0 erros; node --check backend OK.
+- **Próximo passo (este commit):** commit + push para `dev` com a mensagem `fix: auto-reatribuicao em ferias, hard-delete para admin, agrupa folgas e ajustes ui`.
+
+---
+
+Task ID: GOOGLE-MAPS-INTEGRATION
+Agent: Z.ai Code (Eng. Software Principal)
+Task: Integração total do Google Maps (geocoding + navegação), limpeza de função morta Smoobu e confirmação de pontos 1/3/4/5 já implementados.
+
+Work Log:
+- **Confirmação prévia:** Os pontos 1 (Hard-Delete para admin), 3 (Reatribuição automática inteligente), 4 (Remoção de "Auto-Atribuir Pendentes" de Limpezas) e 5 (Separador "Dias de Folga" em Ausências) já estavam implementados no commit `f18545d`. Esta iteração focou-se na parte NOVA: integração do Google Maps.
+- **#2a Backend — Google Maps Geocoding API:** `backend/utils/geocoding.js` reescrito. Agora usa `GOOGLE_MAPS_API_KEY` (env var do Render) como prioridade para geocoding de moradas de propriedades. Fallback silencioso para Nominatim (OpenStreetMap) se: (a) API key não definida; (b) chamada à API falhar; (c) resposta sem dados. Vantagens: maior precisão em moradas portuguesas, sem rate limit de 1 req/s, melhor coverage de códigos postais. Nova função `googleMapsAtivo()` exportada. O `distancia.js` (load balancer) JÁ usava `GOOGLE_MAPS_API_KEY` para a Distance Matrix API (com fallback Haversine) — não foi preciso alterar.
+- **#2a Backend — Endpoint `/configuracoes/integracoes`:** Adicionado campo `google_maps_ativo: boolean` à resposta JSON (via `googleMapsAtivo()`), para o frontend saber se pode mostrar botões de navegação.
+- **#2b Frontend — Helper `googleMapsUrl()`:** `frontend/src/lib/utils.ts` — nova função que gera URL universal `https://www.google.com/maps/search/?api=1&query=...` (funciona em browser, iOS e Android — abre a app nativa se instalada). Aceita coordenadas `{ lat, lng }` (mais preciso) ou string de morada (URL-encoded).
+- **#2b Frontend — Botão "Abrir no Google Maps" em Propriedades:** `propriedades/page.tsx` — junto à morada na tabela, ícone `Navigation` (link externo) que usa coordenadas se existirem, senão a morada. Import `Navigation` e `googleMapsUrl` adicionados.
+- **#2b Frontend — Botão "Abrir no Google Maps" no Staff:** `task-card.tsx` (lista de tarefas) e `detalhe-tarefa-client.tsx` (detalhe) — ícone `Navigation` junto ao endereço da propriedade. O staff clica para abrir o Google Maps na localização (mobile/web). Imports `Navigation` e `googleMapsUrl` adicionados.
+- **#2c Limpeza de função morta Smoobu:** `propriedades/page.tsx` — removida a função `handleImportarPropriedades` (morta desde que o botão foi removido do cabeçalho no commit anterior). Removidos os estados `sincronizando`/`sincronizacaoOk`. Introduzido estado genérico `feedbackOk` para feedback de toggle de estado e checklist padrão (que antes usavam `sincronizacaoOk`). Banner de sucesso atualizado para usar `feedbackOk`. Import `Download` removido (não usado). O botão "Importar do Smoobu" continua disponível em `/gestor/configuracoes/integracoes` (secção "Ações Manuais de Emergência").
+- **Documentação atualizada:** esta entrada no `WORKLOG.md`.
+
+Stage Summary:
+- **Google Maps totalmente integrado:** geocoding de moradas usa Google Maps Geocoding API (mais preciso, sem rate limit) com fallback Nominatim. Distance Matrix API (load balancer) já usava Google Maps. Botões "Abrir no Google Maps" em Propriedades e Staff (task-card + detalhe) para navegação direta.
+- **Endpoint de configuração:** `GET /api/gestor/configuracoes/integracoes` agora devolve `google_maps_ativo: boolean` para o frontend saber se a integração está ativa.
+- **Código limpo:** função morta `handleImportarPropriedades` e estados `sincronizando`/`sincronizacaoOk` removidos de Propriedades. Estado genérico `feedbackOk` reintroduzido para feedback de toggle/checklist.
+- **Navegação universal:** URLs usam o endpoint universal `https://www.google.com/maps/search/?api=1&query=...` que abre a app nativa do Google Maps no mobile e o web app no desktop.
+- **Sem regressões:** 111/111 testes Jest passam; tsc frontend 0 erros; node --check backend OK.
+- **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat: google maps integration, auto-reatribuicao em ferias, hard-delete para admin e ajustes ui`.

@@ -743,10 +743,15 @@ describe('Fluxo de aprovação de ausências', () => {
     expect(res.body.redistribuicao).toBeTruthy();
     expect(res.body.redistribuicao.desatribuidas).toBeGreaterThanOrEqual(1);
 
-    // A tarefa foi DESATRIBUÍDA: utilizador_id = null + estado 'por_atribuir'.
+    // A tarefa foi DESATRIBUÍDA do staff original.
+    // FIX (auto-reatribuição) — Com a reatribuição automática, a tarefa pode
+    // ter sido reatribuída a outro staff disponível (se houver) ou ficado
+    // 'por_atribuir' (se não houver). Ambos os casos são válidos.
     const depois = await Tarefa.findById(tarefaAtribuida._id);
-    expect(depois.utilizador_id).toBeNull();
-    expect(depois.estado).toBe('por_atribuir');
+    // Não deve continuar atribuída ao staff original (que está de férias).
+    expect(String(depois.utilizador_id ?? '')).not.toBe(staffId);
+    // Estado deve ser 'atribuida' (se reatribuída) ou 'por_atribuir' (se órfã).
+    expect(['atribuida', 'por_atribuir']).toContain(depois.estado);
   });
 
   it('admin rejeita ausência → 200 + só atualiza estado (não mexe em tarefas)', async () => {
@@ -2704,7 +2709,7 @@ describe('Prompt 116 — Fundação SaaS + Lógica de Negócio', () => {
     await Utilizador.deleteOne({ _id: staff._id });
   });
 
-  it('GET /api/gestor/equipa exclui admin e utilizadores inativos', async () => {
+  it('GET /api/gestor/equipa exclui admin e parceiros (mas mostra inativos)', async () => {
     const hash = await bcrypt.hash(PASSWORD, 10);
     // Staff ativo — deve aparecer.
     const staffAtivo = await Utilizador.create({
@@ -2715,7 +2720,7 @@ describe('Prompt 116 — Fundação SaaS + Lógica de Negócio', () => {
       role: 'staff',
       ativo: true,
     });
-    // Staff inativo — NÃO deve aparecer.
+    // Staff inativo — deve aparecer (FIX: soft-delete mostra inativos para reativação).
     const staffInativo = await Utilizador.create({
       nome: 'Staff Inativo Equipa',
       email: 'staff.inativo.equipa@teste.pt',
@@ -2741,8 +2746,8 @@ describe('Prompt 116 — Fundação SaaS + Lógica de Negócio', () => {
     expect(emails).toContain('gestor.equipa@teste.pt');
     // Admin NÃO aparece.
     expect(emails).not.toContain('admin@teste.pt');
-    // Inativo NÃO aparece.
-    expect(emails).not.toContain('staff.inativo.equipa@teste.pt');
+    // FIX (soft-delete com desatribuição) — Inativo AGORA aparece (para reativação).
+    expect(emails).toContain('staff.inativo.equipa@teste.pt');
 
     await Utilizador.deleteMany({
       _id: { $in: [staffAtivo._id, staffInativo._id, gestor._id] },

@@ -184,3 +184,42 @@ export function calcularHoraFimISO(iso: string | null | undefined, minutos: numb
   const fimM = totalMin % 60;
   return `${String(fimH).padStart(2, "0")}:${String(fimM).padStart(2, "0")}`;
 }
+
+/**
+ * FIX (google maps integration) — Gera um URL para abrir uma localização no
+ * Google Maps (app web ou mobile).
+ *
+ * Aceita:
+ *   - Coordenadas { lat, lng } → usa o formato `?query=lat,lng` (mais preciso).
+ *   - String de morada → usa o formato `?query=morada` (URL-encoded).
+ *
+ * Usa o endpoint universal `https://www.google.com/maps/search/?api=1&query=...`
+ * que funciona em browser, iOS e Android (abre a app nativa se instalada).
+ *
+ * @param input coordenadas { lat, lng } ou string de morada
+ * @returns URL do Google Maps, ou null se input for inválido.
+ */
+export function googleMapsUrl(
+  input: { lat: number; lng: number } | string | null | undefined
+): string | null {
+  if (!input) return null;
+
+  // Se for coordenadas { lat, lng }.
+  if (typeof input === "object" && input !== null) {
+    const { lat, lng } = input;
+    if (
+      typeof lat === "number" &&
+      typeof lng === "number" &&
+      !Number.isNaN(lat) &&
+      !Number.isNaN(lng)
+    ) {
+      return `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+    }
+    return null;
+  }
+
+  // Se for string de morada.
+  const morada = String(input).trim();
+  if (!morada) return null;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(morada)}`;
+}

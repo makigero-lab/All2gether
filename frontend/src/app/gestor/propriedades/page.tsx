@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Plus, Building2, Loader2, AlertCircle, RefreshCw, Power, Pencil, Download, CheckCircle2, ListChecks } from "lucide-react";
+import { Plus, Building2, Loader2, AlertCircle, RefreshCw, Power, Pencil, Trash2, CheckCircle2, ListChecks, Navigation } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,10 +26,13 @@ import {
   adminPost,
   adminPatch,
   adminPut,
+  adminDelete,
   type PropriedadeDTO,
   type UtilizadorDTO,
   type ModeloChecklistDTO,
 } from "@/lib/api";
+import { lerUtilizador, type Role } from "@/lib/auth";
+import { googleMapsUrl } from "@/lib/utils";
 
 /**
  * Página de Propriedades — Painel de Administração.
@@ -63,6 +66,37 @@ export default function PropriedadesPage() {
   >([]);
   const [smoobuLoading, setSmoobuLoading] = useState(false);
   const [smoobuErro, setSmoobuErro] = useState<string | null>(null);
+
+  // FIX (hard-delete para admin) — Role do utilizador atual (para mostrar o
+  // botão "Eliminar Definitivamente" apenas para admin).
+  const [userRole, setUserRole] = useState<Role | null>(null);
+  useEffect(() => {
+    let cancelado = false;
+    (async () => {
+      const user = await lerUtilizador();
+      if (!cancelado) setUserRole(user?.role ?? null);
+    })();
+    return () => { cancelado = true; };
+  }, []);
+
+  // FIX (hard-delete para admin) — Estado do Dialog de confirmação de hard-delete.
+  const [eliminandoProp, setEliminandoProp] = useState<PropriedadeDTO | null>(null);
+  const [eliminandoSubmitting, setEliminandoSubmitting] = useState(false);
+
+  /** FIX (hard-delete para admin) — Elimina definitivamente a propriedade. */
+  async function handleEliminarDefinitivamente() {
+    if (!eliminandoProp) return;
+    setEliminandoSubmitting(true);
+    try {
+      await adminDelete(`/api/gestor/propriedades/${eliminandoProp._id}?hard=true`);
+      setEliminandoProp(null);
+      await carregar();
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Erro ao eliminar propriedade.");
+    } finally {
+      setEliminandoSubmitting(false);
+    }
+  }
 
   /** Carrega as propriedades da API. */
   const carregar = useCallback(async () => {
@@ -186,7 +220,7 @@ export default function PropriedadesPage() {
     setPropriedades((prev) =>
       prev.map((x) => (x._id === p._id ? { ...x, ativo: novoEstado } : x))
     );
-    setSincronizacaoOk(null);
+    setFeedbackOk(null);
     try {
       const res = await adminPatch<{
         ativo: boolean;
@@ -197,7 +231,7 @@ export default function PropriedadesPage() {
       // tarefas futuras desatribuídas (passaram a 'por_atribuir'), informa.
       if (!novoEstado && typeof res?.tarefasDesatribuidas === "number") {
         const n = res.tarefasDesatribuidas;
-        setSincronizacaoOk(
+        setFeedbackOk(
           n > 0
             ? `Propriedade desativada. ${n} tarefa(s) futura(s) não concluída(s) foram desatribuída(s) (por atribuir).`
             : `Propriedade desativada. Não havia tarefas futuras por executar.`
@@ -212,11 +246,13 @@ export default function PropriedadesPage() {
     }
   }
 
-  // Estado da sincronização de propriedades do Smoobu (importação em massa).
-  const [sincronizando, setSincronizando] = useState(false);
-  const [sincronizacaoOk, setSincronizacaoOk] = useState<string | null>(null);
+  // FIX (relocação do botão Smoobu) — Estado `sincronizando`/`sincronizacaoOk`
+  // removido. A funcionalidade de importação do Smoobu foi migrada para a
+  // página /gestor/configuracoes/integracoes.
+  // Estado genérico de feedback de sucesso (toggle de estado, checklist padrão).
+  const [feedbackOk, setFeedbackOk] = useState<string | null>(null);
   // Prompt 117 — Aviso de geocoding INLINE (junto ao campo morada, não toast global).
-  // String preenchida quando o Nominatim falha ao georreferenciar a morada.
+  // String preenchida quando o Nominatim/Google falha ao georreferenciar a morada.
   const [moradaWarning, setMoradaWarning] = useState<string | null>(null);
   // Aviso inline do modal de edição (morada editada não georreferenciada).
   const [editMoradaWarning, setEditMoradaWarning] = useState<string | null>(null);
@@ -226,39 +262,9 @@ export default function PropriedadesPage() {
   const [moradaConfirmada, setMoradaConfirmada] = useState(false);
   const [editMoradaConfirmada, setEditMoradaConfirmada] = useState(false);
 
-  /**
-   * Importa/atualiza propriedades do Smoobu (scoped por empresa).
-   * Cria as novas e atualiza SEMPRE a morada + capacidade das existentes
-   * (alinhado com sincronizarPropriedades do Prompt 92).
-   */
-  async function handleImportarPropriedades() {
-    setSincronizando(true);
-    setSincronizacaoOk(null);
-    setErro(null);
-    try {
-      const res = await adminPost<{
-        totalRecebidas: number;
-        criadas: number;
-        existentes: number;
-        erros: number;
-      }>("/api/gestor/smoobu/propriedades", {});
-
-      let msg = `${res.criadas} propriedade(s) importada(s) com sucesso!`;
-      if (res.existentes > 0) msg += ` ${res.existentes} já existiam.`;
-      if (res.erros > 0) msg += ` ${res.erros} com erro.`;
-      setSincronizacaoOk(msg);
-
-      await carregar();
-    } catch (e) {
-      setErro(
-        e instanceof Error
-          ? `Importação falhou: ${e.message}`
-          : "Erro ao importar propriedades do Smoobu."
-      );
-    } finally {
-      setSincronizando(false);
-    }
-  }
+  // FIX (relocação do botão Smoobu) — Estado `sincronizando`/`sincronizacaoOk`
+  // removido. A funcionalidade de importação do Smoobu foi migrada para a
+  // página /gestor/configuracoes/integracoes.
 
   // Estado do modal de edição
   const [editando, setEditando] = useState<PropriedadeDTO | null>(null);
@@ -272,6 +278,11 @@ export default function PropriedadesPage() {
     tempo_limpeza_minutos: "45",
     staff_necessario: "1",
     dias_fixos_limpeza: [] as number[],
+    // FIX (parceiro associado + morada estruturada) — novos campos.
+    observacoes: "",
+    morada_rua: "",
+    morada_codigo_postal: "",
+    morada_cidade: "",
   });
   const [manualSubmitting, setManualSubmitting] = useState(false);
   const [manualErro, setManualErro] = useState<string | null>(null);
@@ -281,7 +292,7 @@ export default function PropriedadesPage() {
     e.preventDefault();
     setManualErro(null);
 
-    if (!manualForm.nome.trim() || !manualForm.morada.trim()) {
+    if (!manualForm.nome.trim() || (!manualForm.morada.trim() && !manualForm.morada_rua.trim())) {
       setManualErro("Nome e Morada são obrigatórios.");
       return;
     }
@@ -300,14 +311,26 @@ export default function PropriedadesPage() {
         "/api/gestor/propriedades",
         {
           nome: manualForm.nome.trim(),
-          morada: manualForm.morada.trim(),
+          // FIX (morada estruturada) — Se rua foi preenchida, envia morada_estruturada.
+          // Senão, envia morada (string única) para retrocompatibilidade.
+          ...(manualForm.morada_rua.trim()
+            ? {
+                morada_estruturada: {
+                  rua: manualForm.morada_rua.trim(),
+                  codigo_postal: manualForm.morada_codigo_postal.trim(),
+                  cidade: manualForm.morada_cidade.trim(),
+                },
+              }
+            : { morada: manualForm.morada.trim() }),
           tempo_limpeza_minutos: tempo,
           staff_necessario: Math.max(1, Math.min(10, Number(manualForm.staff_necessario) || 1)),
           dias_fixos_limpeza: manualForm.dias_fixos_limpeza.length > 0 ? manualForm.dias_fixos_limpeza : undefined,
+          // FIX (parceiro associado) — observacoes (notas internas).
+          observacoes: manualForm.observacoes.trim() || undefined,
         }
       );
       // Limpa o formulário e fecha o modal.
-      setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1", dias_fixos_limpeza: [] });
+      setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1", dias_fixos_limpeza: [], observacoes: "", morada_rua: "", morada_codigo_postal: "", morada_cidade: "" });
       setManualOpen(false);
       await carregar();
     } catch (e) {
@@ -325,6 +348,11 @@ export default function PropriedadesPage() {
     checklist: "",
     funcionario_preferencial_id: "",
     modelo_checklist_id: "",
+    // FIX (parceiro associado + morada estruturada) — novos campos.
+    observacoes: "",
+    morada_rua: "",
+    morada_codigo_postal: "",
+    morada_cidade: "",
   });
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editErro, setEditErro] = useState<string | null>(null);
@@ -361,13 +389,13 @@ export default function PropriedadesPage() {
     }
     setChecklistLoading(true);
     setErro(null);
-    setSincronizacaoOk(null);
+    setFeedbackOk(null);
     try {
       const res = await adminPost<{ message: string; modificadas: number }>(
         "/api/gestor/propriedades/default-checklist",
         {}
       );
-      setSincronizacaoOk(res.message || `Checklist aplicada a ${res.modificadas} propriedade(s).`);
+      setFeedbackOk(res.message || `Checklist aplicada a ${res.modificadas} propriedade(s).`);
       await carregar();
     } catch (e) {
       setErro(
@@ -413,6 +441,11 @@ export default function PropriedadesPage() {
       funcionario_preferencial_id: p.funcionario_preferencial_id ?? "",
       // Prompt 134 — Modelo de Checklist associado (string vazia = Nenhum).
       modelo_checklist_id: p.modelo_checklist_id ?? "",
+      // FIX (parceiro associado + morada estruturada) — novos campos.
+      observacoes: p.observacoes ?? "",
+      morada_rua: p.morada_estruturada?.rua ?? "",
+      morada_codigo_postal: p.morada_estruturada?.codigo_postal ?? "",
+      morada_cidade: p.morada_estruturada?.cidade ?? "",
     });
     setEditErro(null);
     // Prompt 126 — Reset dos avisos de morada ao abrir o modal.
@@ -428,7 +461,7 @@ export default function PropriedadesPage() {
     if (!editando) return;
     setEditErro(null);
 
-    if (!editForm.nome.trim() || !editForm.morada.trim()) {
+    if (!editForm.nome.trim() || (!editForm.morada.trim() && !editForm.morada_rua.trim())) {
       setEditErro("Nome e Morada são obrigatórios.");
       return;
     }
@@ -454,7 +487,17 @@ export default function PropriedadesPage() {
         `/api/gestor/propriedades/${editando._id}`,
         {
           nome: editForm.nome.trim(),
-          morada: editForm.morada.trim(),
+          // FIX (morada estruturada) — Se rua foi preenchida, envia morada_estruturada.
+          // Senão, envia morada (string única) para retrocompatibilidade.
+          ...(editForm.morada_rua.trim()
+            ? {
+                morada_estruturada: {
+                  rua: editForm.morada_rua.trim(),
+                  codigo_postal: editForm.morada_codigo_postal.trim(),
+                  cidade: editForm.morada_cidade.trim(),
+                },
+              }
+            : { morada: editForm.morada.trim() }),
           tempo_limpeza_minutos: tempo,
           checklist: editForm.checklist
             .split("\n")
@@ -468,6 +511,8 @@ export default function PropriedadesPage() {
           // (sem modelo / usa checklist flat antigo).
           modelo_checklist_id:
             editForm.modelo_checklist_id.trim() || null,
+          // FIX (parceiro associado) — observacoes (notas internas).
+          observacoes: editForm.observacoes.trim(),
           forcar_morada: editMoradaConfirmada || undefined,
         }
       );
@@ -517,21 +562,11 @@ export default function PropriedadesPage() {
           >
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           </Button>
-          <Button
-            variant="outline"
-            onClick={handleImportarPropriedades}
-            disabled={sincronizando}
-            title="Importa apartamentos do Smoobu para a tua empresa. Morada fica 'A definir' para preencher depois."
-          >
-            {sincronizando ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Download className="h-4 w-4" />
-            )}
-            <span className="hidden sm:inline">
-              {sincronizando ? "A importar…" : "Importar do Smoobu"}
-            </span>
-          </Button>
+          {/* FIX (relocação do botão Smoobu) — Botão "Importar do Smoobu"
+              removido desta página. A funcionalidade foi migrada para a página
+              /gestor/configuracoes/integracoes (secção "Ações Manuais de
+              Emergência"). Aqui mantém-se apenas o "Checklist Padrão" e o
+              "Adicionar" manual. */}
           {/* Prompt 113 — Aplicar checklist padrão a todas as propriedades */}
           <Button
             variant="outline"
@@ -554,7 +589,7 @@ export default function PropriedadesPage() {
             onClick={() => {
               setManualOpen(true);
               setManualErro(null);
-              setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1", dias_fixos_limpeza: [] });
+              setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1", dias_fixos_limpeza: [], observacoes: "", morada_rua: "", morada_codigo_postal: "", morada_cidade: "" });
             }}
           >
             <Plus className="h-4 w-4" />
@@ -777,15 +812,16 @@ export default function PropriedadesPage() {
       )}
 
       {/* Sucesso da sincronização Smoobu */}
-      {sincronizacaoOk && (
+      {/* FIX — Banner de feedback de sucesso (toggle de estado, checklist padrão). */}
+      {feedbackOk && (
         <Card className="border-emerald-500/50">
           <CardContent className="flex items-center gap-3 p-4 text-sm text-emerald-600 dark:text-emerald-400">
             <CheckCircle2 className="h-5 w-5 shrink-0" />
-            <span>{sincronizacaoOk}</span>
+            <span>{feedbackOk}</span>
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setSincronizacaoOk(null)}
+              onClick={() => setFeedbackOk(null)}
               className="ml-auto"
             >
               Fechar
@@ -834,17 +870,66 @@ export default function PropriedadesPage() {
                               👥 {p.capacidade_hospedes}
                             </Badge>
                           )}
+                          {/* FIX (parceiro associado) — Badge do parceiro associado.
+                              Extrai o nome da linha "Parceiro Associado: [nome]"
+                              das observações. Se não houver, mostra "All2gether". */}
+                          <Badge
+                            variant="secondary"
+                            className="text-[10px]"
+                            title={
+                              p.observacoes?.match(/Parceiro Associado:\s*(.+)/i)?.[1]?.trim()
+                                ? `Parceiro Associado: ${p.observacoes.match(/Parceiro Associado:\s*(.+)/i)![1].trim()}`
+                                : "Propriedade All2gether"
+                            }
+                          >
+                            {(() => {
+                              const match = p.observacoes?.match(/Parceiro Associado:\s*(.+)/i);
+                              const nomeParceiro = match?.[1]?.trim();
+                              return nomeParceiro || "All2gether";
+                            })()}
+                          </Badge>
                           {p.morada === "A definir" && (
                             <Badge className="bg-amber-500/15 text-amber-700 border-amber-500/30 hover:bg-amber-500/20">
                               ⚠️ Morada por definir
                             </Badge>
                           )}
                         </div>
-                        {p.morada && p.morada !== "A definir" && (
-                          <div className="text-xs text-muted-foreground mt-0.5">
-                            {p.morada}
-                          </div>
-                        )}
+                        {/* FIX (morada estruturada) — Mostra morada estruturada
+                            se existir, senão fallback para morada (string legada).
+                            FIX (google maps integration) — Botão "Abrir no Google
+                            Maps" que usa coordenadas (se existirem) ou a morada. */}
+                        {(() => {
+                          const me = p.morada_estruturada;
+                          const moradaDisplay =
+                            me?.rua
+                              ? [me.rua, me.codigo_postal, me.cidade].filter(Boolean).join(", ")
+                              : p.morada;
+                          if (!moradaDisplay || moradaDisplay === "A definir") return null;
+                          // FIX (google maps integration) — Usa coordenadas se
+                          // existirem (mais preciso), senão usa a morada string.
+                          const coords = p.coordenadas;
+                          const gmapsUrl = googleMapsUrl(
+                            coords?.lat != null && coords?.lng != null
+                              ? { lat: coords.lat, lng: coords.lng }
+                              : moradaDisplay
+                          );
+                          return (
+                            <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1.5">
+                              <span>{moradaDisplay}</span>
+                              {gmapsUrl && (
+                                <a
+                                  href={gmapsUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-0.5 text-primary hover:underline"
+                                  title="Abrir no Google Maps"
+                                >
+                                  <Navigation className="h-3 w-3" />
+                                </a>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </td>
                       <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
                         {p.smoobu_id}
@@ -877,6 +962,21 @@ export default function PropriedadesPage() {
                           >
                             <Power className="h-4 w-4" />
                           </Button>
+                          {/* FIX (hard-delete para admin) — Botão "Eliminar
+                              Definitivamente" visível EXCLUSIVAMENTE para
+                              role === 'admin'. Faz hard-delete (?hard=true). */}
+                          {userRole === "admin" && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-destructive hover:text-destructive"
+                              onClick={() => setEliminandoProp(p)}
+                              aria-label={`Eliminar definitivamente ${p.nome}`}
+                              title="Eliminar Definitivamente (admin)"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -947,6 +1047,61 @@ export default function PropriedadesPage() {
                 As coordenadas são calculadas automaticamente via Nominatim
                 (best-effort). Se a morada não for encontrada, a propriedade é
                 criada na mesma (sem coordenadas).
+              </p>
+            </div>
+            {/* FIX (morada estruturada) — Campos estruturados opcionais.
+                Se preencheres a Rua, o backend usa os 3 campos para geocoding
+                e ignora a "Morada" (string única) acima. */}
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">
+                Morada Estruturada (opcional — substitui &quot;Morada&quot; se preenchida)
+              </label>
+              <div className="grid gap-2 sm:grid-cols-3">
+                <Input
+                  placeholder="Rua, número, andar"
+                  value={manualForm.morada_rua}
+                  onChange={(e) =>
+                    setManualForm((f) => ({ ...f, morada_rua: e.target.value }))
+                  }
+                />
+                <Input
+                  placeholder="Código Postal (ex: 1200-001)"
+                  value={manualForm.morada_codigo_postal}
+                  onChange={(e) =>
+                    setManualForm((f) => ({ ...f, morada_codigo_postal: e.target.value }))
+                  }
+                />
+                <Input
+                  placeholder="Cidade (ex: Lisboa)"
+                  value={manualForm.morada_cidade}
+                  onChange={(e) =>
+                    setManualForm((f) => ({ ...f, morada_cidade: e.target.value }))
+                  }
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Preferencial em relação à &quot;Morada&quot; única. Usado para geocoding
+                mais preciso e para mostrar a morada de forma estruturada.
+              </p>
+            </div>
+            {/* FIX (parceiro associado) — Observações (notas internas). */}
+            <div className="space-y-1.5">
+              <label htmlFor="manual-observacoes" className="text-sm font-medium">
+                Observações (opcional)
+              </label>
+              <textarea
+                id="manual-observacoes"
+                value={manualForm.observacoes}
+                onChange={(e) =>
+                  setManualForm((f) => ({ ...f, observacoes: e.target.value }))
+                }
+                rows={2}
+                placeholder="Notas internas (ex: Parceiro Associado: Particulares, frequência, etc.)"
+                className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+              <p className="text-xs text-muted-foreground">
+                Notas livres do gestor. Se contiver a linha &quot;Parceiro Associado:
+                [nome]&quot;, o nome é extraído e mostrado no Badge da listagem.
               </p>
             </div>
             <div className="space-y-1.5">
@@ -1149,6 +1304,61 @@ export default function PropriedadesPage() {
                 </p>
               )}
             </div>
+            {/* FIX (morada estruturada) — Campos estruturados opcionais.
+                Se preencheres a Rua, o backend usa os 3 campos para geocoding
+                e ignora a "Morada" (string única) acima. */}
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">
+                Morada Estruturada (opcional — substitui &quot;Morada&quot; se preenchida)
+              </label>
+              <div className="grid gap-2 sm:grid-cols-3">
+                <Input
+                  placeholder="Rua, número, andar"
+                  value={editForm.morada_rua}
+                  onChange={(e) =>
+                    setEditForm((f) => ({ ...f, morada_rua: e.target.value }))
+                  }
+                />
+                <Input
+                  placeholder="Código Postal (ex: 1200-001)"
+                  value={editForm.morada_codigo_postal}
+                  onChange={(e) =>
+                    setEditForm((f) => ({ ...f, morada_codigo_postal: e.target.value }))
+                  }
+                />
+                <Input
+                  placeholder="Cidade (ex: Lisboa)"
+                  value={editForm.morada_cidade}
+                  onChange={(e) =>
+                    setEditForm((f) => ({ ...f, morada_cidade: e.target.value }))
+                  }
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Preferencial em relação à &quot;Morada&quot; única. Usado para geocoding
+                mais preciso e para mostrar a morada de forma estruturada.
+              </p>
+            </div>
+            {/* FIX (parceiro associado) — Observações (notas internas). */}
+            <div className="space-y-1.5">
+              <label htmlFor="edit-observacoes" className="text-sm font-medium">
+                Observações
+              </label>
+              <textarea
+                id="edit-observacoes"
+                value={editForm.observacoes}
+                onChange={(e) =>
+                  setEditForm((f) => ({ ...f, observacoes: e.target.value }))
+                }
+                rows={2}
+                placeholder="Notas internas (ex: Parceiro Associado: Particulares, frequência, etc.)"
+                className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+              <p className="text-xs text-muted-foreground">
+                Notas livres do gestor. Se contiver a linha &quot;Parceiro Associado:
+                [nome]&quot;, o nome é extraído e mostrado no Badge da listagem.
+              </p>
+            </div>
             <div className="space-y-1.5">
               <label
                 htmlFor="edit-tempo"
@@ -1294,6 +1504,58 @@ export default function PropriedadesPage() {
             </Button>
           </DialogFooter>
         </form>
+      </Dialog>
+
+      {/* FIX (hard-delete para admin) — Dialog de confirmação de hard-delete. */}
+      <Dialog open={eliminandoProp !== null} onOpenChange={(o) => !o && setEliminandoProp(null)}>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-destructive">
+            <Trash2 className="h-5 w-5" />
+            Eliminar Definitivamente
+          </DialogTitle>
+          <DialogDescription>
+            Tens a certeza que queres eliminar definitivamente a propriedade{" "}
+            <strong>{eliminandoProp?.nome}</strong>?
+          </DialogDescription>
+          <DialogClose onClick={() => setEliminandoProp(null)} />
+        </DialogHeader>
+        <DialogContent className="space-y-3">
+          <div className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm">
+            <p className="font-medium text-destructive">⚠️ Ação irreversível!</p>
+            <p className="mt-1 text-muted-foreground">
+              Esta operação apaga permanentemente a propriedade da base de dados
+              e <strong>todas as tarefas futuras</strong> a ela associadas
+              (não concluídas/canceladas). As tarefas concluídas e canceladas
+              são preservadas para auditoria.
+            </p>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Se só quiseres desativar a propriedade (preservando os dados),
+              usa o botão &quot;Desativar&quot; (Power) em vez deste.
+            </p>
+          </div>
+        </DialogContent>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setEliminandoProp(null)}
+            disabled={eliminandoSubmitting}
+          >
+            Cancelar
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            onClick={handleEliminarDefinitivamente}
+            disabled={eliminandoSubmitting}
+          >
+            {eliminandoSubmitting ? (
+              <><Loader2 className="mr-2 h-4 w-4 animate-spin" />A eliminar…</>
+            ) : (
+              <><Trash2 className="mr-2 h-4 w-4" />Sim, eliminar definitivamente</>
+            )}
+          </Button>
+        </DialogFooter>
       </Dialog>
     </div>
   );
