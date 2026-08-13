@@ -34,9 +34,6 @@ const relatorioRoutes = require('./routes/relatorioRoutes');
 const staffRoutes = require('./routes/staffRoutes');
 const smoobuRoutes = require('./routes/smoobuRoutes');
 const parceiroRoutes = require('./routes/parceiroRoutes');
-// TEMPORÁRIO — Rota de setup emergencial (admin + importação de clientes via
-// browser). Remover após o setup inicial em produção estar confirmado.
-const setupRoutes = require('./routes/setupRoutes');
 const { iniciarDailyBriefing } = require('./jobs/dailyBriefing');
 const { iniciarAgendaAmanha } = require('./jobs/agendaAmanha');
 const { iniciarCaoGuarda } = require('./jobs/caoGuarda');
@@ -137,24 +134,6 @@ app.use('/api/smoobu', smoobuRoutes);
 // HF17 (Fase 3) — Portal de Parceiros B2B (propriedades manuais + tarefas).
 // Protegido por auth + isParceiro.
 app.use('/api/parceiro', parceiroRoutes);
-
-// TEMPORÁRIO — Setup emergencial via browser (GET /api/setup-emergencia).
-// Rota PÚBLICA (sem JWT) que faz upsert do Super Admin + importação dos 47
-// clientes. Proteção opcional via env var SETUP_EMERGENCIA_TOKEN (se definida,
-// exige ?token=<valor>). Ver routes/setupRoutes.js para detalhes.
-// ⚠️ REMOVER esta montagem e o ficheiro routes/setupRoutes.js após o setup
-// inicial em produção estar confirmado.
-app.use('/api/setup-emergencia', setupRoutes);
-
-// TEMPORÁRIO — Migração de unificação de propriedades (GET /api/fix-migracao).
-// Rota PÚBLICA (sem JWT) que move TODAS as propriedades para o tenant do
-// Super Admin (admin@makigero.com) e apaga as empresas parceiras vazias.
-// Reflete o modelo de negócio single-tenant. Proteção opcional via env var
-// SETUP_EMERGENCIA_TOKEN (se definida, exige ?token=<valor>).
-// ⚠️ REMOVER esta montagem e o ficheiro routes/fixMigracaoRoutes.js após o
-// cliente executar a migração em produção.
-const fixMigracaoRoutes = require('./routes/fixMigracaoRoutes');
-app.use('/api/fix-migracao', fixMigracaoRoutes);
 
 /* ------------------------------------------------------------------ */
 /* Middleware global de tratamento de erros                            */
