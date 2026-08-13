@@ -146,6 +146,16 @@ app.use('/api/parceiro', parceiroRoutes);
 // inicial em produção estar confirmado.
 app.use('/api/setup-emergencia', setupRoutes);
 
+// TEMPORÁRIO — Migração de unificação de propriedades (GET /api/fix-migracao).
+// Rota PÚBLICA (sem JWT) que move TODAS as propriedades para o tenant do
+// Super Admin (admin@makigero.com) e apaga as empresas parceiras vazias.
+// Reflete o modelo de negócio single-tenant. Proteção opcional via env var
+// SETUP_EMERGENCIA_TOKEN (se definida, exige ?token=<valor>).
+// ⚠️ REMOVER esta montagem e o ficheiro routes/fixMigracaoRoutes.js após o
+// cliente executar a migração em produção.
+const fixMigracaoRoutes = require('./routes/fixMigracaoRoutes');
+app.use('/api/fix-migracao', fixMigracaoRoutes);
+
 /* ------------------------------------------------------------------ */
 /* Middleware global de tratamento de erros                            */
 /* ------------------------------------------------------------------ */
