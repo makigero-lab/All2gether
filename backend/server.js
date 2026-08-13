@@ -135,6 +135,48 @@ app.use('/api/smoobu', smoobuRoutes);
 // Protegido por auth + isParceiro.
 app.use('/api/parceiro', parceiroRoutes);
 
+// TEMPORÁRIO — Rota de limpeza final (GET /api/cleanup-final).
+// Procura a empresa-sistema "All2gether (Sistema)" (NIF 'SISTEMA', criada pelo
+// seed-admin.js) e renomeia-a para "All2gether". Isto reflete o modelo de
+// negócio clarificado: o Super Admin (role 'admin') tem `empresa_id` que aponta
+// para a empresa operacional única (single-tenant), pelo que as queries
+// `req.user.empresa_id` passam a devolver dados reais sem necessidade de
+// impersonação (o AutoImpersonarEmpresa foi removido do layout do gestor).
+// ⚠️ ROTA TEMPORÁRIA — remover após execução em produção.
+app.get('/api/cleanup-final', async (req, res) => {
+  try {
+    const Empresa = require('./models/Empresa');
+    const NOME_ANTIGO = 'All2gether (Sistema)';
+    const NOME_NOVO = 'All2gether';
+
+    console.log(`🔧 [cleanup-final] A procurar empresa "${NOME_ANTIGO}"...`);
+    const empresa = await Empresa.findOne({ nome: NOME_ANTIGO });
+    if (!empresa) {
+      console.warn(`⚠️  [cleanup-final] Empresa "${NOME_ANTIGO}" não encontrada.`);
+      return res.status(404).json({
+        sucesso: false,
+        erro: `Empresa "${NOME_ANTIGO}" não encontrada. Já foi renomeada?`,
+      });
+    }
+
+    const nomeAntes = empresa.nome;
+    empresa.nome = NOME_NOVO;
+    await empresa.save();
+    console.log(`✅ [cleanup-final] Empresa renomeada: "${nomeAntes}" → "${empresa.nome}" (${empresa._id})`);
+
+    return res.json({
+      sucesso: true,
+      mensagem: 'Empresa renomeada com sucesso.',
+      empresa_id: String(empresa._id),
+      nome_antigo: nomeAntes,
+      nome_novo: empresa.nome,
+    });
+  } catch (err) {
+    console.error('❌ [cleanup-final] Erro:', err.message);
+    return res.status(500).json({ sucesso: false, erro: err.message });
+  }
+});
+
 /* ------------------------------------------------------------------ */
 /* Middleware global de tratamento de erros                            */
 /* ------------------------------------------------------------------ */
