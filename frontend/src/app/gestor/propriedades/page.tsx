@@ -1054,7 +1054,7 @@ export default function PropriedadesPage() {
                 e ignora a "Morada" (string única) acima. */}
             <div className="space-y-1.5">
               <label className="text-sm font-medium">
-                Morada Estruturada (opcional — substitui "Morada" se preenchida)
+                Morada Estruturada (opcional — substitui &quot;Morada&quot; se preenchida)
               </label>
               <div className="grid gap-2 sm:grid-cols-3">
                 <Input
@@ -1080,7 +1080,7 @@ export default function PropriedadesPage() {
                 />
               </div>
               <p className="text-xs text-muted-foreground">
-                Preferencial em relação à "Morada" única. Usado para geocoding
+                Preferencial em relação à &quot;Morada&quot; única. Usado para geocoding
                 mais preciso e para mostrar a morada de forma estruturada.
               </p>
             </div>
@@ -1100,8 +1100,8 @@ export default function PropriedadesPage() {
                 className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
               <p className="text-xs text-muted-foreground">
-                Notas livres do gestor. Se contiver a linha "Parceiro Associado:
-                [nome]", o nome é extraído e mostrado no Badge da listagem.
+                Notas livres do gestor. Se contiver a linha &quot;Parceiro Associado:
+                [nome]&quot;, o nome é extraído e mostrado no Badge da listagem.
               </p>
             </div>
             <div className="space-y-1.5">
@@ -1309,7 +1309,7 @@ export default function PropriedadesPage() {
                 e ignora a "Morada" (string única) acima. */}
             <div className="space-y-1.5">
               <label className="text-sm font-medium">
-                Morada Estruturada (opcional — substitui "Morada" se preenchida)
+                Morada Estruturada (opcional — substitui &quot;Morada&quot; se preenchida)
               </label>
               <div className="grid gap-2 sm:grid-cols-3">
                 <Input
@@ -1335,7 +1335,7 @@ export default function PropriedadesPage() {
                 />
               </div>
               <p className="text-xs text-muted-foreground">
-                Preferencial em relação à "Morada" única. Usado para geocoding
+                Preferencial em relação à &quot;Morada&quot; única. Usado para geocoding
                 mais preciso e para mostrar a morada de forma estruturada.
               </p>
             </div>
@@ -1355,8 +1355,8 @@ export default function PropriedadesPage() {
                 className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
               <p className="text-xs text-muted-foreground">
-                Notas livres do gestor. Se contiver a linha "Parceiro Associado:
-                [nome]", o nome é extraído e mostrado no Badge da listagem.
+                Notas livres do gestor. Se contiver a linha &quot;Parceiro Associado:
+                [nome]&quot;, o nome é extraído e mostrado no Badge da listagem.
               </p>
             </div>
             <div className="space-y-1.5">
@@ -1530,7 +1530,7 @@ export default function PropriedadesPage() {
             </p>
             <p className="mt-2 text-xs text-muted-foreground">
               Se só quiseres desativar a propriedade (preservando os dados),
-              usa o botão "Desativar" (Power) em vez deste.
+              usa o botão &quot;Desativar&quot; (Power) em vez deste.
             </p>
           </div>
         </DialogContent>

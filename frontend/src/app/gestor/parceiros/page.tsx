@@ -247,7 +247,7 @@ export default function ParceirosPage() {
             <div className="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">
               <Handshake className="h-10 w-10 opacity-40" />
               <p className="text-sm">Ainda não há parceiros.</p>
-              <p className="text-xs">Clica em "Novo Parceiro" para adicionar o primeiro.</p>
+              <p className="text-xs">Clica em &quot;Novo Parceiro&quot; para adicionar o primeiro.</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
