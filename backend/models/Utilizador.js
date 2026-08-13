@@ -39,6 +39,21 @@ const utilizadorSchema = new mongoose.Schema(
       trim: true,
       default: '',
     },
+    // FIX (gestão de parceiros) — NIF do utilizador (particularmente relevante
+    // para parceiros B2B que precisam de faturação). Opcional.
+    nif: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    // FIX (gestão de parceiros) — Observações livres sobre o utilizador
+    // (notas internas do gestor — ex.: "Parceiro desde 2024", "Desconto 10%").
+    // Opcional.
+    observacoes: {
+      type: String,
+      trim: true,
+      default: '',
+    },
     // Hash bcrypt da password. Nunca armazenar a password em claro.
     password_hash: {
       type: String,

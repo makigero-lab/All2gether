@@ -48,6 +48,8 @@ const {
   getWebhooks,
   reprocessarWebhook,
   setupClienteZero,
+  // FIX (gestão de parceiros) — novo controller para listar parceiros B2B.
+  getParceiros,
 } = require('../controllers/gestorController');
 const { reportarAtrasoTarefa, criarTarefa, atribuirTarefa, reatribuirTarefa, atualizarEstadoTarefa, apagarTarefasFuturas, listarIndisponiveisData, autoAtribuirTarefas, criarTarefaEspontanea } = require('../controllers/tarefaController');
 // CRUD de Modelos de Checklist (futuro: Modelos de Protocolo Clínico)
@@ -147,6 +149,8 @@ router.get('/tarefas/indisponiveis', auth, isGestor, listarIndisponiveisData);
 // Gestão de equipa (utilizadores) da empresa. PROTEGIDO por JWT.
 router.get('/equipa', auth, isGestor, getEquipa);
 router.post('/equipa', auth, isGestor, criarMembroEquipa);
+// FIX (gestão de parceiros) — rota dedicada para parceiros B2B.
+router.get('/parceiros', auth, isGestor, getParceiros);
 router.put('/equipa/:id', auth, isGestor, atualizarMembroEquipa);
 router.patch('/equipa/:id/estado', auth, isGestor, alternarEstadoMembro);
 router.delete('/equipa/:id', auth, isGestor, eliminarMembroEquipa);

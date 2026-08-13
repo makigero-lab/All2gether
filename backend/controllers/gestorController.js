@@ -225,12 +225,16 @@ exports.criarPropriedade = async (req, res) => {
     const { ok, empresaId } = obterEmpresaId(req, res);
     if (!ok) return;
 
-    const { nome, morada, tempo_limpeza_minutos, parceiro_id, staff_necessario, dias_fixos_limpeza, nome_responsavel, contacto, frequencia_limpeza, horario_limpeza } = req.body || {};
+    const { nome, morada, tempo_limpeza_minutos, parceiro_id, staff_necessario, dias_fixos_limpeza, nome_responsavel, contacto, frequencia_limpeza, horario_limpeza, observacoes, morada_estruturada } = req.body || {};
 
     // Validações de presença.
-    if (!nome || !morada) {
+    // FIX (morada estruturada) — Aceita morada OU morada_estruturada (pelo menos
+    // o campo rua). Retrocompatível com as 46 propriedades legadas que usam `morada`.
+    const temMoradaStr = morada && String(morada).trim();
+    const temMoradaEstruturada = morada_estruturada && morada_estruturada.rua && String(morada_estruturada.rua).trim();
+    if (!nome || (!temMoradaStr && !temMoradaEstruturada)) {
       return res.status(400).json({
-        erro: 'Campos obrigatórios em falta: nome e morada.',
+        erro: 'Campos obrigatórios em falta: nome e morada (ou morada_estruturada.rua).',
       });
     }
 
@@ -253,7 +257,24 @@ exports.criarPropriedade = async (req, res) => {
     // faz CATCH silenciosamente. A propriedade é criada com coordenadas null
     // (não bloqueia). Devolve flag `geocoding_falhou` para o frontend mostrar
     // um Toast de warning aconselhando a simplificar a morada.
-    const moradaTrim = String(morada).trim();
+    // FIX (morada estruturada) — Se vier morada_estruturada, usa a concatenação
+    // dos 3 campos para geocoding. Senão, fallback para morada (string única).
+    let moradaParaGeocode = '';
+    let moradaEstruturadaFinal = null;
+    if (temMoradaEstruturada) {
+      const me = morada_estruturada;
+      moradaEstruturadaFinal = {
+        rua: String(me.rua || '').trim(),
+        codigo_postal: String(me.codigo_postal || '').trim(),
+        cidade: String(me.cidade || '').trim(),
+      };
+      moradaParaGeocode = [moradaEstruturadaFinal.rua, moradaEstruturadaFinal.codigo_postal, moradaEstruturadaFinal.cidade]
+        .filter((s) => s)
+        .join(', ');
+    } else {
+      moradaParaGeocode = String(morada).trim();
+    }
+    const moradaTrim = moradaParaGeocode; // alias para manter compatibilidade com o código abaixo
     let coordenadas = { lat: null, lng: null };
     let geocodingFalhou = false;
     try {
@@ -270,7 +291,8 @@ exports.criarPropriedade = async (req, res) => {
 
     const nova = await Propriedade.create({
       nome: String(nome).trim(),
-      morada: moradaTrim,
+      morada: temMoradaStr ? String(morada).trim() : '',
+      ...(moradaEstruturadaFinal ? { morada_estruturada: moradaEstruturadaFinal } : {}),
       coordenadas,
       empresa_id: empresaId,
       tempo_limpeza_minutos: tempo,
@@ -286,6 +308,8 @@ exports.criarPropriedade = async (req, res) => {
       contacto: contacto ? String(contacto).trim().slice(0, 50) : '', // HF23
       frequencia_limpeza: ['semanal', 'quinzenal', 'mensal'].includes(frequencia_limpeza) ? frequencia_limpeza : 'semanal', // HF23
       horario_limpeza: horario_limpeza ? String(horario_limpeza).trim().slice(0, 100) : '', // HF23
+      // FIX (parceiro associado) — Observações livres (notas internas do gestor).
+      observacoes: observacoes ? String(observacoes).trim().slice(0, 2000) : '',
       checklist: Array.isArray(req.body?.checklist)
         ? req.body.checklist.filter((s) => typeof s === 'string' && s.trim())
         : [],
@@ -929,7 +953,7 @@ exports.atualizarPropriedade = async (req, res) => {
       });
     }
 
-    const { nome, morada, tempo_limpeza_minutos, funcionario_preferencial_id, modelo_checklist_id } = req.body || {};
+    const { nome, morada, tempo_limpeza_minutos, funcionario_preferencial_id, modelo_checklist_id, observacoes, morada_estruturada } = req.body || {};
 
     // Tem de haver pelo menos um campo para atualizar.
     if (
@@ -938,10 +962,12 @@ exports.atualizarPropriedade = async (req, res) => {
       tempo_limpeza_minutos === undefined &&
       funcionario_preferencial_id === undefined &&
       modelo_checklist_id === undefined &&
+      observacoes === undefined &&
+      morada_estruturada === undefined &&
       req.body?.checklist === undefined
     ) {
       return res.status(400).json({
-        erro: 'Nenhum campo para atualizar. Envie nome, morada, tempo_limpeza_minutos, checklist, funcionario_preferencial_id ou modelo_checklist_id.',
+        erro: 'Nenhum campo para atualizar. Envie nome, morada, tempo_limpeza_minutos, checklist, funcionario_preferencial_id, modelo_checklist_id, observacoes ou morada_estruturada.',
       });
     }
 
@@ -977,27 +1003,60 @@ exports.atualizarPropriedade = async (req, res) => {
     // Morada — se mudou, re-faz geocoding (best-effort).
     // Prompt 114 — Se geocoding falhar/devolver vazio, mantém coordenadas
     // antigas e devolve flag `geocoding_falhou` para o frontend avisar.
+    // FIX (morada estruturada) — Se vier morada_estruturada, atualiza os 3 campos
+    // e usa a concatenação para geocoding. Senão, usa morada (string única).
     let geocodingFalhou = false;
-    if (morada !== undefined) {
-      const novaMorada = String(morada).trim();
-      if (novaMorada !== propriedade.morada) {
-        propriedade.morada = novaMorada;
+    if (morada_estruturada !== undefined) {
+      const me = morada_estruturada || {};
+      const novaRua = String(me.rua || '').trim();
+      const novoCp = String(me.codigo_postal || '').trim();
+      const novaCidade = String(me.cidade || '').trim();
+      propriedade.morada_estruturada = { rua: novaRua, codigo_postal: novoCp, cidade: novaCidade };
+      // Se morada_estruturada.rua foi preenchida, re-faz geocoding com a concatenação.
+      if (novaRua) {
+        const moradaCompleta = [novaRua, novoCp, novaCidade].filter((s) => s).join(', ');
         try {
-          const coords = await obterCoordenadas(novaMorada);
+          const coords = await obterCoordenadas(moradaCompleta);
           if (coords) {
             propriedade.coordenadas = coords;
           } else {
             geocodingFalhou = true;
           }
         } catch (err) {
-          // Geocoding falhou → mantém coordenadas antigas (não bloqueia).
           geocodingFalhou = true;
-          console.error(
-            '⚠️  Geocoding falhou na edição (coordenadas mantidas):',
-            err.message
-          );
+          console.error('⚠️  Geocoding falhou na edição (coordenadas mantidas):', err.message);
         }
       }
+    }
+    if (morada !== undefined) {
+      const novaMorada = String(morada).trim();
+      if (novaMorada !== propriedade.morada) {
+        propriedade.morada = novaMorada;
+        // Só re-faz geocoding se morada_estruturada NÃO foi fornecida (evita duplo geocode).
+        if (morada_estruturada === undefined && novaMorada) {
+          try {
+            const coords = await obterCoordenadas(novaMorada);
+            if (coords) {
+              propriedade.coordenadas = coords;
+            } else {
+              geocodingFalhou = true;
+            }
+          } catch (err) {
+            // Geocoding falhou → mantém coordenadas antigas (não bloqueia).
+            geocodingFalhou = true;
+            console.error(
+              '⚠️  Geocoding falhou na edição (coordenadas mantidas):',
+              err.message
+            );
+          }
+        }
+      }
+    }
+
+    // FIX (parceiro associado) — Observações livres (notas internas do gestor).
+    // Aceita string vazia para limpar o campo.
+    if (observacoes !== undefined) {
+      propriedade.observacoes = String(observacoes).trim().slice(0, 2000);
     }
 
     // v1.34.0: atualiza checklist (array de strings).
@@ -1115,11 +1174,16 @@ exports.getEquipa = async (req, res) => {
     //   - exclui ESTritamente o Super Admin (role: 'admin') — nunca pode
     //     aparecer nas listas do Gestor
     //   - exclui eliminados (soft delete)
+    // FIX (gestão de parceiros) — exclui parceiros (role: 'parceiro') da
+    // listagem da Equipa. Parceiros são geridos na página dedicada
+    // /gestor/parceiros. Apenas staff e gestor aparecem aqui.
+    // FIX (soft-delete com desatribuição) — Mostra tanto ativos como inativos
+    // (removido o filtro ativo: true) para o gestor poder ver e reativar
+    // utilizadores inativos. O soft-delete (eliminado_em) continua a excluir.
     const utilizadores = await Utilizador.find({
       empresa_id: empresaId,
       eliminado_em: null,
-      ativo: true,
-      role: { $ne: 'admin' },
+      role: { $nin: ['admin', 'parceiro'] },
     })
       .select('-password_hash') // nunca expor a hash
       .populate({ path: 'responsavel_id', select: 'nome email role' })
@@ -1147,6 +1211,36 @@ exports.getEquipa = async (req, res) => {
 };
 
 /**
+ * GET /api/gestor/parceiros
+ * FIX (gestão de parceiros) — Lista apenas utilizadores com role 'parceiro'.
+ * Página dedicada /gestor/parceiros. Mostra tanto ativos como inativos
+ * (ao contrário do getEquipa que só mostra ativos) — parceiros inativos
+ * continuam visíveis para reativação. Exclui eliminados (soft delete).
+ *
+ * Resposta 200: { utilizadores: [...] } (sem password_hash).
+ */
+exports.getParceiros = async (req, res) => {
+  try {
+    const { ok, empresaId } = obterEmpresaId(req, res);
+    if (!ok) return;
+
+    const utilizadores = await Utilizador.find({
+      empresa_id: empresaId,
+      eliminado_em: null,
+      role: 'parceiro',
+    })
+      .select('-password_hash')
+      .sort({ nome: 1 })
+      .lean();
+
+    return res.status(200).json({ utilizadores });
+  } catch (err) {
+    console.error('❌ getParceiros:', err.message);
+    return res.status(500).json({ erro: 'Erro interno do servidor.' });
+  }
+};
+
+/**
  * POST /api/admin/equipa
  * Cria um novo membro de equipa (Utilizador) para a empresa.
  *
@@ -1164,7 +1258,7 @@ exports.criarMembroEquipa = async (req, res) => {
     const { ok, empresaId } = obterEmpresaId(req, res);
     if (!ok) return;
 
-    const { nome, email, password, role, responsavel_id, dias_folga, telefone } = req.body || {};
+    const { nome, email, password, role, responsavel_id, dias_folga, telefone, nif, observacoes } = req.body || {};
 
     // Validações de presença.
     if (!nome || !email || !password) {
@@ -1255,6 +1349,9 @@ exports.criarMembroEquipa = async (req, res) => {
       responsavel_id: responsavelValidado,
       dias_folga: diasFolgaFinal,
       telefone: telefone ? String(telefone).trim() : '',
+      // FIX (gestão de parceiros) — NIF e observações livres.
+      nif: nif ? String(nif).trim().slice(0, 20) : '',
+      observacoes: observacoes ? String(observacoes).trim().slice(0, 2000) : '',
       ativo: true,
     });
 
@@ -1317,7 +1414,7 @@ exports.atualizarMembroEquipa = async (req, res) => {
       return res.status(400).json({ erro: 'ID de utilizador inválido.' });
     }
 
-    const { nome, email, role, password, responsavel_id, dias_folga, telefone, folgas_rotativas } = req.body || {};
+    const { nome, email, role, password, responsavel_id, dias_folga, telefone, folgas_rotativas, nif, observacoes } = req.body || {};
     if (
       nome === undefined &&
       email === undefined &&
@@ -1326,10 +1423,12 @@ exports.atualizarMembroEquipa = async (req, res) => {
       responsavel_id === undefined &&
       dias_folga === undefined &&
       telefone === undefined &&
-      folgas_rotativas === undefined
+      folgas_rotativas === undefined &&
+      nif === undefined &&
+      observacoes === undefined
     ) {
       return res.status(400).json({
-        erro: 'Nada para atualizar. Envie nome, email, role, password, responsavel_id, dias_folga, folgas_rotativas e/ou telefone.',
+        erro: 'Nada para atualizar. Envie nome, email, role, password, responsavel_id, dias_folga, folgas_rotativas, telefone, nif e/ou observacoes.',
       });
     }
 
@@ -1476,6 +1575,17 @@ exports.atualizarMembroEquipa = async (req, res) => {
       utilizador.telefone = String(telefone).trim();
     }
 
+    // FIX (gestão de parceiros) — nif e observacoes (opcional)
+    // --- nif (opcional) ---
+    if (nif !== undefined) {
+      utilizador.nif = String(nif).trim().slice(0, 20);
+    }
+
+    // --- observacoes (opcional) ---
+    if (observacoes !== undefined) {
+      utilizador.observacoes = String(observacoes).trim().slice(0, 2000);
+    }
+
     // --- Password (opcional: só se vier, faz hash nova) ---
     if (password !== undefined && password !== null && String(password) !== '') {
       if (String(password).length < 6) {
@@ -1548,9 +1658,51 @@ exports.alternarEstadoMembro = async (req, res) => {
     utilizador.ativo = novoEstado;
     await utilizador.save();
 
+    // FIX (soft-delete com desatribuição) — Ao INATIVAR um funcionário de
+    // limpeza (role staff ou gestor), o sistema desatribui automaticamente
+    // TODAS as tarefas futuras (ou não concluídas) atribuídas a esse
+    // funcionário, colocando-as de volta no estado 'por_atribuir'. Isto
+    // garante que limpezas não ficam órfãs atribuídas a alguém que já não
+    // trabalha na empresa. Reutiliza o helper desatribuirTarefasPeriodo
+    // do ausenciaController (modelo testado pelo fluxo de férias/baixa).
+    let tarefasDesatribuidas = 0;
+    if (!novoEstado) {
+      // Só desatribui para staff e gestor (parceiros não têm tarefas atribuídas).
+      if (utilizador.role === 'staff' || utilizador.role === 'gestor') {
+        try {
+          const { desatribuirTarefasPeriodo } = require('./ausenciaController');
+          const hoje = new Date();
+          const inicio = new Date(
+            Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth(), hoje.getUTCDate())
+          );
+          // Desatribui tarefas desde hoje até 1 ano no futuro (cobre todas
+          // as tarefas futuras — o helper filtra por estado 'atribuida'/'em_curso').
+          const futuro = new Date(inicio.getTime() + 365 * 24 * 60 * 60 * 1000);
+          const resultado = await desatribuirTarefasPeriodo(
+            utilizador._id,
+            inicio,
+            futuro
+          );
+          tarefasDesatribuidas = resultado.desatribuidas;
+        } catch (err) {
+          // Não bloqueia a inativação se a desatribuição falhar — loga e continua.
+          console.error(
+            '⚠️  Erro ao desatribuir tarefas futuras do utilizador inativado:',
+            err.message
+          );
+        }
+      }
+    }
+
     const resp = utilizador.toObject();
     delete resp.password_hash;
-    return res.status(200).json({ utilizador: resp, ativo: novoEstado });
+    return res.status(200).json({
+      utilizador: resp,
+      ativo: novoEstado,
+      // FIX (soft-delete com desatribuição) — devolve contagem de tarefas
+      // desatribuídas para o frontend mostrar feedback ao gestor.
+      tarefas_desatribuidas: tarefasDesatribuidas,
+    });
   } catch (err) {
     console.error('❌ alternarEstadoMembro:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });

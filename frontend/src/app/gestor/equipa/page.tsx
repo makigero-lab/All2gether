@@ -991,17 +991,12 @@ function EquipaPage() {
                                 >
                                   <Power className="h-4 w-4" />
                                 </Button>
-                                {/* Eliminar */}
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8 text-destructive hover:text-destructive"
-                                  onClick={() => setEliminando(u)}
-                                  aria-label={`Eliminar ${u.nome}`}
-                                  title="Eliminar"
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
+                                {/* FIX (soft-delete com desatribuição) — Botão "Eliminar"
+                                    removido. O soft-delete é feito via "Inativar" (Power),
+                                    que agora desatribui automaticamente as tarefas futuras.
+                                    Utilizadores inativos continuam visíveis na lista para
+                                    reativação. O hard-delete (eliminado_em) só é acessível
+                                    via API direta para casos extremos. */}
                                 {/* Falta súbita */}
                                 <Button
                                   variant="ghost"

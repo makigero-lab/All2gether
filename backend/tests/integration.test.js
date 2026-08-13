@@ -2704,7 +2704,7 @@ describe('Prompt 116 — Fundação SaaS + Lógica de Negócio', () => {
     await Utilizador.deleteOne({ _id: staff._id });
   });
 
-  it('GET /api/gestor/equipa exclui admin e utilizadores inativos', async () => {
+  it('GET /api/gestor/equipa exclui admin e parceiros (mas mostra inativos)', async () => {
     const hash = await bcrypt.hash(PASSWORD, 10);
     // Staff ativo — deve aparecer.
     const staffAtivo = await Utilizador.create({
@@ -2715,7 +2715,7 @@ describe('Prompt 116 — Fundação SaaS + Lógica de Negócio', () => {
       role: 'staff',
       ativo: true,
     });
-    // Staff inativo — NÃO deve aparecer.
+    // Staff inativo — deve aparecer (FIX: soft-delete mostra inativos para reativação).
     const staffInativo = await Utilizador.create({
       nome: 'Staff Inativo Equipa',
       email: 'staff.inativo.equipa@teste.pt',
@@ -2741,8 +2741,8 @@ describe('Prompt 116 — Fundação SaaS + Lógica de Negócio', () => {
     expect(emails).toContain('gestor.equipa@teste.pt');
     // Admin NÃO aparece.
     expect(emails).not.toContain('admin@teste.pt');
-    // Inativo NÃO aparece.
-    expect(emails).not.toContain('staff.inativo.equipa@teste.pt');
+    // FIX (soft-delete com desatribuição) — Inativo AGORA aparece (para reativação).
+    expect(emails).toContain('staff.inativo.equipa@teste.pt');
 
     await Utilizador.deleteMany({
       _id: { $in: [staffAtivo._id, staffInativo._id, gestor._id] },

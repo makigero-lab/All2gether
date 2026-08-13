@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   LayoutDashboard,
   Building2,
@@ -17,11 +17,13 @@ import {
   LogOut,
   Bell,
   ListChecks,
+  Settings,
+  Handshake,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { fazerLogout } from "@/lib/auth";
+import { fazerLogout, lerUtilizador, type Role } from "@/lib/auth";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { NotificationBell } from "@/components/notification-bell";
 
@@ -48,17 +50,27 @@ interface NavItem {
  *   /admin/empresas/[id]). O Gestor apenas vê operações:
  *   Dashboard, Calendário, Tarefas, Propriedades, Equipa, Ausências, Relatórios.
  */
+/**
+ * FIX (acesso direto admin) — O item "Configurações" volta à sidebar, agora
+ * visível para TODOS (admin e gestor). O item "Parceiros" é adicionado para
+ * a nova página /gestor/parceiros (gestão de parceiros B2B isolada da Equipa).
+ * O admin tem acesso a tudo (igual ao gestor) sem depender de impersonação.
+ */
 const gestorNavItems: NavItem[] = [
   { label: "Dashboard", href: "/gestor", icon: LayoutDashboard },
   { label: "Calendário", href: "/gestor/calendario", icon: CalendarRange },
   { label: "Limpezas", href: "/gestor/tarefas", icon: ClipboardList },
   { label: "Propriedades", href: "/gestor/propriedades", icon: Building2 },
   { label: "Equipa", href: "/gestor/equipa", icon: Users },
+  { label: "Parceiros", href: "/gestor/parceiros", icon: Handshake },
   { label: "Ausências / Férias", href: "/gestor/ausencias", icon: CalendarOff },
   { label: "Relatórios", href: "/gestor/relatorios", icon: BarChart3 },
   { label: "Notificações", href: "/gestor/notificacoes", icon: Bell },
   // Prompt 134 — Modelos de Checklist (configuração).
   { label: "Checklists", href: "/gestor/configuracoes/checklists", icon: ListChecks },
+  // FIX (acesso direto admin) — Configurações da empresa (integracoes,
+  // gerais) voltam a estar acessíveis na sidebar para admin E gestor.
+  { label: "Configurações", href: "/gestor/configuracoes", icon: Settings },
   // HF13 — Item "Integrações" removido (sistema agora usa webhooks exclusivamente;
   // a página /gestor/configuracoes/integracoes mantém-se acessível via URL direta
   // para gestão da API key, mas não é exposta na navegação principal).
@@ -71,9 +83,30 @@ const gestorNavItems: NavItem[] = [
  * NADA de admin. Antes, o `gestor/layout.tsx` usava `AdminSidebar` (partilhado)
  * com `mode="gestor"` — agora há um componente dedicado e isolado.
  */
+/**
+ * FIX (perfil admin dinâmico) — Determina o label do role dinamicamente:
+ * 'Admin' para role 'admin', 'Gestor' para role 'gestor'. Antes era
+ * hardcoded 'Gestor'. Agora usa lerUtilizador() para buscar o role real.
+ */
+function useRoleLabel(): string {
+  const [label, setLabel] = useState("Gestor");
+  useEffect(() => {
+    let cancelado = false;
+    (async () => {
+      const user = await lerUtilizador();
+      if (cancelado) return;
+      if (user?.role === "admin") setLabel("Admin");
+      else if (user?.role === "gestor") setLabel("Gestor");
+    })();
+    return () => { cancelado = true; };
+  }, []);
+  return label;
+}
+
 export function GestorSidebar() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const roleLabel = useRoleLabel();
 
   const basePath = "/gestor";
 
@@ -113,7 +146,8 @@ export function GestorSidebar() {
       </div>
       <div className="flex flex-col leading-none">
         <span className="text-sm font-bold">All2gether</span>
-        <span className="text-[11px] text-muted-foreground">Gestor</span>
+        {/* FIX (perfil admin dinâmico) — label reflete o role real do utilizador */}
+        <span className="text-[11px] text-muted-foreground">{roleLabel}</span>
       </div>
     </div>
   );
@@ -130,7 +164,8 @@ export function GestorSidebar() {
         >
           <Menu className="h-5 w-5" />
         </Button>
-        <span className="flex-1 text-sm font-semibold">All2gether — Gestor</span>
+        {/* FIX (perfil admin dinâmico) — saudação reflete o role real */}
+        <span className="flex-1 text-sm font-semibold">All2gether — {roleLabel}</span>
         <NotificationBell />
       </header>
 

@@ -272,6 +272,11 @@ export default function PropriedadesPage() {
     tempo_limpeza_minutos: "45",
     staff_necessario: "1",
     dias_fixos_limpeza: [] as number[],
+    // FIX (parceiro associado + morada estruturada) — novos campos.
+    observacoes: "",
+    morada_rua: "",
+    morada_codigo_postal: "",
+    morada_cidade: "",
   });
   const [manualSubmitting, setManualSubmitting] = useState(false);
   const [manualErro, setManualErro] = useState<string | null>(null);
@@ -281,7 +286,7 @@ export default function PropriedadesPage() {
     e.preventDefault();
     setManualErro(null);
 
-    if (!manualForm.nome.trim() || !manualForm.morada.trim()) {
+    if (!manualForm.nome.trim() || (!manualForm.morada.trim() && !manualForm.morada_rua.trim())) {
       setManualErro("Nome e Morada são obrigatórios.");
       return;
     }
@@ -300,14 +305,26 @@ export default function PropriedadesPage() {
         "/api/gestor/propriedades",
         {
           nome: manualForm.nome.trim(),
-          morada: manualForm.morada.trim(),
+          // FIX (morada estruturada) — Se rua foi preenchida, envia morada_estruturada.
+          // Senão, envia morada (string única) para retrocompatibilidade.
+          ...(manualForm.morada_rua.trim()
+            ? {
+                morada_estruturada: {
+                  rua: manualForm.morada_rua.trim(),
+                  codigo_postal: manualForm.morada_codigo_postal.trim(),
+                  cidade: manualForm.morada_cidade.trim(),
+                },
+              }
+            : { morada: manualForm.morada.trim() }),
           tempo_limpeza_minutos: tempo,
           staff_necessario: Math.max(1, Math.min(10, Number(manualForm.staff_necessario) || 1)),
           dias_fixos_limpeza: manualForm.dias_fixos_limpeza.length > 0 ? manualForm.dias_fixos_limpeza : undefined,
+          // FIX (parceiro associado) — observacoes (notas internas).
+          observacoes: manualForm.observacoes.trim() || undefined,
         }
       );
       // Limpa o formulário e fecha o modal.
-      setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1", dias_fixos_limpeza: [] });
+      setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1", dias_fixos_limpeza: [], observacoes: "", morada_rua: "", morada_codigo_postal: "", morada_cidade: "" });
       setManualOpen(false);
       await carregar();
     } catch (e) {
@@ -325,6 +342,11 @@ export default function PropriedadesPage() {
     checklist: "",
     funcionario_preferencial_id: "",
     modelo_checklist_id: "",
+    // FIX (parceiro associado + morada estruturada) — novos campos.
+    observacoes: "",
+    morada_rua: "",
+    morada_codigo_postal: "",
+    morada_cidade: "",
   });
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editErro, setEditErro] = useState<string | null>(null);
@@ -413,6 +435,11 @@ export default function PropriedadesPage() {
       funcionario_preferencial_id: p.funcionario_preferencial_id ?? "",
       // Prompt 134 — Modelo de Checklist associado (string vazia = Nenhum).
       modelo_checklist_id: p.modelo_checklist_id ?? "",
+      // FIX (parceiro associado + morada estruturada) — novos campos.
+      observacoes: p.observacoes ?? "",
+      morada_rua: p.morada_estruturada?.rua ?? "",
+      morada_codigo_postal: p.morada_estruturada?.codigo_postal ?? "",
+      morada_cidade: p.morada_estruturada?.cidade ?? "",
     });
     setEditErro(null);
     // Prompt 126 — Reset dos avisos de morada ao abrir o modal.
@@ -428,7 +455,7 @@ export default function PropriedadesPage() {
     if (!editando) return;
     setEditErro(null);
 
-    if (!editForm.nome.trim() || !editForm.morada.trim()) {
+    if (!editForm.nome.trim() || (!editForm.morada.trim() && !editForm.morada_rua.trim())) {
       setEditErro("Nome e Morada são obrigatórios.");
       return;
     }
@@ -454,7 +481,17 @@ export default function PropriedadesPage() {
         `/api/gestor/propriedades/${editando._id}`,
         {
           nome: editForm.nome.trim(),
-          morada: editForm.morada.trim(),
+          // FIX (morada estruturada) — Se rua foi preenchida, envia morada_estruturada.
+          // Senão, envia morada (string única) para retrocompatibilidade.
+          ...(editForm.morada_rua.trim()
+            ? {
+                morada_estruturada: {
+                  rua: editForm.morada_rua.trim(),
+                  codigo_postal: editForm.morada_codigo_postal.trim(),
+                  cidade: editForm.morada_cidade.trim(),
+                },
+              }
+            : { morada: editForm.morada.trim() }),
           tempo_limpeza_minutos: tempo,
           checklist: editForm.checklist
             .split("\n")
@@ -468,6 +505,8 @@ export default function PropriedadesPage() {
           // (sem modelo / usa checklist flat antigo).
           modelo_checklist_id:
             editForm.modelo_checklist_id.trim() || null,
+          // FIX (parceiro associado) — observacoes (notas internas).
+          observacoes: editForm.observacoes.trim(),
           forcar_morada: editMoradaConfirmada || undefined,
         }
       );
@@ -554,7 +593,7 @@ export default function PropriedadesPage() {
             onClick={() => {
               setManualOpen(true);
               setManualErro(null);
-              setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1", dias_fixos_limpeza: [] });
+              setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1", dias_fixos_limpeza: [], observacoes: "", morada_rua: "", morada_codigo_postal: "", morada_cidade: "" });
             }}
           >
             <Plus className="h-4 w-4" />
@@ -834,17 +873,44 @@ export default function PropriedadesPage() {
                               👥 {p.capacidade_hospedes}
                             </Badge>
                           )}
+                          {/* FIX (parceiro associado) — Badge do parceiro associado.
+                              Extrai o nome da linha "Parceiro Associado: [nome]"
+                              das observações. Se não houver, mostra "All2gether". */}
+                          <Badge
+                            variant="secondary"
+                            className="text-[10px]"
+                            title={
+                              p.observacoes?.match(/Parceiro Associado:\s*(.+)/i)?.[1]?.trim()
+                                ? `Parceiro Associado: ${p.observacoes.match(/Parceiro Associado:\s*(.+)/i)![1].trim()}`
+                                : "Propriedade All2gether"
+                            }
+                          >
+                            {(() => {
+                              const match = p.observacoes?.match(/Parceiro Associado:\s*(.+)/i);
+                              const nomeParceiro = match?.[1]?.trim();
+                              return nomeParceiro || "All2gether";
+                            })()}
+                          </Badge>
                           {p.morada === "A definir" && (
                             <Badge className="bg-amber-500/15 text-amber-700 border-amber-500/30 hover:bg-amber-500/20">
                               ⚠️ Morada por definir
                             </Badge>
                           )}
                         </div>
-                        {p.morada && p.morada !== "A definir" && (
-                          <div className="text-xs text-muted-foreground mt-0.5">
-                            {p.morada}
-                          </div>
-                        )}
+                        {/* FIX (morada estruturada) — Mostra morada estruturada
+                            se existir, senão fallback para morada (string legada). */}
+                        {(() => {
+                          const me = p.morada_estruturada;
+                          const moradaDisplay =
+                            me?.rua
+                              ? [me.rua, me.codigo_postal, me.cidade].filter(Boolean).join(", ")
+                              : p.morada;
+                          return moradaDisplay && moradaDisplay !== "A definir" ? (
+                            <div className="text-xs text-muted-foreground mt-0.5">
+                              {moradaDisplay}
+                            </div>
+                          ) : null;
+                        })()}
                       </td>
                       <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
                         {p.smoobu_id}
@@ -947,6 +1013,61 @@ export default function PropriedadesPage() {
                 As coordenadas são calculadas automaticamente via Nominatim
                 (best-effort). Se a morada não for encontrada, a propriedade é
                 criada na mesma (sem coordenadas).
+              </p>
+            </div>
+            {/* FIX (morada estruturada) — Campos estruturados opcionais.
+                Se preencheres a Rua, o backend usa os 3 campos para geocoding
+                e ignora a "Morada" (string única) acima. */}
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">
+                Morada Estruturada (opcional — substitui "Morada" se preenchida)
+              </label>
+              <div className="grid gap-2 sm:grid-cols-3">
+                <Input
+                  placeholder="Rua, número, andar"
+                  value={manualForm.morada_rua}
+                  onChange={(e) =>
+                    setManualForm((f) => ({ ...f, morada_rua: e.target.value }))
+                  }
+                />
+                <Input
+                  placeholder="Código Postal (ex: 1200-001)"
+                  value={manualForm.morada_codigo_postal}
+                  onChange={(e) =>
+                    setManualForm((f) => ({ ...f, morada_codigo_postal: e.target.value }))
+                  }
+                />
+                <Input
+                  placeholder="Cidade (ex: Lisboa)"
+                  value={manualForm.morada_cidade}
+                  onChange={(e) =>
+                    setManualForm((f) => ({ ...f, morada_cidade: e.target.value }))
+                  }
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Preferencial em relação à "Morada" única. Usado para geocoding
+                mais preciso e para mostrar a morada de forma estruturada.
+              </p>
+            </div>
+            {/* FIX (parceiro associado) — Observações (notas internas). */}
+            <div className="space-y-1.5">
+              <label htmlFor="manual-observacoes" className="text-sm font-medium">
+                Observações (opcional)
+              </label>
+              <textarea
+                id="manual-observacoes"
+                value={manualForm.observacoes}
+                onChange={(e) =>
+                  setManualForm((f) => ({ ...f, observacoes: e.target.value }))
+                }
+                rows={2}
+                placeholder="Notas internas (ex: Parceiro Associado: Particulares, frequência, etc.)"
+                className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+              <p className="text-xs text-muted-foreground">
+                Notas livres do gestor. Se contiver a linha "Parceiro Associado:
+                [nome]", o nome é extraído e mostrado no Badge da listagem.
               </p>
             </div>
             <div className="space-y-1.5">
@@ -1148,6 +1269,61 @@ export default function PropriedadesPage() {
                   <span>{editMoradaWarning}</span>
                 </p>
               )}
+            </div>
+            {/* FIX (morada estruturada) — Campos estruturados opcionais.
+                Se preencheres a Rua, o backend usa os 3 campos para geocoding
+                e ignora a "Morada" (string única) acima. */}
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">
+                Morada Estruturada (opcional — substitui "Morada" se preenchida)
+              </label>
+              <div className="grid gap-2 sm:grid-cols-3">
+                <Input
+                  placeholder="Rua, número, andar"
+                  value={editForm.morada_rua}
+                  onChange={(e) =>
+                    setEditForm((f) => ({ ...f, morada_rua: e.target.value }))
+                  }
+                />
+                <Input
+                  placeholder="Código Postal (ex: 1200-001)"
+                  value={editForm.morada_codigo_postal}
+                  onChange={(e) =>
+                    setEditForm((f) => ({ ...f, morada_codigo_postal: e.target.value }))
+                  }
+                />
+                <Input
+                  placeholder="Cidade (ex: Lisboa)"
+                  value={editForm.morada_cidade}
+                  onChange={(e) =>
+                    setEditForm((f) => ({ ...f, morada_cidade: e.target.value }))
+                  }
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Preferencial em relação à "Morada" única. Usado para geocoding
+                mais preciso e para mostrar a morada de forma estruturada.
+              </p>
+            </div>
+            {/* FIX (parceiro associado) — Observações (notas internas). */}
+            <div className="space-y-1.5">
+              <label htmlFor="edit-observacoes" className="text-sm font-medium">
+                Observações
+              </label>
+              <textarea
+                id="edit-observacoes"
+                value={editForm.observacoes}
+                onChange={(e) =>
+                  setEditForm((f) => ({ ...f, observacoes: e.target.value }))
+                }
+                rows={2}
+                placeholder="Notas internas (ex: Parceiro Associado: Particulares, frequência, etc.)"
+                className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              />
+              <p className="text-xs text-muted-foreground">
+                Notas livres do gestor. Se contiver a linha "Parceiro Associado:
+                [nome]", o nome é extraído e mostrado no Badge da listagem.
+              </p>
             </div>
             <div className="space-y-1.5">
               <label
