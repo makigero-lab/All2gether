@@ -1,6 +1,6 @@
-# Worklog — Autocell
+# Worklog — All2gether
 
-Worklog interno do projeto Autocell. Regista a evolução técnica do trabalho
+Worklog interno do projeto All2gether. Regista a evolução técnica do trabalho
 efetuado (análises, melhorias, correções). Complementa o histórico do git
 (`git log`) e a documentação técnica (`docs/BACKEND.md`, `docs/FRONTEND.md`).
 

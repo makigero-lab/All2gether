@@ -84,34 +84,58 @@ Representa um apartamento ou unidade de alojamento gerida pela empresa.
 | Campo                        | Tipo     | Notas                                                              |
 |------------------------------|----------|--------------------------------------------------------------------|
 | `nome`                       | String   | Obrigatório, trim.                                                 |
-| `morada`                     | String   | Obrigatório, trim. Geocoding automático (Nominatim) ao criar/editar. |
-| `coordenadas`                | Object   | `{ lat: Number, lng: Number }`. Preenchidas via geocoding (default null). |
+| `morada`                     | String   | `required: false` (default `''`), trim. Morada em string única (legado). Geocoding automático ao criar/editar. Retrocompatível com `morada_estruturada`. |
+| `morada_estruturada`         | Object   | **HF23 (NOVO)** — sub-documento `{ rua: String, codigo_postal: String, cidade: String }` (todos com default `''`, trim). Morada decomposta para UX e geocoding mais preciso. O virtual `moradaCompleta` concatena os 3 campos OU faz fallback para `morada` (legado) se `rua` estiver vazia. |
+| `coordenadas`                | Object   | `{ lat: Number, lng: Number }`. Preenchidas via geocoding (default null). Prioridade: Google Maps API (se `GOOGLE_MAPS_API_KEY`) → Nominatim (fallback). |
 | `empresa_id`                 | ObjectId | `ref: 'Empresa'`. Obrigatório, indexado.                           |
 | `tempo_limpeza_minutos`      | Number   | Default `45`, `min: 0`. Duração estimada da tarefa de limpeza.     |
 | `ativo`                      | Boolean  | Default `true`.                                                    |
 | `checklist`                  | [String] | Default `[]`. Itens de verificação definidos pelo gestor (v1.34.0).|
+| `modelo_checklist_id`        | ObjectId | `ref: 'ModeloChecklist'`, default `null`, indexado (Prompt 133). Template dinâmico cujas secções/items são copiados para `checklist_dinamica` da Tarefa (snapshot). |
 | `capacidade_hospedes`        | Number   | Default `null`, `min: 0`. Capacidade máxima de hóspedes (v1.61.0 / Prompt 84).|
-| `funcionario_preferencial_id`| ObjectId | `ref: 'Utilizador'`, default `null`, indexado. **Prompt 92 (Fase 1.5)** — funcionário preferencial da propriedade; a lógica de prioridade no load balancer será ativada num prompt seguinte. |
+| `funcionario_preferencial_id`| ObjectId | `ref: 'Utilizador'`, default `null`, indexado. **Prompt 92 (Fase 1.5)** — funcionário preferencial da propriedade; HF11 (sistema híbrido Many-to-One + Load Balancer): o webhook tenta atribuir ao preferencial primeiro; se estiver de folga ou a propriedade não tiver preferencial, faz fallback para o load balancer. |
+| `origem`                     | String   | `enum: ['smoobu','manual']`, default `'manual'`, indexado. **HF17** — origem da propriedade (Smoobu via webhook/importação vs manual criada pelo gestor/parceiro). |
+| `smoobu_id`                  | String   | Default `null`, trim, sparse index. **HF4** — ID do apartamento Smoobu (match no webhook). Opcional (propriedades manuais ficam `null`). |
+| `parceiro_id`                | ObjectId | `ref: 'Utilizador'`, default `null`, indexado. **HF17 / HF25 (relacional)** — associa a propriedade a um parceiro B2B. Populado pelo `getPropriedades` com `nome`/`email`/`role` (substitui a lógica legacy de extrair "Parceiro Associado: [nome]" das `observacoes`). |
+| `observacoes`                | String   | Default `''`, trim. **Prompt 125** — notas livres internas do gestor. A lógica legacy de "Parceiro Associado: [nome]" foi substituída pelo campo relacional `parceiro_id`. Editável via `PUT /api/gestor/propriedades/:id`. |
+| `staff_necessario`           | Number   | Default `1`, `min: 1`. **HF21** — nº de staff necessário para limpar a propriedade. Se > 1, o load balancer atribui uma equipa (Top N) em vez de 1 pessoa. |
+| `dias_fixos_limpeza`         | [Number] | Default `[]`. **HF22** — dias fixos de limpeza semanal (0=Dom, 1=Seg, …, 6=Sáb — standard JS `getDay()`); validação de inteiros 0–6. O cron job `geradorRotinas` cria tarefa automática quando o dia de amanhã está neste array. |
+| `nome_responsavel`           | String   | Default `''`, trim. **HF23** — nome do responsável pela propriedade (contacto operacional). |
+| `contacto`                   | String   | Default `''`, trim. **HF23** — telefone/email do responsável. |
+| `frequencia_limpeza`         | String   | `enum: ['semanal','quinzenal','mensal']`, default `'semanal'`. **HF23**. |
+| `horario_limpeza`            | String   | Default `''`, trim. **HF23** — janela horária preferencial para limpeza. |
+
+> **Virtual `moradaCompleta` (HF23):** devolve a morada completa como string — concatena `morada_estruturada.rua` (+ `codigo_postal` + `cidade` se preenchidos) OU faz fallback para `morada` (legado) se `rua` estiver vazia. Serializado em `toJSON`/`toObject` (`virtuals: true`). Usado pelo frontend para display e pelo geocoder para obter coordenadas.
 
 ### `Utilizador`
-Admin, Manager ou Staff de uma empresa. Credenciais de login (email + password_hash).
+Admin, Gestor, Staff ou Parceiro de uma empresa. Credenciais de login (email + password_hash).
 
 **Roles (hierarquia):**
 - `admin` — dono da conta (gestão total: empresas, planos, utilizadores).
-- `manager` — responsável de limpezas (gere equipa de staff, vê dashboard alargado, pode executar limpezas).
+- `gestor` — responsável de limpezas (gere equipa de staff, vê dashboard alargado, pode executar limpezas).
 - `staff` — executante de limpezas (vê apenas as suas tarefas no mobile).
+- `parceiro` — **HF17** — utilizador externo B2B (parceiro de canal). As propriedades associadas usam o campo `Propriedade.parceiro_id`. A gestão de parceiros faz-se na rota dedicada `GET /api/gestor/parceiros`.
 
 | Campo            | Tipo     | Notas                                                              |
 |------------------|----------|--------------------------------------------------------------------|
-| `nome`           | String   | Obrigatório.                                                       |
+| `nome`           | String   | Obrigatório, trim.                                                 |
 | `email`          | String   | Obrigatório, lowercase, trim, **único** (indexado). Credencial de login. |
+| `telefone`       | String   | Trim, default `''`. Formato internacional (ex.: `+351912345678`). Para Daily Briefing via WhatsApp. |
+| `nif`            | String   | Default `''`, trim. **HF23 (NOVO)** — NIF do utilizador (particularmente para parceiros B2B / faturação). |
+| `observacoes`    | String   | Default `''`, trim. **HF23 (NOVO)** — observações livres sobre o utilizador (notas internas do gestor — ex.: "Parceiro desde 2024", "Desconto 10%"). |
 | `password_hash`  | String   | Hash bcrypt da password (nunca a password em claro). Opcional (utilizador migrado sem password → login recusa). |
 | `empresa_id`     | ObjectId | `ref: 'Empresa'`. Obrigatório, indexado.                           |
-| `role`           | String   | `enum: ['admin','manager','staff']`, default `'staff'`.           |
-| `responsavel_id` | ObjectId | `ref: 'Utilizador'`, default `null`. Superior hierárquico (admin/manager). O admin não tem responsavel_id (topo da hierarquia). Indexado. |
+| `role`           | String   | `enum: ['admin','gestor','staff','parceiro']` (HF17), default `'staff'`, obrigatório. |
+| `responsavel_id` | ObjectId | `ref: 'Utilizador'`, default `null`. Superior hierárquico (admin/gestor). O admin não tem responsavel_id (topo da hierarquia). Indexado. |
 | `ativo`          | Boolean  | Default `true`. Utilizador inativo é ignorado pelo webhook e pelo login. |
+| `dias_folga`     | [Number] | Default `[]`. **v1.14.0** — folgas fixas semanais (0=Dom, …, 6=Sáb). O load balancer exclui staff cujo dia da semana da tarefa está neste array. |
+| `folgas_rotativas` | [{ data, motivo }] | Default `[]`. **HF9** — datas específicas de folga além das fixas semanais. Verificado pelo `criarTarefaPorReserva` no dia do check-out. |
+| `eliminado_em`   | Date     | Default `null`, indexado. **v1.13.0 (Soft delete)** — em vez de remover o utilizador (deixaria Tarefas órfãs), marca-se a data. Utilizadores eliminados são excluídos das queries normais. |
+| `pushSubscription` | Mixed  | Default `null`. **v1.27.0** — subscrição Web Push API (endpoint + keys) gerada pelo browser via `PushManager.subscribe()`. |
 
-> **Regras de segurança (v1.7.0):** não é possível criar/editar utilizadores com role `admin` via `/api/admin/equipa` (403). Não é possível editar/eliminar/desativar utilizadores que já sejam `admin` (403 "Não é possível modificar um administrador"). O `responsavel_id` tem de ser um admin/manager da mesma empresa (validado no backend).
+> **Regras de segurança (v1.7.0):** não é possível criar/editar utilizadores com role `admin` via `/api/admin/equipa` (403). Não é possível editar/eliminar/desativar utilizadores que já sejam `admin` (403 "Não é possível modificar um administrador"). O `responsavel_id` tem de ser um admin/gestor da mesma empresa (validado no backend).
+>
+> **HF23 / HF25 (soft-delete com desatribuição):** ao inativar um `staff`/`gestor` via `PATCH /api/gestor/equipa/:id/estado`, o sistema chama `desatribuirTarefasPeriodo(utilizadorId, hoje, +1ano)` para desatribuir TODAS as tarefas futuras atribuídas (não as concluídas/canceladas). A resposta JSON inclui `tarefas_desatribuidas`. Parceiros não têm tarefas atribuídas, por isso não são afetados.
 
 ### `Ausencia`
 Indisponibilidade (férias/folga) de um Staff num intervalo de datas. Todas as datas são **normalizadas para meia-noite UTC**.
@@ -167,6 +191,13 @@ Tarefa (consulta/agendamento).
 > - **Folgas fixas semanais (`Utilizador.dias_folga`):** o dia da semana da tarefa (calculado a partir de `range.start`) é comparado contra o array `[0=Dom ... 6=Sáb]` de cada staff. Se o dia da tarefa estiver no array, o staff é excluído do pool.
 > - **Ausências (`Ausencia`):** a query agora usa **interseção de intervalos** (`data_inicio < range.end AND data_fim >= range.start`) em vez da comparação pontual anterior (`data_inicio <= range.start AND data_fim >= range.start`), que falhava em casos edge (ex.: ausência a terminar no dia da tarefa com horário inferior a `range.start`). São consideradas ausências ATIVAS os estados `aprovada` (férias/doença confirmadas) e `pendente_emergencia` (falta súbita do próprio funcionário para o dia atual). Excluem-se `pendente` (pedido normal não confirmado), `rejeitada` e `cancelada`.
 > - **Versão de equipas:** `determinarEquipaAtribuida` foi refactorizada para passar um `Set<string>` de IDs já escolhidos (`excluirStaffIds`) a cada iteração de `determinarUtilizadorAtribuido`, em vez do hack anterior de `break` quando o LB devolvia o mesmo staff. Isto garante que a versão de equipas herda automaticamente o mesmo rigor de filtragem (folgas + férias + exclusão explícita) e nunca repete o mesmo staff.
+>
+> **HF24 — Reatribuição automática inteligente (commit f18545d).** Nova função `reatribuirTarefasPeriodo(empresaId, utilizadorId, inicio, fim)` em `ausenciaController.js` que, **após** desatribuir as tarefas do funcionário ausente (`desatribuirTarefasPeriodo`), executa o load balancer para cada tarefa `por_atribuir` do período, tentando alocá-la a outro staff **ATIVO**, **DISPONÍVEL** (sem folga fixa nem ausência aprovada/pendente_emergencia) e com **menor carga**.
+> - **Exclusão do utilizador ausente:** o pool do LB recebe `excluirStaffIds = new Set([String(utilizadorId)])`, garantindo que o funcionário ausente nunca é re-escolhido.
+> - **Se encontrar staff elegível** → reatribui (`utilizador_id` + `estado: 'atribuida'`) e recalcula a hora de início via scheduler sequencial (`calcularInicioTarefaUtilizador`); atualiza também `tempo_viagem_minutos`.
+> - **Se não encontrar staff** → mantém `estado: 'por_atribuir'` (órfã) para ser reaproveitada pelo Fail-Safe do Cão de Guarda às 18h.
+> - **Best-effort:** try/catch por tarefa (uma tarefa com erro não aborta as restantes) e try/catch global (a aprovação da ausência nunca falha por causa de um erro na reatribuição). Devolve `{ total, reatribuidas, orfas }`.
+> - **Callers:** `aprovarRejeitarAusencia` (quando uma ausência é aprovada) e `reaplicarAusencia` (forçar re-execução da desatribuição + reatribuição numa ausência já aprovada). Em ambos, a resposta JSON inclui `redistribuicao = { total, desatribuidas }` e `reatribuicao = { total, reatribuidas, orfas }`.
 
 ---
 
@@ -316,6 +347,33 @@ A função `enviarEventoParaAutocell()` é `async` mas os callers **não devem a
 
 ---
 
+## 3.5. Geocoding e Distâncias (Google Maps)
+
+O All2gether converte moradas em coordenadas (`lat`, `lng`) para suportar a otimização de rotas do load balancer (Haversine) e o tempo de viagem real entre propriedades. O módulo responsável é `backend/utils/geocoding.js`.
+
+### Geocoding — `obterCoordenadas(morada)`
+
+Converte uma morada completa (ex.: "Rua das Flores 12, Lisboa") em coordenadas. **Prioridade (HF24 / commit `97c6832`):**
+
+1. **Google Maps Geocoding API** (se `GOOGLE_MAPS_API_KEY` estiver definida) — chamada a `https://maps.googleapis.com/maps/api/geocode/json` com `language=pt-PT` e `region=pt`, timeout 5s.
+2. **Nominatim** (OpenStreetMap, fallback silencioso) — `https://nominatim.openstreetmap.org/search` com `User-Agent: All2gether/1.0 (all2gether.app)`, timeout 5s, rate limit 1 req/s.
+
+**Fallback gracioso:** o Google Maps é tentado primeiro, mas se a env var não existir, a API devolver erro HTTP, quota (`OVER_QUERY_LIMIT`), resposta inválida ou timeout, o sistema cai silenciosamente para Nominatim — a criação/edição da propriedade nunca falha por causa do geocoder (mantém `coordenadas` anteriores ou `null`).
+
+> **Vantagens do Google Maps:** maior precisão em moradas portuguesas (rua, número, código postal), sem rate limit agressivo (Nominatim limita a 1 req/s), melhor cobertura de códigos postais e locais, Place ID (para futuras integrações com Places API).
+
+### `googleMapsAtivo()`
+
+Função exportada por `utils/geocoding.js` que devolve `true` se `GOOGLE_MAPS_API_KEY` estiver definida (não vazia). É exposta ao frontend via `GET /api/gestor/configuracoes/integracoes` (campo `google_maps_ativo`), permitindo à UI mostrar/ocultar botões "Abrir no Google Maps" e links de navegação.
+
+### Distâncias — `utils/distancia.js`
+
+**HF16:** o módulo `utils/distancia.js` JÁ usava `GOOGLE_MAPS_API_KEY` para a **Distance Matrix API** (`calcularTempoViagemReal(origem, destino)`) com cache em memória (TTL 5min) e fallback silencioso para Haversine (`tempoViagemHaversine`) se: (a) env var não existir; (b) API falhar; (c) resposta inválida. Usado pelo load balancer no fator "tempo de viagem" do score final (ver §3.2 — HF16).
+
+> **Variável de ambiente:** `GOOGLE_MAPS_API_KEY` (opcional). Se ausente, todo o sistema funciona com Nominatim (geocoding) + Haversine (distâncias) — sem perda de funcionalidade, apenas com menor precisão em moradas portuguesas.
+
+---
+
 ## 4. Scripts disponíveis
 
 | Script               | Comando                            | Descrição                                                          |
@@ -388,6 +446,8 @@ Definidas no ficheiro `.env` (a criar a partir de `.env.example`). **Nunca** faz
 | `AUTOCELL_WEBHOOK_SECRET` | ❌ Não | Segredo partilhado para assinatura HMAC-SHA256 dos webhooks outbound (ver §3.4). Tem de ser idêntico no Autocell. |
 | `GEMINI_API_KEY` | ❌ Não       | Chave do Google Gemini para o Resumo Executivo com IA (ver §6.4). Best-effort: se ausente, usa placeholder. |
 | `OPENAI_API_KEY` | ❌ Não       | Alternativa ao Gemini para o Resumo Executivo (fallback). |
+| `GOOGLE_MAPS_API_KEY` | ❌ Não | **HF24 (§3.5)** — Chave do Google Maps para Geocoding API (`utils/geocoding.js`) e Distance Matrix API (`utils/distancia.js`, HF16). Se ausente, fallback silencioso para Nominatim (geocoding) e Haversine (distâncias). |
+| `SMOOBU_API_KEY` | ❌ Não | Chave da API Smoobu (env var fallback). Se definida + sem chave na BD, o webhook Smoobu é aceite e `smoobu_ativo` devolve `true`. |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | ❌ Não | Chaves VAPID para notificações push (Web Push API). Se ausentes, push é ignorado silenciosamente. |
 
 ---
@@ -441,19 +501,19 @@ Cria uma propriedade para a empresa.
 - **Resposta (201 Created):** `{ "propriedade": { ... } }`
 - **Erros:** `400` campos em falta / `tempo_limpeza_minutos` inválido; `401` não autenticado; `500` erro interno.
 
-#### `GET /api/admin/equipa`
-Lista todos os utilizadores da empresa (qualquer role), ordenados por `nome`.
+#### `GET /api/admin/equipa` (também em `GET /api/gestor/equipa`)
+Lista os utilizadores da empresa do JWT, ordenados por `nome`. **HF23/HF25:** devolve **ativos E inativos** (removido o filtro `ativo: true`) para o gestor poder ver e reativar utilizadores inativos; continua a excluir eliminados (soft delete) e parceiros (`role: { $nin: ['admin', 'parceiro'] }`). Parceiros são listados na rota dedicada `GET /api/gestor/parceiros`.
 
 - **Auth:** JWT (strito, sem fallback legacy). **Protegido.**
 - **Resposta (200 OK):**
 ```json
 {
   "utilizadores": [
-    { "_id": "...", "nome": "João Limpezas", "email": "joao.limpezas@all2gether.pt", "empresa_id": "...", "role": "staff", "ativo": true, "createdAt": "...", "updatedAt": "..." }
+    { "_id": "...", "nome": "João Limpezas", "email": "joao.limpezas@all2gether.pt", "empresa_id": "...", "role": "staff", "ativo": true, "responsavel_id": "...", "responsavel": { "_id": "...", "nome": "...", "email": "...", "role": "gestor" }, "createdAt": "...", "updatedAt": "..." }
   ]
 }
 ```
-- **Nota:** a `password_hash` **nunca** é devolvida (`.select('-password_hash')`).
+- **Nota:** a `password_hash` **nunca** é devolvida (`.select('-password_hash')`). `responsavel_id` é populado para o campo `responsavel`.
 - **Erros:** `400` empresa_id em falta/inválido; `401` não autenticado; `500` erro interno.
 
 #### `POST /api/admin/equipa`
@@ -492,14 +552,25 @@ Atualiza Nome, Email e/ou Role de um utilizador, e opcionalmente a password.
 - **Resposta (200 OK):** `{ "utilizador": { ... } }` (sem `password_hash`).
 - **Erros:** `400` ID inválido / nada para atualizar / password < 6 / role inválido; `401` não autenticado; `404` não encontrado / não pertence à empresa; `409` email duplicado; `500` erro.
 
-#### `PATCH /api/admin/equipa/:id/estado`
-Alterna o estado `ativo` do utilizador (ativa ↔ desativa).
+#### `PATCH /api/admin/equipa/:id/estado` (também em `PATCH /api/gestor/equipa/:id/estado`)
+Altera o estado `ativo` do utilizador (ativa ↔ desativa). **HF23/HF25 — soft-delete com desatribuição:** ao **inativar** um `staff`/`gestor`, chama `desatribuirTarefasPeriodo(utilizadorId, hoje, +1ano)` para desatribuir TODAS as tarefas futuras atribuídas (coloca em `por_atribuir` com `utilizador_id=null`; preserva as `concluida`/`cancelada`). Parceiros não são afetados (não têm tarefas atribuídas).
 
 - **Auth:** JWT (strito, sem fallback legacy). **Protegido.**
 - **Body (opcional):** `{ "ativo": true }` — se não vier, alterna o estado atual.
-- **Resposta (200 OK):** `{ "utilizador": { ... }, "ativo": boolean }`.
-- **Comportamento:** um utilizador desativado **não consegue fazer login** (ver `authController.login` → 401 "Utilizador inativo").
-- **Erros:** `400` ID inválido; `401` não autenticado; `404` não encontrado; `500` erro.
+- **Resposta (200 OK):**
+```json
+{
+  "utilizador": { ... },
+  "ativo": false,
+  "tarefas_desatribuidas": 7
+}
+```
+  - `tarefas_desatribuidas` (HF25) — contagem de tarefas futuras que foram desatribuídas (0 se o utilizador foi ativado, ou se a desatribuição falhou best-effort sem bloquear a inativação).
+- **Comportamento:**
+  - Um utilizador desativado **não consegue fazer login** (ver `authController.login` → 401 "Utilizador inativo").
+  - Não é possível desativar/ativar um `admin` (403 "Não é possível modificar o estado de um administrador").
+  - A desatribuição é **best-effort** (try/catch) — a inativação nunca falha por causa de um erro na desatribuição; o erro é loggado.
+- **Erros:** `400` ID inválido; `401` não autenticado; `403` alvo é admin; `404` não encontrado; `500` erro.
 
 #### `DELETE /api/admin/equipa/:id`
 Remove permanentemente o utilizador da base de dados.
@@ -820,6 +891,107 @@ As ações diretas do admin (falta súbita, baixa prolongada, registo manual) cr
 
 ---
 
+### 6.12. Hard-Delete de Propriedades — HF24
+
+*Protegido por JWT (middleware `auth`) + `isGestor`. Hard-delete exige `role: 'admin'`.*
+
+#### `DELETE /api/gestor/propriedades/:id`
+
+Elimina uma propriedade. Comporta-se de duas formas conforme o query param `hard`:
+
+| Modo | Query | Perfil | Ação |
+|------|-------|--------|------|
+| **Soft-delete (padrão)** | (sem `?hard=true`) | qualquer gestor | Marca `ativo=false` e desatribui as tarefas futuras (`atribuida`/`em_curso` → `por_atribuir`, `utilizador_id=null`). A propriedade fica oculta mas continua na BD (preserva histórico e associações). |
+| **HARD DELETE** | `?hard=true` | **exclusivo `admin`** (403 caso contrário) | Apaga definitivamente a propriedade (`Propriedade.deleteOne`) **e** as tarefas futuras não concluídas dessa propriedade (`Tarefa.deleteMany` com `data >= hoje` e `estado ∉ ['concluida','cancelada']`). Evita tarefas órfãs com `propriedade_id` inexistente. |
+
+- **Controller:** `eliminarPropriedade` em `backend/controllers/gestorController.js`.
+- **Validação:** pertença à empresa (`findOne({ _id, empresa_id })`) → 404 se não encontrar.
+- **Auditoria:** ambos os modos registam auditoria (`registarAuditoria`) com `acao='desativar'` (soft) ou `acao='eliminar'` (hard).
+- **Resposta 200 (soft):** `{ mensagem, propriedade_id, hard_delete: false, tarefas_desatribuidas: <n> }`.
+- **Resposta 200 (hard):** `{ mensagem, propriedade_id, hard_delete: true, tarefas_apagadas: <n> }`.
+- **Erros:** `400` ID inválido; `403` `?hard=true` por não-admin; `404` propriedade não encontrada; `500` erro interno.
+
+> **Casos de uso:** o soft-delete é o fluxo normal para "pausar" uma propriedade (mantém tarefas concluídas para relatórios/histórico). O hard-delete é uma operação de limpeza administrativa (apenas Super Admin) para remover propriedades de teste ou duplicadas sem deixar resíduos.
+
+---
+
+### 6.13. Configurações / Integrações (`/api/gestor/configuracoes/integracoes`)
+
+*Protegido por JWT (middleware `auth`) + `isGestor` (HF6; HF25 — alterações restritas a admin).*
+
+#### `GET /api/gestor/configuracoes/integracoes`
+
+Devolve o estado das integrações externas da empresa do gestor.
+
+- **Resposta 200:**
+```json
+{
+  "smoobu": {
+    "api_key_mascarada": "••••••••1234",
+    "configurado": true,
+    "ativo": true,
+    "ultima_sincronizacao": "2025-01-31T18:00:00.000Z"
+  },
+  "rotinas": {
+    "sincronizacao_automatica": false,
+    "frequencia_horas": 24
+  },
+  "env_var_ativa": true,
+  "smoobu_ativo": true,
+  "google_maps_ativo": true
+}
+```
+
+- **`smoobu_ativo` (HF25 — NOVO):** booleano que reflete o **estado real** da integração Smoobu — `true` se houver chave na BD (`integracoes.smoobu.api_key`) **OU** env var `SMOOBU_API_KEY` definida no Render. O frontend usa este campo para mostrar a bolinha verde/vermelha de estado (em vez do antigo `configurado` que só refletia a BD).
+- **`google_maps_ativo` (HF24 — NOVO):** booleano que indica se `GOOGLE_MAPS_API_KEY` está definida (via `utils/geocoding.js → googleMapsAtivo()`). O frontend usa-o para mostrar/ocultar botões "Abrir no Google Maps" e links de navegação.
+- A `api_key` Smoobu **nunca** é devolvida em claro — apenas mascarada (`••••••••1234`) + booleano `configurado`.
+
+#### `PUT /api/gestor/configuracoes/integracoes`
+
+Atualiza as configurações de integrações.
+
+- **Body:**
+```json
+{
+  "smoobu": { "api_key": "nova-chave", "ativo": true },
+  "rotinas": { "sincronizacao_automatica": true, "frequencia_horas": 12 }
+}
+```
+  - `smoobu.api_key` (opcional) — string; se `undefined`, mantém a atual; se string vazia, limpa.
+  - `smoobu.ativo` (opcional) — boolean.
+  - `rotinas.sincronizacao_automatica` (opcional) — boolean.
+  - `rotinas.frequencia_horas` (opcional) — número (mínimo 1; valores comuns: 1, 6, 12, 24).
+- **Resposta 200:** `{ message, smoobu: {...}, rotinas: {...} }` (configurações atualizadas, `api_key` mascarada).
+- **Erros:** `400` nenhum campo para atualizar / `frequencia_horas` inválida; `404` empresa não encontrada; `500` erro interno.
+
+> **HF25 — alterações restritas a admin:** a operação `PUT` foi tornada mais restritiva (apenas `admin` pode alterar a `api_key` do Smoobu); gestores continuam a poder consultar (`GET`) e ajustar as rotinas.
+
+---
+
+### 6.14. Parceiros B2B (`/api/gestor/parceiros`) — HF23
+
+*Protegido por JWT (middleware `auth`) + `isGestor`.*
+
+#### `GET /api/gestor/parceiros`
+
+Lista os utilizadores com `role: 'parceiro'` da empresa do gestor.
+
+- **Controller:** `getParceiros` em `backend/controllers/gestorController.js`.
+- **Comportamento:** devolve **ativos E inativos** (para permitir reativação). Exclui eliminados (soft delete: `eliminado_em: null`). A `password_hash` nunca é devolvida (`.select('-password_hash')`).
+- **Resposta 200:**
+```json
+{
+  "utilizadores": [
+    { "_id": "...", "nome": "Hotel Lisboa", "email": "ops@hotellisboa.pt", "role": "parceiro", "ativo": true, "nif": "500100200", "observacoes": "Parceiro desde 2024", "createdAt": "...", "updatedAt": "..." }
+  ]
+}
+```
+- **Erros:** `400` `empresa_id` em falta no token; `500` erro interno.
+
+> **Diferença para `GET /api/gestor/equipa`:** `getEquipa` exclui parceiros (`role: { $nin: ['admin','parceiro'] }`), pelo que esta rota dedicada é necessária para a página `/gestor/parceiros`.
+
+---
+
 ## 7. Deploy no Render
 
 | Definição        | Valor                        |
@@ -930,3 +1102,6 @@ As ações diretas do admin (falta súbita, baixa prolongada, registo manual) cr
 | Hotfix (HF20) | — | **HR: ausências por intervalo de datas + calendário global da equipa:** **(1) Backend confirmado:** `Ausencia.js` já suporta `data_inicio` + `data_fim` (intervalos) desde v1.8.0. `ausenciaController.registarAusencia` aceita intervalos. `loadBalancer.js` já filtra por `data_inicio <= range.start AND data_fim >= range.start` (bloqueia atribuição durante todo o período de férias). Sem alterações de backend necessárias. **(2) Frontend ausências (`/gestor/ausencias/page.tsx`):** adicionado botão "Nova Ausência" + modal (Dialog) com Date Range Picker: select de Funcionário (carregado de `/api/gestor/equipa`, filtrado a `role==='staff' && ativo`), input `type="date"` para Data de Início, input `type="date"` para Data de Fim, select de Tipo (Férias/Doença/Outro), input de Notas. Validações: `data_fim >= data_inicio`. Faz `adminPost("/api/gestor/ausencias", { utilizador_id, data_inicio, data_fim, tipo, notas })`. Imports `Plus`, `Input`, `adminPost`, `UtilizadorDTO` adicionados. **(3) Frontend calendário (`/gestor/calendario/page.tsx`):** adicionada terceira vista "Equipa" ao toggle existente (Calendário/Tabela/Equipa). Novo componente `EquipaMapa` que mostra uma tabela: linhas = staff, colunas = dias do período (até 31 dias). Cada célula tem cor conforme o estado: verde (disponível), azul (tarefas atribuídas, mostra nº), vermelho (ausência/férias), âmbar (folga fixa). Deteta tarefas por `utilizador_id + data`, ausências por eventos `allDay` do FullCalendar, folgas por `dias_folga` do staff. Legenda visual + resumo. Import `Users` adicionado ao lucide-react. `tsc` 0 erros ✓ · `next lint` limpo ✓ · backend 111/111 testes ✓. |
 | Hotfix (HF21) | — | **Suporte para múltiplos funcionários por tarefa + atualização do load balancer:** **(1) Schema Propriedade (`models/Propriedade.js`):** novo campo `staff_necessario: { type: Number, default: 1, min: 1 }`. Se > 1, o LB atribui uma equipa de N. **(2) Schema Tarefa (`models/Tarefa.js`):** novo campo `equipa_atribuida: [ObjectId]` (ref 'Utilizador', default []). `utilizador_id` mantém-se como o vencedor #1 (retrocompatibilidade total — zero breaking changes). Se `equipa_atribuida` estiver vazia, a tarefa tem 1 staff (`utilizador_id`). **(3) Load Balancer (`utils/loadBalancer.js`):** nova função `determinarEquipaAtribuida(empresaId, range, coordenadas, tempo, propriedadeId, numStaffNecessario)`. Se N=1, delega para `determinarUtilizadorAtribuido` (comportamento original). Se N>1, chama `determinarUtilizadorAtribuido` iterativamente e devolve Top N (com exclusão dos já escolhidos). Se houver menos disponíveis, devolve os que estiverem + flag `insuficiente: true`. `smoobuController.js` atualizado para usar `determinarEquipaAtribuida` quando `propriedade.staff_necessario > 1`. Preenche `utilizador_id` (vencedor #1) + `equipa_atribuida` (todos). Alerta "Equipa parcial: X/N staff disponíveis" se insuficiente. **(4) Frontend:** `PropriedadeDTO` em `lib/api.ts` ganhou `staff_necessario?: number`. Modal de "Adicionar Propriedade Manual" em `/gestor/propriedades` tem novo campo "Nº de Staff Necessário" (input number min=1 max=10). `gestorController.criarPropriedade` aceita `staff_necessario` no body. `node --check` ✓ · 111/111 testes ✓ · `tsc` 0 erros ✓ · `next lint` limpo ✓. |
 | Hotfix (HF22) | — | **Rotinas automáticas: dias fixos de limpeza + cron job gerador de tarefas:** **(1) Schema Propriedade (`models/Propriedade.js`):** novo campo `dias_fixos_limpeza: [Number]` (0=Dom, 1=Seg, ..., 6=Sáb — standard JS `getDay()`), com validação de inteiros 0-6. `gestorController.criarPropriedade` aceita `dias_fixos_limpeza` no body (filtra inválidos). **(2) Frontend (`/gestor/propriedades`):** `PropriedadeDTO` em `lib/api.ts` ganhou `dias_fixos_limpeza?: number[]`. Modal "Adicionar Propriedade Manual" tem novo grupo de 7 checkboxes (Seg-Dom) com toggle visual (border-primary + bg-primary/10 quando selecionado). Converte seleção em array de números ordenado. **(3) Cron job (`jobs/geradorRotinas.js`):** corre todos os dias às 02:00 (`0 2 * * *`). Lógica: descobre o dia da semana de amanhã; procura propriedades ativas (de empresas ativas) com esse dia no `dias_fixos_limpeza`; verifica idempotência (não cria se já existe tarefa para amanhã); cria tarefa (`origem: 'manual'`, `estado: 'por_atribuir'`, `data: amanhã 10:00 UTC`); submete ao LB — se `staff_necessario > 1` usa `determinarEquipaAtribuida`, senão `determinarUtilizadorAtribuido`; se o LB atribui, atualiza `utilizador_id` + `equipa_atribuida` + `estado: 'atribuida'`; se não, fica `por_atribuir` (gestor resolve). Log detalhado: `🔄 [GeradorRotinas] N tarefa(s) criada(s), M atribuída(s), E com erro.` Montado em `server.js` após `iniciarLimpezaFotos()`. `node --check` ✓ · 111/111 testes ✓ · `tsc` 0 erros ✓ · `next lint` limpo ✓. |
+| Hotfix (HF23) | — | **Morada estruturada + `parceiro_id` relacional + `nif`/`observacoes` no Utilizador + página Parceiros + soft-delete com desatribuição:** (1) **Schema `Propriedade`** — `morada` deixou de ser `required` (default `''`); novo sub-documento `morada_estruturada: { rua, codigo_postal, cidade }` (todos default `''`, trim) para morada decomposta (geocoding mais preciso); virtual `moradaCompleta` concatena os 3 ou faz fallback para `morada` legado. Novos campos HF23 de gestão: `nome_responsavel`, `contacto`, `frequencia_limpeza` (`enum: ['semanal','quinzenal','mensal']`, default `'semanal'`), `horario_limpeza`. (2) **Schema `Utilizador`** — novos campos `nif: String, default: ''` e `observacoes: String, default: ''` (notas internas do gestor). (3) **Página `/gestor/parceiros`** — nova rota `GET /api/gestor/parceiros` (`getParceiros` em `gestorController.js`) que lista utilizadores com `role: 'parceiro'` (ativos E inativos, para reativação; exclui eliminados). (4) **Soft-delete com desatribuição** — `alternarEstadoMembro` (`PATCH /api/gestor/equipa/:id/estado`) ao inativar staff/gestor chama `desatribuirTarefasPeriodo(utilizadorId, hoje, +1ano)`; resposta inclui `tarefas_desatribuidas`. `getEquipa` agora mostra ativos E inativos (removido filtro `ativo: true`) e exclui parceiros (`role: { $nin: ['admin','parceiro'] }`). Best-effort — a inativação nunca falha por causa de um erro na desatribuição. `node --check` ✓ · `tsc` 0 erros ✓ · `next lint` limpo ✓. |
+| Hotfix (HF24) | — | **Reatribuição automática inteligente + hard-delete para admin + Google Maps integration + limpeza de UI:** (1) **`reatribuirTarefasPeriodo(empresaId, utilizadorId, inicio, fim)`** em `ausenciaController.js` — após `desatribuirTarefasPeriodo`, executa o load balancer para cada tarefa `por_atribuir` do período, tentando alocá-la a outro staff ATIVO, DISPONÍVEL (sem folga/ausência) e com menor carga; exclui o utilizador ausente via `excluirStaffIds`; recalcula hora via scheduler; se não houver staff elegível, mantém `por_atribuir`; best-effort com try/catch por tarefa e global. Usada por `aprovarRejeitarAusencia` (ausência aprovada) e `reaplicarAusencia`. (2) **Hard-delete de propriedades** — `DELETE /api/gestor/propriedades/:id?hard=true` (`eliminarPropriedade`) apaga a propriedade E as tarefas futuras não concluídas; exclusivo para `role: 'admin'` (403 caso contrário). Sem `?hard=true` → soft-delete padrão (`ativo=false` + desatribui tarefas futuras). (3) **Google Maps integration (commit `97c6832`)** — `utils/geocoding.js` usa `GOOGLE_MAPS_API_KEY` (Google Maps Geocoding API) como prioridade para geocoding de moradas, com fallback silencioso para Nominatim (OpenStreetMap) se a key não existir ou falhar. Nova função `googleMapsAtivo()` exportada. `utils/distancia.js` JÁ usava `GOOGLE_MAPS_API_KEY` para Distance Matrix API (HF16, com fallback Haversine). `GET /api/gestor/configuracoes/integracoes` devolve `google_maps_ativo: boolean`. (4) **Limpeza de UI** — correções menores de UI no painel do gestor. `node --check` ✓ · `tsc` 0 erros ✓ · `next lint` limpo ✓. |
+| Hotfix (HF25) | — | **Associação relacional de parceiros (populate) + status Smoobu real + configs restritas a admin + limpeza dev UI:** (1) **`getPropriedades` (`gestorController.js`)** — passou a popular `parceiro_id` com `nome`/`email`/`role`, permitindo ao frontend mostrar o Badge do parceiro diretamente sem extrair da string legacy "Parceiro Associado: [nome]" das `observacoes`. (2) **`smoobu_ativo: boolean` na resposta de `GET /api/gestor/configuracoes/integracoes`** — estado real da integração Smoobu: `true` se houver chave na BD (`integracoes.smoobu.api_key`) OU env var `SMOOBU_API_KEY`. Substitui o antigo `configurado` (que só refletia a BD). (3) **Configs restritas a admin** — `PUT /api/gestor/configuracoes/integracoes` torna-se mais restritivo: apenas `role: 'admin'` pode alterar a `api_key` do Smoobu; gestores continuam a poder consultar (`GET`) e ajustar as rotinas. (4) **Limpeza dev UI** — remover botões/links de desenvolvimento (ex.: setup temporário via browser) que estavam a poluir o painel. `node --check` ✓ · `tsc` 0 erros ✓ · `next lint` limpo ✓. |

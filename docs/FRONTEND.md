@@ -2,7 +2,7 @@
 
 Interface web do sistema All2gether de gestão de Alojamento Local e Airbnb, construída com **Next.js 14 (App Router)**, **TypeScript**, **Tailwind CSS** e componentes **shadcn/ui** (estilo *New York*).
 
-> Nesta fase, o frontend usa **dados fictícios (mock data)** — sem ligação à API. O objetivo é validar design, layout e comportamento responsivo.
+> O frontend consome a API REST do backend (Node.js + Express + MongoDB) via proxies same-origin com JWT em cookie httpOnly. Dados reais em produção.
 
 ---
 
@@ -41,32 +41,32 @@ frontend/
     │   ├── page.tsx          # Landing page premium (1 botão 'Entrar na Plataforma' → /login)
     │   ├── login/
     │   │   └── page.tsx      # Ecrã de Login (POST /api/auth/login, redirect por role / ?from=)
-    │   ├── gestor/           # Programa operacional (rebrand SSO — antiga "Área Admin" eliminada)
-    │   │   ├── layout.tsx    # Layout gestor + RouteGuard (role gestor/admin) + AutoImpersonarEmpresa
+    │   ├── gestor/           # Programa operacional (satélite single-tenant — acesso direto do admin)
+    │   │   ├── layout.tsx    # Layout gestor + RouteGuard (role gestor/admin) + ImpersonationBanner (legacy)
     │   │   ├── page.tsx      # Dashboard (estatísticas, equipa, radar de risco)
-    │   │   ├── calendario/   # Calendário operacional
+    │   │   ├── calendario/   # Calendário operacional (ausências têm prioridade visual sobre tarefas)
     │   │   ├── tarefas/      # Gestão de tarefas
-    │   │   ├── propriedades/ # CRUD de propriedades
-    │   │   ├── equipa/       # CRUD de equipa
-    │   │   ├── ausencias/    # Pedidos de ausência
+    │   │   ├── propriedades/ # CRUD de propriedades (Badge parceiro, Select parceiro, Google Maps, hard-delete admin)
+    │   │   ├── equipa/       # CRUD de equipa (+ folgas rotativas)
+    │   │   ├── parceiros/    # NOVA: CRUD de parceiros B2B (role 'parceiro')
+    │   │   ├── ausencias/    # Ausências + Dias de Folga (Tabs; sem ferramentas de dev)
     │   │   ├── relatorios/   # Analytics + resumo IA
-    │   │   └── configuracoes/ # Configurações da empresa + webhooks
+    │   │   └── configuracoes/ # Configurações da empresa + integracoes (status Smoobu real)
     │   └── staff/
     │       ├── layout.tsx    # Layout staff + RouteGuard (role staff)
     │       ├── page.tsx      # Área do Staff (mobile-first)
-    │       └── tarefas/[id]/page.tsx  # Detalhe da Tarefa (checklist + concluir)
+    │       └── tarefas/[id]/page.tsx  # Detalhe da Tarefa (checklist + concluir + Google Maps)
     ├── components/
     │   ├── ui/               # shadcn: button, card, badge, avatar, separator, checkbox, textarea, input
     │   ├── auth/
     │   │   └── route-guard.tsx      # Camada client-side de proteção (valida token + role)
     │   ├── gestor/
-    │   │   ├── gestor-sidebar.tsx   # Sidebar do gestor (desktop fixa / mobile overlay)
-    │   │   ├── auto-impersonar-empresa.tsx  # Auto-impersonação da empresa principal (admin SSO)
-    │   │   ├── impersonation-banner.tsx     # Banner "Sair da empresa" (modo impersonação)
+    │   │   ├── gestor-sidebar.tsx   # Sidebar (saudação dinâmica Admin/Gestor; Configurações só para admin)
+    │   │   ├── impersonation-banner.tsx     # Banner "Sair da empresa" (legacy — só sessões antigas)
     │   │   └── detalhe-tarefa-modal.tsx     # Modal de detalhe de tarefa
     │   └── staff/
-    │       ├── task-card.tsx             # Cartão de tarefa (link para detalhe)
-    │       └── detalhe-tarefa-client.tsx # Ecrã de detalhe (estado interativo)
+    │       ├── task-card.tsx             # Cartão de tarefa (link + botão Google Maps)
+    │       └── detalhe-tarefa-client.tsx # Ecrã de detalhe (estado interativo + Google Maps)
     └── lib/
         ├── utils.ts          # cn() — clsx + tailwind-merge
         ├── api.ts             # Helpers de fetch (adminGet/adminPost) com Authorization Bearer
@@ -84,18 +84,24 @@ A aplicação tem **três áreas privadas** (cada uma com layout próprio), uma 
 |-----------------|----------------------------------------------------|-------------------|
 | `/`             | Landing premium — 1 botão 'Entrar na Plataforma' → `/login` | — |
 | `/login`        | **Login** (POST /api/auth/login; redirect por role / `?from=`) | Centrado, premium |
-| `/gestor`       | **Programa operacional** (Dashboard, Calendário, Tarefas, Propriedades, Equipa, Ausências, Relatórios, Configurações) — **protegido** (role gestor ou admin) | Desktop-first |
+| `/gestor`       | **Programa operacional** (Dashboard, Calendário, Tarefas, Propriedades, Equipa, Parceiros, Ausências, Relatórios, Configurações*) — **protegido** (role gestor ou admin) | Desktop-first |
+| `/gestor/parceiros` | CRUD de parceiros B2B (role 'parceiro') — criar/editar/ativar/desativar | Desktop-first |
+| `/gestor/ausencias` | Gestão de ausências + Dias de Folga (Tabs) | Desktop-first |
 | `/staff`        | Área do Staff — tarefas de limpeza do dia — **protegida** (role staff) | Mobile-first |
 | `/staff/ausencias` | Pedidos de ausência do staff (férias/doença/outro) — criar + histórico + cancelar pendentes | Mobile-first |
 | `/staff/tarefas/[id]` | Detalhe da Tarefa (checklist + concluir)      | Mobile-first |
 
+> **\*** `Configurações` (`/gestor/configuracoes`) só aparece na sidebar e só é acessível para `role === 'admin'` (via `useUserRole()` hook). O gestor não vê nem acede a Configurações.
+
 ### 3.1 Programa Operacional (`/gestor`) — antiga "Área Admin"
 
-> **Rebrand SSO (satélite single-tenant):** o painel `/admin` (gestão cross-tenant de empresas: criar, suspender, apagar, restaurar) foi **eliminado** — essa gestão pertence agora à Nave-Mãe. O Super Admin entra diretamente no programa operacional `/gestor` (via SSO ou login), onde o componente `<AutoImpersonarEmpresa/>` assume automaticamente a empresa principal do satélite. As funcionalidades operacionais (Dashboard, Propriedades, Tarefas, Equipa, Ausências, Calendário, Relatórios, Configurações) vivem agora todas em `/gestor/*`.
+> **Satélite single-tenant — ACESSO DIRETO DO ADMIN:** o painel `/admin` (gestão cross-tenant de empresas) foi **eliminado**. O Super Admin (role `admin`) aterra **diretamente** na vista operacional `/gestor` sem fluxo de impersonação — o seu `empresa_id` aponta para a empresa operacional única "All2gether" (renomeada via rota `/api/cleanup-final` a partir de "All2gether (Sistema)"). As queries `req.user.empresa_id` devolvem dados reais sem necessidade de impersonação. O componente `<AutoImpersonarEmpresa/>` foi **REMOVIDO** do `gestor/layout.tsx` (commit `16ad06a`). As funcionalidades operacionais (Dashboard, Propriedades, Tarefas, Equipa, Parceiros, Ausências, Calendário, Relatórios, Configurações) vivem todas em `/gestor/*`.
 
-- **Barra lateral** (`gestor-sidebar.tsx`) com 8 itens: **Dashboard**, **Calendário**, **Tarefas**, **Propriedades**, **Equipa**, **Ausências**, **Relatórios**, **Configurações** + sino de Notificações.
+- **Barra lateral** (`gestor-sidebar.tsx`) com os itens: **Dashboard**, **Calendário**, **Limpezas** (tarefas), **Propriedades**, **Equipa**, **Parceiros** (NOVO — ícone `Handshake`), **Ausências / Férias**, **Relatórios**, **Notificações**, **Checklists** e **Configurações** (só visível para `role === 'admin'`) + sino de Notificações.
+- **Saudação dinâmica:** a Brand e o cabeçalho mobile mostram "Admin" ou "Gestor" dinamicamente (via `useRoleLabel()` hook que chama `lerUtilizador()` no `useEffect`). Antes era hardcoded "Gestor".
+- **Configurações restritas a admin:** o item "Configurações" (`/gestor/configuracoes`) só aparece na sidebar se `userRole === 'admin'` (via `useUserRole()` hook que chama `lerUtilizador()`). O `gestorNavItems` é filtrado no `NavLinks` com `.filter()` que esconde `/gestor/configuracoes` quando `userRole !== 'admin'`. O gestor não vê nem acede a Configurações.
 - **Dashboard** (`/gestor`): cartões de estatística em tempo real + estado da equipa com carga de trabalho (`GET /api/gestor/dashboard`).
-- As restantes secções (`/gestor/propriedades`, `/gestor/tarefas`, `/gestor/equipa`, etc.) contêm o CRUD operacional completo (anteriormente em `/admin/*`, migrado para `/gestor/*`).
+- As restantes secções (`/gestor/propriedades`, `/gestor/tarefas`, `/gestor/equipa`, `/gestor/parceiros`, etc.) contêm o CRUD operacional completo (anteriormente em `/admin/*`, migrado para `/gestor/*`).
 
 ### 3.2 Área Staff (`/staff`)
 
@@ -112,6 +118,7 @@ A aplicação tem **três áreas privadas** (cada uma com layout próprio), uma 
   - Endereço (opcional)
   - Estado (Atribuída / Por atribuir) com badge colorido
   - Botão "Iniciar tarefa" → abre o **Detalhe da Tarefa** (`/staff/tarefas/[id]`). Em tarefas "Por atribuir" o botão fica desativado.
+  - **Botão "Abrir no Google Maps"** (commit `97c6832`): ícone `Navigation` junto ao endereço da propriedade. URL universal `https://www.google.com/maps/search/?api=1&query=...` (usa coordenadas se existirem, senão a morada string).
 - **Rodapé** fixo com identidade "All2gether · Área do Staff".
 
 #### Página `/staff/ausencias` — Pedidos de Ausência
@@ -136,6 +143,7 @@ Ecrã mobile-first apresentado quando o Staff clica num cartão de tarefa atribu
   - Link "Voltar" para `/staff`
   - Ícone do tipo de tarefa + **nome da propriedade no topo** + label do tipo
   - Metadados rápidos: hora limite, estimativa e endereço
+  - **Botão "Abrir no Google Maps"** (commit `97c6832`): ícone `Navigation` junto ao endereço. Mesmo URL universal do `task-card.tsx` — abre o Google Maps na localização da propriedade.
 - **Checklist interativa** (gerada a partir de um array `string[]`):
   - Cada item tem uma **checkbox** controlada por React State (`itensMarcados[]`).
   - Badge com contador `{concluídos}/{total}` e barra de progresso visual.
@@ -273,7 +281,7 @@ Isto força o framework para `nextjs`, pelo que o output directory passa a `.nex
 - **Branch de desenvolvimento:** `dev`.
 - **Documentação:** sempre que o frontend é alterado, este ficheiro e o `README.md` são atualizados.
 - **Linguagem:** interface e comentários em **pt-pt**.
-- **Integração com a API:** `/admin/propriedades` consome a API real com **JWT** (v1.3.0); `/login` faz autenticação; as restantes secções (`/staff`, dashboard) ainda usam `mock-data.ts`.
+- **Integração com a API:** o frontend consome a API REST do backend (Node.js + Express + MongoDB) via proxies same-origin (`/api/gestor/*`, `/api/staff/*`, `/api/auth/*`) com JWT em cookie httpOnly. `/login` faz autenticação (`POST /api/auth/login`); o `mock-data.ts` mantém-se apenas como fallback/dev para tipagem e testes isolados — em produção, todas as secções (`/gestor/*`, `/staff/*`) usam dados reais.
 
 ---
 
@@ -286,7 +294,7 @@ Isto força o framework para `nextjs`, pelo que o output directory passa a `.nex
   - `Secure` — o cookie só é enviado over HTTPS (em `http://localhost` o cookie não será definido — testar em HTTPS ou ajustar temporariamente em dev).
 - `lerUtilizadorDoToken()` — descodifica o payload JWT (base64url) **sem verificar assinatura** (isso é responsabilidade do backend); devolve `{ id, role, empresa_id }` ou `null` se inválido/expirado.
 - `estaAutenticado()` — true se houver token válido.
-- `rotaPorRole(role)` — devolve `/gestor` para admin e gestor, `/staff` para staff (usado no redirect pós-login). **Rebrand SSO (satélite single-tenant):** o painel `/admin` (gestão cross-tenant de empresas) deixou de fazer sentido neste repositório dedicado — o Super Admin entra diretamente no programa operacional `/gestor`. A auto-impersonação da empresa principal é tratada pelo `<AutoImpersonarEmpresa/>` no layout do gestor (ver abaixo).
+- `rotaPorRole(role)` — devolve `/gestor` para admin e gestor, `/staff` para staff (usado no redirect pós-login). **Satélite single-tenant — ACESSO DIRETO:** o painel `/admin` (gestão cross-tenant de empresas) deixou de fazer sentido neste repositório dedicado — o Super Admin entra diretamente no programa operacional `/gestor`. O `empresa_id` do admin aponta agora para a empresa operacional única "All2gether" (renomeada via rota `/api/cleanup-final` a partir de "All2gether (Sistema)") — sem necessidade de auto-impersonação.
 
 ### `src/lib/api.ts` — Helpers de fetch
 - `API_URL` — lê `process.env.NEXT_PUBLIC_API_URL`.
@@ -300,56 +308,131 @@ Isto força o framework para `nextjs`, pelo que o output directory passa a `.nex
 Ecrã minimalista premium centrado:
 - Formulário com **Email** + **Password** + botão **Entrar** (design premium: azul marinho, padrão de pontos de fundo, marca "A").
 - Ao submeter: `POST /api/auth/login` (sem auth header — endpoint público).
-- Em caso de sucesso: `limparCacheAuth()` + `router.push(rotaPorRole(role))` → **admin → `/gestor`**, **gestor → `/gestor`**, **staff → `/staff`**. **Rebrand SSO:** o admin entra no `/gestor` e o `<AutoImpersonarEmpresa/>` assume automaticamente a empresa principal do satélite.
+- Em caso de sucesso: `limparCacheAuth()` + `router.push(rotaPorRole(role))` → **admin → `/gestor`**, **gestor → `/gestor`**, **staff → `/staff`**. **Acesso direto:** o admin aterra diretamente na vista operacional `/gestor` (sem fluxo de impersonação — o seu `empresa_id` já aponta para a empresa "All2gether").
 - Estados: loading (spinner), erro (cartão vermelho com a mensagem do backend).
 
-### Fluxo SSO (satélite single-tenant) — Rebrand
+### Fluxo SSO (satélite single-tenant) — Acesso Direto do Admin
+
+> **⚠️ ATUALIZAÇÃO (commit `16ad06a`):** o componente `<AutoImpersonarEmpresa/>` foi **REMOVIDO** do `gestor/layout.tsx`. O fluxo de auto-impersonação descrito abaixo **é o histórico** — foi substituído pelo **acesso direto** do admin.
 
 O repositório passou de Nave-Mãe (multi-tenant) para **Satélite dedicado à All2gether**. O painel `/admin` (gestão cross-tenant de empresas) deixou de fazer sentido — o Super Admin entra **diretamente no programa operacional** (`/gestor`).
 
-**Fluxo pós-SSO:**
+#### Fluxo atual (após commit `16ad06a`) — Acesso Direto
+
 1. Autocell → `GET /api/auth/sso?token=<jwt_externo>` (proxy route do Next.js).
-2. Proxy valida com o backend, define cookies httpOnly (`all2gether_token` + `all2gether_admin_token`) e **redireciona para `/gestor`**.
+2. Proxy valida com o backend, define o cookie httpOnly `all2gether_token` e **redireciona para `/gestor`**.
 3. O `middleware.ts` deixa o admin passar em `/gestor/*` (alinhado com o backend, onde `isGestor = requireRole('admin', 'gestor')`).
 4. O `<RouteGuard role="gestor">` aceita admin (alinhado com o `isGestor` do backend).
-5. O `<AutoImpersonarEmpresa/>` (no `gestor/layout.tsx`) deteta `role === 'admin'` e:
-   - `GET /api/admin/empresas` → encontra a primeira empresa ativa, não apagada, com NIF ≠ `SISTEMA` (empresa principal do satélite).
-   - `POST /api/admin/impersonar/:id` → substitui o cookie pelo token de gestor dessa empresa (mantém `all2gether_admin_token` guardado).
-   - Marca `sessionStorage` (`all2gether_auto_impersonado` + `all2gether_impersonating`) para não repetir.
-   - `limparCacheAuth()` + `window.location.reload()` → o `/gestor` volta a montar com o token de gestor e vê dados reais.
-6. O `<ImpersonationBanner/>` mostra "Sair da empresa" — o admin pode terminar a impersonação (logout + `/login`).
+5. O admin aterra **diretamente** na vista operacional `/gestor` — **sem fluxo de impersonação**. O `empresa_id` do admin aponta para a empresa operacional única **"All2gether"** (renomeada via rota `/api/cleanup-final` a partir de "All2gether (Sistema)").
+6. As queries `req.user.empresa_id` devolvem **dados reais** sem necessidade de impersonação.
+7. O `<ImpersonationBanner/>` mantém-se no layout **por segurança**: sessões antigas com a flag `all2gether_impersonating` ativa no `sessionStorage` (de impersonações manuais anteriores ao commit `16ad06a`) podem sair do modo impersonado. Para **novas sessões**, a flag nunca é definida e o banner **não aparece** — o admin trabalha diretamente como gestor da empresa "All2gether".
 
-**Porquê auto-impersonação?** O Super Admin é cross-tenant: no token, `empresa_id` aponta para a empresa-sistema `All2gether (Sistema)` (NIF `SISTEMA`, criada pelo `seed-admin.js`), que **não tem dados operacionais**. Sem a auto-impersonação, as queries do `/gestor` (que filtram por `req.user.empresa_id`) devolviam dados vazios. A auto-impersonação reutiliza a infraestrutura de impersonation já existente e testada.
+#### Fluxo histórico (REMOVIDO em `16ad06a`) — Auto-Impersonação
 
-### `/admin/propriedades` (Client Component)
-Primeiro ecrã a consumir a API real (mock-data abandonado nesta secção):
+> Documentado para contexto histórico. **Não está mais ativo no código.**
 
-- `useEffect` chama `adminGet('/api/admin/propriedades')` ao montar.
-- Apresenta as propriedades numa **tabela HTML** (Tailwind) com colunas **Nome**, **Tempo de Limpeza**, **Estado**.
+1. Autocell → `GET /api/auth/sso?token=<jwt_externo>` (proxy route do Next.js).
+2. Proxy valida com o backend, define cookies httpOnly (`all2gether_token` + `all2gether_admin_token`) e **redireciona para `/gestor`**.
+3. O `middleware.ts` deixa o admin passar em `/gestor/*`.
+4. O `<RouteGuard role="gestor">` aceita admin.
+5. ~~O `<AutoImpersonarEmpresa/>` (no `gestor/layout.tsx`) detetava `role === 'admin'` e:~~
+   - ~~`GET /api/admin/empresas` → encontrava a primeira empresa ativa, não apagada, com NIF ≠ `SISTEMA` (empresa principal do satélite).~~
+   - ~~`POST /api/admin/impersonar/:id` → substituía o cookie pelo token de gestor dessa empresa (mantinha `all2gether_admin_token` guardado).~~
+   - ~~Marcava `sessionStorage` (`all2gether_auto_impersonado` + `all2gether_impersonating`) para não repetir.~~
+   - ~~`limparCacheAuth()` + `window.location.reload()` → o `/gestor` voltava a montar com o token de gestor e via dados reais.~~
+6. O `<ImpersonationBanner/>` mostrava "Sair da empresa" — o admin podia terminar a impersonação (logout + `/login`).
+
+**Porquê foi removida a auto-impersonação?** Antes, o Super Admin era cross-tenant: no token, `empresa_id` apontava para a empresa-sistema `All2gether (Sistema)` (NIF `SISTEMA`, criada pelo `seed-admin.js`), que **não tinha dados operacionais** — daí a necessidade de impersonar. A rota de cleanup `/api/cleanup-final` renomeou a empresa-sistema para **"All2gether"** e o `empresa_id` do admin passou a apontar para ela, tornando a auto-impersonação redundante. As queries `req.user.empresa_id` passam a devolver dados reais diretamente, simplificando o fluxo e eliminando uma troca de token que era propensa a bugs de cache/sessionStorage.
+
+### `/gestor/propriedades` (Client Component)
+Primeiro ecrã histórico a consumir a API real (mock-data abandonado nesta secção):
+
+- `useEffect` chama `adminGet('/api/gestor/propriedades')` ao montar.
+- Apresenta as propriedades numa **tabela HTML** (Tailwind) com colunas **Nome**, **Parceiro** (Badge), **Tempo de Limpeza**, **Estado**.
 - Estados visuais: loading (spinner), erro (cartão vermelho com “Tentar novamente”), vazio (call-to-action).
 - Botão **“Nova Propriedade”** no topo → abre formulário **inline** (Card) com campos **Nome**, **Tempo de Limpeza**.
-- Ao submeter: `adminPost('/api/admin/propriedades', { ... })`, limpa o formulário e volta a chamar `carregar()` para atualizar a tabela automaticamente.
+- Ao submeter: `adminPost('/api/gestor/propriedades', { ... })`, limpa o formulário e volta a chamar `carregar()` para atualizar a tabela automaticamente.
 - Validações no cliente: Nome obrigatório; Tempo de Limpeza numérico `>= 0`.
 
-### `/admin/equipa` (Client Component) — CRUD completo (v1.9.0 + v1.10.0)
-- `useEffect` chama `adminGet('/api/admin/equipa')` ao montar.
+#### Badge de Parceiro Associado (commit `2984270`)
+- A tabela mostra um **Badge** com o nome do parceiro B2B associado à propriedade (campo `parceiro_id` populado pelo backend).
+- **Não se extrai mais das observações** — o relacionamento é feito via `parceiro_id` (campo relacional dedicado).
+- Se a propriedade não tiver parceiro associado, mostra **"All2gether"** (default operacional).
+
+#### Select de Parceiro nos formulários
+- Nos formulários de **criação** e **edição** de propriedades, há um `<select>` que busca a lista de parceiros via `GET /api/gestor/parceiros`.
+- Permite associar um parceiro B2B à propriedade (ou deixar em branco = All2gether).
+- O ID selecionado é enviado como `parceiro_id` no payload do POST/PUT.
+
+#### Botão “Abrir no Google Maps”
+- Junto à morada na tabela, há um botão com ícone **`Navigation`** (lucide-react) que abre o Google Maps.
+- URL universal: `https://www.google.com/maps/search/?api=1&query=...`.
+- Se a propriedade tiver **coordenadas** (lat/lng), usa-as; senão, usa a **morada em string**.
+
+#### Hard-Delete para Admin (commit `97c6832`)
+- Botão **“Eliminar Definitivamente”** (ícone `Trash2`) visível **exclusivamente** para `userRole === 'admin'` (verificado via `lerUtilizador()` no client).
+- Abre um **Dialog de confirmação** com aviso de **irreversibilidade** (a propriedade é removida permanentemente da BD, não vai para a reciclagem).
+- Endpoint: `DELETE /api/gestor/propriedades/:id?hard=true`.
+- O gestor (role `gestor`) **não vê** este botão — só pode fazer soft-delete.
+
+#### Morada Estruturada (commit `c30edde`)
+- Os formulários de criação/edição passaram a ter campos opcionais de **morada estruturada**: `rua`, `codigo_postal`, `cidade`.
+- Se preenchidos, **substituem** o campo `morada` (string livre) na resposta do backend.
+- Se não preenchidos, mantém-se o campo `morada` legacy para retrocompatibilidade.
+
+### `/gestor/parceiros` (Client Component) — NOVA PÁGINA (commit `c30edde` + `2984270`)
+Nova página dedicada à gestão de **parceiros B2B** (utilizadores com `role === 'parceiro'`).
+
+- `useEffect` chama `adminGet('/api/gestor/parceiros')` ao montar (lista apenas utilizadores com role 'parceiro').
+- **Tabela** com colunas: **Nome**, **Email**, **Telefone**, **NIF**, **Observações**, **Estado** (Badge Ativo/Inativo), **Ações**.
+- **Criar Parceiro**: botão "Novo Parceiro" → abre **Dialog** com campos: Nome, Email, Password, Telefone, NIF, Observações → `POST /api/gestor/equipa` (reutiliza o endpoint da equipa com `role: 'parceiro'`).
+- **Editar Parceiro**: botão ✏️ por linha → abre **Dialog** com Nome, Email, Telefone, NIF, Observações + **Nova Password (opcional)** → `PUT /api/gestor/equipa/:id`. Password vazia = mantém atual.
+- **Ativar/Desativar** (soft-delete): botão ⏻ por linha → `PATCH /api/gestor/equipa/:id/estado` com otimismo (atualiza UI imediatamente, reverte se falhar).
+- Após cada operação (criar/editar/toggle), a tabela atualiza-se automaticamente (`carregar()`).
+- **Endpoints**: `GET /api/gestor/parceiros` (lista filtrada); `POST`/`PUT`/`PATCH /api/gestor/equipa` (reutilizados — o backend aceita `role: 'parceiro'` desde o commit `6d8bca1`).
+- **Item "Parceiros"** adicionado à sidebar com ícone `Handshake` (lucide-react).
+- **Isolamento da Equipa:** parceiros **não aparecem** na página `/gestor/equipa` — são geridos exclusivamente aqui, dado que têm fluxos próprios (telefone/NIF/observações específicos de B2B).
+
+### `/gestor/equipa` (Client Component) — CRUD completo (v1.9.0 + v1.10.0)
+- `useEffect` chama `adminGet('/api/gestor/equipa')` ao montar.
 - **Tabela** com colunas: **Nome**, **Email**, **Role** (Badge), **Responsável** (nome do superior hierárquico ou "—"), **Estado** (Badge Ativo/Inativo), **Ações**.
 - **Adicionar**: botão "Adicionar Funcionário" → formulário inline (Nome, Email, Password, Role select **sem Admin**, **Responsável select** populado com admin+manager) → `adminPost`.
 - **Editar**: botão ✏️ por linha → abre **modal Dialog** com Nome, Email, Role (**sem Admin**), **Responsável select** + **Nova Password (opcional)** → `adminPut`. Password vazia = mantém atual. O utilizador a editar é excluído do select de Responsável (não pode ser responsável de si próprio).
 - **Ativar/Desativar**: botão ⏻ por linha → `adminPatch('/equipa/:id/estado')` com otimismo (atualiza UI imediatamente, reverte se falhar).
 - **Eliminar**: botão 🗑️ por linha → abre **modal de confirmação** (Dialog) → `adminDelete`. Aviso: "ação permanente".
-- **Admin = só de leitura**: linhas com `role === "admin"` **não mostram botões de ação** (Editar/Ativar/Eliminar escondidos). Mostra "—" no lugar das ações. Isto reflete as regras 403 do backend (não é possível modificar/eliminar admins via `/api/admin/equipa`).
+- **Admin = só de leitura**: linhas com `role === "admin"` **não mostram botões de ação** (Editar/Ativar/Eliminar escondidos). Mostra "—" no lugar das ações. Isto reflete as regras 403 do backend (não é possível modificar/eliminar admins via `/api/gestor/equipa`).
 - Após cada operação (criar/editar/eliminar), a tabela atualiza-se automaticamente (`carregar()`).
 - Componente `Dialog` (shadcn, sem Radix) em `components/ui/dialog.tsx` — backdrop, fecho com Esc/clique fora, scroll bloqueado.
+- **Folgas rotativas** (HF10): secção no modal de edição com calendário de folgas específicas por staff (input `type="date"` + motivo + botão adicionar/remover).
+- **Isolamento dos parceiros:** parceiros (role `parceiro`) **não aparecem** nesta tabela — são geridos em `/gestor/parceiros`.
 
-### `/admin/calendario` (Client Component) — Folgas e Férias (v1.11.0)
-- `useEffect` carrega em paralelo: `adminGet('/api/admin/ausencias?futuras=true')` + `adminGet('/api/admin/equipa')` (para popular o select de funcionários, filtrado a staff+manager).
+### `/gestor/calendario` (Client Component) — Folgas e Férias (v1.11.0)
+- `useEffect` carrega em paralelo: `adminGet('/api/gestor/ausencias?futuras=true')` + `adminGet('/api/gestor/equipa')` (para popular o select de funcionários, filtrado a staff+manager).
 - **Formulário "Marcar Ausência"** no topo: select Funcionário, Data de Início, Data de Fim, select Tipo (Folga/Férias), Notas (opcional), botão "Agendar" → `adminPost`.
 - **Tabela** de ausências agendadas: Funcionário, Tipo (Badge com ícone Plane/Sun), Período (datas formatadas pt-PT), Notas, Ações.
 - **Eliminar**: botão 🗑️ por linha → `adminDelete` com otimismo (remove da UI imediatamente, reverte se falhar).
 - Validações no cliente: funcionário + datas obrigatórios; `data_fim >= data_inicio`.
 - Tipo `AusenciaDTO` + `TipoAusencia` em `lib/api.ts`.
 - **Integração com o load balancer**: as ausências registadas aqui excluem automaticamente o staff da atribuição automática de tarefas.
+
+#### Prioridade Visual de Ausências (commit `2984270`)
+- Na vista **Equipa**, a função `estadoDia(membro, data)` foi **reordenada**: ausências (vermelho) têm agora prioridade **ABSOLUTA** sobre tarefas (azul).
+- Antes, um staff com tarefa atribuída + ausência nesse dia aparecia a azul (tarefa). Agora aparece a vermelho (ausência).
+- O gestor vê **imediatamente** quem está de férias/folga, mesmo que tenha tarefas atribuídas nesse dia.
+- Ordem da verificação: (1) ausência → vermelho; (2) tarefa atribuída → azul; (3) sem nada → default.
+
+### `/gestor/ausencias` (Client Component) — Tabs: Ausências + Dias de Folga (commit `2984270`)
+A página foi redesenhada com `<Tabs>` (shadcn) e duas vistas:
+
+- **Separador "Ausências"** (conteúdo existente): lista as ausências/folgas agendadas em tabela (Funcionário, Tipo, Período, Notas, Ações) + botão "Marcar Ausência".
+- **Separador "Dias de Folga"** (NOVO): Card que lista o staff ativo com os seus `dias_folga` (dia da semana de folga fixa, ex.: "Segunda-feira") como **Badges** abreviados ("Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom").
+  - Vê-se rapidamente quem tem que dia de folga rotativa semanal.
+  - Editável em `/gestor/equipa` (campo `dias_folga` no modal de edição).
+
+#### Remoção de ferramentas de dev (commit `2984270`)
+- ❌ Card de **"Diagnóstico de ausências"** — removido (era um utilitário técnico de desenvolvimento para inspeção de estado).
+- ❌ Botão **"Reaplicar ausência"** — removido (era um utilitário de correção de ausências órfãs durante o desenvolvimento).
+- Estas ferramentas não fazem sentido em produção e foram limpas da UI.
 
 ---
 
@@ -449,3 +532,10 @@ O token passou a ser guardado num **cookie** (`all2gether_token`, SameSite=Lax, 
 | Hotfix | — | **Correção da construção do URL de destino nos proxies (anti-502):** os 9 proxy routes (`/api/gestor/*`, `/api/staff/*`, `/api/admin/*`, `/api/auth/login`, `/api/auth/me/*`, `/api/auth/sso`, `/api/admin/empresas`, `/api/admin/impersonar/:id`) partilhavam um padrão frágil — `const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL ?? "";` seguido de concatenação por template literal. Se a env var faltasse, `BACKEND_URL = ""` produzia um URL relativo que resolvia contra o próprio domínio Vercel (loop → 502 silencioso). Criado helper partilhado `lib/backend.ts` com `buildBackendUrl(path, queryString)` que: (1) normaliza a env var (trim + remoção de barras finais); (2) combina path + base com `new URL(path, base)` — tolera barras finais, valida a base, **sem protocolo hardcoded**; (3) devolve `null` se a env var faltar/for inválida. Todos os proxies passam a usar o helper e devolvem `502` com mensagem explícita `ERRO_BACKEND_NAO_CONFIGURADO` (nomeia a env var em falta) em vez do 502 genérico, para diagnóstico imediato nos logs da Vercel. **Nota operacional:** a env var `NEXT_PUBLIC_API_URL` na Vercel deve apontar para `https://all2gether-backend.onrender.com` (não `autocell-kv5g.onrender.com`, host antigo). tsc ✓ · lint ✓. |
 | Hotfix (HF6) | — | **Nova página `/gestor/configuracoes/integracoes` (Integrações & Rotinas):** migra a gestão da configuração Smoobu da Nave-Mãe para o All2gether (descentralização arquitetural). Nova página `frontend/src/app/gestor/configuracoes/integracoes/page.tsx` com: (1) **Secção "Integração Smoobu"** — input password para nova API key (com toggle Substituir/Limpar), mostra chave mascarada (`••••••••1234`) se já configurada + Badge "Configurada"/"Por configurar", checkbox "Integração ativa", indicador de última sincronização, botão "Importar Propriedades" (chama `POST /api/gestor/smoobu/propriedades`). (2) **Secção "Rotinas de Sincronização"** — checkbox "Sincronização automática", select de frequência (1h/6h/12h/24h). (3) **Avisos** — toast de sucesso/erro + aviso âmbar se env var `SMOOBU_API_KEY` ativa (a chave da BD tem prioridade). (4) **Item sidebar "Integrações"** (ícone `Plug`) adicionado ao `gestor-sidebar.tsx`. Comunica com `GET/PUT /api/gestor/configuracoes/integracoes` (novo endpoint backend HF6). A API key NUNCA é exposta em claro no GET (só mascarada + booleano `configurado`). Adaptado aos componentes UI disponíveis (sem Switch/Label/Select shadcn — usa Checkbox + `<label>` + `<select>` nativos). tsc 0 erros ✓ · `next lint` limpo ✓. |
 | Hotfix (HF10) | — | **Interface de gestão de folgas rotativas para o staff:** nova secção "Folgas Específicas / Rotativas" no modal de edição de funcionário (`/gestor/equipa`). (1) **Tipos TypeScript** — `UtilizadorDTO` em `lib/api.ts` ganhou `folgas_rotativas?: { _id?: string; data: string \| Date; motivo: string }[]`. (2) **Backend** — `atualizarMembroEquipa` (`gestorController.js`) aceita `folgas_rotativas` no `req.body`: valida array, normaliza datas (`new Date(fr.data)`), trunca motivo a 200 chars, ordena por data ascendente, substituição total (não append). (3) **UI** — secção no modal de edição com: formulário para adicionar (input `type="date"` + input de motivo + botão "Adicionar" com ícone `Plus`); lista de folgas agendadas ordenadas por data (formato `dd/MM/yyyy` via `date-fns` com locale `pt`), cada item com data + motivo + botão remover (ícone `Trash2`, `aria-label`); datas passadas mostradas com `opacity-50` + "(passada)"; estado vazio "Nenhuma folga específica agendada."; `max-h-48 overflow-y-auto` na lista. (4) **Funcionalidades** — `adicionarFolgaRotativa()` valida data obrigatória + evita duplicados; `removerFolgaRotativa(data)` filtra por data; `abrirEdicao` normaliza datas ISO do backend para `YYYY-MM-DD` (formato do input); `handleEditar` envia o array completo no PUT. Ícone `Calendar` adicionado aos imports do lucide-react. tsc 0 erros ✓ · `next lint` limpo ✓ · backend 111/111 testes ✓. |
+| Commit `16ad06a` | — | **Acesso direto do admin + remoção do `<AutoImpersonarEmpresa/>`:** o componente `<AutoImpersonarEmpresa/>` foi **REMOVIDO** do `gestor/layout.tsx`. O Super Admin (role `admin`) aterra **diretamente** na vista operacional `/gestor` sem fluxo de impersonação — o seu `empresa_id` aponta para a empresa operacional "All2gether" (renomeada via rota `/api/cleanup-final` a partir de "All2gether (Sistema)"). As queries `req.user.empresa_id` devolvem dados reais sem necessidade de troca de token. O `<ImpersonationBanner/>` mantém-se no layout **por segurança** (sessões antigas com flag `all2gether_impersonating` ativa podem sair), mas para novas sessões o banner não aparece. Limpeza de rotas de setup temporárias. Resolveu bugs de cache/sessionStorage do fluxo legacy de auto-impersonação. |
+| Commit `6d8bca1` | — | **Backend aceita role 'parceiro' + clarificação UI:** o `gestorController.criarMembroEquipa` passou a aceitar `role: 'parceiro'` (além de `staff` e `gestor`). A UI de criação/edição em `/gestor/parceiros` envia `role: 'parceiro'` no payload. Página `/gestor/parceiros` consome `GET /api/gestor/parceiros` (lista filtrada) e reutiliza `POST/PUT/PATCH /api/gestor/equipa` para criar/editar/toggle. |
+| Commit `c30edde` | — | **Parceiros isolados + soft-delete com desatribuição futura + moradas estruturadas:** (1) **Nova página `/gestor/parceiros`** — CRUD completo de parceiros B2B (role 'parceiro'), isolada da `/gestor/equipa`. Tabela com Nome, Email, Telefone, NIF, Observações, Estado. Dialogs de criar/editar. Item sidebar "Parceiros" (ícone `Handshake`). (2) **Soft-delete com desatribuição futura** — ao desativar/apagar um parceiro, as propriedades associadas ficam com `parceiro_id = null` (ou reatribuídas à empresa operacional "All2gether"). (3) **Morada estruturada** — formulários de propriedade ganharam campos `rua` / `codigo_postal` / `cidade` (opcionais; substituem `morada` string se preenchidos). (4) **Correções admin** — pequenas correções de permissões para o admin em modo acesso direto. |
+| Commit `97c6832` | — | **Google Maps integration + auto-reatribuição em férias + hard-delete para admin:** (1) **Botão "Abrir no Google Maps"** — ícone `Navigation` (lucide-react) junto à morada em `/gestor/propriedades` (tabela), `task-card.tsx` (staff, lista de tarefas) e `detalhe-tarefa-client.tsx` (staff, detalhe). URL universal `https://www.google.com/maps/search/?api=1&query=...` — usa coordenadas lat/lng se existirem, senão a morada string. (2) **Auto-reatribuição em férias** — quando o staff entra de férias, as suas tarefas futuras são reatribuídas automaticamente a outro staff disponível (backend); o frontend mostra o novo atribuído. (3) **Hard-delete para admin** — botão "Eliminar Definitivamente" (ícone `Trash2`) em `/gestor/propriedades`, visível só para `userRole === 'admin'` (via `lerUtilizador()`), com Dialog de confirmação de irreversibilidade. Endpoint: `DELETE /api/gestor/propriedades/:id?hard=true`. (4) Ajustes UI menores. |
+| Commit `f18545d` | — | **Auto-reatribuição em férias + hard-delete para admin + agrupa folgas + ajustes UI:** iteração do commit `97c6832` — refinamentos no fluxo de auto-reatribuição quando staff entra de férias; consolidação do hard-delete para admin; agrupamento visual das folgas rotativas; ajustes UI. |
+| Commit `5674c1f` | — | **Fix build Vercel — escape de aspas em JSX:** corrigido erro de build da Vercel causado por aspas não escapadas em JSX. Os caracteres `'` em texto literal dentro de componentes JSX passaram a ser escapados corretamente. Desbloqueou o deploy. |
+| Commit `2984270` | — | **Associação parceiro relacional + status Smoobu real + configs restritas a admin + limpeza dev UI:** (1) **Badge de Parceiro Associado** em `/gestor/propriedades` — usa `parceiro_id` populado pelo backend (não mais extraído das observações); se não houver parceiro, mostra "All2gether". (2) **Select de Parceiro** nos formulários de criação/edição de propriedades — busca `GET /api/gestor/parceiros`. (3) **Status Smoobu real** em `/gestor/configuracoes/integracoes` — o indicador de estado da integração passou a refletir o status real do backend (não um placeholder). (4) **Configs restritas a admin** — `useUserRole()` hook no `gestor-sidebar.tsx` esconde o item "Configurações" para `role !== 'admin'`. (5) **Saudação dinâmica** — `useRoleLabel()` hook mostra "Admin" ou "Gestor" na Brand e no cabeçalho mobile. (6) **Tabs em `/gestor/ausencias`** — `<Tabs>` com separador "Ausências" + novo separador "Dias de Folga" (Card com staff ativo + Badges "Seg", "Ter", etc. dos `dias_folga`). (7) **Remoção de ferramentas de dev** — Card "Diagnóstico de ausências" e botão "Reaplicar ausência" removidos da UI. (8) **Prioridade visual de ausências no calendário** — função `estadoDia()` reordenada: ausências (vermelho) têm prioridade ABSOLUTA sobre tarefas (azul) na vista Equipa. tsc 0 erros ✓ · lint ✓. |

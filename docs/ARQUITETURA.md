@@ -210,12 +210,22 @@ Timezone: `Europe/Lisbon` (nativo node-cron, exceto Daily Briefing que usa `TZ` 
 
 ---
 
-## 9. Impersonation (admin → gestor)
+## 9. Acesso Direto do Admin (sem impersonação)
 
-- `POST /api/admin/empresas/:id/impersonar` — gera JWT com `id` do admin, `role: 'gestor'`, `empresa_id` alvo. Override se a empresa não tiver gestor ativo.
-- Cookie de backup `all2gether_admin_token` guarda o token de admin original.
-- `POST /api/auth/exit-impersonation` — restaura o token de admin a partir do backup.
-- Frontend: banner vermelho "Voltar a Admin" (`components/gestor/impersonation-banner.tsx`).
+> **Atualização (commit 16ad06a):** o fluxo de auto-impersonação (`<AutoImpersonarEmpresa/>`) foi REMOVIDO. O Super Admin agora acede diretamente à vista operacional `/gestor` sem impersonação.
+
+- O Super Admin (role 'admin') tem `empresa_id` que aponta para a empresa operacional "All2gether" (renomeada via rota `/api/cleanup-final` a partir de "All2gether (Sistema)").
+- As queries `req.user.empresa_id` devolvem dados reais sem necessidade de impersonação.
+- O `RouteGuard` aceita admin quando o role exigido é 'gestor' (alinhado com o backend, onde `isGestor = requireRole('admin', 'gestor')`).
+- O `middleware.ts` permite o admin em `/gestor/*`.
+- O componente `<AutoImpersonarEmpresa/>` foi removido do `gestor/layout.tsx`.
+- O `<ImpersonationBanner/>` mantém-se no layout por segurança (sessões antigas com flag `all2gether_impersonating` ativa podem sair), mas para novas sessões o banner não aparece.
+- As rotas de impersonação manual continuam disponíveis na API (`POST /api/admin/empresas/:id/impersonar` + `POST /api/auth/exit-impersonation`) para casos de suporte pontual, mas não são o fluxo principal.
+
+### Configurações restritas a admin (commit 2984270)
+
+- O item "Configurações" (`/gestor/configuracoes`) na sidebar só é visível para `role === 'admin'` (via `useUserRole()` hook).
+- O gestor não vê nem acede a Configurações — é exclusivo do Super Admin.
 
 ---
 
