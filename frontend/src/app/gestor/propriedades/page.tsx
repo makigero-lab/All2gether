@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Plus, Building2, Loader2, AlertCircle, RefreshCw, Power, Pencil, Trash2, CheckCircle2, ListChecks } from "lucide-react";
+import { Plus, Building2, Loader2, AlertCircle, RefreshCw, Power, Pencil, Trash2, CheckCircle2, ListChecks, Navigation } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,6 +32,7 @@ import {
   type ModeloChecklistDTO,
 } from "@/lib/api";
 import { lerUtilizador, type Role } from "@/lib/auth";
+import { googleMapsUrl } from "@/lib/utils";
 
 /**
  * Página de Propriedades — Painel de Administração.
@@ -219,7 +220,7 @@ export default function PropriedadesPage() {
     setPropriedades((prev) =>
       prev.map((x) => (x._id === p._id ? { ...x, ativo: novoEstado } : x))
     );
-    setSincronizacaoOk(null);
+    setFeedbackOk(null);
     try {
       const res = await adminPatch<{
         ativo: boolean;
@@ -230,7 +231,7 @@ export default function PropriedadesPage() {
       // tarefas futuras desatribuídas (passaram a 'por_atribuir'), informa.
       if (!novoEstado && typeof res?.tarefasDesatribuidas === "number") {
         const n = res.tarefasDesatribuidas;
-        setSincronizacaoOk(
+        setFeedbackOk(
           n > 0
             ? `Propriedade desativada. ${n} tarefa(s) futura(s) não concluída(s) foram desatribuída(s) (por atribuir).`
             : `Propriedade desativada. Não havia tarefas futuras por executar.`
@@ -245,11 +246,13 @@ export default function PropriedadesPage() {
     }
   }
 
-  // Estado da sincronização de propriedades do Smoobu (importação em massa).
-  const [sincronizando, setSincronizando] = useState(false);
-  const [sincronizacaoOk, setSincronizacaoOk] = useState<string | null>(null);
+  // FIX (relocação do botão Smoobu) — Estado `sincronizando`/`sincronizacaoOk`
+  // removido. A funcionalidade de importação do Smoobu foi migrada para a
+  // página /gestor/configuracoes/integracoes.
+  // Estado genérico de feedback de sucesso (toggle de estado, checklist padrão).
+  const [feedbackOk, setFeedbackOk] = useState<string | null>(null);
   // Prompt 117 — Aviso de geocoding INLINE (junto ao campo morada, não toast global).
-  // String preenchida quando o Nominatim falha ao georreferenciar a morada.
+  // String preenchida quando o Nominatim/Google falha ao georreferenciar a morada.
   const [moradaWarning, setMoradaWarning] = useState<string | null>(null);
   // Aviso inline do modal de edição (morada editada não georreferenciada).
   const [editMoradaWarning, setEditMoradaWarning] = useState<string | null>(null);
@@ -259,39 +262,9 @@ export default function PropriedadesPage() {
   const [moradaConfirmada, setMoradaConfirmada] = useState(false);
   const [editMoradaConfirmada, setEditMoradaConfirmada] = useState(false);
 
-  /**
-   * Importa/atualiza propriedades do Smoobu (scoped por empresa).
-   * Cria as novas e atualiza SEMPRE a morada + capacidade das existentes
-   * (alinhado com sincronizarPropriedades do Prompt 92).
-   */
-  async function handleImportarPropriedades() {
-    setSincronizando(true);
-    setSincronizacaoOk(null);
-    setErro(null);
-    try {
-      const res = await adminPost<{
-        totalRecebidas: number;
-        criadas: number;
-        existentes: number;
-        erros: number;
-      }>("/api/gestor/smoobu/propriedades", {});
-
-      let msg = `${res.criadas} propriedade(s) importada(s) com sucesso!`;
-      if (res.existentes > 0) msg += ` ${res.existentes} já existiam.`;
-      if (res.erros > 0) msg += ` ${res.erros} com erro.`;
-      setSincronizacaoOk(msg);
-
-      await carregar();
-    } catch (e) {
-      setErro(
-        e instanceof Error
-          ? `Importação falhou: ${e.message}`
-          : "Erro ao importar propriedades do Smoobu."
-      );
-    } finally {
-      setSincronizando(false);
-    }
-  }
+  // FIX (relocação do botão Smoobu) — Estado `sincronizando`/`sincronizacaoOk`
+  // removido. A funcionalidade de importação do Smoobu foi migrada para a
+  // página /gestor/configuracoes/integracoes.
 
   // Estado do modal de edição
   const [editando, setEditando] = useState<PropriedadeDTO | null>(null);
@@ -416,13 +389,13 @@ export default function PropriedadesPage() {
     }
     setChecklistLoading(true);
     setErro(null);
-    setSincronizacaoOk(null);
+    setFeedbackOk(null);
     try {
       const res = await adminPost<{ message: string; modificadas: number }>(
         "/api/gestor/propriedades/default-checklist",
         {}
       );
-      setSincronizacaoOk(res.message || `Checklist aplicada a ${res.modificadas} propriedade(s).`);
+      setFeedbackOk(res.message || `Checklist aplicada a ${res.modificadas} propriedade(s).`);
       await carregar();
     } catch (e) {
       setErro(
@@ -839,15 +812,16 @@ export default function PropriedadesPage() {
       )}
 
       {/* Sucesso da sincronização Smoobu */}
-      {sincronizacaoOk && (
+      {/* FIX — Banner de feedback de sucesso (toggle de estado, checklist padrão). */}
+      {feedbackOk && (
         <Card className="border-emerald-500/50">
           <CardContent className="flex items-center gap-3 p-4 text-sm text-emerald-600 dark:text-emerald-400">
             <CheckCircle2 className="h-5 w-5 shrink-0" />
-            <span>{sincronizacaoOk}</span>
+            <span>{feedbackOk}</span>
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setSincronizacaoOk(null)}
+              onClick={() => setFeedbackOk(null)}
               className="ml-auto"
             >
               Fechar
@@ -921,18 +895,40 @@ export default function PropriedadesPage() {
                           )}
                         </div>
                         {/* FIX (morada estruturada) — Mostra morada estruturada
-                            se existir, senão fallback para morada (string legada). */}
+                            se existir, senão fallback para morada (string legada).
+                            FIX (google maps integration) — Botão "Abrir no Google
+                            Maps" que usa coordenadas (se existirem) ou a morada. */}
                         {(() => {
                           const me = p.morada_estruturada;
                           const moradaDisplay =
                             me?.rua
                               ? [me.rua, me.codigo_postal, me.cidade].filter(Boolean).join(", ")
                               : p.morada;
-                          return moradaDisplay && moradaDisplay !== "A definir" ? (
-                            <div className="text-xs text-muted-foreground mt-0.5">
-                              {moradaDisplay}
+                          if (!moradaDisplay || moradaDisplay === "A definir") return null;
+                          // FIX (google maps integration) — Usa coordenadas se
+                          // existirem (mais preciso), senão usa a morada string.
+                          const coords = p.coordenadas;
+                          const gmapsUrl = googleMapsUrl(
+                            coords?.lat != null && coords?.lng != null
+                              ? { lat: coords.lat, lng: coords.lng }
+                              : moradaDisplay
+                          );
+                          return (
+                            <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1.5">
+                              <span>{moradaDisplay}</span>
+                              {gmapsUrl && (
+                                <a
+                                  href={gmapsUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-0.5 text-primary hover:underline"
+                                  title="Abrir no Google Maps"
+                                >
+                                  <Navigation className="h-3 w-3" />
+                                </a>
+                              )}
                             </div>
-                          ) : null;
+                          );
                         })()}
                       </td>
                       <td className="px-4 py-3 font-mono text-xs text-muted-foreground">

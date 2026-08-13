@@ -312,6 +312,10 @@ router.get('/configuracoes/integracoes', auth, isGestor, async (req, res) => {
       // Indica se a env var fallback está ativa (para o frontend mostrar aviso
       // de que a chave da BD tem prioridade).
       env_var_ativa: Boolean(process.env.SMOOBU_API_KEY),
+      // FIX (google maps integration) — Indica se o Google Maps está configurado
+      // (env var GOOGLE_MAPS_API_KEY no Render). O frontend usa este booleano
+      // para mostrar/ocultar botões "Abrir no Google Maps" e links de navegação.
+      google_maps_ativo: require('../utils/geocoding').googleMapsAtivo(),
     });
   } catch (err) {
     return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });

@@ -9,11 +9,12 @@ import {
   Wrench,
   ChevronRight,
   User,
+  Navigation,
 } from "lucide-react";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 
-import { cn, parsearDataSegura } from "@/lib/utils";
+import { cn, parsearDataSegura, googleMapsUrl } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -138,10 +139,29 @@ export function TaskCard({ tarefa }: { tarefa: TarefaMock }) {
             </div>
           </div>
 
+          {/* FIX (google maps integration) — Endereço + botão "Abrir no Google
+              Maps" para navegação direta. O staff pode clicar para abrir a app
+              do Google Maps (mobile/web) na localização da propriedade. */}
           {tarefa.endereco && (
             <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
               <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              <span className="whitespace-normal break-words">{tarefa.endereco}</span>
+              <span className="whitespace-normal break-words flex-1">{tarefa.endereco}</span>
+              {(() => {
+                const url = googleMapsUrl(tarefa.endereco);
+                if (!url) return null;
+                return (
+                  <a
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex shrink-0 items-center gap-0.5 rounded text-primary hover:underline"
+                    title="Abrir no Google Maps"
+                    aria-label="Abrir no Google Maps"
+                  >
+                    <Navigation className="h-3.5 w-3.5" />
+                  </a>
+                );
+              })()}
             </p>
           )}
 

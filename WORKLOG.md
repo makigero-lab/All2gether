@@ -2187,3 +2187,27 @@ Stage Summary:
 - **Folgas visíveis:** novo separador "Dias de Folga" na página de Ausências lista todos os staff ativos com os seus dias de folga fixos.
 - **Sem regressões:** 111/111 testes Jest passam; tsc frontend 0 erros; node --check backend OK.
 - **Próximo passo (este commit):** commit + push para `dev` com a mensagem `fix: auto-reatribuicao em ferias, hard-delete para admin, agrupa folgas e ajustes ui`.
+
+---
+
+Task ID: GOOGLE-MAPS-INTEGRATION
+Agent: Z.ai Code (Eng. Software Principal)
+Task: Integração total do Google Maps (geocoding + navegação), limpeza de função morta Smoobu e confirmação de pontos 1/3/4/5 já implementados.
+
+Work Log:
+- **Confirmação prévia:** Os pontos 1 (Hard-Delete para admin), 3 (Reatribuição automática inteligente), 4 (Remoção de "Auto-Atribuir Pendentes" de Limpezas) e 5 (Separador "Dias de Folga" em Ausências) já estavam implementados no commit `f18545d`. Esta iteração focou-se na parte NOVA: integração do Google Maps.
+- **#2a Backend — Google Maps Geocoding API:** `backend/utils/geocoding.js` reescrito. Agora usa `GOOGLE_MAPS_API_KEY` (env var do Render) como prioridade para geocoding de moradas de propriedades. Fallback silencioso para Nominatim (OpenStreetMap) se: (a) API key não definida; (b) chamada à API falhar; (c) resposta sem dados. Vantagens: maior precisão em moradas portuguesas, sem rate limit de 1 req/s, melhor coverage de códigos postais. Nova função `googleMapsAtivo()` exportada. O `distancia.js` (load balancer) JÁ usava `GOOGLE_MAPS_API_KEY` para a Distance Matrix API (com fallback Haversine) — não foi preciso alterar.
+- **#2a Backend — Endpoint `/configuracoes/integracoes`:** Adicionado campo `google_maps_ativo: boolean` à resposta JSON (via `googleMapsAtivo()`), para o frontend saber se pode mostrar botões de navegação.
+- **#2b Frontend — Helper `googleMapsUrl()`:** `frontend/src/lib/utils.ts` — nova função que gera URL universal `https://www.google.com/maps/search/?api=1&query=...` (funciona em browser, iOS e Android — abre a app nativa se instalada). Aceita coordenadas `{ lat, lng }` (mais preciso) ou string de morada (URL-encoded).
+- **#2b Frontend — Botão "Abrir no Google Maps" em Propriedades:** `propriedades/page.tsx` — junto à morada na tabela, ícone `Navigation` (link externo) que usa coordenadas se existirem, senão a morada. Import `Navigation` e `googleMapsUrl` adicionados.
+- **#2b Frontend — Botão "Abrir no Google Maps" no Staff:** `task-card.tsx` (lista de tarefas) e `detalhe-tarefa-client.tsx` (detalhe) — ícone `Navigation` junto ao endereço da propriedade. O staff clica para abrir o Google Maps na localização (mobile/web). Imports `Navigation` e `googleMapsUrl` adicionados.
+- **#2c Limpeza de função morta Smoobu:** `propriedades/page.tsx` — removida a função `handleImportarPropriedades` (morta desde que o botão foi removido do cabeçalho no commit anterior). Removidos os estados `sincronizando`/`sincronizacaoOk`. Introduzido estado genérico `feedbackOk` para feedback de toggle de estado e checklist padrão (que antes usavam `sincronizacaoOk`). Banner de sucesso atualizado para usar `feedbackOk`. Import `Download` removido (não usado). O botão "Importar do Smoobu" continua disponível em `/gestor/configuracoes/integracoes` (secção "Ações Manuais de Emergência").
+- **Documentação atualizada:** esta entrada no `WORKLOG.md`.
+
+Stage Summary:
+- **Google Maps totalmente integrado:** geocoding de moradas usa Google Maps Geocoding API (mais preciso, sem rate limit) com fallback Nominatim. Distance Matrix API (load balancer) já usava Google Maps. Botões "Abrir no Google Maps" em Propriedades e Staff (task-card + detalhe) para navegação direta.
+- **Endpoint de configuração:** `GET /api/gestor/configuracoes/integracoes` agora devolve `google_maps_ativo: boolean` para o frontend saber se a integração está ativa.
+- **Código limpo:** função morta `handleImportarPropriedades` e estados `sincronizando`/`sincronizacaoOk` removidos de Propriedades. Estado genérico `feedbackOk` reintroduzido para feedback de toggle/checklist.
+- **Navegação universal:** URLs usam o endpoint universal `https://www.google.com/maps/search/?api=1&query=...` que abre a app nativa do Google Maps no mobile e o web app no desktop.
+- **Sem regressões:** 111/111 testes Jest passam; tsc frontend 0 erros; node --check backend OK.
+- **Próximo passo (este commit):** commit + push para `dev` com a mensagem `feat: google maps integration, auto-reatribuicao em ferias, hard-delete para admin e ajustes ui`.
