@@ -262,8 +262,12 @@ exports.criarPropriedade = async (req, res) => {
     // um Toast de warning aconselhando a simplificar a morada.
     // FIX (morada estruturada) — Se vier morada_estruturada, usa a concatenação
     // dos 3 campos para geocoding. Senão, fallback para morada (string única).
+    // FIX (sync morada) — Sincroniza o campo `morada` (string) com a
+    // concatenação da morada estruturada, para que a listagem que usa `morada`
+    // como fallback continue a funcionar.
     let moradaParaGeocode = '';
     let moradaEstruturadaFinal = null;
+    let moradaFinalStr = ''; // valor final para o campo `morada` (string)
     if (temMoradaEstruturada) {
       const me = morada_estruturada;
       moradaEstruturadaFinal = {
@@ -274,8 +278,11 @@ exports.criarPropriedade = async (req, res) => {
       moradaParaGeocode = [moradaEstruturadaFinal.rua, moradaEstruturadaFinal.codigo_postal, moradaEstruturadaFinal.cidade]
         .filter((s) => s)
         .join(', ');
+      // Sincroniza `morada` (string) com a concatenação.
+      moradaFinalStr = moradaParaGeocode;
     } else {
       moradaParaGeocode = String(morada).trim();
+      moradaFinalStr = moradaParaGeocode;
     }
     const moradaTrim = moradaParaGeocode; // alias para manter compatibilidade com o código abaixo
     let coordenadas = { lat: null, lng: null };
@@ -294,7 +301,7 @@ exports.criarPropriedade = async (req, res) => {
 
     const nova = await Propriedade.create({
       nome: String(nome).trim(),
-      morada: temMoradaStr ? String(morada).trim() : '',
+      morada: moradaFinalStr, // FIX (sync morada) — sempre sincronizada com morada_estruturada
       ...(moradaEstruturadaFinal ? { morada_estruturada: moradaEstruturadaFinal } : {}),
       coordenadas,
       empresa_id: empresaId,
@@ -1131,6 +1138,11 @@ exports.atualizarPropriedade = async (req, res) => {
     // antigas e devolve flag `geocoding_falhou` para o frontend avisar.
     // FIX (morada estruturada) — Se vier morada_estruturada, atualiza os 3 campos
     // e usa a concatenação para geocoding. Senão, usa morada (string única).
+    // FIX (sync morada) — Ao guardar morada_estruturada, sincroniza também o
+    // campo `morada` (string) com a concatenação, para que a listagem que usa
+    // `morada` como fallback continue a funcionar. Isto resolve o bug onde a
+    // tabela mostrava "A definir" quando o utilizador preenchia apenas a
+    // morada estruturada (o `morada` ficava vazio/antigo).
     let geocodingFalhou = false;
     if (morada_estruturada !== undefined) {
       const me = morada_estruturada || {};
@@ -1138,11 +1150,13 @@ exports.atualizarPropriedade = async (req, res) => {
       const novoCp = String(me.codigo_postal || '').trim();
       const novaCidade = String(me.cidade || '').trim();
       propriedade.morada_estruturada = { rua: novaRua, codigo_postal: novoCp, cidade: novaCidade };
-      // Se morada_estruturada.rua foi preenchida, re-faz geocoding com a concatenação.
+      // Sincroniza `morada` (string) com a concatenação da morada estruturada.
       if (novaRua) {
-        const moradaCompleta = [novaRua, novoCp, novaCidade].filter((s) => s).join(', ');
+        const moradaConcatenada = [novaRua, novoCp, novaCidade].filter((s) => s).join(', ');
+        propriedade.morada = moradaConcatenada;
+        // Re-faz geocoding com a concatenação.
         try {
-          const coords = await obterCoordenadas(moradaCompleta);
+          const coords = await obterCoordenadas(moradaConcatenada);
           if (coords) {
             propriedade.coordenadas = coords;
           } else {

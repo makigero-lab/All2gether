@@ -918,22 +918,38 @@ export default function PropriedadesPage() {
                               return "All2gether";
                             })()}
                           </Badge>
-                          {p.morada === "A definir" && (
+                          {/* FIX (morada estruturada) — Badge "Morada por definir"
+                              só aparece se NÃO houver morada estruturada NEM
+                              morada string válida. Antes verificava apenas
+                              p.morada === "A definir", o que mostrava o badge
+                              mesmo quando a morada estruturada estava preenchida. */}
+                          {(!p.morada_estruturada?.rua &&
+                            (!p.morada || p.morada === "A definir" || p.morada === "")) && (
                             <Badge className="bg-amber-500/15 text-amber-700 border-amber-500/30 hover:bg-amber-500/20">
                               ⚠️ Morada por definir
                             </Badge>
                           )}
                         </div>
                         {/* FIX (morada estruturada) — Mostra morada estruturada
-                            se existir, senão fallback para morada (string legada).
+                            se existir, senão usa moradaCompleta (virtual do
+                            backend), senão fallback para morada (string legada).
                             FIX (google maps integration) — Botão "Abrir no Google
                             Maps" que usa coordenadas (se existirem) ou a morada. */}
                         {(() => {
                           const me = p.morada_estruturada;
-                          const moradaDisplay =
-                            me?.rua
-                              ? [me.rua, me.codigo_postal, me.cidade].filter(Boolean).join(", ")
-                              : p.morada;
+                          // FIX (morada estruturada) — Prioridade de display:
+                          // 1. morada_estruturada concatenada (Rua, CP, Cidade)
+                          // 2. moradaCompleta (virtual do backend — já concatenada)
+                          // 3. morada (string legada)
+                          // 4. null se vazia ou "A definir"
+                          let moradaDisplay = '';
+                          if (me?.rua) {
+                            moradaDisplay = [me.rua, me.codigo_postal, me.cidade].filter(Boolean).join(", ");
+                          } else if (p.moradaCompleta) {
+                            moradaDisplay = p.moradaCompleta;
+                          } else {
+                            moradaDisplay = p.morada || '';
+                          }
                           if (!moradaDisplay || moradaDisplay === "A definir") return null;
                           // FIX (google maps integration) — Usa coordenadas se
                           // existirem (mais preciso), senão usa a morada string.

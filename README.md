@@ -5,7 +5,7 @@
 O All2gether é uma aplicação dividida em duas partes:
 
 - **`backend/`** — API REST construída em **Node.js + Express**, com base de dados **MongoDB** (via Mongoose). A API está desenhada para ser alojada no [Render](https://render.com).
-- **`frontend/`** — Interface de utilizador em **Next.js 14 + TypeScript + Tailwind CSS + shadcn/ui**, com duas áreas: Painel de Administração (`/admin`) e Área do Staff (`/staff`). Desenhada para a [Vercel](https://vercel.com), comunica com a API via CORS. *(Fase atual: dados fictícios/mock.)*
+- **`frontend/`** — Interface de utilizador em **Next.js 14 + TypeScript + Tailwind CSS + shadcn/ui**, com áreas: Painel do Gestor/Admin (`/gestor`) e Área do Staff (`/staff`) e Portal de Parceiros B2B (`/parceiro`). Desenhada para a [Vercel](https://vercel.com), comunica com a API via proxies same-origin (cookie httpOnly).
 
 > 📌 Repositório: https://github.com/makigero-lab/All2gether
 > 🌿 Branch de desenvolvimento ativa: **`dev`**
@@ -153,28 +153,44 @@ npm install
 npm run dev          # http://localhost:3000
 ```
 
-Abrir http://localhost:3000 → landing page com links para `/admin` e `/staff`.
+Abrir http://localhost:3000 → landing page com botão 'Entrar na Plataforma' → `/login`.
 
 ### Rotas
 
 | Rota | Área | Descrição |
 |------|------|-----------|
 | `/` | — | Landing premium (1 botão 'Entrar na Plataforma' → `/login`); autenticados são redirecionados |
-| `/login` | — | **Login** (POST /api/auth/login; redirect admin→`/admin`, staff→`/staff` ou `?from=`); autenticados são redirecionados |
-| `/admin` | Admin (protegido, role admin) | Dashboard com sidebar (Dashboard, Propriedades, Equipa, Calendário de Folgas) |
-| `/admin/propriedades` | Admin | **Consome a API real** — tabela de propriedades (GET) + formulário de criação (POST) |
-| `/admin/equipa` | Admin | **Consome a API real** — tabela de utilizadores (GET) + formulário de criação de funcionário (POST) |
-| `/admin/calendario` | Admin | **Consome a API real** — calendário de folgas/férias (marcar + eliminar ausências) |
-| `/staff` | Staff (protegido, role staff, mobile-first) | Cabeçalho "Bem-vindo, [Nome]" + lista de cartões de tarefas de limpeza do dia |
-| `/staff/tarefas/[id]` | Staff (mobile-first) | Detalhe da Tarefa: checklist interativa + observações + botão "Concluir Tarefa" (desativado até todas as checkboxes marcadas) |
+| `/login` | — | **Login** (POST /api/auth/login; redirect admin→`/gestor`, gestor→`/gestor`, staff→`/staff`, parceiro→`/parceiro`) |
+| `/gestor` | Gestor/Admin (protegido, role gestor ou admin) | Dashboard operacional com sidebar (Dashboard, Calendário, Limpezas, Propriedades, Equipa, Parceiros, Ausências, Relatórios, Notificações, Checklists, Configurações*) |
+| `/gestor/propriedades` | Gestor/Admin | Tabela de propriedades + Badge de parceiro + botão Google Maps + formulário com morada estruturada |
+| `/gestor/parceiros` | Gestor/Admin | CRUD de parceiros B2B (Nome, Email, NIF, Observações) |
+| `/gestor/equipa` | Gestor/Admin | Tabela de staff/gestores + soft-delete com desatribuição de tarefas futuras |
+| `/gestor/calendario` | Gestor/Admin | Calendário de limpezas + vista equipa + auto-atribuir pendentes |
+| `/gestor/ausencias` | Gestor/Admin | Ausências/Férias + separador 'Dias de Folga' |
+| `/gestor/configuracoes` | Admin (exclusivo) | Configurações da empresa + integrações Smoobu + Google Maps (só role admin) |
+| `/staff` | Staff (protegido, role staff, mobile-first) | Lista de cartões de tarefas de limpeza + botão 'Abrir no Google Maps' |
+| `/staff/tarefas/[id]` | Staff (mobile-first) | Detalhe da tarefa: checklist + fotos + Google Maps + concluir |
+| `/parceiro` | Parceiro (protegido, role parceiro) | Portal B2B: propriedades + reservas manuais |
 
-> **Proteção de rotas:** `/admin/**`, `/gestor/**` e `/staff/**` exigem token JWT válido (via `middleware.ts` + `RouteGuard`). `/` e `/login` redirecionam utilizadores autenticados para o seu painel (admin→`/admin`, gestor→`/gestor`, staff→`/staff`). Mock data ainda usado em `/staff` e dashboard admin; `/admin/propriedades` consome a API real.
+> **Configurações** (`/gestor/configuracoes`) é exclusivo do Super Admin (role 'admin'). O gestor não vê nem acede a esta rota.
+> **Proteção de rotas:** `/gestor/**`, `/staff/**` e `/parceiro/**` exigem token JWT válido (via `middleware.ts` + `RouteGuard`). O admin entra diretamente em `/gestor` (sem impersonação).
 
-### Variáveis de ambiente
+### Variáveis de ambiente (Frontend — Vercel)
 
 | Variável | Descrição | Exemplo |
 |-----------|-----------|---------|
-| `NEXT_PUBLIC_API_URL` | URL base da API backend (Render). Usada na fase de integração. | `https://all2gether-backend.onrender.com` |
+| `NEXT_PUBLIC_API_URL` | URL base da API backend (Render). | `https://all2gether-backend.onrender.com` |
+
+### Variáveis de ambiente (Backend — Render)
+
+| Variável | Descrição | Obrigatória |
+|-----------|-----------|-------------|
+| `MONGODB_URI` | URI de ligação ao MongoDB | Sim |
+| `JWT_SECRET` | Segredo de assinatura dos JWT | Sim |
+| `FRONTEND_URL` | Origem permitida para CORS (default localhost:3000) | Não |
+| `SMOOBU_API_KEY` | API key do Smoobu (fallback da chave na BD) | Não |
+| `GOOGLE_MAPS_API_KEY` | API key do Google Maps (geocoding + distance matrix) | Não |
+| `ADMIN_PASSWORD` | Password do Super Admin (se não definida, é gerada aleatoriamente) | Não |
 
 ### Deploy na Vercel
 
