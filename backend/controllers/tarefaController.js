@@ -1121,7 +1121,10 @@ exports.autoAtribuirTarefas = async (req, res) => {
           // "sem staff disponível" (ausências/folgas) ou "SLA excedido" (todos
           // > 480 min). Se for SLA, marca 'nao_atribuida' para o gestor ver.
           // Distingue pela presença de staff ativo na empresa.
+          // FIX (motivo_falha_atribuicao) — Preenche motivo_nao_atribuicao
+          // com a justificação exata para o gestor perceber porque falhou.
           let slaExcedido = false;
+          let motivoFalha = 'Sem staff disponível';
           try {
             const Utilizador = require('../models/Utilizador');
             const temStaffAtivo = await Utilizador.exists({
@@ -1132,14 +1135,27 @@ exports.autoAtribuirTarefas = async (req, res) => {
             });
             // Se há staff ativo mas o load balancer não atribuiu → SLA excedido.
             slaExcedido = !!temStaffAtivo;
+            if (slaExcedido) {
+              motivoFalha = 'Lotação máxima excedida (todos os staff > 8h/dia)';
+            } else {
+              motivoFalha = 'Toda a equipa de folga/férias ou sem staff ativo';
+            }
           } catch (e) {
             // Se falha a verificação, mantém por_atribuir (seguro).
+            motivoFalha = 'Erro ao verificar disponibilidade da equipa';
           }
 
           if (slaExcedido) {
             await Tarefa.updateOne(
               { _id: tarefa._id },
-              { $set: { estado: 'nao_atribuida', tempo_viagem_minutos: 0 } }
+              { $set: { estado: 'nao_atribuida', tempo_viagem_minutos: 0, motivo_nao_atribuicao: motivoFalha } }
+            );
+          } else {
+            // FIX (motivo_falha_atribuicao) — Mesmo mantendo 'por_atribuir',
+            // preenche o motivo para o gestor ver no tooltip.
+            await Tarefa.updateOne(
+              { _id: tarefa._id },
+              { $set: { motivo_nao_atribuicao: motivoFalha } }
             );
           }
 
@@ -1149,6 +1165,7 @@ exports.autoAtribuirTarefas = async (req, res) => {
             propriedade: tarefa.propriedade_id?.nome ?? '—',
             utilizador_id: null,
             status: slaExcedido ? 'nao_atribuida' : 'orfa',
+            motivo: motivoFalha,
           });
         }
       } catch (errTarefa) {

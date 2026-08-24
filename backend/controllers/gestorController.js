@@ -431,7 +431,11 @@ exports.getTarefas = async (req, res) => {
       // Prompt 114 — Inclui capacidade_hospedes para destaque no detalhe.
       // Prompt 139 — Inclui coordenadas para cálculo on-the-fly de tempo_viagem.
       .populate({ path: 'propriedade_id', select: 'nome capacidade_hospedes coordenadas' })
-      .populate({ path: 'utilizador_id', select: 'nome' })
+      // FIX (fantasmas de inativos) — match: { ativo: true, eliminado_em: null }
+      // garante que tarefas atribuídas a staff entretanto desativado NÃO
+      // populam o nome do staff — utilizador_id fica null no resultado,
+      // e o frontend trata a tarefa como 'Por Atribuir'.
+      .populate({ path: 'utilizador_id', select: 'nome', match: { ativo: true, eliminado_em: null } })
       .sort({ data: 1 })
       .lean();
 
@@ -567,7 +571,8 @@ exports.getDadosCalendario = async (req, res) => {
     const tarefas = await Tarefa.find(filtro)
       // Prompt 114 — Inclui capacidade_hospedes para destaque no detalhe.
       .populate({ path: 'propriedade_id', select: 'nome morada coordenadas capacidade_hospedes' })
-      .populate({ path: 'utilizador_id', select: 'nome' })
+      // FIX (fantasmas de inativos) — match: { ativo: true, eliminado_em: null }
+      .populate({ path: 'utilizador_id', select: 'nome', match: { ativo: true, eliminado_em: null } })
       .sort({ data: 1 })
       .lean();
 
