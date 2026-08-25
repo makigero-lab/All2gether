@@ -457,6 +457,24 @@ exports.criarTarefa = async (req, res) => {
     // Prompt 137 — Debug log para confirmar que nome_hospede chega e é guardado.
     console.log('📋 criarTarefa — detalhes_reserva a guardar:', JSON.stringify(detalhesReserva));
 
+    // FIX (bloqueio de duplicados) — Rejeita a criação se já existir uma
+    // tarefa ativa (não cancelada) para a MESMA propriedade, no MESMO dia E
+    // MESMA hora (data exata). Múltiplas tarefas no mesmo dia são permitidas
+    // apenas se as horas forem diferentes.
+    const tarefaDuplicada = await Tarefa.findOne({
+      empresa_id: empresaId,
+      propriedade_id,
+      data: dataNormalizada,
+      estado: { $nin: ['cancelada'] },
+    }).lean();
+    if (tarefaDuplicada) {
+      return res.status(409).json({
+        erro: 'Já existe uma tarefa para esta propriedade neste dia e hora.',
+        tarefa_id: tarefaDuplicada._id,
+        data: dataNormalizada,
+      });
+    }
+
     const nova = await Tarefa.create({
       empresa_id: empresaId,
       propriedade_id,
@@ -1121,7 +1139,10 @@ exports.autoAtribuirTarefas = async (req, res) => {
           // "sem staff disponível" (ausências/folgas) ou "SLA excedido" (todos
           // > 480 min). Se for SLA, marca 'nao_atribuida' para o gestor ver.
           // Distingue pela presença de staff ativo na empresa.
+          // FIX (motivo_falha_atribuicao) — Preenche motivo_nao_atribuicao
+          // com a justificação exata para o gestor perceber porque falhou.
           let slaExcedido = false;
+          let motivoFalha = 'Sem staff disponível';
           try {
             const Utilizador = require('../models/Utilizador');
             const temStaffAtivo = await Utilizador.exists({
@@ -1132,14 +1153,27 @@ exports.autoAtribuirTarefas = async (req, res) => {
             });
             // Se há staff ativo mas o load balancer não atribuiu → SLA excedido.
             slaExcedido = !!temStaffAtivo;
+            if (slaExcedido) {
+              motivoFalha = 'Lotação máxima excedida (todos os staff > 8h/dia)';
+            } else {
+              motivoFalha = 'Toda a equipa de folga/férias ou sem staff ativo';
+            }
           } catch (e) {
             // Se falha a verificação, mantém por_atribuir (seguro).
+            motivoFalha = 'Erro ao verificar disponibilidade da equipa';
           }
 
           if (slaExcedido) {
             await Tarefa.updateOne(
               { _id: tarefa._id },
-              { $set: { estado: 'nao_atribuida', tempo_viagem_minutos: 0 } }
+              { $set: { estado: 'nao_atribuida', tempo_viagem_minutos: 0, motivo_nao_atribuicao: motivoFalha } }
+            );
+          } else {
+            // FIX (motivo_falha_atribuicao) — Mesmo mantendo 'por_atribuir',
+            // preenche o motivo para o gestor ver no tooltip.
+            await Tarefa.updateOne(
+              { _id: tarefa._id },
+              { $set: { motivo_nao_atribuicao: motivoFalha } }
             );
           }
 
@@ -1149,6 +1183,7 @@ exports.autoAtribuirTarefas = async (req, res) => {
             propriedade: tarefa.propriedade_id?.nome ?? '—',
             utilizador_id: null,
             status: slaExcedido ? 'nao_atribuida' : 'orfa',
+            motivo: motivoFalha,
           });
         }
       } catch (errTarefa) {

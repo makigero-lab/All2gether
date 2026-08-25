@@ -188,6 +188,11 @@ export interface PropriedadeDTO {
   capacidade_hospedes?: number | null;
   // Prompt 92 (Fase 1.5) — Funcionário preferencial (Algoritmo VIP).
   funcionario_preferencial_id?: string | null;
+  // FIX (equipas preferenciais) — Array de staff preferenciais.
+  // Staff com `exclusivo_preferenciais: true` SÓ são elegíveis para
+  // propriedades onde o seu ID consta neste array. O load balancer dá
+  // prioridade a estes membros ao atribuir tarefas de limpeza.
+  equipa_preferencial?: string[];
   // Prompt 133 — Referência ao ModeloChecklist (template dinâmico).
   modelo_checklist_id?: string | null;
   // HF21 — Nº de staff necessário para limpar esta propriedade.
@@ -250,6 +255,10 @@ export interface UtilizadorDTO {
   // FIX (gestão de parceiros) — NIF e observações livres do utilizador.
   nif?: string;
   observacoes?: string;
+  // FIX (equipas preferenciais) — Se true, só é elegível para propriedades
+  // onde consta na equipa_preferencial. Usado pelo load balancer para
+  // restringir o pool de staff exclusivos a certas propriedades.
+  exclusivo_preferenciais?: boolean;
   createdAt?: string;
   updatedAt?: string;
 }

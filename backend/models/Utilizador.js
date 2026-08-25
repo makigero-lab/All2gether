@@ -54,6 +54,13 @@ const utilizadorSchema = new mongoose.Schema(
       trim: true,
       default: '',
     },
+    // FIX (equipas preferenciais) — Se true, este staff SÓ é elegível para
+    // tarefas de propriedades onde o seu ID conste na equipa_preferencial.
+    // Staff com false (default) pode ser atribuído a qualquer propriedade.
+    exclusivo_preferenciais: {
+      type: Boolean,
+      default: false,
+    },
     // Hash bcrypt da password. Nunca armazenar a password em claro.
     password_hash: {
       type: String,

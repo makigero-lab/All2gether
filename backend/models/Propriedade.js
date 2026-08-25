@@ -123,6 +123,16 @@ const propriedadeSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+    // FIX (equipas preferenciais) — Array de staff preferenciais para esta
+    // propriedade. Substitui funcionalmente o funcionario_preferencial_id
+    // (mantido para retrocompatibilidade). O load balancer dá prioridade
+    // máxima a staff cujo ID conste neste array. Se um staff tem
+    // exclusivo_preferenciais: true, SÓ é elegível se estiver neste array.
+    equipa_preferencial: {
+      type: [mongoose.Schema.Types.ObjectId],
+      ref: 'Utilizador',
+      default: [],
+    },
     // HF17 (Fase 3) — Origem da propriedade: Smoobu (via webhook/importação)
     // ou manual (criada pelo gestor ou por um parceiro B2B).
     origem: {

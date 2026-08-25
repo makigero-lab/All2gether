@@ -50,9 +50,12 @@ const ausenciaSchema = new mongoose.Schema(
     },
     // v1.24.0: enum alargado. As "folgas" fixas semanais passaram para o
     // campo `dias_folga` do Utilizador (v1.14.0).
+    // FIX (folgas rotativas) — adicionado 'folga_rotativa' para folgas em
+    // datas específicas (diferente das fixas semanais). Funciona como férias
+    // (tem data_inicio e data_fim, requer aprovação, bloqueia calendário).
     tipo: {
       type: String,
-      enum: ['ferias', 'doenca', 'outro'],
+      enum: ['ferias', 'doenca', 'folga_rotativa', 'outro'],
       default: 'ferias',
       required: true,
     },

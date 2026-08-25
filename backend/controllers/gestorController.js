@@ -228,7 +228,7 @@ exports.criarPropriedade = async (req, res) => {
     const { ok, empresaId } = obterEmpresaId(req, res);
     if (!ok) return;
 
-    const { nome, morada, tempo_limpeza_minutos, parceiro_id, staff_necessario, dias_fixos_limpeza, nome_responsavel, contacto, frequencia_limpeza, horario_limpeza, observacoes, morada_estruturada } = req.body || {};
+    const { nome, morada, tempo_limpeza_minutos, parceiro_id, staff_necessario, dias_fixos_limpeza, nome_responsavel, contacto, frequencia_limpeza, horario_limpeza, observacoes, morada_estruturada, equipa_preferencial } = req.body || {};
 
     // Validações de presença.
     // FIX (morada estruturada) — Aceita morada OU morada_estruturada (pelo menos
@@ -320,6 +320,10 @@ exports.criarPropriedade = async (req, res) => {
       horario_limpeza: horario_limpeza ? String(horario_limpeza).trim().slice(0, 100) : '', // HF23
       // FIX (parceiro associado) — Observações livres (notas internas do gestor).
       observacoes: observacoes ? String(observacoes).trim().slice(0, 2000) : '',
+      // FIX (equipas preferenciais) — Array de IDs de staff preferenciais.
+      ...(Array.isArray(equipa_preferencial)
+        ? { equipa_preferencial: equipa_preferencial.filter((id) => mongoose.isValidObjectId(id)) }
+        : {}),
       checklist: Array.isArray(req.body?.checklist)
         ? req.body.checklist.filter((s) => typeof s === 'string' && s.trim())
         : [],
@@ -431,7 +435,11 @@ exports.getTarefas = async (req, res) => {
       // Prompt 114 — Inclui capacidade_hospedes para destaque no detalhe.
       // Prompt 139 — Inclui coordenadas para cálculo on-the-fly de tempo_viagem.
       .populate({ path: 'propriedade_id', select: 'nome capacidade_hospedes coordenadas' })
-      .populate({ path: 'utilizador_id', select: 'nome' })
+      // FIX (fantasmas de inativos) — match: { ativo: true, eliminado_em: null }
+      // garante que tarefas atribuídas a staff entretanto desativado NÃO
+      // populam o nome do staff — utilizador_id fica null no resultado,
+      // e o frontend trata a tarefa como 'Por Atribuir'.
+      .populate({ path: 'utilizador_id', select: 'nome', match: { ativo: true, eliminado_em: null } })
       .sort({ data: 1 })
       .lean();
 
@@ -567,7 +575,8 @@ exports.getDadosCalendario = async (req, res) => {
     const tarefas = await Tarefa.find(filtro)
       // Prompt 114 — Inclui capacidade_hospedes para destaque no detalhe.
       .populate({ path: 'propriedade_id', select: 'nome morada coordenadas capacidade_hospedes' })
-      .populate({ path: 'utilizador_id', select: 'nome' })
+      // FIX (fantasmas de inativos) — match: { ativo: true, eliminado_em: null }
+      .populate({ path: 'utilizador_id', select: 'nome', match: { ativo: true, eliminado_em: null } })
       .sort({ data: 1 })
       .lean();
 
@@ -1086,7 +1095,7 @@ exports.atualizarPropriedade = async (req, res) => {
       });
     }
 
-    const { nome, morada, tempo_limpeza_minutos, funcionario_preferencial_id, modelo_checklist_id, observacoes, morada_estruturada, parceiro_id } = req.body || {};
+    const { nome, morada, tempo_limpeza_minutos, funcionario_preferencial_id, modelo_checklist_id, observacoes, morada_estruturada, parceiro_id, equipa_preferencial } = req.body || {};
 
     // Tem de haver pelo menos um campo para atualizar.
     if (
@@ -1223,6 +1232,18 @@ exports.atualizarPropriedade = async (req, res) => {
         }
       }
       propriedade.parceiro_id = valor;
+    }
+
+    // FIX (equipas preferenciais) — Atualiza o array de equipa_preferencial.
+    // Aceita array vazio para limpar. Valida que cada ID é um ObjectId válido.
+    if (equipa_preferencial !== undefined) {
+      if (Array.isArray(equipa_preferencial)) {
+        propriedade.equipa_preferencial = equipa_preferencial
+          .filter((id) => mongoose.isValidObjectId(id))
+          .map((id) => String(id).trim());
+      } else {
+        propriedade.equipa_preferencial = [];
+      }
     }
 
     // v1.34.0: atualiza checklist (array de strings).
@@ -1424,7 +1445,7 @@ exports.criarMembroEquipa = async (req, res) => {
     const { ok, empresaId } = obterEmpresaId(req, res);
     if (!ok) return;
 
-    const { nome, email, password, role, responsavel_id, dias_folga, telefone, nif, observacoes } = req.body || {};
+    const { nome, email, password, role, responsavel_id, dias_folga, telefone, nif, observacoes, exclusivo_preferenciais } = req.body || {};
 
     // Validações de presença.
     if (!nome || !email || !password) {
@@ -1518,6 +1539,8 @@ exports.criarMembroEquipa = async (req, res) => {
       // FIX (gestão de parceiros) — NIF e observações livres.
       nif: nif ? String(nif).trim().slice(0, 20) : '',
       observacoes: observacoes ? String(observacoes).trim().slice(0, 2000) : '',
+      // FIX (equipas preferenciais) — Toggle de exclusividade.
+      exclusivo_preferenciais: Boolean(exclusivo_preferenciais),
       ativo: true,
     });
 
@@ -1580,7 +1603,7 @@ exports.atualizarMembroEquipa = async (req, res) => {
       return res.status(400).json({ erro: 'ID de utilizador inválido.' });
     }
 
-    const { nome, email, role, password, responsavel_id, dias_folga, telefone, folgas_rotativas, nif, observacoes } = req.body || {};
+    const { nome, email, role, password, responsavel_id, dias_folga, telefone, folgas_rotativas, nif, observacoes, exclusivo_preferenciais } = req.body || {};
     if (
       nome === undefined &&
       email === undefined &&
@@ -1750,6 +1773,11 @@ exports.atualizarMembroEquipa = async (req, res) => {
     // --- observacoes (opcional) ---
     if (observacoes !== undefined) {
       utilizador.observacoes = String(observacoes).trim().slice(0, 2000);
+    }
+
+    // FIX (equipas preferenciais) — exclusivo_preferenciais (toggle booleano).
+    if (exclusivo_preferenciais !== undefined) {
+      utilizador.exclusivo_preferenciais = Boolean(exclusivo_preferenciais);
     }
 
     // --- Password (opcional: só se vier, faz hash nova) ---

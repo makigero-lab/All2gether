@@ -14,6 +14,7 @@ import {
   Filter,
   Sparkles,
   Eye,
+  Info,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -67,6 +68,9 @@ interface TarefaAdmin {
     pax?: number | null;
     nome_hospede?: string | null;
   } | null;
+  // FIX (motivo_falha_atribuicao) — Motivo pelo qual a auto-atribuição falhou
+  // (ex: "Toda a equipa de folga/férias", "Lotação máxima excedida").
+  motivo_nao_atribuicao?: string | null;
 }
 
 const ESTADO_LABEL: Record<string, string> = {
@@ -846,9 +850,18 @@ export default function AdminTarefasPage() {
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">{t.utilizador_id?.nome ?? "—"}</td>
                       <td className="px-4 py-3">
-                        <Badge variant={ESTADO_VARIANT[t.estado] ?? "secondary"}>
-                          {ESTADO_LABEL[t.estado] ?? t.estado}
-                        </Badge>
+                        <div className="flex items-center gap-1">
+                          <Badge variant={ESTADO_VARIANT[t.estado] ?? "secondary"}>
+                            {ESTADO_LABEL[t.estado] ?? t.estado}
+                          </Badge>
+                          {/* FIX (motivo_falha_atribuicao) — Ícone de Info com
+                              tooltip que mostra o motivo da falha na auto-atribuição. */}
+                          {(t.estado === "por_atribuir" || t.estado === "nao_atribuida") && t.motivo_nao_atribuicao && (
+                            <span title={t.motivo_nao_atribuicao} className="cursor-help">
+                              <Info className="h-3.5 w-3.5 text-muted-foreground" />
+                            </span>
+                          )}
+                        </div>
                       </td>
                       {/* v1.68.0 (Prompt 91) — Excerto das observações (descrição da avaria) */}
                       <td className="px-4 py-3 max-w-xs">
@@ -880,7 +893,7 @@ export default function AdminTarefasPage() {
                           >
                             <Eye className="h-4 w-4" />
                           </Button>
-                          {(t.estado === "por_atribuir" || t.estado === "atribuida") && (
+                          {(t.estado === "por_atribuir" || t.estado === "atribuida" || t.estado === "nao_atribuida") && (
                             <Button
                               variant="ghost"
                               size="icon"
