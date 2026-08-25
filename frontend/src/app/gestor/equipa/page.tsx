@@ -229,9 +229,18 @@ function EquipaPage() {
   // Paginação client-side.
   const [pagina, setPagina] = useState(1);
   const [tamPagina, setTamPagina] = useState(25);
-  const totalPaginas = Math.max(1, Math.ceil(utilizadores.length / tamPagina));
+  // Filtros (T1) — aplicados antes da paginação.
+  const [filtroEstado, setFiltroEstado] = useState<"todos" | "ativos" | "inativos">("todos");
+  const [filtroRole, setFiltroRole] = useState<"todos" | "staff" | "gestor" | "parceiro">("todos");
+  const utilizadoresFiltrados = utilizadores.filter((u) => {
+    if (filtroEstado === "ativos" && !u.ativo) return false;
+    if (filtroEstado === "inativos" && u.ativo) return false;
+    if (filtroRole !== "todos" && u.role !== filtroRole) return false;
+    return true;
+  });
+  const totalPaginas = Math.max(1, Math.ceil(utilizadoresFiltrados.length / tamPagina));
   const paginaSegura = Math.min(pagina, totalPaginas);
-  const utilizadoresPagina = utilizadores.slice(
+  const utilizadoresPagina = utilizadoresFiltrados.slice(
     (paginaSegura - 1) * tamPagina,
     paginaSegura * tamPagina
   );
@@ -685,6 +694,37 @@ function EquipaPage() {
             </Button>
           </div>
 
+          {/* Filtros (T1) — Estado + Role */}
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={filtroEstado}
+              onChange={(e) => {
+                setFiltroEstado(e.target.value as "todos" | "ativos" | "inativos");
+                setPagina(1);
+              }}
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
+              aria-label="Filtrar por estado"
+            >
+              <option value="todos">Estado: Todos</option>
+              <option value="ativos">Estado: Ativos</option>
+              <option value="inativos">Estado: Inativos</option>
+            </select>
+            <select
+              value={filtroRole}
+              onChange={(e) => {
+                setFiltroRole(e.target.value as "todos" | "staff" | "gestor" | "parceiro");
+                setPagina(1);
+              }}
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
+              aria-label="Filtrar por role"
+            >
+              <option value="todos">Função: Todas</option>
+              <option value="staff">Função: Staff</option>
+              <option value="gestor">Função: Gestor</option>
+              <option value="parceiro">Função: Parceiro</option>
+            </select>
+          </div>
+
           {/* Formulário inline de criação */}
           {mostrarForm && (
             <Card>
@@ -884,7 +924,7 @@ function EquipaPage() {
                   <Loader2 className="h-5 w-5 animate-spin" />
                   A carregar equipa…
                 </div>
-              ) : utilizadores.length === 0 ? (
+              ) : utilizadoresFiltrados.length === 0 ? (
                 <div className="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">
                   <Users className="h-10 w-10 opacity-40" />
                   <p className="text-sm">Ainda não há membros na equipa.</p>
@@ -1037,11 +1077,11 @@ function EquipaPage() {
                 </div>
               )}
               {/* Paginação */}
-              {!loading && utilizadores.length > 0 && (
+              {!loading && utilizadoresFiltrados.length > 0 && (
                 <PaginationBar
                   page={paginaSegura}
                   totalPages={totalPaginas}
-                  total={utilizadores.length}
+                  total={utilizadoresFiltrados.length}
                   pageSize={tamPagina}
                   onPageChange={setPagina}
                   onPageSizeChange={(n) => {

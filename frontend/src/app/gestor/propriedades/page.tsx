@@ -22,6 +22,12 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
+import {
   adminGet,
   adminPost,
   adminPatch,
@@ -361,6 +367,13 @@ export default function PropriedadesPage() {
     morada_cidade: "",
     // FIX (parceiro associado relacional) — ID do parceiro B2B associado.
     parceiro_id: "",
+    // FIX (equipas preferenciais) — IDs de staff que formam a equipa
+    // preferencial desta propriedade (select múltiplo no modal de edição).
+    equipa_preferencial: [] as string[],
+    // FIX (equipas preferenciais) — Nº de staff necessário para limpar esta
+    // propriedade (tornado editável no modal de edição; antes só existia no
+    // formulário de criação manual).
+    staff_necessario: "1",
   });
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editErro, setEditErro] = useState<string | null>(null);
@@ -453,6 +466,12 @@ export default function PropriedadesPage() {
       tempo_limpeza_minutos: String(p.tempo_limpeza_minutos ?? 45),
       checklist: (p.checklist ?? []).join("\n"),
       funcionario_preferencial_id: p.funcionario_preferencial_id ?? "",
+      // FIX (equipas preferenciais) — Array de IDs de staff preferencial.
+      equipa_preferencial: Array.isArray(p.equipa_preferencial)
+        ? [...p.equipa_preferencial]
+        : [],
+      // FIX (equipas preferenciais) — Nº de staff necessário.
+      staff_necessario: String(p.staff_necessario ?? 1),
       // Prompt 134 — Modelo de Checklist associado (string vazia = Nenhum).
       modelo_checklist_id: p.modelo_checklist_id ?? "",
       // FIX (parceiro associado + morada estruturada) — novos campos.
@@ -473,6 +492,53 @@ export default function PropriedadesPage() {
     setEditMoradaConfirmada(false);
     // Prompt 134 — Carrega os modelos de checklist para o select.
     carregarModelosChecklist();
+  }
+
+  /**
+   * FIX (auto-fill checklist) — Quando o gestor seleciona um Modelo de
+   * Checklist no select `edit-modelo-checklist`, faz fetch do modelo e
+   * preenche automaticamente o textarea `checklist` (aba "Checklists").
+   *
+   * - String vazia ("Nenhum"): só atualiza o editForm, NÃO limpa o textarea
+   *   (preserva as edições manuais do gestor).
+   * - ID válido: busca as secções/items em GET /api/gestor/checklists/:id e
+   *   concatena todos os items (um por linha) no textarea.
+   */
+  async function handleModeloChecklistChange(id: string) {
+    // Atualiza o editForm com o ID selecionado imediatamente.
+    setEditForm((f) => ({ ...f, modelo_checklist_id: id }));
+
+    // "Nenhum" → não faz fetch nem limpa o textarea.
+    if (!id) return;
+
+    try {
+      const data = await adminGet<{ modelo: ModeloChecklistDTO }>(
+        `/api/gestor/checklists/${id}`
+      );
+      const modelo = data.modelo;
+      if (!modelo?.seccoes) return;
+
+      // Concatena todos os items de todas as secções (um item por linha).
+      // Preserva a ordem das secções e dos items dentro de cada secção.
+      const items: string[] = [];
+      for (const seccao of modelo.seccoes) {
+        if (!Array.isArray(seccao.items)) continue;
+        for (const item of seccao.items) {
+          if (typeof item === "string" && item.trim()) {
+            items.push(item);
+          }
+        }
+      }
+
+      // Só substitui o textarea se houver items válidos (evita apagar
+      // edições manuais se o modelo estiver vazio).
+      if (items.length > 0) {
+        setEditForm((f) => ({ ...f, checklist: items.join("\n") }));
+      }
+    } catch {
+      // Silencioso — o utilizador pode preencher o textarea manualmente.
+      // O ID do modelo continua guardado no editForm (será enviado ao gravar).
+    }
   }
 
   /** Submete a edição da propriedade. */
@@ -531,6 +597,15 @@ export default function PropriedadesPage() {
           // (sem modelo / usa checklist flat antigo).
           modelo_checklist_id:
             editForm.modelo_checklist_id.trim() || null,
+          // FIX (equipas preferenciais) — Array de IDs de staff preferencial.
+          // Envia sempre o array (vazio = sem equipa preferencial). O backend
+          // (quando atualizado para suportar este campo) substitui a lista.
+          equipa_preferencial: editForm.equipa_preferencial,
+          // FIX (equipas preferenciais) — Nº de staff necessário (1-10).
+          staff_necessario: Math.max(
+            1,
+            Math.min(10, Number(editForm.staff_necessario) || 1)
+          ),
           // FIX (parceiro associado) — observacoes (notas internas).
           observacoes: editForm.observacoes.trim(),
           // FIX (parceiro associado relacional) — ID do parceiro B2B.
@@ -1320,241 +1395,355 @@ export default function PropriedadesPage() {
         </DialogHeader>
         <form onSubmit={handleEditar}>
           <DialogContent className="space-y-4">
-            <div className="space-y-1.5">
-              <label htmlFor="edit-nome" className="text-sm font-medium">
-                Nome
-              </label>
-              <Input
-                id="edit-nome"
-                value={editForm.nome}
-                onChange={(e) =>
-                  setEditForm((f) => ({ ...f, nome: e.target.value }))
-                }
-                required
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label htmlFor="edit-smoobu" className="text-sm font-medium">
-                Smoobu ID
-              </label>
-              <Input
-                id="edit-smoobu"
-                value={editForm.smoobu_id}
-                readOnly
-                tabIndex={-1}
-                className="font-mono text-xs bg-muted/50 text-muted-foreground cursor-not-allowed"
-              />
-              <p className="text-xs text-muted-foreground">
-                O Smoobu ID não é editável (é o identificador do apartamento no Smoobu).
-              </p>
-            </div>
-            <div className="space-y-1.5">
-              <label htmlFor="edit-morada" className="text-sm font-medium">
-                Morada
-              </label>
-              <Input
-                id="edit-morada"
-                value={editForm.morada}
-                onChange={(e) => {
-                  setEditForm((f) => ({ ...f, morada: e.target.value }));
-                  setEditMoradaWarning(null);
-                  // Prompt 126 — Reset da confirmação quando a morada muda.
-                  setEditMoradaConfirmada(false);
-                }}
-                required
-              />
-              {/* Prompt 117 — Aviso de geocoding INLINE no modal de edição */}
-              {editMoradaWarning && (
-                <p className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-300">
-                  <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                  <span>{editMoradaWarning}</span>
-                </p>
-              )}
-            </div>
-            {/* FIX (morada estruturada) — Campos estruturados opcionais.
-                Se preencheres a Rua, o backend usa os 3 campos para geocoding
-                e ignora a "Morada" (string única) acima. */}
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">
-                Morada Estruturada (opcional — substitui &quot;Morada&quot; se preenchida)
-              </label>
-              <div className="grid gap-2 sm:grid-cols-3">
-                <Input
-                  placeholder="Rua, número, andar"
-                  value={editForm.morada_rua}
-                  onChange={(e) =>
-                    setEditForm((f) => ({ ...f, morada_rua: e.target.value }))
-                  }
-                />
-                <Input
-                  placeholder="Código Postal (ex: 1200-001)"
-                  value={editForm.morada_codigo_postal}
-                  onChange={(e) =>
-                    setEditForm((f) => ({ ...f, morada_codigo_postal: e.target.value }))
-                  }
-                />
-                <Input
-                  placeholder="Cidade (ex: Lisboa)"
-                  value={editForm.morada_cidade}
-                  onChange={(e) =>
-                    setEditForm((f) => ({ ...f, morada_cidade: e.target.value }))
-                  }
-                />
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Preferencial em relação à &quot;Morada&quot; única. Usado para geocoding
-                mais preciso e para mostrar a morada de forma estruturada.
-              </p>
-            </div>
-            {/* FIX (parceiro associado) — Observações (notas internas). */}
-            <div className="space-y-1.5">
-              <label htmlFor="edit-observacoes" className="text-sm font-medium">
-                Observações
-              </label>
-              <textarea
-                id="edit-observacoes"
-                value={editForm.observacoes}
-                onChange={(e) =>
-                  setEditForm((f) => ({ ...f, observacoes: e.target.value }))
-                }
-                rows={2}
-                placeholder="Notas internas (ex: Parceiro Associado: Particulares, frequência, etc.)"
-                className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              />
-              <p className="text-xs text-muted-foreground">
-                Notas livres do gestor (ex: frequência, instruções especiais).
-              </p>
-            </div>
-            {/* FIX (parceiro associado relacional) — Select de parceiro B2B. */}
-            <div className="space-y-1.5">
-              <label htmlFor="edit-parceiro" className="text-sm font-medium">
-                Parceiro Associado
-              </label>
-              <select
-                id="edit-parceiro"
-                value={editForm.parceiro_id}
-                onChange={(e) =>
-                  setEditForm((f) => ({ ...f, parceiro_id: e.target.value }))
-                }
-                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <option value="">Nenhum (propriedade All2gether)</option>
-                {parceirosList.map((p) => (
-                  <option key={p._id} value={p._id}>{p.nome}</option>
-                ))}
-              </select>
-              <p className="text-xs text-muted-foreground">
-                Associa esta propriedade a um parceiro B2B. O nome aparece no Badge da listagem.
-              </p>
-            </div>
-            <div className="space-y-1.5">
-              <label
-                htmlFor="edit-tempo"
-                className="text-sm font-medium"
-              >
-                Tempo de Limpeza (minutos)
-              </label>
-              <Input
-                id="edit-tempo"
-                type="number"
-                min={0}
-                value={editForm.tempo_limpeza_minutos}
-                onChange={(e) =>
-                  setEditForm((f) => ({
-                    ...f,
-                    tempo_limpeza_minutos: e.target.value,
-                  }))
-                }
-                required
-              />
-            </div>
+            {/* FIX (modal propriedades em tabs) — Reorganização dos campos em
+                3 Tabs (Geral / Atribuição / Checklists) para reduzir a
+                altura do modal e agrupar campos relacionados. */}
+            <Tabs defaultValue="geral" className="w-full">
+              <TabsList className="grid w-full grid-cols-3">
+                <TabsTrigger value="geral">Geral</TabsTrigger>
+                <TabsTrigger value="atribuicao">Atribuição</TabsTrigger>
+                <TabsTrigger value="checklists">Checklists</TabsTrigger>
+              </TabsList>
 
-            {/* Checklist de Limpeza (edição) */}
-            <div className="space-y-1.5">
-              <label htmlFor="edit-checklist" className="text-sm font-medium">
-                Checklist de Limpeza (um item por linha)
-              </label>
-              <textarea
-                id="edit-checklist"
-                value={editForm.checklist}
-                onChange={(e) =>
-                  setEditForm((f) => ({ ...f, checklist: e.target.value }))
-                }
-                rows={4}
-                placeholder={"Verificar toalhas\nEsvaziar lixo\nTrocar roupa de cama"}
-                className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              />
-              <p className="text-xs text-muted-foreground">
-                O staff verá estes itens ao concluir a tarefa de limpeza desta propriedade.
-              </p>
-            </div>
+              {/* ── TAB: Geral — dados básicos da propriedade ── */}
+              <TabsContent value="geral" className="space-y-4">
+                <div className="space-y-1.5">
+                  <label htmlFor="edit-nome" className="text-sm font-medium">
+                    Nome
+                  </label>
+                  <Input
+                    id="edit-nome"
+                    value={editForm.nome}
+                    onChange={(e) =>
+                      setEditForm((f) => ({ ...f, nome: e.target.value }))
+                    }
+                    required
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label htmlFor="edit-smoobu" className="text-sm font-medium">
+                    Smoobu ID
+                  </label>
+                  <Input
+                    id="edit-smoobu"
+                    value={editForm.smoobu_id}
+                    readOnly
+                    tabIndex={-1}
+                    className="font-mono text-xs bg-muted/50 text-muted-foreground cursor-not-allowed"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    O Smoobu ID não é editável (é o identificador do apartamento no Smoobu).
+                  </p>
+                </div>
+                <div className="space-y-1.5">
+                  <label htmlFor="edit-morada" className="text-sm font-medium">
+                    Morada
+                  </label>
+                  <Input
+                    id="edit-morada"
+                    value={editForm.morada}
+                    onChange={(e) => {
+                      setEditForm((f) => ({ ...f, morada: e.target.value }));
+                      setEditMoradaWarning(null);
+                      // Prompt 126 — Reset da confirmação quando a morada muda.
+                      setEditMoradaConfirmada(false);
+                    }}
+                    required
+                  />
+                  {/* Prompt 117 — Aviso de geocoding INLINE no modal de edição */}
+                  {editMoradaWarning && (
+                    <p className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-300">
+                      <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      <span>{editMoradaWarning}</span>
+                    </p>
+                  )}
+                </div>
+                {/* FIX (morada estruturada) — Campos estruturados opcionais.
+                    Se preencheres a Rua, o backend usa os 3 campos para geocoding
+                    e ignora a "Morada" (string única) acima. */}
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">
+                    Morada Estruturada (opcional — substitui &quot;Morada&quot; se preenchida)
+                  </label>
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    <Input
+                      placeholder="Rua, número, andar"
+                      value={editForm.morada_rua}
+                      onChange={(e) =>
+                        setEditForm((f) => ({ ...f, morada_rua: e.target.value }))
+                      }
+                    />
+                    <Input
+                      placeholder="Código Postal (ex: 1200-001)"
+                      value={editForm.morada_codigo_postal}
+                      onChange={(e) =>
+                        setEditForm((f) => ({ ...f, morada_codigo_postal: e.target.value }))
+                      }
+                    />
+                    <Input
+                      placeholder="Cidade (ex: Lisboa)"
+                      value={editForm.morada_cidade}
+                      onChange={(e) =>
+                        setEditForm((f) => ({ ...f, morada_cidade: e.target.value }))
+                      }
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Preferencial em relação à &quot;Morada&quot; única. Usado para geocoding
+                    mais preciso e para mostrar a morada de forma estruturada.
+                  </p>
+                </div>
+                {/* FIX (parceiro associado) — Observações (notas internas). */}
+                <div className="space-y-1.5">
+                  <label htmlFor="edit-observacoes" className="text-sm font-medium">
+                    Observações
+                  </label>
+                  <textarea
+                    id="edit-observacoes"
+                    value={editForm.observacoes}
+                    onChange={(e) =>
+                      setEditForm((f) => ({ ...f, observacoes: e.target.value }))
+                    }
+                    rows={2}
+                    placeholder="Notas internas (ex: Parceiro Associado: Particulares, frequência, etc.)"
+                    className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Notas livres do gestor (ex: frequência, instruções especiais).
+                  </p>
+                </div>
+                {/* FIX (parceiro associado relacional) — Select de parceiro B2B. */}
+                <div className="space-y-1.5">
+                  <label htmlFor="edit-parceiro" className="text-sm font-medium">
+                    Parceiro Associado
+                  </label>
+                  <select
+                    id="edit-parceiro"
+                    value={editForm.parceiro_id}
+                    onChange={(e) =>
+                      setEditForm((f) => ({ ...f, parceiro_id: e.target.value }))
+                    }
+                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <option value="">Nenhum (propriedade All2gether)</option>
+                    {parceirosList.map((p) => (
+                      <option key={p._id} value={p._id}>{p.nome}</option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-muted-foreground">
+                    Associa esta propriedade a um parceiro B2B. O nome aparece no Badge da listagem.
+                  </p>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <label
+                      htmlFor="edit-tempo"
+                      className="text-sm font-medium"
+                    >
+                      Tempo de Limpeza (minutos)
+                    </label>
+                    <Input
+                      id="edit-tempo"
+                      type="number"
+                      min={0}
+                      value={editForm.tempo_limpeza_minutos}
+                      onChange={(e) =>
+                        setEditForm((f) => ({
+                          ...f,
+                          tempo_limpeza_minutos: e.target.value,
+                        }))
+                      }
+                      required
+                    />
+                  </div>
+                  {/* FIX (equipas preferenciais) — Nº de Staff Necessário
+                      tornado editável no modal de edição (antes só existia
+                      no formulário de criação manual). */}
+                  <div className="space-y-1.5">
+                    <label
+                      htmlFor="edit-staff-necessario"
+                      className="text-sm font-medium"
+                    >
+                      Nº de Staff Necessário
+                    </label>
+                    <Input
+                      id="edit-staff-necessario"
+                      type="number"
+                      min={1}
+                      max={10}
+                      value={editForm.staff_necessario}
+                      onChange={(e) =>
+                        setEditForm((f) => ({
+                          ...f,
+                          staff_necessario: e.target.value,
+                        }))
+                      }
+                      placeholder="1"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Se &gt; 1, o sistema atribui uma equipa de N funcionários a esta propriedade.
+                    </p>
+                  </div>
+                </div>
+              </TabsContent>
 
-            {/* Prompt 95 — Funcionário Preferencial (Algoritmo VIP) */}
-            <div className="space-y-1.5">
-              <label
-                htmlFor="edit-preferencial"
-                className="text-sm font-medium"
-              >
-                Funcionário Preferencial
-              </label>
-              <select
-                id="edit-preferencial"
-                value={editForm.funcionario_preferencial_id}
-                onChange={(e) =>
-                  setEditForm((f) => ({
-                    ...f,
-                    funcionario_preferencial_id: e.target.value,
-                  }))
-                }
-                className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              >
-                <option value="">Nenhum (usar load balancer geral)</option>
-                {staffList.map((s) => (
-                  <option key={s._id} value={s._id}>
-                    {s.nome}
-                  </option>
-                ))}
-              </select>
-              <p className="text-xs text-muted-foreground">
-                Quando definido, o motor de atribuição dá prioridade a este
-                funcionário para limpezas desta propriedade (se estiver
-                disponível e dentro do limite de 8h/dia).
-              </p>
-            </div>
+              {/* ── TAB: Atribuição — funcionário preferencial, equipa
+                  preferencial, modelo de checklist ── */}
+              <TabsContent value="atribuicao" className="space-y-4">
+                {/* Prompt 95 — Funcionário Preferencial (Algoritmo VIP) */}
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="edit-preferencial"
+                    className="text-sm font-medium"
+                  >
+                    Funcionário Preferencial
+                  </label>
+                  <select
+                    id="edit-preferencial"
+                    value={editForm.funcionario_preferencial_id}
+                    onChange={(e) =>
+                      setEditForm((f) => ({
+                        ...f,
+                        funcionario_preferencial_id: e.target.value,
+                      }))
+                    }
+                    className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  >
+                    <option value="">Nenhum (usar load balancer geral)</option>
+                    {staffList.map((s) => (
+                      <option key={s._id} value={s._id}>
+                        {s.nome}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-muted-foreground">
+                    Quando definido, o motor de atribuição dá prioridade a este
+                    funcionário para limpezas desta propriedade (se estiver
+                    disponível e dentro do limite de 8h/dia).
+                  </p>
+                </div>
 
-            {/* Prompt 134 — Modelo de Checklist (template dinâmico) */}
-            <div className="space-y-1.5">
-              <label
-                htmlFor="edit-modelo-checklist"
-                className="text-sm font-medium"
-              >
-                Modelo de Checklist
-              </label>
-              <select
-                id="edit-modelo-checklist"
-                value={editForm.modelo_checklist_id}
-                onChange={(e) =>
-                  setEditForm((f) => ({
-                    ...f,
-                    modelo_checklist_id: e.target.value,
-                  }))
-                }
-                disabled={modelosChecklistLoading}
-                className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-60"
-              >
-                <option value="">Nenhum (usar checklist simples abaixo)</option>
-                {modelosChecklist.map((m) => (
-                  <option key={m._id} value={m._id}>
-                    {m.nome}
-                  </option>
-                ))}
-              </select>
-              <p className="text-xs text-muted-foreground">
-                {modelosChecklistLoading
-                  ? "A carregar modelos…"
-                  : "Quando definido, as novas tarefas de limpeza usam as secções e itens do modelo (snapshot). Gerir modelos em Checklists."}
-              </p>
-            </div>
+                {/* FIX (equipas preferenciais) — Equipa Preferencial (select
+                    múltiplo via checkboxes). Staff com
+                    `exclusivo_preferenciais: true` SÓ são elegíveis para
+                    propriedades onde o seu ID consta neste array. O load
+                    balancer dá prioridade a estes membros ao atribuir
+                    tarefas de limpeza. */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium leading-none">
+                    Equipa Preferencial (opcional)
+                  </label>
+                  <p className="text-xs text-muted-foreground">
+                    Seleciona os staff que formam a equipa preferencial desta
+                    propriedade. Staff marcados como &quot;exclusivos&quot; só recebem
+                    tarefas de propriedades onde constam nesta lista.
+                  </p>
+                  {staffList.length === 0 ? (
+                    <p className="text-xs italic text-muted-foreground">
+                      Sem staff ativo disponível.
+                    </p>
+                  ) : (
+                    <div className="grid max-h-48 gap-1.5 overflow-y-auto rounded-md border border-input p-2 sm:grid-cols-2">
+                      {staffList.map((s) => {
+                        const checked = editForm.equipa_preferencial.includes(s._id);
+                        return (
+                          <label
+                            key={s._id}
+                            className={`flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm transition-colors ${
+                              checked
+                                ? "border-primary bg-primary/10 text-primary"
+                                : "border-input text-muted-foreground hover:bg-muted/50"
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) => {
+                                setEditForm((f) => ({
+                                  ...f,
+                                  equipa_preferencial: e.target.checked
+                                    ? [...f.equipa_preferencial, s._id]
+                                    : f.equipa_preferencial.filter(
+                                        (id) => id !== s._id
+                                      ),
+                                }));
+                              }}
+                              className="h-3.5 w-3.5"
+                            />
+                            <span className="flex-1 truncate">{s.nome}</span>
+                            {s.exclusivo_preferenciais && (
+                              <Badge
+                                variant="outline"
+                                className="text-[10px]"
+                                title="Staff exclusivo — só recebe tarefas de propriedades onde está na equipa preferencial"
+                              >
+                                exclusivo
+                              </Badge>
+                            )}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Prompt 134 — Modelo de Checklist (template dinâmico) */}
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="edit-modelo-checklist"
+                    className="text-sm font-medium"
+                  >
+                    Modelo de Checklist
+                  </label>
+                  <select
+                    id="edit-modelo-checklist"
+                    value={editForm.modelo_checklist_id}
+                    onChange={(e) => handleModeloChecklistChange(e.target.value)}
+                    disabled={modelosChecklistLoading}
+                    className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-60"
+                  >
+                    <option value="">Nenhum (usar checklist simples abaixo)</option>
+                    {modelosChecklist.map((m) => (
+                      <option key={m._id} value={m._id}>
+                        {m.nome}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-muted-foreground">
+                    {modelosChecklistLoading
+                      ? "A carregar modelos…"
+                      : "Quando definido, as novas tarefas de limpeza usam as secções e itens do modelo (snapshot). Selecionar um modelo preenche automaticamente o textarea na aba \"Checklists\". Gerir modelos em Checklists."}
+                  </p>
+                </div>
+              </TabsContent>
+
+              {/* ── TAB: Checklists — textarea com auto-fill a partir do
+                  modelo selecionado na aba "Atribuição" ── */}
+              <TabsContent value="checklists" className="space-y-4">
+                {/* Checklist de Limpeza (edição) */}
+                <div className="space-y-1.5">
+                  <label htmlFor="edit-checklist" className="text-sm font-medium">
+                    Checklist de Limpeza (um item por linha)
+                  </label>
+                  <textarea
+                    id="edit-checklist"
+                    value={editForm.checklist}
+                    onChange={(e) =>
+                      setEditForm((f) => ({ ...f, checklist: e.target.value }))
+                    }
+                    rows={8}
+                    placeholder={"Verificar toalhas\nEsvaziar lixo\nTrocar roupa de cama"}
+                    className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    O staff verá estes itens ao concluir a tarefa de limpeza desta propriedade.
+                    {editForm.modelo_checklist_id
+                      ? " Editaste manualmente após o auto-fill do modelo — as tuas alterações serão guardadas."
+                      : " Dica: seleciona um \"Modelo de Checklist\" na aba \"Atribuição\" para preencher automaticamente."}
+                  </p>
+                </div>
+              </TabsContent>
+            </Tabs>
 
             {editErro && (
               <p className="text-sm text-destructive">{editErro}</p>

@@ -232,16 +232,31 @@ async function determinarUtilizadorAtribuido(
 
   // ------------------------------------------------------------------
   // FIX (folgas/férias) — Filtro de Folgas Fixas Semanais (dias_folga).
+  // FIX (equipas preferenciais) — Se a propriedade tiver equipa_preferencial,
+  // staff com exclusivo_preferenciais: true SÓ são elegíveis se estiverem
+  // nesse array. Staff sem exclusivo_preferenciais pode ser atribuído a qualquer
+  // propriedade.
   // ------------------------------------------------------------------
-  // diaSemana é calculado a partir de range.start (meia-noite UTC do dia
-  // da tarefa). Utilizador.dias_folga é um array de inteiros 0-6
-  // (0=Dom, 1=Seg, ..., 6=Sáb) que representa os dias fixos de folga
-  // semanal do funcionário. Se o dia da tarefa estiver neste array,
-  // o staff é excluído do pool (não precisa de ausência marcada manual).
   const diaSemana = range.start.getDay();
 
   // Set de exclusão explícita (versão de equipas — staff já escolhidos).
   const setExcluidos = excluirStaffIds instanceof Set ? excluirStaffIds : null;
+
+  // FIX (equipas preferenciais) — Carrega a equipa_preferencial da propriedade
+  // (se propriedadeId for fornecido). Usa para filtrar exclusivos.
+  let setEquipaPreferencial = null;
+  if (propriedadeId) {
+    try {
+      const propEquip = await Propriedade.findById(propriedadeId)
+        .select('equipa_preferencial')
+        .lean();
+      if (propEquip?.equipa_preferencial && Array.isArray(propEquip.equipa_preferencial)) {
+        setEquipaPreferencial = new Set(propEquip.equipa_preferencial.map(String));
+      }
+    } catch (e) {
+      // Se falhar, continua sem filtro de exclusividade (seguro).
+    }
+  }
 
   const disponiveis = staff.filter((s) => {
     const idStr = String(s._id);
@@ -257,6 +272,11 @@ async function determinarUtilizadorAtribuido(
     ) {
       return false;
     }
+    // FIX (equipas preferenciais) — Se o staff tem exclusivo_preferenciais: true,
+    // só é elegível se estiver na equipa_preferencial da propriedade.
+    if (s.exclusivo_preferenciais === true && setEquipaPreferencial) {
+      if (!setEquipaPreferencial.has(idStr)) return false;
+    }
     return true;
   });
 
@@ -271,12 +291,42 @@ async function determinarUtilizadorAtribuido(
   }
 
   // ----------------------------------------------------------------
-  // Algoritmo VIP (funcionário preferencial) — preservado.
+  // Algoritmo VIP (equipa preferencial + funcionário preferencial) — preservado.
+  // FIX (equipas preferenciais) — Usa equipa_preferencial (array) para dar
+  // prioridade máxima absoluta a quem pertence à equipa. Mantém o
+  // funcionario_preferencial_id (legacy) como fallback individual.
   // ----------------------------------------------------------------
   if (propriedadeId) {
     const propVIP = await Propriedade.findById(propriedadeId)
-      .select('funcionario_preferencial_id')
+      .select('funcionario_preferencial_id equipa_preferencial')
       .lean();
+
+    // FIX (equipas preferenciais) — Tenta cada membro da equipa_preferencial
+    // (prioridade máxima absoluta). Se nenhum estiver disponível, faz fallback
+    // para o funcionario_preferencial_id (legacy) e depois para o LB geral.
+    const equipaIds = propVIP?.equipa_preferencial || [];
+    if (equipaIds.length > 0) {
+      for (const equipaId of equipaIds) {
+        const equipaIdStr = String(equipaId);
+        const vip = disponiveis.find((s) => String(s._id) === equipaIdStr);
+        if (vip) {
+          const cargaLimpezaVIP = Number(await calcularCargaLimpezaDia(empresaId, vip._id, range)) || 0;
+          const cargaTotalVIP = cargaLimpezaVIP + Number(tempoNovaTarefa);
+          if (cargaTotalVIP <= CAPACIDADE_MAXIMA_MINUTOS) {
+            console.log(
+              `⭐ VIP (equipa): tarefa atribuída ao preferencial ${equipaIdStr} ` +
+                `(carga ${cargaTotalVIP}min ≤ ${CAPACIDADE_MAXIMA_MINUTOS}min).`
+            );
+            return { utilizadorId: vip._id, tempoViagem: 0 };
+          }
+        }
+      }
+      console.log(
+        `⭐ VIP (equipa): ${equipaIds.length} preferencial(is) — nenhum disponível ou dentro do SLA. Fallback para LB.`
+      );
+    }
+
+    // Fallback legacy: funcionario_preferencial_id (individual).
     const vipId = propVIP?.funcionario_preferencial_id;
     if (vipId) {
       const vipIdStr = String(vipId);
@@ -286,13 +336,13 @@ async function determinarUtilizadorAtribuido(
         const cargaTotalVIP = cargaLimpezaVIP + Number(tempoNovaTarefa);
         if (cargaTotalVIP <= CAPACIDADE_MAXIMA_MINUTOS) {
           console.log(
-            `⭐ VIP: tarefa atribuída ao preferencial ${vipIdStr} ` +
+            `⭐ VIP (legacy): tarefa atribuída ao preferencial ${vipIdStr} ` +
               `(carga ${cargaTotalVIP}min ≤ ${CAPACIDADE_MAXIMA_MINUTOS}min).`
           );
           return { utilizadorId: vip._id, tempoViagem: 0 };
         }
         console.log(
-          `⭐ VIP: preferencial ${vipIdStr} excede SLA ` +
+          `⭐ VIP (legacy): preferencial ${vipIdStr} excede SLA ` +
             `(${cargaTotalVIP}min > ${CAPACIDADE_MAXIMA_MINUTOS}min) — fallback para LB.`
         );
       }

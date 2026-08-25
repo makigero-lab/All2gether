@@ -457,6 +457,24 @@ exports.criarTarefa = async (req, res) => {
     // Prompt 137 — Debug log para confirmar que nome_hospede chega e é guardado.
     console.log('📋 criarTarefa — detalhes_reserva a guardar:', JSON.stringify(detalhesReserva));
 
+    // FIX (bloqueio de duplicados) — Rejeita a criação se já existir uma
+    // tarefa ativa (não cancelada) para a MESMA propriedade, no MESMO dia E
+    // MESMA hora (data exata). Múltiplas tarefas no mesmo dia são permitidas
+    // apenas se as horas forem diferentes.
+    const tarefaDuplicada = await Tarefa.findOne({
+      empresa_id: empresaId,
+      propriedade_id,
+      data: dataNormalizada,
+      estado: { $nin: ['cancelada'] },
+    }).lean();
+    if (tarefaDuplicada) {
+      return res.status(409).json({
+        erro: 'Já existe uma tarefa para esta propriedade neste dia e hora.',
+        tarefa_id: tarefaDuplicada._id,
+        data: dataNormalizada,
+      });
+    }
+
     const nova = await Tarefa.create({
       empresa_id: empresaId,
       propriedade_id,
