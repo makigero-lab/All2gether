@@ -589,10 +589,9 @@ export default function PropriedadesPage() {
             .split("\n")
             .map((s) => s.trim())
             .filter((s) => s.length > 0),
-          // Prompt 95 — Funcionário preferencial (Algoritmo VIP). String vazia
-          // → null no backend (remove o preferencial).
-          funcionario_preferencial_id:
-            editForm.funcionario_preferencial_id.trim() || null,
+          // FIX (cartão redundante removido) — funcionario_preferencial_id
+          // já não é enviado (cartão removido da UI). O backend mantém o
+          // campo para retrocompatibilidade mas não é editável.
           // Prompt 134 — Modelo de Checklist associado. String vazia → null
           // (sem modelo / usa checklist flat antigo).
           modelo_checklist_id:
@@ -1590,38 +1589,12 @@ export default function PropriedadesPage() {
               {/* ── TAB: Atribuição — funcionário preferencial, equipa
                   preferencial, modelo de checklist ── */}
               <TabsContent value="atribuicao" className="space-y-4">
-                {/* Prompt 95 — Funcionário Preferencial (Algoritmo VIP) */}
-                <div className="space-y-1.5">
-                  <label
-                    htmlFor="edit-preferencial"
-                    className="text-sm font-medium"
-                  >
-                    Funcionário Preferencial
-                  </label>
-                  <select
-                    id="edit-preferencial"
-                    value={editForm.funcionario_preferencial_id}
-                    onChange={(e) =>
-                      setEditForm((f) => ({
-                        ...f,
-                        funcionario_preferencial_id: e.target.value,
-                      }))
-                    }
-                    className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                  >
-                    <option value="">Nenhum (usar load balancer geral)</option>
-                    {staffList.map((s) => (
-                      <option key={s._id} value={s._id}>
-                        {s.nome}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-xs text-muted-foreground">
-                    Quando definido, o motor de atribuição dá prioridade a este
-                    funcionário para limpezas desta propriedade (se estiver
-                    disponível e dentro do limite de 8h/dia).
-                  </p>
-                </div>
+                {/* FIX (cartão redundante removido) — O cartão "Funcionário
+                    Preferencial" foi removido. Era redundante com "Equipa
+                    Preferencial" — o load balancer já dá prioridade máxima
+                    aos membros da equipa_preferencial. O campo
+                    funcionario_preferencial_id mantém-se no schema/DTO para
+                    retrocompatibilidade mas não é exposto na UI. */}
 
                 {/* FIX (equipas preferenciais) — Equipa Preferencial (select
                     múltiplo via checkboxes). Staff com
