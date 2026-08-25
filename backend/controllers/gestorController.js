@@ -445,7 +445,15 @@ exports.getTarefas = async (req, res) => {
 
     // Prompt 139 — Cálculo on-the-fly de tempo_viagem_minutos (best-effort).
     const { calcularTempoViagem } = require('../utils/scheduler');
+    // FIX (estado fantasma) — Após populate com match: { ativo: true }, se o
+    // utilizador_id ficou null mas o estado é 'atribuida' ou 'em_curso',
+    // trata como 'por_atribuir' no DTO devolvido ao frontend (não altera a BD).
     const tarefasComViagem = tarefas.map((t) => {
+      // FIX (estado fantasma) — Se utilizador_id é null mas estado é 'atribuida',
+      // o staff foi desativado. Devolve como 'por_atribuir' para o frontend.
+      if (!t.utilizador_id && (t.estado === 'atribuida' || t.estado === 'em_curso')) {
+        t.estado = 'por_atribuir';
+      }
       if (t.tempo_viagem_minutos && Number(t.tempo_viagem_minutos) > 0) {
         return t;
       }
@@ -587,6 +595,11 @@ exports.getDadosCalendario = async (req, res) => {
     // Isto é best-effort: se não houver coordenadas, fica 0.
     const { calcularTempoViagem } = require('../utils/scheduler');
     const tarefasComViagem = tarefas.map((t) => {
+      // FIX (estado fantasma) — Se utilizador_id é null mas estado é 'atribuida',
+      // o staff foi desativado. Devolve como 'por_atribuir' para o frontend.
+      if (!t.utilizador_id && (t.estado === 'atribuida' || t.estado === 'em_curso')) {
+        t.estado = 'por_atribuir';
+      }
       // Já tem tempo_viagem_minutos > 0? Mantém.
       if (t.tempo_viagem_minutos && Number(t.tempo_viagem_minutos) > 0) {
         return t;

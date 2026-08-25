@@ -851,9 +851,20 @@ export default function AdminTarefasPage() {
                       <td className="px-4 py-3 text-muted-foreground">{t.utilizador_id?.nome ?? "—"}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
-                          <Badge variant={ESTADO_VARIANT[t.estado] ?? "secondary"}>
-                            {ESTADO_LABEL[t.estado] ?? t.estado}
-                          </Badge>
+                          {/* FIX (estado fantasma) — Se estado é 'atribuida' mas
+                              utilizador_id é null (staff desativado), mostra como
+                              'Por atribuir' visualmente. */}
+                          {(() => {
+                            const estadoExibido =
+                              (t.estado === "atribuida" || t.estado === "em_curso") && !t.utilizador_id
+                                ? "por_atribuir"
+                                : t.estado;
+                            return (
+                              <Badge variant={ESTADO_VARIANT[estadoExibido] ?? "secondary"}>
+                                {ESTADO_LABEL[estadoExibido] ?? estadoExibido}
+                              </Badge>
+                            );
+                          })()}
                           {/* FIX (motivo_falha_atribuicao) — Ícone de Info com
                               tooltip que mostra o motivo da falha na auto-atribuição. */}
                           {(t.estado === "por_atribuir" || t.estado === "nao_atribuida") && t.motivo_nao_atribuicao && (
