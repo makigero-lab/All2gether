@@ -295,6 +295,9 @@ async function determinarUtilizadorAtribuido(
   // FIX (equipas preferenciais) — Usa equipa_preferencial (array) para dar
   // prioridade máxima absoluta a quem pertence à equipa. Mantém o
   // funcionario_preferencial_id (legacy) como fallback individual.
+  // FIX (prioridade equipa) — Se o VIP exceder o SLA por ter tarefas futuras
+  // atribuídas, o sistema desatribui a tarefa futura mais distante desse VIP
+  // (coloca 'por_atribuir') para libertar capacidade, e tenta novamente.
   // ----------------------------------------------------------------
   if (propriedadeId) {
     const propVIP = await Propriedade.findById(propriedadeId)
@@ -310,8 +313,41 @@ async function determinarUtilizadorAtribuido(
         const equipaIdStr = String(equipaId);
         const vip = disponiveis.find((s) => String(s._id) === equipaIdStr);
         if (vip) {
-          const cargaLimpezaVIP = Number(await calcularCargaLimpezaDia(empresaId, vip._id, range)) || 0;
-          const cargaTotalVIP = cargaLimpezaVIP + Number(tempoNovaTarefa);
+          let cargaLimpezaVIP = Number(await calcularCargaLimpezaDia(empresaId, vip._id, range)) || 0;
+          let cargaTotalVIP = cargaLimpezaVIP + Number(tempoNovaTarefa);
+
+          // FIX (prioridade equipa) — Se o VIP excede o SLA, tenta libertar
+          // capacidade desatribuindo a tarefa futura mais distante desse VIP.
+          // Isto garante que a equipa preferencial é priorizada mesmo que
+          // tenha tarefas futuras que possam ser reatribuídas a outro staff.
+          if (cargaTotalVIP > CAPACIDADE_MAXIMA_MINUTOS) {
+            console.log(
+              `⭐ VIP (equipa): ${equipaIdStr} excede SLA (${cargaTotalVIP}min). A tentar libertar capacidade...`
+            );
+            // Procura a tarefa futura mais distante do VIP (maior data) que
+            // não seja a tarefa atual e que esteja 'atribuida' ou 'em_curso'.
+            const tarefaParaLibertar = await Tarefa.findOne({
+              utilizador_id: vip._id,
+              empresa_id: empresaId,
+              data: { $gte: range.start },
+              estado: { $in: ['atribuida', 'em_curso'] },
+            }).sort({ data: -1 }).lean();
+
+            if (tarefaParaLibertar) {
+              // Desatribui a tarefa futura (coloca 'por_atribuir').
+              await Tarefa.updateOne(
+                { _id: tarefaParaLibertar._id },
+                { $set: { utilizador_id: null, estado: 'por_atribuir', motivo_nao_atribuicao: 'Desatribuída para libertar equipa preferencial' } }
+              );
+              console.log(
+                `⭐ VIP (equipa): tarefa ${tarefaParaLibertar._id} desatribuída do VIP ${equipaIdStr} para libertar capacidade.`
+              );
+              // Recalcula a carga do VIP (a tarefa libertada já não conta).
+              cargaLimpezaVIP = Number(await calcularCargaLimpezaDia(empresaId, vip._id, range)) || 0;
+              cargaTotalVIP = cargaLimpezaVIP + Number(tempoNovaTarefa);
+            }
+          }
+
           if (cargaTotalVIP <= CAPACIDADE_MAXIMA_MINUTOS) {
             console.log(
               `⭐ VIP (equipa): tarefa atribuída ao preferencial ${equipaIdStr} ` +
