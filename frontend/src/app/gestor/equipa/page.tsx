@@ -15,6 +15,7 @@ import {
   Siren,
   CalendarOff,
   Calendar,
+  Search,
   // Ícones usados pela aba de Aprovações
   CalendarCheck,
   Check,
@@ -231,6 +232,10 @@ function EquipaPage() {
   // (para o multiselect de propriedades alocadas nos formulários). Carregada
   // em paralelo com os utilizadores no `carregar()`.
   const [propriedades, setPropriedades] = useState<PropriedadeDTO[]>([]);
+  // FIX (pesquisa propriedades) — Termo de pesquisa para filtrar propriedades
+  // no multiselect de "Propriedades Alocadas". Quando há muitas propriedades,
+  // o gestor precisa de procurar pelo nome em vez de fazer scroll.
+  const [pesquisaPropriedades, setPesquisaPropriedades] = useState("");
 
   // Paginação client-side.
   const [pagina, setPagina] = useState(1);
@@ -896,7 +901,10 @@ function EquipaPage() {
 
                   {/* FIX (alocação bidirecional) — Propriedades Alocadas
                       (controlo geográfico). Multiselect de checkboxes para
-                      associar este staff a propriedades específicas. */}
+                      associar este staff a propriedades específicas.
+                      FIX (pesquisa) — Campo de pesquisa para filtrar por nome
+                      quando há muitas propriedades. Mostra TODAS as propriedades
+                      (ativas e inativas), igual à tabela de Propriedades. */}
                   <div className="space-y-2">
                     <label className="text-sm font-medium leading-none">
                       Propriedades Alocadas (controlo geográfico)
@@ -910,10 +918,26 @@ function EquipaPage() {
                         Sem propriedades disponíveis.
                       </p>
                     ) : (
-                      <div className="grid max-h-48 gap-1.5 overflow-y-auto rounded-md border border-input p-2 sm:grid-cols-2">
-                        {propriedades
-                          .filter((p) => p.ativo)
-                          .map((p) => {
+                      <>
+                        {/* FIX (pesquisa propriedades) — Input de pesquisa */}
+                        <div className="relative">
+                          <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                          <Input
+                            type="text"
+                            placeholder="Pesquisar propriedade..."
+                            value={pesquisaPropriedades}
+                            onChange={(e) => setPesquisaPropriedades(e.target.value)}
+                            className="h-8 pl-7 text-xs"
+                          />
+                        </div>
+                        <div className="grid max-h-48 gap-1.5 overflow-y-auto rounded-md border border-input p-2 sm:grid-cols-2">
+                          {propriedades
+                            .filter((p) =>
+                              !pesquisaPropriedades.trim()
+                                ? true
+                                : p.nome.toLowerCase().includes(pesquisaPropriedades.toLowerCase().trim())
+                            )
+                            .map((p) => {
                             const checked =
                               form.propriedades_alocadas.includes(p._id);
                             return (
@@ -923,7 +947,7 @@ function EquipaPage() {
                                   checked
                                     ? "border-primary bg-primary/10 text-primary"
                                     : "border-input text-muted-foreground hover:bg-muted/50"
-                                }`}
+                                } ${!p.ativo ? "opacity-50" : ""}`}
                               >
                                 <input
                                   type="checkbox"
@@ -941,10 +965,12 @@ function EquipaPage() {
                                   className="h-3.5 w-3.5"
                                 />
                                 <span className="flex-1 truncate">{p.nome}</span>
+                                {!p.ativo && <span className="text-[10px] text-muted-foreground">(inativa)</span>}
                               </label>
                             );
                           })}
-                      </div>
+                        </div>
+                      </>
                     )}
                   </div>
 
@@ -1448,7 +1474,10 @@ function EquipaPage() {
 
                 {/* FIX (alocação bidirecional) — Propriedades Alocadas
                     (controlo geográfico). Multiselect de checkboxes para
-                    associar este staff a propriedades específicas. */}
+                    associar este staff a propriedades específicas.
+                    FIX (pesquisa) — Campo de pesquisa para filtrar por nome
+                    quando há muitas propriedades. Mostra TODAS as propriedades
+                    (ativas e inativas), igual à tabela de Propriedades. */}
                 <div className="space-y-2">
                   <label className="text-sm font-medium leading-none">
                     Propriedades Alocadas (controlo geográfico)
@@ -1462,10 +1491,26 @@ function EquipaPage() {
                       Sem propriedades disponíveis.
                     </p>
                   ) : (
-                    <div className="grid max-h-48 gap-1.5 overflow-y-auto rounded-md border border-input p-2 sm:grid-cols-2">
-                      {propriedades
-                        .filter((p) => p.ativo)
-                        .map((p) => {
+                    <>
+                      {/* FIX (pesquisa propriedades) — Input de pesquisa */}
+                      <div className="relative">
+                        <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                          type="text"
+                          placeholder="Pesquisar propriedade..."
+                          value={pesquisaPropriedades}
+                          onChange={(e) => setPesquisaPropriedades(e.target.value)}
+                          className="h-8 pl-7 text-xs"
+                        />
+                      </div>
+                      <div className="grid max-h-48 gap-1.5 overflow-y-auto rounded-md border border-input p-2 sm:grid-cols-2">
+                        {propriedades
+                          .filter((p) =>
+                            !pesquisaPropriedades.trim()
+                              ? true
+                              : p.nome.toLowerCase().includes(pesquisaPropriedades.toLowerCase().trim())
+                          )
+                          .map((p) => {
                           const checked =
                             editForm.propriedades_alocadas.includes(p._id);
                           return (
@@ -1475,7 +1520,7 @@ function EquipaPage() {
                                 checked
                                   ? "border-primary bg-primary/10 text-primary"
                                   : "border-input text-muted-foreground hover:bg-muted/50"
-                              }`}
+                              } ${!p.ativo ? "opacity-50" : ""}`}
                             >
                               <input
                                 type="checkbox"
@@ -1493,10 +1538,12 @@ function EquipaPage() {
                                 className="h-3.5 w-3.5"
                               />
                               <span className="flex-1 truncate">{p.nome}</span>
+                              {!p.ativo && <span className="text-[10px] text-muted-foreground">(inativa)</span>}
                             </label>
                           );
                         })}
-                    </div>
+                      </div>
+                    </>
                   )}
                 </div>
 
