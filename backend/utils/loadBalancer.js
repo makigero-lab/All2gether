@@ -273,9 +273,19 @@ async function determinarUtilizadorAtribuido(
       return false;
     }
     // FIX (equipas preferenciais) — Se o staff tem exclusivo_preferenciais: true,
-    // só é elegível se estiver na equipa_preferencial da propriedade.
-    if (s.exclusivo_preferenciais === true && setEquipaPreferencial) {
-      if (!setEquipaPreferencial.has(idStr)) return false;
+    // só é elegível se a propriedade estiver nas suas propriedades_alocadas OU
+    // se o seu ID constar na equipa_preferencial da propriedade.
+    // Isto garante que um funcionário exclusivo de Lisboa NUNCA recebe
+    // tarefas de uma casa do Algarve, mesmo que a casa não tenha
+    // equipa_preferencial definida.
+    if (s.exclusivo_preferenciais === true) {
+      // Verifica se o staff está na equipa_preferencial da propriedade.
+      const naEquipaPreferencial = setEquipaPreferencial && setEquipaPreferencial.has(idStr);
+      // Verifica se a propriedade está nas propriedades_alocadas do staff.
+      const propriedadesAlocadas = Array.isArray(s.propriedades_alocadas) ? s.propriedades_alocadas.map(String) : [];
+      const nasAlocadas = propriedadeId && propriedadesAlocadas.includes(String(propriedadeId));
+      // Se não estiver em nenhuma das duas, exclui.
+      if (!naEquipaPreferencial && !nasAlocadas) return false;
     }
     return true;
   });
