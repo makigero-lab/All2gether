@@ -551,10 +551,23 @@ export default function AdminTarefasPage() {
               "Importar do Smoobu" removidos da barra principal para não
               confundir o gestor no dia a dia. Essas ações avançadas ficam
               disponíveis em /gestor/configuracoes/integracoes. */}
-          {/* FIX (limpeza de botões duplicados) — Botão "Auto-Atribuir Pendentes"
-              removido desta página. A funcionalidade mantém-se exclusivamente
-              na página do Calendário (/gestor/calendario) para evitar
-              duplicação. */}
+          {/* FIX — Botão "Auto-Atribuir Pendentes" reposto na página de Limpezas.
+              O gestor precisa de poder disparar o load balancer diretamente daqui. */}
+          <Button
+            onClick={() => setConfirmarAutoAtribuir(true)}
+            disabled={autoAtribuindo}
+            title="Corre o load balancer para atribuir automaticamente todas as tarefas futuras sem funcionário."
+            className="bg-primary text-primary-foreground hover:bg-primary/90"
+          >
+            {autoAtribuindo ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Sparkles className="h-4 w-4" />
+            )}
+            <span className="hidden sm:inline">
+              {autoAtribuindo ? "A atribuir…" : "Auto-Atribuir Pendentes"}
+            </span>
+          </Button>
           <Button onClick={() => {
             setMostrarForm((v) => !v);
             setConflitoForcar(false);
