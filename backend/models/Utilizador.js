@@ -61,6 +61,19 @@ const utilizadorSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    // FIX (alocação bidirecional) — Array de propriedades às quais este staff
+    // está alocado. Sincronizado bidirecionalmente com Propriedade.equipa_preferencial:
+    //   - Ao adicionar/remover aqui, o _id do staff é adicionado/removido do
+    //     equipa_preferencial das propriedades correspondentes.
+    //   - Ao adicionar/remover do equipa_preferencial de uma propriedade, o
+    //     _id da propriedade é adicionado/removido aqui.
+    // Isto permite controlo geográfico (ex: staff de Lisboa só vê propriedades
+    // de Lisboa, staff do Algarve só vê as do Algarve).
+    propriedades_alocadas: {
+      type: [mongoose.Schema.Types.ObjectId],
+      ref: 'Propriedade',
+      default: [],
+    },
     // Hash bcrypt da password. Nunca armazenar a password em claro.
     password_hash: {
       type: String,

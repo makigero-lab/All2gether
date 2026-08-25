@@ -259,6 +259,8 @@ export interface UtilizadorDTO {
   // onde consta na equipa_preferencial. Usado pelo load balancer para
   // restringir o pool de staff exclusivos a certas propriedades.
   exclusivo_preferenciais?: boolean;
+  // FIX (alocação bidirecional) — Propriedades às quais este staff está alocado.
+  propriedades_alocadas?: string[];
   createdAt?: string;
   updatedAt?: string;
 }

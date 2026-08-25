@@ -1236,13 +1236,34 @@ exports.atualizarPropriedade = async (req, res) => {
 
     // FIX (equipas preferenciais) — Atualiza o array de equipa_preferencial.
     // Aceita array vazio para limpar. Valida que cada ID é um ObjectId válido.
+    // FIX (alocação bidirecional) — Sincroniza propriedades_alocadas nos
+    // utilizadores: adiciona esta propriedade aos novos membros e remove dos
+    // que foram desmarcados.
     if (equipa_preferencial !== undefined) {
-      if (Array.isArray(equipa_preferencial)) {
-        propriedade.equipa_preferencial = equipa_preferencial
-          .filter((id) => mongoose.isValidObjectId(id))
-          .map((id) => String(id).trim());
-      } else {
-        propriedade.equipa_preferencial = [];
+      const novaEquipa = Array.isArray(equipa_preferencial)
+        ? equipa_preferencial.filter((id) => mongoose.isValidObjectId(id)).map(String)
+        : [];
+      const antigaEquipa = (propriedade.equipa_preferencial || []).map(String);
+
+      // Staff a ADICICIONAR (estão nos novos mas não nos antigos).
+      const paraAdicionar = novaEquipa.filter((sid) => !antigaEquipa.includes(sid));
+      // Staff a REMOVER (estão nos antigos mas não nos novos).
+      const paraRemover = antigaEquipa.filter((sid) => !novaEquipa.includes(sid));
+
+      propriedade.equipa_preferencial = novaEquipa;
+
+      // Sincroniza propriedades_alocadas nos utilizadores (after save).
+      if (paraAdicionar.length > 0) {
+        await Utilizador.updateMany(
+          { _id: { $in: paraAdicionar }, empresa_id: empresaId },
+          { $addToSet: { propriedades_alocadas: propriedade._id } }
+        );
+      }
+      if (paraRemover.length > 0) {
+        await Utilizador.updateMany(
+          { _id: { $in: paraRemover }, empresa_id: empresaId },
+          { $pull: { propriedades_alocadas: propriedade._id } }
+        );
       }
     }
 
@@ -1445,7 +1466,7 @@ exports.criarMembroEquipa = async (req, res) => {
     const { ok, empresaId } = obterEmpresaId(req, res);
     if (!ok) return;
 
-    const { nome, email, password, role, responsavel_id, dias_folga, telefone, nif, observacoes, exclusivo_preferenciais } = req.body || {};
+    const { nome, email, password, role, responsavel_id, dias_folga, telefone, nif, observacoes, exclusivo_preferenciais, propriedades_alocadas } = req.body || {};
 
     // Validações de presença.
     if (!nome || !email || !password) {
@@ -1541,8 +1562,21 @@ exports.criarMembroEquipa = async (req, res) => {
       observacoes: observacoes ? String(observacoes).trim().slice(0, 2000) : '',
       // FIX (equipas preferenciais) — Toggle de exclusividade.
       exclusivo_preferenciais: Boolean(exclusivo_preferenciais),
+      // FIX (alocação bidirecional) — Propriedades alocadas ao staff.
+      ...(Array.isArray(propriedades_alocadas)
+        ? { propriedades_alocadas: propriedades_alocadas.filter((id) => mongoose.isValidObjectId(id)) }
+        : {}),
       ativo: true,
     });
+
+    // FIX (alocação bidirecional) — Sincroniza equipa_preferencial nas
+    // propriedades: adiciona o ID deste staff às propriedades selecionadas.
+    if (novo.propriedades_alocadas && novo.propriedades_alocadas.length > 0) {
+      await Propriedade.updateMany(
+        { _id: { $in: novo.propriedades_alocadas }, empresa_id: empresaId },
+        { $addToSet: { equipa_preferencial: novo._id } }
+      );
+    }
 
     // Resposta sem password_hash.
     const utilizador = novo.toObject();
@@ -1603,7 +1637,7 @@ exports.atualizarMembroEquipa = async (req, res) => {
       return res.status(400).json({ erro: 'ID de utilizador inválido.' });
     }
 
-    const { nome, email, role, password, responsavel_id, dias_folga, telefone, folgas_rotativas, nif, observacoes, exclusivo_preferenciais } = req.body || {};
+    const { nome, email, role, password, responsavel_id, dias_folga, telefone, folgas_rotativas, nif, observacoes, exclusivo_preferenciais, propriedades_alocadas } = req.body || {};
     if (
       nome === undefined &&
       email === undefined &&
@@ -1778,6 +1812,36 @@ exports.atualizarMembroEquipa = async (req, res) => {
     // FIX (equipas preferenciais) — exclusivo_preferenciais (toggle booleano).
     if (exclusivo_preferenciais !== undefined) {
       utilizador.exclusivo_preferenciais = Boolean(exclusivo_preferenciais);
+    }
+
+    // FIX (alocação bidirecional) — Atualiza propriedades_alocadas e sincroniza
+    // o equipa_preferencial das propriedades (adicionar/remover o ID do staff).
+    if (propriedades_alocadas !== undefined) {
+      const novasAlocadas = Array.isArray(propriedades_alocadas)
+        ? propriedades_alocadas.filter((pid) => mongoose.isValidObjectId(pid)).map(String)
+        : [];
+      const antigasAlocadas = (utilizador.propriedades_alocadas || []).map(String);
+
+      // Propriedades a ADICICIONAR (estão nas novas mas não nas antigas).
+      const paraAdicionar = novasAlocadas.filter((pid) => !antigasAlocadas.includes(pid));
+      // Propriedades a REMOVER (estão nas antigas mas não nas novas).
+      const paraRemover = antigasAlocadas.filter((pid) => !novasAlocadas.includes(pid));
+
+      utilizador.propriedades_alocadas = novasAlocadas;
+
+      // Sincroniza equipa_preferencial nas propriedades (depois do save).
+      if (paraAdicionar.length > 0) {
+        await Propriedade.updateMany(
+          { _id: { $in: paraAdicionar }, empresa_id: empresaId },
+          { $addToSet: { equipa_preferencial: utilizador._id } }
+        );
+      }
+      if (paraRemover.length > 0) {
+        await Propriedade.updateMany(
+          { _id: { $in: paraRemover }, empresa_id: empresaId },
+          { $pull: { equipa_preferencial: utilizador._id } }
+        );
+      }
     }
 
     // --- Password (opcional: só se vier, faz hash nova) ---
