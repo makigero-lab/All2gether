@@ -965,7 +965,7 @@ function EquipaPage() {
                                   }}
                                   className="h-3.5 w-3.5"
                                 />
-                                <span className="flex-1 truncate">{p.nome}</span>
+                                <span className="flex-1 truncate" title={p.nome}>{p.nome}</span>
                                 {!p.ativo && (
                                   <Badge variant="outline" className="text-[10px]">
                                     inativa
@@ -1543,7 +1543,7 @@ function EquipaPage() {
                                 }}
                                 className="h-3.5 w-3.5"
                               />
-                              <span className="flex-1 truncate">{p.nome}</span>
+                              <span className="flex-1 truncate" title={p.nome}>{p.nome}</span>
                               {!p.ativo && (
                                 <Badge variant="outline" className="text-[10px]">
                                   inativa
