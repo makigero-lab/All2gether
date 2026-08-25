@@ -678,6 +678,11 @@ exports.atualizarEstadoTarefa = async (req, res) => {
 
     tarefa.estado = estado;
     if (estado === 'concluida') tarefa.concluida_em = new Date();
+    // FIX (por atribuir manual) — Se o estado for 'por_atribuir', desatribui
+    // o utilizador (utilizador_id = null) para que a tarefa volte ao pool.
+    if (estado === 'por_atribuir') {
+      tarefa.utilizador_id = null;
+    }
     await tarefa.save();
 
     return res.status(200).json({ tarefa });

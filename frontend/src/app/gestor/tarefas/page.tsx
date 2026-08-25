@@ -15,6 +15,7 @@ import {
   Sparkles,
   Eye,
   Info,
+  UserMinus,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -378,6 +379,16 @@ export default function AdminTarefasPage() {
       setErro(e instanceof Error ? e.message : "Erro ao atribuir tarefa.");
     } finally {
       setAtribuirSubmitting(false);
+    }
+  }
+
+  // FIX (por atribuir manual) — Desatribui uma tarefa (coloca 'por_atribuir').
+  async function handleDesatribuir(t: TarefaAdmin) {
+    try {
+      await adminPatch(`/api/gestor/tarefas/${t._id}/estado`, { estado: "por_atribuir" });
+      await carregar();
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Erro ao desatribuir tarefa.");
     }
   }
 
@@ -914,6 +925,21 @@ export default function AdminTarefasPage() {
                               title="Atribuir / Reatribuir"
                             >
                               <UserCheck className="h-4 w-4" />
+                            </Button>
+                          )}
+                          {/* FIX (por atribuir manual) — Botão para desatribuir
+                              (colocar 'por atribuir'). Visível para tarefas
+                              atribuídas ou em curso. */}
+                          {(t.estado === "atribuida" || t.estado === "em_curso") && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-amber-600 hover:text-amber-700"
+                              onClick={() => handleDesatribuir(t)}
+                              aria-label="Desatribuir (por atribuir)"
+                              title="Desatribuir (colocar por atribuir)"
+                            >
+                              <UserMinus className="h-4 w-4" />
                             </Button>
                           )}
                           {t.estado !== "cancelada" && t.estado !== "concluida" && (
