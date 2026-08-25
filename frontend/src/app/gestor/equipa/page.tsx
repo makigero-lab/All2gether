@@ -904,7 +904,8 @@ function EquipaPage() {
                       associar este staff a propriedades específicas.
                       FIX (pesquisa) — Campo de pesquisa para filtrar por nome
                       quando há muitas propriedades. Mostra TODAS as propriedades
-                      (ativas e inativas), igual à tabela de Propriedades. */}
+                      (ativas e inativas), igual ao cartão "Equipa Preferencial"
+                      no separador "Atribuição" da página de Propriedades. */}
                   <div className="space-y-2">
                     <label className="text-sm font-medium leading-none">
                       Propriedades Alocadas (controlo geográfico)
@@ -947,7 +948,7 @@ function EquipaPage() {
                                   checked
                                     ? "border-primary bg-primary/10 text-primary"
                                     : "border-input text-muted-foreground hover:bg-muted/50"
-                                } ${!p.ativo ? "opacity-50" : ""}`}
+                                }`}
                               >
                                 <input
                                   type="checkbox"
@@ -965,7 +966,11 @@ function EquipaPage() {
                                   className="h-3.5 w-3.5"
                                 />
                                 <span className="flex-1 truncate">{p.nome}</span>
-                                {!p.ativo && <span className="text-[10px] text-muted-foreground">(inativa)</span>}
+                                {!p.ativo && (
+                                  <Badge variant="outline" className="text-[10px]">
+                                    inativa
+                                  </Badge>
+                                )}
                               </label>
                             );
                           })}
@@ -1477,7 +1482,8 @@ function EquipaPage() {
                     associar este staff a propriedades específicas.
                     FIX (pesquisa) — Campo de pesquisa para filtrar por nome
                     quando há muitas propriedades. Mostra TODAS as propriedades
-                    (ativas e inativas), igual à tabela de Propriedades. */}
+                    (ativas e inativas), igual ao cartão "Equipa Preferencial"
+                    no separador "Atribuição" da página de Propriedades. */}
                 <div className="space-y-2">
                   <label className="text-sm font-medium leading-none">
                     Propriedades Alocadas (controlo geográfico)
@@ -1520,7 +1526,7 @@ function EquipaPage() {
                                 checked
                                   ? "border-primary bg-primary/10 text-primary"
                                   : "border-input text-muted-foreground hover:bg-muted/50"
-                              } ${!p.ativo ? "opacity-50" : ""}`}
+                              }`}
                             >
                               <input
                                 type="checkbox"
@@ -1538,7 +1544,11 @@ function EquipaPage() {
                                 className="h-3.5 w-3.5"
                               />
                               <span className="flex-1 truncate">{p.nome}</span>
-                              {!p.ativo && <span className="text-[10px] text-muted-foreground">(inativa)</span>}
+                              {!p.ativo && (
+                                <Badge variant="outline" className="text-[10px]">
+                                  inativa
+                                </Badge>
+                              )}
                             </label>
                           );
                         })}
