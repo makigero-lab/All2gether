@@ -59,6 +59,7 @@ import {
   adminPatch,
   adminDelete,
   type UtilizadorDTO,
+  type PropriedadeDTO,
   type Role,
 } from "@/lib/api";
 import { PaginationBar } from "@/components/admin/pagination-bar";
@@ -226,6 +227,11 @@ function EquipaPage() {
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
 
+  // FIX (alocação bidirecional) — Lista de propriedades ativas da empresa
+  // (para o multiselect de propriedades alocadas nos formulários). Carregada
+  // em paralelo com os utilizadores no `carregar()`.
+  const [propriedades, setPropriedades] = useState<PropriedadeDTO[]>([]);
+
   // Paginação client-side.
   const [pagina, setPagina] = useState(1);
   const [tamPagina, setTamPagina] = useState(25);
@@ -259,6 +265,9 @@ function EquipaPage() {
     responsavel_id: "" as string,
     dias_folga: [] as number[],
     telefone: "",
+    // FIX (alocação bidirecional) — Propriedades às quais este staff está
+    // alocado (controlo geográfico). Array de IDs de Propriedade.
+    propriedades_alocadas: [] as string[],
   });
   const [submitting, setSubmitting] = useState(false);
   const [formErro, setFormErro] = useState<string | null>(null);
@@ -275,6 +284,9 @@ function EquipaPage() {
     telefone: "",
     // HF10 — Folgas rotativas (datas específicas).
     folgas_rotativas: [] as { _id?: string; data: string; motivo: string }[],
+    // FIX (alocação bidirecional) — Propriedades às quais este staff está
+    // alocado (controlo geográfico). Array de IDs de Propriedade.
+    propriedades_alocadas: [] as string[],
   });
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editErro, setEditErro] = useState<string | null>(null);
@@ -317,7 +329,7 @@ function EquipaPage() {
     try {
       const hoje = new Date();
 
-      const [data, ausenciasRes] = await Promise.all([
+      const [data, ausenciasRes, propriedadesRes] = await Promise.all([
         adminGet<{ utilizadores: UtilizadorDTO[] }>("/api/gestor/equipa"),
         adminGet<{
           ausencias: {
@@ -328,8 +340,14 @@ function EquipaPage() {
             tipo: string;
           }[];
         }>("/api/gestor/ausencias?estado=aprovada"),
+        // FIX (alocação bidirecional) — Propriedades ativas para o multiselect
+        // de propriedades alocadas no formulário de criação/edição.
+        adminGet<{ propriedades: PropriedadeDTO[] }>(
+          "/api/gestor/propriedades"
+        ).catch(() => ({ propriedades: [] as PropriedadeDTO[] })),
       ]);
       setUtilizadores(data.utilizadores ?? []);
+      setPropriedades(propriedadesRes.propriedades ?? []);
 
       // Filtra as ausências aprovadas que cobrem hoje e guarda o TIPO
       // (ferias/doenca/outro) para mostrar o badge correto.
@@ -381,8 +399,11 @@ function EquipaPage() {
         responsavel_id: form.responsavel_id || null,
         dias_folga: form.dias_folga,
         telefone: form.telefone,
+        // FIX (alocação bidirecional) — Propriedades às quais este staff está
+        // alocado (controlo geográfico).
+        propriedades_alocadas: form.propriedades_alocadas,
       });
-      setForm({ nome: "", email: "", password: "", role: "staff", responsavel_id: "", dias_folga: [], telefone: "" });
+      setForm({ nome: "", email: "", password: "", role: "staff", responsavel_id: "", dias_folga: [], telefone: "", propriedades_alocadas: [] });
       setMostrarForm(false);
       await carregar();
     } catch (e) {
@@ -414,6 +435,11 @@ function EquipaPage() {
       dias_folga: u.dias_folga ?? [],
       telefone: u.telefone ?? "",
       folgas_rotativas: folgas,
+      // FIX (alocação bidirecional) — Array de IDs de propriedades às quais
+      // o staff está alocado (controlo geográfico).
+      propriedades_alocadas: Array.isArray(u.propriedades_alocadas)
+        ? [...u.propriedades_alocadas]
+        : [],
     });
     setNovaFolga({ data: "", motivo: "" });
     setEditErro(null);
@@ -481,6 +507,10 @@ function EquipaPage() {
           data: fr.data,
           motivo: fr.motivo,
         })),
+        // FIX (alocação bidirecional) — Propriedades às quais este staff está
+        // alocado (controlo geográfico). Envia sempre o array (vazio = sem
+        // alocações) para o backend poder remover alocações desmarcadas.
+        propriedades_alocadas: editForm.propriedades_alocadas,
       };
       if (editForm.password) body.password = editForm.password;
 
@@ -864,6 +894,60 @@ function EquipaPage() {
                     />
                   )}
 
+                  {/* FIX (alocação bidirecional) — Propriedades Alocadas
+                      (controlo geográfico). Multiselect de checkboxes para
+                      associar este staff a propriedades específicas. */}
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium leading-none">
+                      Propriedades Alocadas (controlo geográfico)
+                    </label>
+                    <p className="text-xs text-muted-foreground">
+                      Associa este staff a propriedades específicas. Usado para
+                      controlo geográfico (ex: Lisboa vs Algarve).
+                    </p>
+                    {propriedades.length === 0 ? (
+                      <p className="text-xs italic text-muted-foreground">
+                        Sem propriedades disponíveis.
+                      </p>
+                    ) : (
+                      <div className="grid max-h-48 gap-1.5 overflow-y-auto rounded-md border border-input p-2 sm:grid-cols-2">
+                        {propriedades
+                          .filter((p) => p.ativo)
+                          .map((p) => {
+                            const checked =
+                              form.propriedades_alocadas.includes(p._id);
+                            return (
+                              <label
+                                key={p._id}
+                                className={`flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm transition-colors ${
+                                  checked
+                                    ? "border-primary bg-primary/10 text-primary"
+                                    : "border-input text-muted-foreground hover:bg-muted/50"
+                                }`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={(e) => {
+                                    setForm((f) => ({
+                                      ...f,
+                                      propriedades_alocadas: e.target.checked
+                                        ? [...f.propriedades_alocadas, p._id]
+                                        : f.propriedades_alocadas.filter(
+                                            (id) => id !== p._id
+                                          ),
+                                    }));
+                                  }}
+                                  className="h-3.5 w-3.5"
+                                />
+                                <span className="flex-1 truncate">{p.nome}</span>
+                              </label>
+                            );
+                          })}
+                      </div>
+                    )}
+                  </div>
+
                   {formErro && (
                     <p className="flex items-center gap-2 text-sm text-destructive">
                       <AlertCircle className="h-4 w-4" />
@@ -888,7 +972,7 @@ function EquipaPage() {
                       onClick={() => {
                         setMostrarForm(false);
                         setFormErro(null);
-                        setForm({ nome: "", email: "", password: "", role: "staff", responsavel_id: "", dias_folga: [], telefone: "" });
+                        setForm({ nome: "", email: "", password: "", role: "staff", responsavel_id: "", dias_folga: [], telefone: "", propriedades_alocadas: [] });
                       }}
                       disabled={submitting}
                     >
@@ -1361,6 +1445,60 @@ function EquipaPage() {
                   )}
                 </div>
                 )}
+
+                {/* FIX (alocação bidirecional) — Propriedades Alocadas
+                    (controlo geográfico). Multiselect de checkboxes para
+                    associar este staff a propriedades específicas. */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium leading-none">
+                    Propriedades Alocadas (controlo geográfico)
+                  </label>
+                  <p className="text-xs text-muted-foreground">
+                    Associa este staff a propriedades específicas. Usado para
+                    controlo geográfico (ex: Lisboa vs Algarve).
+                  </p>
+                  {propriedades.length === 0 ? (
+                    <p className="text-xs italic text-muted-foreground">
+                      Sem propriedades disponíveis.
+                    </p>
+                  ) : (
+                    <div className="grid max-h-48 gap-1.5 overflow-y-auto rounded-md border border-input p-2 sm:grid-cols-2">
+                      {propriedades
+                        .filter((p) => p.ativo)
+                        .map((p) => {
+                          const checked =
+                            editForm.propriedades_alocadas.includes(p._id);
+                          return (
+                            <label
+                              key={p._id}
+                              className={`flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm transition-colors ${
+                                checked
+                                  ? "border-primary bg-primary/10 text-primary"
+                                  : "border-input text-muted-foreground hover:bg-muted/50"
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(e) => {
+                                  setEditForm((f) => ({
+                                    ...f,
+                                    propriedades_alocadas: e.target.checked
+                                      ? [...f.propriedades_alocadas, p._id]
+                                      : f.propriedades_alocadas.filter(
+                                          (id) => id !== p._id
+                                        ),
+                                  }));
+                                }}
+                                className="h-3.5 w-3.5"
+                              />
+                              <span className="flex-1 truncate">{p.nome}</span>
+                            </label>
+                          );
+                        })}
+                    </div>
+                  )}
+                </div>
 
                 {editErro && (
                   <p className="flex items-center gap-2 text-sm text-destructive">

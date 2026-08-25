@@ -241,13 +241,17 @@ export default function IntegracoesPage() {
         message?: string;
         smoobu?: { api_key_mascarada: string; configurado: boolean; ultima_sincronizacao?: string | null };
         rotinas?: { frequencia_horas: number };
+        // FIX (status smoobu real) — smoobu_ativo devolvido pelo PUT.
+        smoobu_ativo?: boolean;
       }
       const data = await adminPut<PutResponse>(
         "/api/gestor/configuracoes/integracoes",
         body
       );
       setApiKeyMascarada(data.smoobu?.api_key_mascarada || "");
-      setTemApiKey(data.smoobu?.configurado || false);
+      // FIX (status smoobu real) — Usa smoobu_ativo (chave na BD OU env var)
+      // como fonte de verdade, não smoobu.configurado (que só verifica a BD).
+      setTemApiKey(data.smoobu_ativo ?? data.smoobu?.configurado ?? false);
       setEditApiKey(false);
       setLimparChave(false);
       setApiKeyInput("");

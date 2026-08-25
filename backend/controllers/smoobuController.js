@@ -910,6 +910,68 @@ async function atualizarTarefaPorReserva(
     console.log(
       `📝 [Smoobu] tarefa ${tarefa._id} atualizada (reserva ${reservaId}).`
     );
+
+    // FIX (sync smoobu — reatribuição automática) — Se a data mudou e a
+    // tarefa ficou 'por_atribuir' (staff desatribuído por indisponibilidade
+    // na nova data), tenta reatribuir automaticamente via load balancer.
+    if (mudouData && tarefa.estado === 'por_atribuir') {
+      try {
+        const { determinarUtilizadorAtribuido } = require('../utils/loadBalancer');
+        const { calcularInicioTarefaUtilizador } = require('../utils/scheduler');
+        const propriedade = await Propriedade.findById(tarefa.propriedade_id)
+          .select('nome coordenadas empresa_id')
+          .lean();
+        if (propriedade && novoRange) {
+          const resultadoLB = await determinarUtilizadorAtribuido(
+            propriedade.empresa_id,
+            novoRange,
+            propriedade.coordenadas,
+            tarefa.tempo_limpeza_minutos || 45,
+            tarefa.propriedade_id
+          );
+          if (resultadoLB?.utilizadorId) {
+            // Recalcula hora de início via scheduler.
+            let novaData = novoRange.start;
+            try {
+              const resultadoScheduler = await calcularInicioTarefaUtilizador(
+                resultadoLB.utilizadorId,
+                novoRange.start,
+                propriedade.coordenadas,
+                tarefa.tempo_limpeza_minutos || 45
+              );
+              novaData = resultadoScheduler.data;
+            } catch (e) {
+              // Mantém a data original se o scheduler falhar.
+            }
+            await Tarefa.updateOne(
+              { _id: tarefa._id },
+              {
+                $set: {
+                  utilizador_id: resultadoLB.utilizadorId,
+                  estado: 'atribuida',
+                  data: novaData,
+                  tempo_viagem_minutos: resultadoLB.tempoViagem || 0,
+                },
+              }
+            );
+            console.log(
+              `🤖 [Smoobu sync] tarefa ${tarefa._id} reatribuída a staff ${resultadoLB.utilizadorId} após update de data.`
+            );
+          } else {
+            // Marca motivo de falha.
+            await Tarefa.updateOne(
+              { _id: tarefa._id },
+              { $set: { motivo_nao_atribuicao: 'Sem staff disponível após update de data (Smoobu)' } }
+            );
+          }
+        }
+      } catch (errReatrib) {
+        console.error(
+          `⚠️ [Smoobu sync] Erro na reatribuição após update de data:`,
+          errReatrib.message
+        );
+      }
+    }
   }
   return tarefa;
 }
