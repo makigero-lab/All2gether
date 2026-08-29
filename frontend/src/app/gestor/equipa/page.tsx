@@ -24,6 +24,7 @@ import {
   User,
   Eye,
   EyeOff,
+  Lock,
 } from "lucide-react";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -1119,6 +1120,18 @@ function EquipaPage() {
                           <td className="px-4 py-3 font-medium">
                             <div className="flex items-center gap-2">
                               {u.nome}
+                              {/* FIX (visualização exclusivo) — Badge visível na
+                                  tabela sempre que exclusivo_preferenciais for true. */}
+                              {u.exclusivo_preferenciais && (
+                                <Badge
+                                  variant="outline"
+                                  className="gap-1 text-[10px]"
+                                  title="Staff exclusivo — só recebe tarefas de propriedades onde está na equipa preferencial"
+                                >
+                                  <Lock className="h-3 w-3" />
+                                  Exclusivo
+                                </Badge>
+                              )}
                               {ausenteTipo === "ferias" && (
                                 <Badge variant="destructive" className="text-[10px]">
                                   De Férias

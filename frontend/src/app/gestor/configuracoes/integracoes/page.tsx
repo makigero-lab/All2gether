@@ -29,7 +29,7 @@ import {
   EyeOff,
   Download,
   Trash2,
-  AlertTriangle,
+  ShieldAlert,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -47,6 +47,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { adminGet, adminPut, adminPost, adminDelete } from "@/lib/api";
+import { lerUtilizador, type Role } from "@/lib/auth";
 
 type Toast = { tipo: "sucesso" | "erro"; msg: string } | null;
 
@@ -88,6 +89,19 @@ export default function IntegracoesPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<Toast>(null);
+
+  // FIX (ações de massa no admin) — A secção de Ações de Manutenção só é
+  // visível/utilizável para role === 'admin'. Os gestores vêem a config do
+  // Smoobu mas não podem disparar ações destrutivas em massa.
+  const [userRole, setUserRole] = useState<Role | null>(null);
+  useEffect(() => {
+    let cancelado = false;
+    (async () => {
+      const user = await lerUtilizador();
+      if (!cancelado) setUserRole(user?.role ?? null);
+    })();
+    return () => { cancelado = true; };
+  }, []);
 
   // Estado do formulário.
   const [apiKeyInput, setApiKeyInput] = useState("");
@@ -181,20 +195,26 @@ export default function IntegracoesPage() {
   const carregar = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await adminGet<IntegracoesConfig>(
-        "/api/gestor/configuracoes/integracoes"
-      );
+      // FIX (bug status smoobu) — Cache-busting: adiciona um timestamp ao
+      // query param para garantir que o browser/Next.js nunca sirva uma versão
+      // em cache da resposta. Isto resolve o bug em que o cliente via "Não
+      // configurada" mesmo depois de a env var estar ativa no backend.
+      const url = `/api/gestor/configuracoes/integracoes?_t=${Date.now()}`;
+      const data = await adminGet<IntegracoesConfig>(url);
       setApiKeyMascarada(data.smoobu.api_key_mascarada || "");
-      // FIX (status smoobu real) — setTemApiKey movido para depois (usa smoobu_ativo).
       setSmoobuAtivo(data.smoobu.ativo || false);
       setUltimaSincronizacao(data.smoobu.ultima_sincronizacao || null);
       setSincronizacaoAutomatica(data.rotinas.sincronizacao_automatica || false);
       setFrequenciaHoras(data.rotinas.frequencia_horas || 24);
       setEnvVarAtiva(data.env_var_ativa || false);
-      // FIX (status smoobu real) — Usa smoobu_ativo (chave na BD OU env var)
-      // como fonte de verdade para o estado da integração. Se smoobu_ativo
-      // estiver definido, usa-o; senão fallback para smoobu.configurado.
-      setTemApiKey(data.smoobu_ativo ?? data.smoobu.configurado ?? false);
+      // FIX (bug status smoobu) — smoobu_ativo (env var OU chave BD) é a fonte
+      // de verdade. Lido de forma estrita: se for true, mostra "Configurada".
+      // Se for undefined/false, faz fallback para env_var_ativa e configurado.
+      const ativo =
+        data.smoobu_ativo === true ||
+        data.env_var_ativa === true ||
+        data.smoobu?.configurado === true;
+      setTemApiKey(ativo);
       setEditApiKey(false);
       setLimparChave(false);
       setApiKeyInput("");
@@ -241,17 +261,22 @@ export default function IntegracoesPage() {
         message?: string;
         smoobu?: { api_key_mascarada: string; configurado: boolean; ultima_sincronizacao?: string | null };
         rotinas?: { frequencia_horas: number };
-        // FIX (status smoobu real) — smoobu_ativo devolvido pelo PUT.
+        // FIX (bug status smoobu) — smoobu_ativo + env_var_ativa devolvidos pelo PUT.
         smoobu_ativo?: boolean;
+        env_var_ativa?: boolean;
       }
       const data = await adminPut<PutResponse>(
         "/api/gestor/configuracoes/integracoes",
         body
       );
       setApiKeyMascarada(data.smoobu?.api_key_mascarada || "");
-      // FIX (status smoobu real) — Usa smoobu_ativo (chave na BD OU env var)
-      // como fonte de verdade, não smoobu.configurado (que só verifica a BD).
-      setTemApiKey(data.smoobu_ativo ?? data.smoobu?.configurado ?? false);
+      // FIX (bug status smoobu) — Usa smoobu_ativo (env var OU chave BD) como
+      // fonte de verdade, com fallback para env_var_ativa e configurado.
+      const ativo =
+        data.smoobu_ativo === true ||
+        data.env_var_ativa === true ||
+        data.smoobu?.configurado === true;
+      setTemApiKey(ativo);
       setEditApiKey(false);
       setLimparChave(false);
       setApiKeyInput("");
@@ -594,33 +619,41 @@ export default function IntegracoesPage() {
         </div>
       </div>
 
-      {/* HF24 — Ações Manuais de Emergência (movidas de /gestor/tarefas) */}
+      {/* FIX (ações de massa no admin) — Secção "Ações de Manutenção" (antes
+          "Ações Manuais de Emergência"). Restrita a admin: contém ações
+          destrutivas em massa (Eliminar Limpezas Futuras) e sincronização
+          do Smoobu que não devem estar acessíveis ao gestor no dia a dia. */}
+      {userRole === "admin" && (
       <Card className="border-destructive/30">
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base text-destructive">
-            <AlertTriangle className="h-5 w-5" />
-            Ações Manuais de Emergência
+            <ShieldAlert className="h-5 w-5" />
+            Ações de Manutenção
+            <Badge variant="outline" className="ml-1 text-[10px]">Admin</Badge>
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="text-sm text-muted-foreground">
-            Estas ações afetam diretamente as tarefas e propriedades. Usa-as
-            apenas quando necessário (ex.: sincronização inicial, reset do
-            calendário, importação de propriedades).
+            Ações destrutivas em massa e sincronização do Smoobu. Restritas
+            ao <strong>admin</strong> por segurança. Usa-as apenas quando
+            necessário (ex.: sincronização inicial, reset do calendário,
+            recriar limpezas a partir das reservas ativas).
           </p>
           <div className="flex flex-wrap gap-2">
-            {/* Sincronizar Reservas */}
+            {/* Sincronizar Smoobu — recria limpezas futuras a partir das
+                reservas ativas (POST /api/gestor/smoobu/sincronizar). */}
             <Button
               variant="outline"
               onClick={handleSincronizar}
               disabled={sincronizando}
+              title="Recria as limpezas futuras a partir das reservas ativas do Smoobu."
             >
               {sincronizando ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 <Download className="h-4 w-4" />
               )}
-              {sincronizando ? "A sincronizar…" : "Sincronizar Reservas"}
+              {sincronizando ? "A sincronizar…" : "Sincronizar Smoobu"}
             </Button>
 
             {/* Importar Propriedades */}
@@ -637,19 +670,20 @@ export default function IntegracoesPage() {
               {importando ? "A importar…" : "Importar Propriedades"}
             </Button>
 
-            {/* Limpar Futuras */}
+            {/* Eliminar Limpezas Futuras */}
             <Button
               variant="outline"
               className="border-destructive/40 text-destructive hover:bg-destructive/10"
               onClick={() => setConfirmarLimpar(true)}
               disabled={limpando}
+              title="Apaga todas as tarefas futuras não concluídas/canceladas (limpa a agenda)."
             >
               {limpando ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 <Trash2 className="h-4 w-4" />
               )}
-              Limpar Futuras
+              Eliminar Limpezas Futuras
             </Button>
           </div>
 
@@ -661,13 +695,29 @@ export default function IntegracoesPage() {
           )}
         </CardContent>
       </Card>
+      )}
 
-      {/* Dialog de confirmação: Limpar Futuras */}
+      {/* Aviso para não-admin: explica onde estão as ações de massa. */}
+      {userRole !== null && userRole !== "admin" && (
+        <div className="flex items-start gap-2 rounded-md border border-amber-500/50 bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
+          <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+          <div>
+            <p className="font-medium">Ações de Manutenção restritas ao Admin</p>
+            <p className="text-xs">
+              As ações destrutivas em massa (Eliminar Limpezas Futuras) e a
+              sincronização do Smoobu foram movidas para a área de Admin por
+              segurança. Contacta o administrador se precisares de executá-las.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Dialog de confirmação: Eliminar Limpezas Futuras */}
       <Dialog open={confirmarLimpar} onOpenChange={setConfirmarLimpar}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Trash2 className="h-5 w-5 text-destructive" />
-            Limpar Limpezas Futuras
+            Eliminar Limpezas Futuras
           </DialogTitle>
           <DialogDescription>
             Isto vai apagar todas as tarefas não concluídas de hoje para a frente.
@@ -677,8 +727,8 @@ export default function IntegracoesPage() {
         </DialogHeader>
         <DialogContent className="space-y-2">
           <p className="text-sm text-muted-foreground">
-            Depois de apagar, podes clicar em &ldquo;Sincronizar Reservas&rdquo; para recriar
-            as tarefas.
+            Depois de apagar, podes clicar em &ldquo;Sincronizar Smoobu&rdquo; para recriar
+            as tarefas a partir das reservas ativas.
           </p>
         </DialogContent>
         <DialogFooter>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
   CalendarOff,
   Loader2,
@@ -670,7 +671,17 @@ export default function AusenciasPage() {
                     const folgas = staff.dias_folga ?? [];
                     return (
                       <tr key={staff._id} className="hover:bg-muted/30">
-                        <td className="px-4 py-3 font-medium">{staff.nome}</td>
+                        {/* FIX (links folgas fixas) — Nome do funcionário é
+                            clicável, abre o modal de edição do staff. */}
+                        <td className="px-4 py-3 font-medium">
+                          <Link
+                            href={`/gestor/equipa?editar=${staff._id}`}
+                            className="text-primary underline-offset-2 hover:underline"
+                            title={`Editar ${staff.nome}`}
+                          >
+                            {staff.nome}
+                          </Link>
+                        </td>
                         <td className="px-4 py-3">
                           {folgas.length === 0 ? (
                             <span className="text-muted-foreground">—</span>

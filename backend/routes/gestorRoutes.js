@@ -27,7 +27,7 @@ const express = require('express');
 const router = express.Router();
 
 const { auth } = require('../middleware/auth');
-const { isGestor } = require('../middleware/requireRole');
+const { isGestor, isAdmin } = require('../middleware/requireRole');
 const {
   getDashboard,
   getPropriedades,
@@ -118,7 +118,7 @@ router.post('/propriedades/default-checklist', auth, isGestor, async (req, res) 
 //        reservas canceladas, idempotente). É o "motor" de sincronização.
 router.get('/smoobu/propriedades', auth, isGestor, getPropriedadesSmoobu);
 router.post('/smoobu/propriedades', auth, isGestor, importarPropriedades);
-router.post('/smoobu/sincronizar', auth, isGestor, sincronizarReservas);
+router.post('/smoobu/sincronizar', auth, isAdmin, sincronizarReservas);
 
 // Calendário Geral de Operações — lista tarefas com filtro de datas.
 router.get('/tarefas', auth, isGestor, getTarefas);
@@ -140,7 +140,7 @@ router.patch('/tarefas/:id/reatribuir', auth, isGestor, reatribuirTarefa);
 router.patch('/tarefas/:id/estado', auth, isGestor, atualizarEstadoTarefa);
 
 // Apagar tarefas futuras não concluídas (reset do calendário).
-router.delete('/tarefas/futuras', auth, isGestor, apagarTarefasFuturas);
+router.delete('/tarefas/futuras', auth, isAdmin, apagarTarefasFuturas);
 
 // Auto-atribuição em lote (corre o load balancer para todas as tarefas
 // órfãs a partir de hoje).
@@ -312,11 +312,13 @@ router.get('/configuracoes/integracoes', auth, isGestor, async (req, res) => {
       // Indica se a env var fallback está ativa (para o frontend mostrar aviso
       // de que a chave da BD tem prioridade).
       env_var_ativa: Boolean(process.env.SMOOBU_API_KEY),
-      // FIX (status smoobu real) — Estado real da integração Smoobu: considera
-      // configurada se houver chave na BD OU env var SMOOBU_API_KEY. O frontend
-      // usa este booleano para mostrar a bolinha verde/vermelha de estado.
+      // FIX (bug status smoobu) — smoobu_ativo avalia estritamente a env var
+      // SMOOBU_API_KEY (fonte de verdade quando o backend corre no Render e a
+      // API está a funcionar). Mantém-se o fallback à chave da BD para setups
+      // multi-tenant que guardam a chave por empresa. Isto resolve o bug em que
+      // o cliente via "Não configurada" apesar de a API estar a funcionar.
       smoobu_ativo: Boolean(
-        (smoobu.api_key && smoobu.api_key.trim()) || process.env.SMOOBU_API_KEY
+        process.env.SMOOBU_API_KEY || (smoobu.api_key && smoobu.api_key.trim())
       ),
       // FIX (google maps integration) — Indica se o Google Maps está configurado
       // (env var GOOGLE_MAPS_API_KEY no Render). O frontend usa este booleano
