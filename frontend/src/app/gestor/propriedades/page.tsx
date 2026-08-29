@@ -53,6 +53,11 @@ export default function PropriedadesPage() {
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
 
+  // FIX (filtros default) — "Ativos" selecionado por defeito para reduzir
+  // excesso de informação visual (propriedades inativas só aparecem se o
+  // gestor procurar explicitamente).
+  const [filtroEstado, setFiltroEstado] = useState<"todos" | "ativos" | "inativos">("ativos");
+
   // Estado do formulário de criação
   const [mostrarForm, setMostrarForm] = useState(false);
   const [form, setForm] = useState({
@@ -651,7 +656,18 @@ export default function PropriedadesPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* FIX (filtros default) — Select de Estado com "Ativos" pré-selecionado. */}
+          <select
+            value={filtroEstado}
+            onChange={(e) => setFiltroEstado(e.target.value as "todos" | "ativos" | "inativos")}
+            className="h-9 rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
+            aria-label="Filtrar por estado"
+          >
+            <option value="todos">Estado: Todos</option>
+            <option value="ativos">Estado: Ativos</option>
+            <option value="inativos">Estado: Inativos</option>
+          </select>
           <Button
             variant="outline"
             size="icon"
@@ -937,12 +953,16 @@ export default function PropriedadesPage() {
               <Loader2 className="h-5 w-5 animate-spin" />
               A carregar propriedades…
             </div>
-          ) : propriedades.length === 0 ? (
+          ) : propriedades.filter((p) =>
+            filtroEstado === "todos" ? true : filtroEstado === "ativos" ? p.ativo : !p.ativo
+          ).length === 0 ? (
             <div className="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">
               <Building2 className="h-10 w-10 opacity-40" />
-              <p className="text-sm">Ainda não há propriedades.</p>
+              <p className="text-sm">{filtroEstado === "ativos" ? "Sem propriedades ativas." : "Ainda não há propriedades."}</p>
               <p className="text-xs">
-                Clica em “Nova Propriedade” para adicionar a primeira.
+                {filtroEstado === "ativos"
+                  ? "Muda o filtro para “Todos” para ver propriedades inativas, ou adiciona uma nova."
+                  : "Clica em “Adicionar” para adicionar a primeira."}
               </p>
             </div>
           ) : (
@@ -958,7 +978,11 @@ export default function PropriedadesPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {propriedades.map((p) => (
+                  {propriedades
+                    .filter((p) =>
+                      filtroEstado === "todos" ? true : filtroEstado === "ativos" ? p.ativo : !p.ativo
+                    )
+                    .map((p) => (
                     <tr key={p._id} className={`hover:bg-muted/30 ${!p.ativo ? "opacity-60" : ""}`}>
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap items-center gap-2">

@@ -49,15 +49,16 @@ frontend/
     │   │   ├── propriedades/ # CRUD de propriedades (Badge parceiro, Select parceiro, Google Maps, hard-delete admin)
     │   │   ├── equipa/       # CRUD de equipa (+ folgas rotativas)
     │   │   ├── parceiros/    # NOVA: CRUD de parceiros B2B (role 'parceiro')
-    │   │   ├── ausencias/    # Ausências + Dias de Folga (Tabs; sem ferramentas de dev)
+    │   │   ├── ausencias/    # Ausências + Folgas Fixas (view única, filtros Estado/Mês; sem Tabs)
     │   │   ├── relatorios/   # Analytics + resumo IA
+    │   │   ├── checklists/   # NOVA: Modelos de Checklist (página própria, não escondida nas configs)
     │   │   └── configuracoes/ # Configurações da empresa + integracoes (status Smoobu real)
     │   └── staff/
     │       ├── layout.tsx    # Layout staff + RouteGuard (role staff)
     │       ├── page.tsx      # Área do Staff (mobile-first)
     │       └── tarefas/[id]/page.tsx  # Detalhe da Tarefa (checklist + concluir + Google Maps)
     ├── components/
-    │   ├── ui/               # shadcn: button, card, badge, avatar, separator, checkbox, textarea, input
+    │   ├── ui/               # shadcn: button, card, badge, avatar, separator, checkbox, textarea, input, switch, tabs, dialog
     │   ├── auth/
     │   │   └── route-guard.tsx      # Camada client-side de proteção (valida token + role)
     │   ├── gestor/

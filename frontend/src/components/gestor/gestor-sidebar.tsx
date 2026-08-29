@@ -66,8 +66,9 @@ const gestorNavItems: NavItem[] = [
   { label: "Ausências / Férias", href: "/gestor/ausencias", icon: CalendarOff },
   { label: "Relatórios", href: "/gestor/relatorios", icon: BarChart3 },
   { label: "Notificações", href: "/gestor/notificacoes", icon: Bell },
-  // Prompt 134 — Modelos de Checklist (configuração).
-  { label: "Checklists", href: "/gestor/configuracoes/checklists", icon: ListChecks },
+  // FIX (checklists página própria) — Movido de /gestor/configuracoes/checklists
+  // para /gestor/checklists (página/menu próprio, não escondido nas configs).
+  { label: "Checklists", href: "/gestor/checklists", icon: ListChecks },
   // FIX (acesso direto admin) — Configurações da empresa (integracoes,
   // gerais) voltam a estar acessíveis na sidebar para admin E gestor.
   { label: "Configurações", href: "/gestor/configuracoes", icon: Settings },

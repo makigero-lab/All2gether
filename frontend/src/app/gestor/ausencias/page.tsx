@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CalendarOff,
   Loader2,
@@ -14,6 +14,7 @@ import {
   Check,
   X,
   Plus,
+  Filter,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -25,7 +26,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog,
   DialogHeader,
@@ -48,13 +48,13 @@ import { parsearDataSegura } from "@/lib/utils";
 /**
  * /gestor/ausencias — Ecrã de Férias/Ausências (Prompt 95 / Fase 1.5).
  *
- * Tabela definitiva com TODAS as ausências da empresa (sem filtros de
- * estado), com coluna de Ações:
- *   - Aprovar / Rejeitar (para pendentes e pendente_emergencia)
- *   - Eliminar (DELETE)
+ * View única (sem Tabs) com:
+ *   - Lista de Ausências (com filtros de Estado e Mês).
+ *   - Painel inferior de Folgas Fixas da equipa.
  *
- * Unifica a visão geral + aprovação num só ecrã (a tab "Aprovações de
- * Férias" da página de Equipa deixou de ser necessária).
+ * FIX (ui ausências) — Unificação das Tabs numa só view + filtros default +
+ *   correção do estado exibido (ausências com data_fim anterior a hoje são
+ *   mostradas como "Concluída"/"Passada" em vez de "Aprovada"/"Agendada").
  */
 
 // Alargamento local do TipoAusencia (o backend usa mais valores que o tipo
@@ -103,6 +103,33 @@ const ESTADO_VARIANT: Record<
   cancelada: "outline",
 };
 
+/**
+ * FIX (lógica de status) — Resolve o estado EXIBIDO de uma ausência.
+ * Se a data_fim for anterior ao dia de hoje, a ausência já terminou:
+ *   - aprovada  → "Concluída"
+ *   - pendente / pendente_emergencia → "Passada"
+ * Caso contrário, usa o estado real do backend.
+ */
+function resolverEstadoExibido(a: AusenciaAmp): { label: string; variant: string } {
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+  const fim = parsearDataSegura(a.data_fim);
+  const passada = fim ? fim.getTime() < hoje.getTime() : false;
+  const est = a.estado ?? "";
+
+  if (passada) {
+    if (est === "aprovada") return { label: "Concluída", variant: "success" };
+    if (est === "pendente" || est === "pendente_emergencia")
+      return { label: "Passada", variant: "secondary" };
+    if (est === "rejeitada") return { label: "Rejeitada", variant: "secondary" };
+    if (est === "cancelada") return { label: "Cancelada", variant: "outline" };
+  }
+  return {
+    label: ESTADO_LABEL[est] ?? est ?? "—",
+    variant: ESTADO_VARIANT[est] ?? "secondary",
+  };
+}
+
 function formatarData(iso: string): string {
   const d = parsearDataSegura(iso);
   if (!d) return iso;
@@ -128,6 +155,10 @@ export default function AusenciasPage() {
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
 
+  // FIX (filtros) — Filtros de Estado e Mês (aplicados client-side).
+  const [filtroEstado, setFiltroEstado] = useState<string>("todos");
+  const [filtroMes, setFiltroMes] = useState<string>(""); // YYYY-MM ou vazio
+
   // Modal de confirmação de eliminação.
   const [aEliminar, setAEliminar] = useState<AusenciaAmp | null>(null);
   const [eliminando, setEliminando] = useState(false);
@@ -135,10 +166,6 @@ export default function AusenciasPage() {
   // Prompt 131b — Modal de confirmação de cancelamento (soft cancel).
   const [aCancelar, setACancelar] = useState<AusenciaAmp | null>(null);
   const [cancelando, setCancelando] = useState(false);
-
-  // FIX (limpeza UI) — Estados `reaplicandoId` e `resultadoReaplicar` removidos.
-  // A funcionalidade de reaplicar ausência foi removida da UI (era utilitário
-  // de desenvolvimento). A reatribuição automática agora corre ao aprovar.
 
   // HF20 — Modal de criação de ausência (Date Range Picker).
   const [mostrarForm, setMostrarForm] = useState(false);
@@ -153,11 +180,30 @@ export default function AusenciasPage() {
     notas: "",
   });
 
-  // FIX (gestão de folgas) — Estado para a secção "Dias de Folga".
+  // FIX (gestão de folgas) — Estado para a secção "Folgas Fixas".
   // Lista os staff ativos com os seus dias_folga fixos (0=Dom, 6=Sáb).
   const [folgasStaff, setFolgasStaff] = useState<UtilizadorDTO[]>([]);
   const [folgasLoading, setFolgasLoading] = useState(false);
   const [folgasErro, setFolgasErro] = useState<string | null>(null);
+
+  /** Nomes dos dias da semana (0=Dom, 6=Sáb). */
+  const DIA_SEMANA_NOMES = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+
+  const carregar = useCallback(async () => {
+    setLoading(true);
+    setErro(null);
+    try {
+      // Sem filtros → devolve TODAS as ausências da empresa.
+      const data = await adminGet<{ ausencias: AusenciaAmp[] }>(
+        "/api/gestor/ausencias"
+      );
+      setAusencias(data.ausencias ?? []);
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Erro ao carregar ausências.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   /** FIX (gestão de folgas) — Carrega staff ativo com dias_folga. */
   async function carregarFolgas() {
@@ -180,30 +226,56 @@ export default function AusenciasPage() {
     }
   }
 
-  /** Nomes dos dias da semana (0=Dom, 6=Sáb). */
-  const DIA_SEMANA_NOMES = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
-
-  const carregar = useCallback(async () => {
-    setLoading(true);
-    setErro(null);
-    try {
-      // Sem filtros → devolve TODAS as ausências da empresa.
-      const data = await adminGet<{ ausencias: AusenciaAmp[] }>(
-        "/api/gestor/ausencias"
-      );
-      setAusencias(data.ausencias ?? []);
-    } catch (e) {
-      setErro(e instanceof Error ? e.message : "Erro ao carregar ausências.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
   useEffect(() => {
     carregar();
     // FIX (gestão de folgas) — Carrega também as folgas ao montar a página.
     carregarFolgas();
   }, [carregar]);
+
+  // FIX (filtros) — Aplica filtros de Estado e Mês (client-side).
+  const ausenciasFiltradas = useMemo(() => {
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+
+    return ausencias.filter((a) => {
+      // Filtro de mês (compara YYYY-MM da data_inicio).
+      if (filtroMes) {
+        const inicio = parsearDataSegura(a.data_inicio);
+        if (!inicio) return false;
+        const mesStr =
+          `${inicio.getFullYear()}-${String(inicio.getMonth() + 1).padStart(2, "0")}`;
+        if (mesStr !== filtroMes) return false;
+      }
+
+      // Filtro de estado (com resolução de "Passada"/"Concluída").
+      if (filtroEstado !== "todos") {
+        const fim = parsearDataSegura(a.data_fim);
+        const passada = fim ? fim.getTime() < hoje.getTime() : false;
+        const est = a.estado ?? "";
+
+        if (filtroEstado === "passada") {
+          // Passada = já terminou e era aprovada/pendente.
+          if (!passada) return false;
+          if (est !== "aprovada" && est !== "pendente" && est !== "pendente_emergencia")
+            return false;
+          return true;
+        }
+        if (filtroEstado === "aprovada") {
+          // Aprovada (não passada) = aprovada e ainda em curso.
+          if (est !== "aprovada") return false;
+          if (passada) return false;
+          return true;
+        }
+        if (filtroEstado === "pendente") {
+          if (est !== "pendente" && est !== "pendente_emergencia") return false;
+          if (passada) return false;
+          return true;
+        }
+        if (est !== filtroEstado) return false;
+      }
+      return true;
+    });
+  }, [ausencias, filtroEstado, filtroMes]);
 
   async function handleEliminar() {
     if (!aEliminar) return;
@@ -360,32 +432,57 @@ export default function AusenciasPage() {
         </Card>
       )}
 
-      {/* FIX (gestão de folgas) — Separador entre "Ausências" e "Dias de Folga". */}
-      <Tabs defaultValue="ausencias" className="w-full">
-        <TabsList className="grid w-full grid-cols-2 sm:w-auto sm:inline-flex">
-          <TabsTrigger value="ausencias" className="gap-1.5">
-            <CalendarOff className="h-4 w-4" />
-            Ausências
-          </TabsTrigger>
-          <TabsTrigger value="folgas" className="gap-1.5">
-            <CalendarX className="h-4 w-4" />
-            Dias de Folga
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="ausencias" className="space-y-4 mt-4">
-
-      {/* FIX (limpeza UI) — Banner de "Reaplicar ausência" e Card de "Diagnóstico
-          de ausências" removidos. Eram utilitários técnicos de desenvolvimento
-          e testes que não devem estar presentes em produção. A funcionalidade
-          de reaplicar ausência continua disponível via API
-          (POST /api/gestor/ausencias/:id/reaplicar) se for necessário. */}
+      {/* FIX (filtros) — Barra de filtros Estado + Mês (view única, sem Tabs). */}
+      <Card>
+        <CardContent className="flex flex-wrap items-center gap-3 p-4">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Filter className="h-4 w-4" />
+            <span className="font-medium">Filtros:</span>
+          </div>
+          <select
+            value={filtroEstado}
+            onChange={(e) => setFiltroEstado(e.target.value)}
+            className="h-9 rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
+            aria-label="Filtrar por estado"
+          >
+            <option value="todos">Estado: Todos</option>
+            <option value="pendente">Pendentes (por aprovar)</option>
+            <option value="aprovada">Aprovadas (em curso)</option>
+            <option value="passada">Passadas / Concluídas</option>
+            <option value="rejeitada">Rejeitadas</option>
+            <option value="cancelada">Canceladas</option>
+          </select>
+          <Input
+            type="month"
+            value={filtroMes}
+            onChange={(e) => setFiltroMes(e.target.value)}
+            className="h-9 w-[180px]"
+            aria-label="Filtrar por mês"
+          />
+          {(filtroEstado !== "todos" || filtroMes) && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setFiltroEstado("todos");
+                setFiltroMes("");
+              }}
+            >
+              Limpar filtros
+            </Button>
+          )}
+          <span className="ml-auto text-xs text-muted-foreground">
+            {ausenciasFiltradas.length} de {ausencias.length} ausência(s)
+          </span>
+        </CardContent>
+      </Card>
 
       {/* Tabela de ausências */}
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">
-            Ausências Registadas ({ausencias.length})
+          <CardTitle className="text-base flex items-center gap-2">
+            <CalendarOff className="h-4 w-4 text-primary" />
+            Ausências Registadas ({ausenciasFiltradas.length})
           </CardTitle>
         </CardHeader>
         <CardContent className="pt-0">
@@ -393,11 +490,13 @@ export default function AusenciasPage() {
             <div className="flex items-center justify-center py-12">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
-          ) : ausencias.length === 0 ? (
+          ) : ausenciasFiltradas.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
               <CalendarOff className="h-8 w-8 text-muted-foreground/50" />
               <p className="text-sm text-muted-foreground">
-                Sem ausências registadas.
+                {ausencias.length === 0
+                  ? "Sem ausências registadas."
+                  : "Nenhuma ausência corresponde aos filtros selecionados."}
               </p>
             </div>
           ) : (
@@ -414,8 +513,14 @@ export default function AusenciasPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {ausencias.map((a) => {
+                  {ausenciasFiltradas.map((a) => {
                     const TipoIcon = TIPO_ICON[a.tipo] ?? CircleDot;
+                    // FIX (lógica de status) — Resolve estado exibido (Passada/Concluída).
+                    const estadoExibido = resolverEstadoExibido(a);
+                    const hoje = new Date();
+                    hoje.setHours(0, 0, 0, 0);
+                    const fim = parsearDataSegura(a.data_fim);
+                    const jaPassada = fim ? fim.getTime() < hoje.getTime() : false;
                     return (
                       <tr key={a._id} className="hover:bg-muted/30">
                         <td className="px-4 py-3 font-medium">
@@ -433,11 +538,16 @@ export default function AusenciasPage() {
                         <td className="px-4 py-3">
                           <Badge
                             variant={
-                              ESTADO_VARIANT[a.estado ?? ""] ?? "secondary"
+                              (estadoExibido.variant as "default" | "secondary" | "success" | "warning" | "destructive" | "outline") ?? "secondary"
                             }
                           >
-                            {ESTADO_LABEL[a.estado ?? ""] ?? a.estado ?? "—"}
+                            {estadoExibido.label}
                           </Badge>
+                          {jaPassada && a.estado === "aprovada" && (
+                            <span className="ml-1 text-[10px] text-muted-foreground">
+                              (terminou)
+                            </span>
+                          )}
                         </td>
                         <td className="px-4 py-3 max-w-xs">
                           {a.notas ? (
@@ -453,8 +563,8 @@ export default function AusenciasPage() {
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center justify-end gap-1">
-                            {/* Aprovar / Rejeitar (só para pendentes) */}
-                            {(a.estado === "pendente" || a.estado === "pendente_emergencia") && (
+                            {/* Aprovar / Rejeitar (só para pendentes não passadas) */}
+                            {(a.estado === "pendente" || a.estado === "pendente_emergencia") && !jaPassada && (
                               <>
                                 <Button
                                   variant="ghost"
@@ -478,10 +588,6 @@ export default function AusenciasPage() {
                                 </Button>
                               </>
                             )}
-                            {/* FIX (limpeza UI) — Botão "Reaplicar ausência" removido.
-                                Era utilitário técnico de desenvolvimento. A funcionalidade
-                                de reatribuição automática agora corre ao aprovar a ausência
-                                (sem necessidade de reaplicar manualmente). */}
                             {/* Prompt 131b — Cancelar (soft cancel).
                                 Só para pendentes ou aprovadas (não rejeitadas/canceladas).
                                 Usa X icon com cor âmbar para distinguir do Rejeitar (vermelho). */}
@@ -520,81 +626,76 @@ export default function AusenciasPage() {
         </CardContent>
       </Card>
 
-        </TabsContent>
+      {/* FIX (gestão de folgas) — Painel inferior de Folgas Fixas (view única). */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <CalendarX className="h-5 w-5 text-primary" />
+            Folgas Fixas da Equipa
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <p className="text-sm text-muted-foreground mb-4">
+            Funcionários ativos (staff) e os respetivos dias de folga fixos
+            semanais. Para editar, vai à página{" "}
+            <a href="/gestor/equipa" className="text-primary underline">
+              Equipa
+            </a>
+            .
+          </p>
 
-        {/* FIX (gestão de folgas) — Separador "Dias de Folga". */}
-        <TabsContent value="folgas" className="space-y-4 mt-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <CalendarX className="h-5 w-5 text-primary" />
-                Folgas Fixas da Equipa
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-sm text-muted-foreground mb-4">
-                Lista de funcionários ativos (staff) e os respetivos dias de
-                folga fixos semanais. Para editar, vai à página{" "}
-                <a href="/gestor/equipa" className="text-primary underline">
-                  Equipa
-                </a>
-                .
-              </p>
-
-              {folgasLoading ? (
-                <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />A carregar…
-                </div>
-              ) : folgasErro ? (
-                <div className="flex items-center gap-2 py-8 text-sm text-destructive">
-                  <AlertCircle className="h-4 w-4" />{folgasErro}
-                </div>
-              ) : folgasStaff.length === 0 ? (
-                <div className="py-8 text-center text-sm text-muted-foreground">
-                  Não há staff ativo na equipa.
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b bg-muted/40 text-left">
-                        <th className="px-4 py-3 font-medium">Nome</th>
-                        <th className="px-4 py-3 font-medium">Dias de Folga</th>
+          {folgasLoading ? (
+            <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />A carregar…
+            </div>
+          ) : folgasErro ? (
+            <div className="flex items-center gap-2 py-8 text-sm text-destructive">
+              <AlertCircle className="h-4 w-4" />{folgasErro}
+            </div>
+          ) : folgasStaff.length === 0 ? (
+            <div className="py-8 text-center text-sm text-muted-foreground">
+              Não há staff ativo na equipa.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/40 text-left">
+                    <th className="px-4 py-3 font-medium">Nome</th>
+                    <th className="px-4 py-3 font-medium">Dias de Folga</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {folgasStaff.map((staff) => {
+                    const folgas = staff.dias_folga ?? [];
+                    return (
+                      <tr key={staff._id} className="hover:bg-muted/30">
+                        <td className="px-4 py-3 font-medium">{staff.nome}</td>
+                        <td className="px-4 py-3">
+                          {folgas.length === 0 ? (
+                            <span className="text-muted-foreground">—</span>
+                          ) : (
+                            <div className="flex flex-wrap gap-1.5">
+                              {folgas
+                                .slice()
+                                .sort((a, b) => a - b)
+                                .map((dia) => (
+                                  <Badge key={dia} variant="outline" className="text-xs">
+                                    {DIA_SEMANA_NOMES[dia] ?? `?${dia}`}
+                                  </Badge>
+                                ))}
+                            </div>
+                          )}
+                        </td>
                       </tr>
-                    </thead>
-                    <tbody className="divide-y">
-                      {folgasStaff.map((staff) => {
-                        const folgas = staff.dias_folga ?? [];
-                        return (
-                          <tr key={staff._id} className="hover:bg-muted/30">
-                            <td className="px-4 py-3 font-medium">{staff.nome}</td>
-                            <td className="px-4 py-3">
-                              {folgas.length === 0 ? (
-                                <span className="text-muted-foreground">—</span>
-                              ) : (
-                                <div className="flex flex-wrap gap-1.5">
-                                  {folgas
-                                    .slice()
-                                    .sort((a, b) => a - b)
-                                    .map((dia) => (
-                                      <Badge key={dia} variant="outline" className="text-xs">
-                                        {DIA_SEMANA_NOMES[dia] ?? `?${dia}`}
-                                      </Badge>
-                                    ))}
-                                </div>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Modal de confirmação de eliminação */}
       <Dialog
@@ -703,7 +804,10 @@ export default function AusenciasPage() {
               </p>
               <p>
                 <strong>Estado atual:</strong>{" "}
-                {ESTADO_LABEL[aCancelar.estado ?? ""] ?? aCancelar.estado ?? "—"}
+                {(() => {
+                  const e = resolverEstadoExibido(aCancelar);
+                  return e.label;
+                })()}
               </p>
               {aCancelar.notas && (
                 <p>

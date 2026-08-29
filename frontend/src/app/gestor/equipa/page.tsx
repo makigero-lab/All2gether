@@ -64,6 +64,7 @@ import {
   type Role,
 } from "@/lib/api";
 import { PaginationBar } from "@/components/admin/pagination-bar";
+import { Switch } from "@/components/ui/switch";
 import { formatarDataSegura, parsearDataSegura } from "@/lib/utils";
 
 /**
@@ -241,7 +242,9 @@ function EquipaPage() {
   const [pagina, setPagina] = useState(1);
   const [tamPagina, setTamPagina] = useState(25);
   // Filtros (T1) — aplicados antes da paginação.
-  const [filtroEstado, setFiltroEstado] = useState<"todos" | "ativos" | "inativos">("todos");
+  // FIX (filtros default) — "Ativos" selecionado por defeito para reduzir
+  // ruído visual (staff inativo só aparece se o gestor procurar explicitamente).
+  const [filtroEstado, setFiltroEstado] = useState<"todos" | "ativos" | "inativos">("ativos");
   const [filtroRole, setFiltroRole] = useState<"todos" | "staff" | "gestor" | "parceiro">("todos");
   const utilizadoresFiltrados = utilizadores.filter((u) => {
     if (filtroEstado === "ativos" && !u.ativo) return false;
@@ -273,6 +276,9 @@ function EquipaPage() {
     // FIX (alocação bidirecional) — Propriedades às quais este staff está
     // alocado (controlo geográfico). Array de IDs de Propriedade.
     propriedades_alocadas: [] as string[],
+    // FIX (toggle exclusivo) — Se true, este staff SÓ é elegível para tarefas
+    // de propriedades onde consta na equipa_preferencial.
+    exclusivo_preferenciais: false,
   });
   const [submitting, setSubmitting] = useState(false);
   const [formErro, setFormErro] = useState<string | null>(null);
@@ -292,6 +298,9 @@ function EquipaPage() {
     // FIX (alocação bidirecional) — Propriedades às quais este staff está
     // alocado (controlo geográfico). Array de IDs de Propriedade.
     propriedades_alocadas: [] as string[],
+    // FIX (toggle exclusivo) — Se true, este staff SÓ é elegível para tarefas
+    // de propriedades onde consta na equipa_preferencial.
+    exclusivo_preferenciais: false,
   });
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editErro, setEditErro] = useState<string | null>(null);
@@ -380,6 +389,17 @@ function EquipaPage() {
     carregar();
   }, [carregar]);
 
+  // FIX (click-to-edit no calendário) — Lê ?editar=<userId> (vindo do
+  // calendário / ausências) e abre automaticamente o modal de edição desse
+  // funcionário assim que a equipa estiver carregada.
+  const editarUserId = searchParams.get("editar");
+  useEffect(() => {
+    if (!editarUserId || utilizadores.length === 0) return;
+    const alvo = utilizadores.find((u) => u._id === editarUserId);
+    if (alvo) abrirEdicao(alvo);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editarUserId, utilizadores]);
+
   /** Submete o formulário de novo membro. */
   async function handleSubmeter(e: React.FormEvent) {
     e.preventDefault();
@@ -407,8 +427,10 @@ function EquipaPage() {
         // FIX (alocação bidirecional) — Propriedades às quais este staff está
         // alocado (controlo geográfico).
         propriedades_alocadas: form.propriedades_alocadas,
+        // FIX (toggle exclusivo) — Envia o estado do toggle de exclusividade.
+        exclusivo_preferenciais: form.exclusivo_preferenciais,
       });
-      setForm({ nome: "", email: "", password: "", role: "staff", responsavel_id: "", dias_folga: [], telefone: "", propriedades_alocadas: [] });
+      setForm({ nome: "", email: "", password: "", role: "staff", responsavel_id: "", dias_folga: [], telefone: "", propriedades_alocadas: [], exclusivo_preferenciais: false });
       setMostrarForm(false);
       await carregar();
     } catch (e) {
@@ -445,6 +467,8 @@ function EquipaPage() {
       propriedades_alocadas: Array.isArray(u.propriedades_alocadas)
         ? [...u.propriedades_alocadas]
         : [],
+      // FIX (toggle exclusivo) — Carrega o estado de exclusividade do staff.
+      exclusivo_preferenciais: Boolean(u.exclusivo_preferenciais),
     });
     setNovaFolga({ data: "", motivo: "" });
     setEditErro(null);
@@ -516,6 +540,8 @@ function EquipaPage() {
         // alocado (controlo geográfico). Envia sempre o array (vazio = sem
         // alocações) para o backend poder remover alocações desmarcadas.
         propriedades_alocadas: editForm.propriedades_alocadas,
+        // FIX (toggle exclusivo) — Envia o estado do toggle de exclusividade.
+        exclusivo_preferenciais: editForm.exclusivo_preferenciais,
       };
       if (editForm.password) body.password = editForm.password;
 
@@ -933,6 +959,7 @@ function EquipaPage() {
                         </div>
                         <div className="grid max-h-48 gap-1.5 overflow-y-auto rounded-md border border-input p-2 sm:grid-cols-2">
                           {propriedades
+                            .filter((p) => p.ativo || form.propriedades_alocadas.includes(p._id))
                             .filter((p) =>
                               !pesquisaPropriedades.trim()
                                 ? true
@@ -979,6 +1006,27 @@ function EquipaPage() {
                     )}
                   </div>
 
+                {/* FIX (toggle exclusivo) — Toggle "Exclusivo Preferenciais".
+                    Se ativo, este staff SÓ recebe tarefas de propriedades onde
+                    o seu ID consta na equipa_preferencial. Default: false. */}
+                <div className="flex items-center justify-between gap-3 rounded-md border border-input p-3">
+                  <div className="space-y-0.5">
+                    <label className="text-sm font-medium leading-none">
+                      Staff Exclusivo (só equipa preferencial)
+                    </label>
+                    <p className="text-xs text-muted-foreground">
+                      Se ativo, este funcionário só é elegível para tarefas das
+                      propriedades onde está na equipa preferencial. Caso
+                      contrário, pode ser atribuído a qualquer propriedade.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={form.exclusivo_preferenciais}
+                    onCheckedChange={(v) => setForm((f) => ({ ...f, exclusivo_preferenciais: v }))}
+                    aria-label="Staff exclusivo"
+                  />
+                </div>
+
                   {formErro && (
                     <p className="flex items-center gap-2 text-sm text-destructive">
                       <AlertCircle className="h-4 w-4" />
@@ -1003,7 +1051,7 @@ function EquipaPage() {
                       onClick={() => {
                         setMostrarForm(false);
                         setFormErro(null);
-                        setForm({ nome: "", email: "", password: "", role: "staff", responsavel_id: "", dias_folga: [], telefone: "", propriedades_alocadas: [] });
+                        setForm({ nome: "", email: "", password: "", role: "staff", responsavel_id: "", dias_folga: [], telefone: "", propriedades_alocadas: [], exclusivo_preferenciais: false });
                       }}
                       disabled={submitting}
                     >
@@ -1511,6 +1559,7 @@ function EquipaPage() {
                       </div>
                       <div className="grid max-h-48 gap-1.5 overflow-y-auto rounded-md border border-input p-2 sm:grid-cols-2">
                         {propriedades
+                          .filter((p) => p.ativo || editForm.propriedades_alocadas.includes(p._id))
                           .filter((p) =>
                             !pesquisaPropriedades.trim()
                               ? true
@@ -1555,6 +1604,25 @@ function EquipaPage() {
                       </div>
                     </>
                   )}
+                </div>
+
+                {/* FIX (toggle exclusivo) — Toggle "Exclusivo Preferenciais"
+                    no formulário de edição. Sincroniza com o campo do backend. */}
+                <div className="flex items-center justify-between gap-3 rounded-md border border-input p-3">
+                  <div className="space-y-0.5">
+                    <label className="text-sm font-medium leading-none">
+                      Staff Exclusivo (só equipa preferencial)
+                    </label>
+                    <p className="text-xs text-muted-foreground">
+                      Se ativo, este funcionário só é elegível para tarefas das
+                      propriedades onde está na equipa preferencial.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={editForm.exclusivo_preferenciais}
+                    onCheckedChange={(v) => setEditForm((f) => ({ ...f, exclusivo_preferenciais: v }))}
+                    aria-label="Staff exclusivo"
+                  />
                 </div>
 
                 {editErro && (

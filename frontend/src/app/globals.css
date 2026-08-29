@@ -642,3 +642,59 @@
   color: #94a3b8;
   font-size: 0.6rem;
 }
+
+/* ==========================================================================
+   FIX (calendário compacto) — Eventos allDay (Folgas/Férias) compactos.
+   O cliente reportou que os eventos de dia inteiro (ausências, folgas fixas)
+   ocupavam demasiado espaço vertical. Agora são barras finas com padding
+   reduzido e font-size menor, mantendo legibilidade.
+   ========================================================================== */
+
+/* Reduz padding, font-size e altura de TODOS os eventos allDay no slot topo. */
+.fc .fc-daygrid-event {
+  padding: 1px 4px !important;
+  font-size: 0.6875rem !important;
+  line-height: 1.1 !important;
+  min-height: 0 !important;
+}
+
+/* O contentor principal do evento allDay fica mais fino. */
+.fc .fc-daygrid-event .fc-event-main {
+  padding: 1px 4px !important;
+  min-height: 0 !important;
+}
+
+/* Banners de ausência (aprovada + pendente) — barras finas e compactas. */
+.fc-evt-ausencia__content,
+.fc-evt-ausencia-pendente__content {
+  padding: 1px 4px !important;
+  line-height: 1.1 !important;
+}
+
+.fc-evt-ausencia__title,
+.fc-evt-ausencia-pendente__title {
+  font-size: 0.6875rem !important;
+  line-height: 1.1 !important;
+}
+
+/* Reduz o espaço entre eventos allDay consecutivos no slot de topo. */
+.fc .fc-daygrid-day-frame .fc-daygrid-event-harness,
+.fc .fc-daygrid-day-frame .fc-daygrid-event-harness-abs {
+  margin-top: 0 !important;
+}
+
+/* O slot de all-day em si fica mais compacto (menos padding vertical). */
+.fc .fc-daygrid-day-frame {
+  padding-top: 1px !important;
+}
+
+/* Linha de all-day na vista semanal — altura mínima reduzida. */
+.fc .fc-daygrid-day-top {
+  padding-top: 1px !important;
+}
+
+/* Folgas fixas (cinzento claro) — barra extra fina para não competir com tarefas. */
+.fc .fc-daygrid-event.fc-daygrid-block-event {
+  min-height: 15px !important;
+}
+
