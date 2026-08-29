@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
   CalendarRange,
   Loader2,
@@ -16,6 +17,7 @@ import {
   Table,
   Download,
   Plus,
+  Trash2,
 } from "lucide-react";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -42,7 +44,7 @@ import {
   DialogContent,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { adminGet, adminPost, adminPatch, type PropriedadeDTO, type UtilizadorDTO } from "@/lib/api";
+import { adminGet, adminPost, adminPatch, adminDelete, type PropriedadeDTO, type UtilizadorDTO } from "@/lib/api";
 
 /* ------------------------------------------------------------------ */
 /* Tipos                                                               */
@@ -836,6 +838,56 @@ export default function CalendarioOperacionalPage() {
   const [confirmarAutoAtribuir, setConfirmarAutoAtribuir] = useState(false);
   const [autoAtribuirResultado, setAutoAtribuirResultado] = useState<string | null>(null);
 
+  /* --- FIX (eliminar limpezas futuras) — Ação rápida de limpeza da agenda.
+      Chama DELETE /api/gestor/tarefas/futuras (apaga tarefas não
+      concluídas/canceladas desde hoje). --- */
+  const [eliminarFuturasOpen, setEliminarFuturasOpen] = useState(false);
+  const [eliminarFuturasLoading, setEliminarFuturasLoading] = useState(false);
+
+  async function handleEliminarFuturas() {
+    setEliminarFuturasLoading(true);
+    setErro(null);
+    try {
+      const res = await adminDelete<{ eliminadas: number; mensagem?: string }>(
+        "/api/gestor/tarefas/futuras"
+      );
+      setEliminarFuturasOpen(false);
+      setAutoAtribuirResultado(
+        res?.mensagem ??
+          `Foram eliminadas ${res?.eliminadas ?? 0} tarefa(s) futura(s) não concluída(s).`
+      );
+      await carregarTarefas();
+    } catch (e) {
+      setErro(
+        e instanceof Error
+          ? `Erro ao eliminar tarefas futuras: ${e.message}`
+          : "Erro ao eliminar tarefas futuras."
+      );
+    } finally {
+      setEliminarFuturasLoading(false);
+    }
+  }
+
+  /* --- FIX (cancelar tarefa no detalhe) — Cancela uma tarefa futura direto
+      do modal de detalhe do calendário (marca estado='cancelada', soft). --- */
+  const [cancelarTarefaLoading, setCancelarTarefaLoading] = useState(false);
+
+  async function handleCancelarTarefa() {
+    if (!tarefaSelecionada) return;
+    setCancelarTarefaLoading(true);
+    try {
+      await adminPatch(`/api/gestor/tarefas/${tarefaSelecionada._id}/estado`, {
+        estado: "cancelada",
+      });
+      setTarefaSelecionada(null);
+      await carregarTarefas();
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Erro ao cancelar tarefa.");
+    } finally {
+      setCancelarTarefaLoading(false);
+    }
+  }
+
   async function handleAutoAtribuir() {
     setAutoAtribuindo(true);
     setConfirmarAutoAtribuir(false);
@@ -1113,6 +1165,25 @@ export default function CalendarioOperacionalPage() {
               <Sparkles className="h-4 w-4" />
             )}
             {autoAtribuindo ? "A atribuir…" : "Auto-Atribuir Pendentes"}
+          </Button>
+
+          {/* FIX (eliminar limpezas futuras) — Limpa a agenda de tarefas futuras
+              não concluídas/canceladas (DELETE /api/gestor/tarefas/futuras). */}
+          <Button
+            variant="outline"
+            onClick={() => setEliminarFuturasOpen(true)}
+            disabled={eliminarFuturasLoading || loading}
+            title="Elimina todas as tarefas futuras não concluídas/canceladas (limpa a agenda)."
+            className="gap-2 border-destructive/30 text-destructive hover:bg-destructive/5"
+          >
+            {eliminarFuturasLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Trash2 className="h-4 w-4" />
+            )}
+            <span className="hidden sm:inline">
+              {eliminarFuturasLoading ? "A eliminar…" : "Eliminar Futuras"}
+            </span>
           </Button>
 
           {/* Prompt 99 — Toggle de vistas (Calendário / Tabela) */}
@@ -1545,7 +1616,15 @@ export default function CalendarioOperacionalPage() {
                 <User className="h-4 w-4 text-muted-foreground" />
                 <span>
                   Staff atual:{" "}
-                  {tarefaSelecionada.utilizador_id?.nome ?? (
+                  {tarefaSelecionada.utilizador_id ? (
+                    <Link
+                      href={`/gestor/equipa?editar=${tarefaSelecionada.utilizador_id._id}`}
+                      className="text-primary underline-offset-2 hover:underline font-medium"
+                      title="Editar funcionário"
+                    >
+                      {tarefaSelecionada.utilizador_id.nome}
+                    </Link>
+                  ) : (
                     <span className="text-destructive">Por atribuir</span>
                   )}
                 </span>
@@ -1633,11 +1712,40 @@ export default function CalendarioOperacionalPage() {
           </DialogContent>
         )}
         <DialogFooter>
+          {/* FIX (cancelar tarefa no detalhe) — Ação rápida de cancelar/eliminar
+              tarefas futuras. Só para tarefas reais (não ausências/folgas) e
+              não concluídas/canceladas. */}
+          {tarefaSelecionada &&
+            tarefaSelecionada.tipo !== "ausencia" &&
+            tarefaSelecionada.tipo !== "ausencia_pendente" &&
+            tarefaSelecionada.tipo !== "folga_fixa" &&
+            tarefaSelecionada.estado !== "concluida" &&
+            tarefaSelecionada.estado !== "cancelada" && (
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={handleCancelarTarefa}
+                disabled={cancelarTarefaLoading || reatribuindo}
+                className="mr-auto"
+              >
+                {cancelarTarefaLoading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    A cancelar…
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Cancelar Limpeza
+                  </>
+                )}
+              </Button>
+            )}
           <Button
             type="button"
             variant="outline"
             onClick={() => setTarefaSelecionada(null)}
-            disabled={reatribuindo}
+            disabled={reatribuindo || cancelarTarefaLoading}
           >
             Fechar
           </Button>
@@ -1882,6 +1990,58 @@ export default function CalendarioOperacionalPage() {
               <>
                 <Plus className="mr-2 h-4 w-4" />
                 Criar Limpeza
+              </>
+            )}
+          </Button>
+        </DialogFooter>
+      </Dialog>
+
+      {/* FIX (eliminar limpezas futuras) — Dialog de confirmação para apagar
+          todas as tarefas futuras não concluídas/canceladas. */}
+      <Dialog open={eliminarFuturasOpen} onOpenChange={setEliminarFuturasOpen}>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-destructive">
+            <Trash2 className="h-5 w-5" />
+            Eliminar Limpezas Futuras
+          </DialogTitle>
+          <DialogDescription>
+            Esta ação apaga <strong>definitivamente</strong> todas as tarefas
+            futuras (a partir de hoje) que não estejam concluídas ou canceladas.
+            Não pode ser desfeita.
+          </DialogDescription>
+          <DialogClose onClick={() => setEliminarFuturasOpen(false)} />
+        </DialogHeader>
+        <DialogContent className="space-y-2">
+          <p className="text-sm text-muted-foreground">
+            Útil para limpar a agenda após uma mudança de rota, reorganização de
+            equipa ou quando as tarefas foram geradas por erro. As tarefas
+            concluídas e canceladas não são afetadas (mantêm-se no histórico).
+          </p>
+        </DialogContent>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setEliminarFuturasOpen(false)}
+            disabled={eliminarFuturasLoading}
+          >
+            Cancelar
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            onClick={handleEliminarFuturas}
+            disabled={eliminarFuturasLoading}
+          >
+            {eliminarFuturasLoading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                A eliminar…
+              </>
+            ) : (
+              <>
+                <Trash2 className="mr-2 h-4 w-4" />
+                Sim, Eliminar Futuras
               </>
             )}
           </Button>
