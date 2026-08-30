@@ -228,7 +228,7 @@ exports.criarPropriedade = async (req, res) => {
     const { ok, empresaId } = obterEmpresaId(req, res);
     if (!ok) return;
 
-    const { nome, morada, tempo_limpeza_minutos, parceiro_id, staff_necessario, dias_fixos_limpeza, nome_responsavel, contacto, frequencia_limpeza, horario_limpeza, observacoes, morada_estruturada, equipa_preferencial } = req.body || {};
+    const { nome, morada, tempo_limpeza_minutos, parceiro_id, staff_necessario, dias_fixos_limpeza, nome_responsavel, contacto, frequencia_limpeza, horario_limpeza, observacoes, morada_estruturada, equipa_preferencial, capacidade_hospedes } = req.body || {};
 
     // Validações de presença.
     // FIX (morada estruturada) — Aceita morada OU morada_estruturada (pelo menos
@@ -323,6 +323,13 @@ exports.criarPropriedade = async (req, res) => {
       // FIX (equipas preferenciais) — Array de IDs de staff preferenciais.
       ...(Array.isArray(equipa_preferencial)
         ? { equipa_preferencial: equipa_preferencial.filter((id) => mongoose.isValidObjectId(id)) }
+        : {}),
+      // FIX (lotação máxima) — capacidade_hospedes (lotação máxima da casa).
+      // Usado como fallback quando o Smoobu não envia o número de hóspedes
+      // da reserva. O campo já existia no schema (v1.61.0) mas não era aceito
+      // no fluxo manual de criação de propriedades.
+      ...(capacidade_hospedes !== undefined && capacidade_hospedes !== null && capacidade_hospedes !== ''
+        ? { capacidade_hospedes: Math.max(0, Number(capacidade_hospedes) || 0) }
         : {}),
       checklist: Array.isArray(req.body?.checklist)
         ? req.body.checklist.filter((s) => typeof s === 'string' && s.trim())
@@ -1115,7 +1122,7 @@ exports.atualizarPropriedade = async (req, res) => {
       });
     }
 
-    const { nome, morada, tempo_limpeza_minutos, funcionario_preferencial_id, modelo_checklist_id, observacoes, morada_estruturada, parceiro_id, equipa_preferencial } = req.body || {};
+    const { nome, morada, tempo_limpeza_minutos, funcionario_preferencial_id, modelo_checklist_id, observacoes, morada_estruturada, parceiro_id, equipa_preferencial, capacidade_hospedes } = req.body || {};
 
     // Tem de haver pelo menos um campo para atualizar.
     if (
@@ -1126,7 +1133,8 @@ exports.atualizarPropriedade = async (req, res) => {
       modelo_checklist_id === undefined &&
       observacoes === undefined &&
       morada_estruturada === undefined &&
-      req.body?.checklist === undefined
+      req.body?.checklist === undefined &&
+      capacidade_hospedes === undefined
     ) {
       return res.status(400).json({
         erro: 'Nenhum campo para atualizar. Envie nome, morada, tempo_limpeza_minutos, checklist, funcionario_preferencial_id, modelo_checklist_id, observacoes ou morada_estruturada.',
@@ -1346,6 +1354,21 @@ exports.atualizarPropriedade = async (req, res) => {
         }
       }
       propriedade.modelo_checklist_id = valor;
+    }
+
+    // FIX (lotação máxima) — capacidade_hospedes (lotação máxima da casa).
+    // Aceita null/string vazia para limpar o valor. O campo já existia no schema
+    // (v1.61.0) mas não era atualizável via PUT /propriedades/:id.
+    if (capacidade_hospedes !== undefined) {
+      const n = capacidade_hospedes === null || capacidade_hospedes === ''
+        ? null
+        : Number(capacidade_hospedes);
+      if (n !== null && (Number.isNaN(n) || n < 0)) {
+        return res.status(400).json({
+          erro: 'capacidade_hospedes deve ser um número maior ou igual a 0 (ou null).',
+        });
+      }
+      propriedade.capacidade_hospedes = n;
     }
 
     await propriedade.save();

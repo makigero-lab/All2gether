@@ -52,8 +52,10 @@ import { parsearDataSegura, extrairHoraISO } from "@/lib/utils";
 
 interface TarefaAdmin {
   _id: string;
-  propriedade_id?: { nome: string } | null;
-  utilizador_id?: { nome: string } | null;
+  // FIX (qtd hóspedes) — Inclui capacidade_hospedes no populate da propriedade
+  // para fallback quando tarefa.hospedes é null/0.
+  propriedade_id?: { _id?: string; nome: string; capacidade_hospedes?: number | null } | null;
+  utilizador_id?: { _id?: string; nome: string } | null;
   data: string;
   tipo: string;
   estado: string;
@@ -69,6 +71,9 @@ interface TarefaAdmin {
     pax?: number | null;
     nome_hospede?: string | null;
   } | null;
+  // FIX (qtd hóspedes) — Número de hóspedes da reserva (vindo do Smoobu
+  // ou preenchido manualmente). Fallback: propriedade.capacidade_hospedes.
+  hospedes?: number | null;
   // FIX (motivo_falha_atribuicao) — Motivo pelo qual a auto-atribuição falhou
   // (ex: "Toda a equipa de folga/férias", "Lotação máxima excedida").
   motivo_nao_atribuicao?: string | null;
@@ -143,16 +148,42 @@ export default function AdminTarefasPage() {
   // Filtro: mostrar só tarefas com avarias.
   const [soAvarias, setSoAvarias] = useState(false);
 
+  // FIX (filtros avançados) — Filtros de intervalo de datas, propriedade e staff.
+  // Aplicados client-side sobre as tarefas já carregadas (que cobrem 3 meses).
+  const [filtroDataInicio, setFiltroDataInicio] = useState("");
+  const [filtroDataFim, setFiltroDataFim] = useState("");
+  const [filtroPropriedade, setFiltroPropriedade] = useState("");
+  const [filtroStaff, setFiltroStaff] = useState("");
+
   // v1.58.0 (Prompt 80, ponto 3) — Aba de filtragem por estado.
   // 'todas' | 'por_atribuir' | 'pendentes' | 'concluidas'
   type AbaEstado = "todas" | "por_atribuir" | "pendentes" | "concluidas";
   const [abaEstado, setAbaEstado] = useState<AbaEstado>("todas");
 
-  // Aplica filtros client-side (avarias + aba de estado).
+  // Aplica filtros client-side (avarias + aba de estado + filtros avançados).
   const tarefasFiltradas = tarefas.filter((t) => {
     // Filtro de avarias (toggle existente).
     if (soAvarias && !(Array.isArray(t.avarias) && t.avarias.length > 0)) {
       return false;
+    }
+    // FIX (filtros avançados) — Intervalo de datas.
+    if (filtroDataInicio) {
+      const dataTarefa = t.data?.slice(0, 10);
+      if (!dataTarefa || dataTarefa < filtroDataInicio) return false;
+    }
+    if (filtroDataFim) {
+      const dataTarefa = t.data?.slice(0, 10);
+      if (!dataTarefa || dataTarefa > filtroDataFim) return false;
+    }
+    // FIX (filtros avançados) — Filtro de propriedade (compara por nome).
+    if (filtroPropriedade) {
+      const nomeSelecionado = propriedades.find((p) => p._id === filtroPropriedade)?.nome;
+      if (t.propriedade_id?.nome !== nomeSelecionado) return false;
+    }
+    // FIX (filtros avançados) — Filtro de staff (compara por nome).
+    if (filtroStaff) {
+      const nomeStaff = staff.find((s) => s._id === filtroStaff)?.nome;
+      if (t.utilizador_id?.nome !== nomeStaff) return false;
     }
     // Filtro da aba de estado.
     switch (abaEstado) {
@@ -808,6 +839,77 @@ export default function AdminTarefasPage() {
         </TabsList>
       </Tabs>
 
+      {/* FIX (filtros avançados) — Barra de filtros: datas, propriedade, staff. */}
+      <Card>
+        <CardContent className="flex flex-wrap items-end gap-3 p-4">
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-medium text-muted-foreground">Data Início</label>
+            <Input
+              type="date"
+              value={filtroDataInicio}
+              onChange={(e) => { setFiltroDataInicio(e.target.value); setPagina(1); }}
+              className="h-9 w-[150px]"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-medium text-muted-foreground">Data Fim</label>
+            <Input
+              type="date"
+              value={filtroDataFim}
+              onChange={(e) => { setFiltroDataFim(e.target.value); setPagina(1); }}
+              className="h-9 w-[150px]"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-medium text-muted-foreground">Propriedade</label>
+            <select
+              value={filtroPropriedade}
+              onChange={(e) => { setFiltroPropriedade(e.target.value); setPagina(1); }}
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
+              aria-label="Filtrar por propriedade"
+            >
+              <option value="">Todas</option>
+              {propriedades.filter((p) => p.ativo).map((p) => (
+                <option key={p._id} value={p._id}>{p.nome}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-medium text-muted-foreground">Funcionário</label>
+            <select
+              value={filtroStaff}
+              onChange={(e) => { setFiltroStaff(e.target.value); setPagina(1); }}
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
+              aria-label="Filtrar por funcionário"
+            >
+              <option value="">Todos</option>
+              {staff.map((u) => (
+                <option key={u._id} value={u._id}>{u.nome}</option>
+              ))}
+            </select>
+          </div>
+          {(filtroDataInicio || filtroDataFim || filtroPropriedade || filtroStaff) && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-9"
+              onClick={() => {
+                setFiltroDataInicio("");
+                setFiltroDataFim("");
+                setFiltroPropriedade("");
+                setFiltroStaff("");
+                setPagina(1);
+              }}
+            >
+              Limpar filtros
+            </Button>
+          )}
+          <span className="ml-auto text-xs text-muted-foreground">
+            {tarefasFiltradas.length} de {tarefas.length} tarefa(s)
+          </span>
+        </CardContent>
+      </Card>
+
       {/* Tabela */}
       <Card>
         <CardContent className="p-0">
@@ -839,6 +941,8 @@ export default function AdminTarefasPage() {
                     <th className="px-4 py-3 font-medium">Propriedade</th>
                     {/* Prompt 136 — Coluna Hóspede (nome_hospede da reserva). */}
                     <th className="px-4 py-3 font-medium">Hóspede</th>
+                    {/* FIX (qtd hóspedes) — Coluna Qtd. Hóspedes com fallback à lotação. */}
+                    <th className="px-4 py-3 font-medium">Qtd. Hóspedes</th>
                     <th className="px-4 py-3 font-medium">Funcionário</th>
                     <th className="px-4 py-3 font-medium">Estado</th>
                     {/* v1.68.0 (Prompt 91) — Coluna Observações / Avaria */}
@@ -871,6 +975,36 @@ export default function AdminTarefasPage() {
                       {/* Prompt 136 — Nome do hóspede (da reserva Smoobu ou manual). */}
                       <td className="px-4 py-3 text-muted-foreground">
                         {t.detalhes_reserva?.nome_hospede ?? "—"}
+                      </td>
+                      {/* FIX (qtd hóspedes) — Quantidade de hóspedes com fallback.
+                          Mostra t.hospedes (vindo do Smoobu). Se for null/0/inválido,
+                          usa propriedade_id.capacidade_hospedes (lotação máxima) e
+                          mostra visualmente que é o limite da casa "(Máx: N)". */}
+                      <td className="px-4 py-3">
+                        {(() => {
+                          const hospedesReal = t.hospedes ?? t.detalhes_reserva?.pax ?? null;
+                          const capacidade = t.propriedade_id?.capacidade_hospedes ?? null;
+                          if (hospedesReal && hospedesReal > 0) {
+                            return (
+                              <span className="inline-flex items-center gap-1 font-medium" title="Nº de hóspedes da reserva">
+                                <span aria-hidden>👥</span>
+                                {hospedesReal}
+                              </span>
+                            );
+                          }
+                          if (capacidade && capacidade > 0) {
+                            return (
+                              <span
+                                className="inline-flex items-center gap-1 text-muted-foreground"
+                                title="Sem nº de hóspedes — a mostrar a lotação máxima da casa"
+                              >
+                                <span aria-hidden>👥</span>
+                                (Máx: {capacidade})
+                              </span>
+                            );
+                          }
+                          return <span className="text-muted-foreground/50">—</span>;
+                        })()}
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">{t.utilizador_id?.nome ?? "—"}</td>
                       <td className="px-4 py-3">
