@@ -661,6 +661,46 @@ export default function CalendarioOperacionalPage() {
       );
     }
 
+    // --- FIX (nomes desaparecidos) — Folga Fixa: barra cinzenta compacta
+    //     com o NOME do staff explicitamente renderizado. Antes caía no
+    //     ramo genérico que usa propriedade_id?.nome ("—") porque folgas
+    //     não têm propriedade associada. Usa arg.event.title (que o backend
+    //     já define como "Folga - {nome}") ou o nome do staff diretamente. ---
+    if (isFolga) {
+      const folgaTitle = arg.event.title ?? `Folga - ${staff ?? "Staff"}`;
+      if (isMonthView) {
+        return (
+          <div className="fc-evt-month fc-evt-month--folga" title={folgaTitle}>
+            <span
+              className="fc-evt-month__dot"
+              style={{ backgroundColor: "#94a3b8" }}
+              aria-hidden
+            />
+            <span className="fc-evt-month__title">{folgaTitle}</span>
+          </div>
+        );
+      }
+      return (
+        <div className="fc-evt-block fc-evt-block--folga" title={folgaTitle}>
+          <div className="fc-evt-block__header">
+            <span
+              className="fc-evt-block__dot"
+              style={{ backgroundColor: "#94a3b8" }}
+              aria-hidden
+            />
+            <span className="fc-evt-block__emoji" aria-hidden>😴</span>
+          </div>
+          <div className="fc-evt-block__title">{folgaTitle}</div>
+          {staff && (
+            <div className="fc-evt-block__subtitle">
+              <User className="fc-evt-block__icon" />
+              <span>{primeiroNome(staff)}</span>
+            </div>
+          )}
+        </div>
+      );
+    }
+
     // --- Vista mensal: layout compacto em linha ---
     if (isMonthView) {
       // HF26 — Tarefa órfã (staff de férias): destaque VERMELHO, prioritário.
