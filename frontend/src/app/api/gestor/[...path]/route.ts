@@ -9,6 +9,11 @@
  * para adicionar o header ao encaminhar para o backend.
  *
  * Métodos suportados: GET, POST, PUT, PATCH, DELETE.
+ *
+ * FIX (bug status smoobu) — Esta rota é explicitamente dinâmica (nunca cached)
+ * para garantir que respostas como o estado do Smoobu sejam sempre lidas do
+ * backend em tempo real. Sem isto, o Next.js poderia servir uma versão em
+ * cache obsoleta onde `smoobu_ativo` ainda era false/undefined.
  */
 
 import { cookies } from "next/headers";
@@ -17,6 +22,10 @@ import {
   buildBackendUrl,
   ERRO_BACKEND_NAO_CONFIGURADO,
 } from "@/lib/backend";
+
+// FIX (bug status smoobu) — Força a rota a ser sempre dinâmica (nunca cached).
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 const COOKIE_NAME = "all2gether_token";
 

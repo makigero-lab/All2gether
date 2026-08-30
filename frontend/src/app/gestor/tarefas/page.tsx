@@ -16,7 +16,6 @@ import {
   Eye,
   Info,
   UserMinus,
-  Trash2,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -43,7 +42,6 @@ import {
   adminGet,
   adminPost,
   adminPatch,
-  adminDelete,
   type PropriedadeDTO,
   type UtilizadorDTO,
   type Role,
@@ -479,35 +477,6 @@ export default function AdminTarefasPage() {
   const [autoAtribuindo, setAutoAtribuindo] = useState(false);
   const [confirmarAutoAtribuir, setConfirmarAutoAtribuir] = useState(false);
 
-  // FIX (eliminar limpezas futuras) — Ação rápida de limpeza da agenda.
-  // Apaga todas as tarefas futuras não concluídas/canceladas (DELETE em massa).
-  const [eliminarFuturasOpen, setEliminarFuturasOpen] = useState(false);
-  const [eliminarFuturasLoading, setEliminarFuturasLoading] = useState(false);
-
-  async function handleEliminarFuturas() {
-    setEliminarFuturasLoading(true);
-    setErro(null);
-    try {
-      const res = await adminDelete<{ eliminadas: number; mensagem?: string }>(
-        "/api/gestor/tarefas/futuras"
-      );
-      setEliminarFuturasOpen(false);
-      setWarningToast(
-        res?.mensagem ??
-          `Foram eliminadas ${res?.eliminadas ?? 0} tarefa(s) futura(s) não concluída(s).`
-      );
-      await carregar();
-    } catch (e) {
-      setErro(
-        e instanceof Error
-          ? `Erro ao eliminar tarefas futuras: ${e.message}`
-          : "Erro ao eliminar tarefas futuras."
-      );
-    } finally {
-      setEliminarFuturasLoading(false);
-    }
-  }
-
   async function handleAutoAtribuir() {
     setAutoAtribuindo(true);
     setConfirmarAutoAtribuir(false);
@@ -597,24 +566,6 @@ export default function AdminTarefasPage() {
             )}
             <span className="hidden sm:inline">
               {autoAtribuindo ? "A atribuir…" : "Auto-Atribuir Pendentes"}
-            </span>
-          </Button>
-          {/* FIX (eliminar limpezas futuras) — Ação rápida para limpar a agenda
-              de tarefas futuras não concluídas/canceladas. */}
-          <Button
-            variant="outline"
-            onClick={() => setEliminarFuturasOpen(true)}
-            disabled={eliminarFuturasLoading || loading}
-            title="Elimina todas as tarefas futuras não concluídas/canceladas (limpa a agenda)."
-            className="gap-2 border-destructive/30 text-destructive hover:bg-destructive/5"
-          >
-            {eliminarFuturasLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Trash2 className="h-4 w-4" />
-            )}
-            <span className="hidden sm:inline">
-              {eliminarFuturasLoading ? "A eliminar…" : "Eliminar Futuras"}
             </span>
           </Button>
           <Button onClick={() => {
@@ -1369,54 +1320,6 @@ export default function AdminTarefasPage() {
               <><Loader2 className="mr-2 h-4 w-4 animate-spin" />A cancelar…</>
             ) : (
               <><AlertCircle className="mr-2 h-4 w-4" />Sim, Cancelar Limpeza</>
-            )}
-          </Button>
-        </DialogFooter>
-      </Dialog>
-
-      {/* FIX (eliminar limpezas futuras) — Dialog de confirmação para apagar
-          todas as tarefas futuras não concluídas/canceladas. */}
-      <Dialog open={eliminarFuturasOpen} onOpenChange={setEliminarFuturasOpen}>
-        <DialogHeader>
-          <div>
-            <DialogTitle className="flex items-center gap-2 text-destructive">
-              <Trash2 className="h-5 w-5" />
-              Eliminar Limpezas Futuras
-            </DialogTitle>
-            <DialogDescription>
-              Esta ação apaga <strong>definitivamente</strong> todas as tarefas
-              futuras (a partir de hoje) que não estejam concluídas ou canceladas.
-              Não pode ser desfeita.
-            </DialogDescription>
-          </div>
-          <DialogClose onClick={() => setEliminarFuturasOpen(false)} />
-        </DialogHeader>
-        <DialogContent className="space-y-2">
-          <p className="text-sm text-muted-foreground">
-            Útil para limpar a agenda após uma mudança de rota, reorganização de
-            equipa ou quando as tarefas foram geradas por erro. As tarefas
-            concluídas e canceladas não são afetadas (mantêm-se no histórico).
-          </p>
-        </DialogContent>
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setEliminarFuturasOpen(false)}
-            disabled={eliminarFuturasLoading}
-          >
-            Cancelar
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            onClick={handleEliminarFuturas}
-            disabled={eliminarFuturasLoading}
-          >
-            {eliminarFuturasLoading ? (
-              <><Loader2 className="mr-2 h-4 w-4 animate-spin" />A eliminar…</>
-            ) : (
-              <><Trash2 className="mr-2 h-4 w-4" />Sim, Eliminar Futuras</>
             )}
           </Button>
         </DialogFooter>

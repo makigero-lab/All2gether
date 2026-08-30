@@ -657,12 +657,13 @@ exports.getDadosCalendario = async (req, res) => {
       const diaAtual = new Date(dataInicio);
 
       while (diaAtual < dataFim) {
-        // FIX (sincronização folgas fixas) — Usa getUTCDay() em vez de getDay()
-        // porque as datas (dataInicio/dataFim e diaAtual) estão a meia-noite UTC
+        // FIX (bug dias de folga) — Usa getUTCDay() em vez de getDay() porque
+        // as datas (dataInicio/dataFim e diaAtual) estão a meia-noite UTC
         // (o frontend envia YYYY-MM-DD e o Ausencia schema normaliza para UTC).
         // getDay() aplica o offset do fuso do servidor, o que desloca o dia da
-        // semana e faz com que as folgas apareçam no dia errado. getUTCDay()
-        // garante que o dia renderizado bate com o dia definido no perfil.
+        // semana e faz com que as folgas apareçam no dia errado (ex.: falsos
+        // positivos a cair no Sábado). getUTCDay() garante que o dia renderizado
+        // bate com o dia definido no perfil.
         const diaSemana = diaAtual.getUTCDay(); // 0=Dom, 1=Seg, ..., 6=Sáb
 
         for (const staff of staffFiltrados) {
@@ -679,7 +680,7 @@ exports.getDadosCalendario = async (req, res) => {
           }
         }
 
-        diaAtual.setDate(diaAtual.getDate() + 1);
+        diaAtual.setUTCDate(diaAtual.getUTCDate() + 1);
       }
 
       // ----------------------------------------------------------------
