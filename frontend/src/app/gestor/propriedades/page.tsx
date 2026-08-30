@@ -296,6 +296,9 @@ export default function PropriedadesPage() {
     morada_cidade: "",
     // FIX (parceiro associado relacional) — ID do parceiro B2B associado.
     parceiro_id: "",
+    // FIX (lotação máxima) — Capacidade máxima de hóspedes (lotação da casa).
+    // Usada como fallback quando o Smoobu não envia o número de hóspedes.
+    capacidade_hospedes: "",
   });
   const [manualSubmitting, setManualSubmitting] = useState(false);
   const [manualErro, setManualErro] = useState<string | null>(null);
@@ -344,10 +347,14 @@ export default function PropriedadesPage() {
           ...(manualForm.parceiro_id.trim()
             ? { parceiro_id: manualForm.parceiro_id.trim() }
             : {}),
+          // FIX (lotação máxima) — capacidade_hospedes (lotação da casa).
+          ...(manualForm.capacidade_hospedes.trim()
+            ? { capacidade_hospedes: Number(manualForm.capacidade_hospedes) }
+            : {}),
         }
       );
       // Limpa o formulário e fecha o modal.
-      setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1", dias_fixos_limpeza: [], observacoes: "", morada_rua: "", morada_codigo_postal: "", morada_cidade: "", parceiro_id: "" });
+      setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1", dias_fixos_limpeza: [], observacoes: "", morada_rua: "", morada_codigo_postal: "", morada_cidade: "", parceiro_id: "", capacidade_hospedes: "" });
       setManualOpen(false);
       await carregar();
     } catch (e) {
@@ -379,6 +386,9 @@ export default function PropriedadesPage() {
     // propriedade (tornado editável no modal de edição; antes só existia no
     // formulário de criação manual).
     staff_necessario: "1",
+    // FIX (lotação máxima) — Capacidade máxima de hóspedes (lotação da casa).
+    // Usada como fallback quando o Smoobu não envia o número de hóspedes.
+    capacidade_hospedes: "",
   });
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editErro, setEditErro] = useState<string | null>(null);
@@ -490,6 +500,9 @@ export default function PropriedadesPage() {
         p.parceiro_id && typeof p.parceiro_id === "object"
           ? p.parceiro_id._id
           : (p.parceiro_id as string) ?? "",
+      // FIX (lotação máxima) — capacidade_hospedes (lotação da casa).
+      capacidade_hospedes:
+        p.capacidade_hospedes != null ? String(p.capacidade_hospedes) : "",
     });
     setEditErro(null);
     // Prompt 126 — Reset dos avisos de morada ao abrir o modal.
@@ -617,6 +630,11 @@ export default function PropriedadesPage() {
           ...(editForm.parceiro_id.trim()
             ? { parceiro_id: editForm.parceiro_id.trim() }
             : { parceiro_id: null }),
+          // FIX (lotação máxima) — capacidade_hospedes (lotação da casa).
+          // String vazia → null no backend (limpa o valor).
+          ...(editForm.capacidade_hospedes.trim()
+            ? { capacidade_hospedes: Number(editForm.capacidade_hospedes) }
+            : { capacidade_hospedes: null }),
           forcar_morada: editMoradaConfirmada || undefined,
         }
       );
@@ -704,7 +722,7 @@ export default function PropriedadesPage() {
             onClick={() => {
               setManualOpen(true);
               setManualErro(null);
-              setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1", dias_fixos_limpeza: [], observacoes: "", morada_rua: "", morada_codigo_postal: "", morada_cidade: "", parceiro_id: "" });
+              setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1", dias_fixos_limpeza: [], observacoes: "", morada_rua: "", morada_codigo_postal: "", morada_cidade: "", parceiro_id: "", capacidade_hospedes: "" });
             }}
           >
             <Plus className="h-4 w-4" />
@@ -1318,6 +1336,33 @@ export default function PropriedadesPage() {
               </p>
             </div>
 
+            {/* FIX (lotação máxima) — Capacidade Máxima / Lotação da casa. */}
+            <div className="space-y-1.5">
+              <label
+                htmlFor="manual-capacidade"
+                className="text-sm font-medium leading-none"
+              >
+                Capacidade Máxima / Lotação
+              </label>
+              <Input
+                id="manual-capacidade"
+                type="number"
+                min={0}
+                value={manualForm.capacidade_hospedes}
+                onChange={(e) =>
+                  setManualForm((f) => ({
+                    ...f,
+                    capacidade_hospedes: e.target.value,
+                  }))
+                }
+                placeholder="Ex.: 4"
+              />
+              <p className="text-xs text-muted-foreground">
+                Nº máximo de hóspedes da casa. Usado como fallback quando o
+                Smoobu não envia o nº de hóspedes da reserva.
+              </p>
+            </div>
+
             {/* HF22 — Dias Fixos de Limpeza (checkboxes) */}
             <div className="space-y-2">
               <label className="text-sm font-medium leading-none">
@@ -1605,6 +1650,31 @@ export default function PropriedadesPage() {
                     />
                     <p className="text-xs text-muted-foreground">
                       Se &gt; 1, o sistema atribui uma equipa de N funcionários a esta propriedade.
+                    </p>
+                  </div>
+                  {/* FIX (lotação máxima) — Capacidade Máxima / Lotação (edição). */}
+                  <div className="space-y-1.5">
+                    <label
+                      htmlFor="edit-capacidade"
+                      className="text-sm font-medium"
+                    >
+                      Capacidade Máxima / Lotação
+                    </label>
+                    <Input
+                      id="edit-capacidade"
+                      type="number"
+                      min={0}
+                      value={editForm.capacidade_hospedes}
+                      onChange={(e) =>
+                        setEditForm((f) => ({
+                          ...f,
+                          capacidade_hospedes: e.target.value,
+                        }))
+                      }
+                      placeholder="Ex.: 4"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Nº máximo de hóspedes. Fallback quando o Smoobu não envia o nº real.
                     </p>
                   </div>
                 </div>
