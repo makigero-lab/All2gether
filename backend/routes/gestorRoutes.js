@@ -188,16 +188,31 @@ router.get('/configuracoes', auth, isGestor, async (req, res) => {
     if (!empresaId) {
       return res.status(400).json({ erro: 'empresa_id em falta no token.' });
     }
-    const empresa = await Empresa.findById(empresaId).select('nome nif morada telefone email').lean();
+    // FIX (status smoobu configs principais) — Inclui integracoes.smoobu no
+    // select para a página principal de configurações poder mostrar o estado
+    // real da integração (env var OU chave BD).
+    const empresa = await Empresa.findById(empresaId)
+      .select('nome nif morada telefone email integracoes.smoobu')
+      .lean();
     if (!empresa) {
       return res.status(404).json({ erro: 'Empresa não encontrada.' });
     }
+    const smoobu = empresa.integracoes?.smoobu || {};
+    const temChaveBD = Boolean(smoobu.api_key && smoobu.api_key.trim());
     return res.status(200).json({
       nome: empresa.nome,
       nif: empresa.nif || '',
       morada: empresa.morada || '',
       telefone: empresa.telefone || '',
       email: empresa.email || '',
+      // FIX (status smoobu configs principais) — Estado real da integração
+      // Smoobu: smoobu_ativo avalia estritamente a env var SMOOBU_API_KEY
+      // (fonte de verdade quando o backend corre no Render) com fallback à
+      // chave da BD. Isto resolve o bug em que o cliente via "Não configurada"
+      // na página principal de configurações apesar de a API estar a funcionar.
+      smoobu_api_key_mascarada: mascararApiKey(smoobu.api_key),
+      tem_api_key: temChaveBD,
+      smoobu_ativo: Boolean(process.env.SMOOBU_API_KEY || temChaveBD),
     });
   } catch (err) {
     return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
@@ -224,10 +239,14 @@ router.put('/configuracoes', auth, isGestor, async (req, res) => {
       return res.status(400).json({ erro: 'Nenhum campo para atualizar.' });
     }
 
-    const empresa = await Empresa.findByIdAndUpdate(empresaId, { $set: update }, { new: true }).select('nome nif morada telefone email').lean();
+    const empresa = await Empresa.findByIdAndUpdate(empresaId, { $set: update }, { new: true }).select('nome nif morada telefone email integracoes.smoobu').lean();
     if (!empresa) {
       return res.status(404).json({ erro: 'Empresa não encontrada.' });
     }
+    // FIX (status smoobu configs principais) — Devolve também o estado do
+    // Smoobu para o frontend atualizar a UI após guardar.
+    const smoobu = empresa.integracoes?.smoobu || {};
+    const temChaveBD = Boolean(smoobu.api_key && smoobu.api_key.trim());
     return res.status(200).json({
       message: 'Configuração guardada com sucesso.',
       nome: empresa.nome,
@@ -235,6 +254,9 @@ router.put('/configuracoes', auth, isGestor, async (req, res) => {
       morada: empresa.morada || '',
       telefone: empresa.telefone || '',
       email: empresa.email || '',
+      smoobu_api_key_mascarada: mascararApiKey(smoobu.api_key),
+      tem_api_key: temChaveBD,
+      smoobu_ativo: Boolean(process.env.SMOOBU_API_KEY || temChaveBD),
     });
   } catch (err) {
     return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
