@@ -883,6 +883,7 @@ function EquipaPage() {
                         <option value="staff">Staff (funcionário de limpezas)</option>
                         <option value="gestor">Responsável (gere a equipa)</option>
                         <option value="parceiro">Parceiro (B2B externo — cria reservas)</option>
+                        <option value="fornecedor">Fornecedor (Lavandaria — gestão de roupa)</option>
                       </select>
                       {form.role === "parceiro" && (
                         <p className="text-xs text-muted-foreground">
@@ -1343,6 +1344,7 @@ function EquipaPage() {
                     <option value="staff">Staff (funcionário de limpezas)</option>
                     <option value="gestor">Responsável (gere a equipa)</option>
                     <option value="parceiro">Parceiro (B2B externo — cria reservas)</option>
+                    <option value="fornecedor">Fornecedor (Lavandaria — gestão de roupa)</option>
                   </select>
                   {editForm.role === "parceiro" && (
                     <p className="text-xs text-muted-foreground">

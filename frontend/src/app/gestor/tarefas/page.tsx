@@ -74,6 +74,8 @@ interface TarefaAdmin {
   // FIX (qtd hóspedes) — Número de hóspedes da reserva (vindo do Smoobu
   // ou preenchido manualmente). Fallback: propriedade.capacidade_hospedes.
   hospedes?: number | null;
+  // FIX (sync parceiros) — true se a tarefa veio de uma reserva de parceiro.
+  origem_parceiro?: boolean;
   // FIX (motivo_falha_atribuicao) — Motivo pelo qual a auto-atribuição falhou
   // (ex: "Toda a equipa de folga/férias", "Lotação máxima excedida").
   motivo_nao_atribuicao?: string | null;
@@ -154,6 +156,8 @@ export default function AdminTarefasPage() {
   const [filtroDataFim, setFiltroDataFim] = useState("");
   const [filtroPropriedade, setFiltroPropriedade] = useState("");
   const [filtroStaff, setFiltroStaff] = useState("");
+  // FIX (sync parceiros) — Toggle para mostrar só tarefas de reservas de parceiros.
+  const [soParceiros, setSoParceiros] = useState(false);
 
   // v1.58.0 (Prompt 80, ponto 3) — Aba de filtragem por estado.
   // 'todas' | 'por_atribuir' | 'pendentes' | 'concluidas'
@@ -164,6 +168,10 @@ export default function AdminTarefasPage() {
   const tarefasFiltradas = tarefas.filter((t) => {
     // Filtro de avarias (toggle existente).
     if (soAvarias && !(Array.isArray(t.avarias) && t.avarias.length > 0)) {
+      return false;
+    }
+    // FIX (sync parceiros) — Filtro “Apenas Parceiros”.
+    if (soParceiros && !t.origem_parceiro) {
       return false;
     }
     // FIX (filtros avançados) — Intervalo de datas.
@@ -888,7 +896,18 @@ export default function AdminTarefasPage() {
               ))}
             </select>
           </div>
-          {(filtroDataInicio || filtroDataFim || filtroPropriedade || filtroStaff) && (
+          {/* FIX (sync parceiros) — Toggle “Apenas Parceiros”. */}
+          <Button
+            variant={soParceiros ? "default" : "outline"}
+            size="sm"
+            className="h-9 gap-1.5"
+            onClick={() => { setSoParceiros((v) => !v); setPagina(1); }}
+            aria-pressed={soParceiros}
+            title="Mostrar só tarefas geradas por reservas de parceiros"
+          >
+            🤝 Apenas Parceiros
+          </Button>
+          {(filtroDataInicio || filtroDataFim || filtroPropriedade || filtroStaff || soParceiros) && (
             <Button
               variant="ghost"
               size="sm"
@@ -898,6 +917,7 @@ export default function AdminTarefasPage() {
                 setFiltroDataFim("");
                 setFiltroPropriedade("");
                 setFiltroStaff("");
+                setSoParceiros(false);
                 setPagina(1);
               }}
             >
@@ -960,6 +980,17 @@ export default function AdminTarefasPage() {
                       <td className="px-4 py-3 font-medium">
                         <div className="flex items-center gap-2">
                           <span>{t.propriedade_id?.nome ?? "—"}</span>
+                          {/* FIX (sync parceiros) — Badge “🤝 Parceiro” se a tarefa
+                              veio de uma reserva de parceiro. */}
+                          {t.origem_parceiro && (
+                            <Badge
+                              variant="secondary"
+                              className="shrink-0 gap-1 whitespace-nowrap text-[10px] px-1.5 py-0"
+                              title="Tarefa gerada por reserva de parceiro B2B"
+                            >
+                              🤝 Parceiro
+                            </Badge>
+                          )}
                           {temAvarias && (
                             <Badge
                               variant="destructive"

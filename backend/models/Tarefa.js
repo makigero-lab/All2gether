@@ -221,6 +221,15 @@ const tarefaSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    // FIX (sync parceiros) — Identifica se a tarefa foi gerada a partir de
+    // uma reserva criada por um parceiro B2B (true) ou por outra via
+    // (Smoobu / gestor manual). Usado para destaque visual na lista de
+    // tarefas e filtro "Apenas Parceiros".
+    origem_parceiro: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
   },
   { timestamps: true }
 );
