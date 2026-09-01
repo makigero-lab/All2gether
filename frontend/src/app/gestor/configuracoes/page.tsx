@@ -14,6 +14,9 @@ import {
   RefreshCw,
   Eye,
   EyeOff,
+  Trash2,
+  Download,
+  ShieldAlert,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -27,8 +30,10 @@ import {
   DialogDescription,
   DialogClose,
   DialogContent,
+  DialogFooter,
 } from "@/components/ui/dialog";
-import { adminGet } from "@/lib/api";
+import { adminGet, adminDelete, adminPost } from "@/lib/api";
+import { lerUtilizador, type Role } from "@/lib/auth";
 
 type Toast = { tipo: "sucesso" | "erro"; msg: string } | null;
 
@@ -45,6 +50,18 @@ interface WebhooksResponse {
   total: number;
 }
 
+/**
+ * /gestor/configuracoes — Página principal de Configurações.
+ *
+ * FIX (centraliza ações smoobu) — Esta página é o ponto central de configuração
+ * do gestor. O cliente acede aqui (não à sub-página de integrações) pelo menu
+ * lateral "Configurações". Por isso:
+ *   - Lê `smoobu_ativo` do backend e mostra o estado real da integração.
+ *   - Se smoobu_ativo for true mas a chave da BD estiver vazia (configurada
+ *     via env var global), mostra um placeholder verde "Configurada (Global/Env)".
+ *   - A secção "Ações de Manutenção" (Eliminar Limpezas Futuras + Sincronizar
+ *     Smoobu) vive aqui, visível apenas para admin.
+ */
 export default function ConfiguracoesPage() {
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<Toast>(null);
@@ -58,6 +75,15 @@ export default function ConfiguracoesPage() {
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [showApiKey, setShowApiKey] = useState(false);
 
+  // FIX (status smoobu configs principais) — Estado real da integração Smoobu
+  // (env var SMOOBU_API_KEY OU chave da BD). Se for true mas temApiKey for
+  // false, a key está configurada via env var global → mostrar placeholder verde.
+  const [smoobuAtivo, setSmoobuAtivo] = useState(false);
+
+  // FIX (ações de massa no admin) — A secção "Ações de Manutenção" só é
+  // visível para role === 'admin'.
+  const [userRole, setUserRole] = useState<Role | null>(null);
+
   function showToast(tipo: "sucesso" | "erro", msg: string) {
     setToast({ tipo, msg });
     setTimeout(() => setToast(null), 6000);
@@ -66,18 +92,33 @@ export default function ConfiguracoesPage() {
   const carregar = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/gestor/configuracoes", { credentials: "include" });
+      // FIX (cache-busting) — Adiciona timestamp para evitar cache do Next.js.
+      const res = await fetch(
+        `/api/gestor/configuracoes?_t=${Date.now()}`,
+        { credentials: "include" }
+      );
       const data = await res.json();
       if (res.ok) {
         setNome(data.nome || "");
         setApiKeyMascarada(data.smoobu_api_key_mascarada || "");
         setTemApiKey(data.tem_api_key || false);
+        setSmoobuAtivo(data.smoobu_ativo || false);
       }
     } catch {
       // silencioso
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  // FIX (ações de massa no admin) — Carrega o role do utilizador.
+  useEffect(() => {
+    let cancelado = false;
+    (async () => {
+      const user = await lerUtilizador();
+      if (!cancelado) setUserRole(user?.role ?? null);
+    })();
+    return () => { cancelado = true; };
   }, []);
 
   useEffect(() => {
@@ -103,6 +144,7 @@ export default function ConfiguracoesPage() {
       if (!res.ok) throw new Error(data?.erro || `Erro ${res.status}`);
       setApiKeyMascarada(data.smoobu_api_key_mascarada || "");
       setTemApiKey(data.tem_api_key || false);
+      setSmoobuAtivo(data.smoobu_ativo || false);
       setEditApiKey(false);
       setApiKeyInput("");
       showToast("sucesso", data.message || "Configuração guardada.");
@@ -125,6 +167,46 @@ export default function ConfiguracoesPage() {
       showToast("erro", e instanceof Error ? e.message : `Erro em ${nomeAcao}.`);
     } finally {
       setActionLoading(null);
+    }
+  }
+
+  // FIX (ações de manutenção) — Handlers para Eliminar Futuras e Sincronizar Smoobu.
+  const [confirmarLimpar, setConfirmarLimpar] = useState(false);
+  const [limpando, setLimpando] = useState(false);
+  const [sincronizando, setSincronizando] = useState(false);
+
+  async function handleEliminarFuturas() {
+    setLimpando(true);
+    setConfirmarLimpar(false);
+    try {
+      const res = await adminDelete<{ mensagem: string; apagadas: number }>(
+        "/api/gestor/tarefas/futuras"
+      );
+      const msg = res.mensagem || `${res.apagadas} tarefa(s) apagada(s).`;
+      showToast("sucesso", msg);
+    } catch (e) {
+      showToast("erro", e instanceof Error ? e.message : "Erro ao apagar.");
+    } finally {
+      setLimpando(false);
+    }
+  }
+
+  async function handleSincronizarSmoobu() {
+    setSincronizando(true);
+    try {
+      const res = await adminPost<{
+        totalRecebidas: number; criadas: number; existentes: number; erros: number;
+        message?: string;
+      }>("/api/gestor/smoobu/sincronizar", {});
+      const msg = res.message ||
+        `${res.criadas} tarefa(s) criada(s)` +
+        (res.existentes > 0 ? `, ${res.existentes} já existiam` : "") +
+        (res.erros > 0 ? `, ${res.erros} com erro` : "") + ".";
+      showToast("sucesso", msg);
+    } catch (e) {
+      showToast("erro", e instanceof Error ? e.message : "Erro ao sincronizar.");
+    } finally {
+      setSincronizando(false);
     }
   }
 
@@ -182,6 +264,17 @@ export default function ConfiguracoesPage() {
     );
   }
 
+  // FIX (status smoobu configs principais) — Determina o texto a mostrar no
+  // input da API Key. Se smoobu_ativo for true mas a chave da BD estiver vazia,
+  // mostra um placeholder verde "Configurada (Global/Env)" em vez de "Não
+  // configurada" — indica que a integração está ativa via env var global.
+  const keyConfiguradaGlobal = smoobuAtivo && !temApiKey;
+  const keyDisplayText = temApiKey
+    ? apiKeyMascarada
+    : keyConfiguradaGlobal
+      ? "Configurada (Global/Env)"
+      : "Não configurada";
+
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
       <div className="flex items-center gap-3">
@@ -217,6 +310,23 @@ export default function ConfiguracoesPage() {
 
               <div className="space-y-1.5">
                 <label className="text-sm font-medium">Smoobu API Key</label>
+                {/* FIX (status smoobu configs principais) — Badge de estado real. */}
+                <div className="flex items-center gap-2">
+                  {smoobuAtivo ? (
+                    <Badge variant="success" className="shrink-0 gap-1">
+                      <CheckCircle2 className="h-3 w-3" /> Ativo
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="shrink-0">
+                      Inativo
+                    </Badge>
+                  )}
+                  {keyConfiguradaGlobal && (
+                    <Badge variant="outline" className="shrink-0 border-emerald-500/40 text-emerald-700 dark:text-emerald-400">
+                      Global/Env
+                    </Badge>
+                  )}
+                </div>
                 {editApiKey ? (
                   <div className="space-y-2">
                     <div className="relative">
@@ -229,8 +339,14 @@ export default function ConfiguracoesPage() {
                   </div>
                 ) : (
                   <div className="flex items-center gap-2">
-                    <code className="flex-1 rounded-md border bg-muted/40 px-3 py-2 text-sm font-mono text-muted-foreground">
-                      {temApiKey ? apiKeyMascarada : "Não configurada"}
+                    <code
+                      className={`flex-1 rounded-md border px-3 py-2 text-sm font-mono ${
+                        keyConfiguradaGlobal
+                          ? "border-emerald-500/40 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400"
+                          : "bg-muted/40 text-muted-foreground"
+                      }`}
+                    >
+                      {keyDisplayText}
                     </code>
                     <Button type="button" variant="outline" size="sm" onClick={() => setEditApiKey(true)}>
                       {temApiKey ? "Alterar" : "Definir"}
@@ -238,7 +354,9 @@ export default function ConfiguracoesPage() {
                   </div>
                 )}
                 <p className="text-xs text-muted-foreground">
-                  Cada empresa tem a sua própria API Key do Smoobu. Substitui a variável de ambiente global.
+                  {keyConfiguradaGlobal
+                    ? "A integração está ativa via variável de ambiente global (SMOOBU_API_KEY). Podes definir uma chave específica da empresa que terá prioridade sobre a global."
+                    : "Cada empresa tem a sua própria API Key do Smoobu. Substitui a variável de ambiente global."}
                 </p>
               </div>
 
@@ -295,7 +413,129 @@ export default function ConfiguracoesPage() {
             </Button>
           </CardContent>
         </Card>
+
+        {/* FIX (centraliza ações smoobu) — Secção "Ações de Manutenção"
+            movida para a página principal de Configurações (visível para admin).
+            Contém ações destrutivas em massa (Eliminar Limpezas Futuras) e
+            sincronização do Smoobu. */}
+        {userRole === "admin" && (
+        <Card className="border-destructive/30 md:col-span-2">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base text-destructive">
+              <ShieldAlert className="h-5 w-5" />
+              Ações de Manutenção
+              <Badge variant="outline" className="ml-1 text-[10px]">Admin</Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Ações destrutivas em massa e sincronização do Smoobu. Restritas
+              ao <strong>admin</strong> por segurança. Usa-as apenas quando
+              necessário (ex.: sincronização inicial, reset do calendário,
+              recriar limpezas a partir das reservas ativas).
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {/* Sincronizar Smoobu — recria limpezas futuras a partir das
+                  reservas ativas (POST /api/gestor/smoobu/sincronizar). */}
+              <Button
+                variant="outline"
+                onClick={handleSincronizarSmoobu}
+                disabled={sincronizando}
+                title="Recria as limpezas futuras a partir das reservas ativas do Smoobu."
+              >
+                {sincronizando ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4" />
+                )}
+                {sincronizando ? "A sincronizar…" : "Sincronizar Smoobu"}
+              </Button>
+
+              {/* Eliminar Limpezas Futuras */}
+              <Button
+                variant="outline"
+                className="border-destructive/40 text-destructive hover:bg-destructive/10"
+                onClick={() => setConfirmarLimpar(true)}
+                disabled={limpando}
+                title="Apaga todas as tarefas futuras não concluídas/canceladas (limpa a agenda)."
+              >
+                {limpando ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Trash2 className="h-4 w-4" />
+                )}
+                Eliminar Limpezas Futuras
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+        )}
+
+        {/* Aviso para não-admin: explica onde estão as ações de massa. */}
+        {userRole !== null && userRole !== "admin" && (
+          <div className="flex items-start gap-2 rounded-md border border-amber-500/50 bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950/50 dark:text-amber-100 md:col-span-2">
+            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              <p className="font-medium">Ações de Manutenção restritas ao Admin</p>
+              <p className="text-xs">
+                As ações destrutivas em massa (Eliminar Limpezas Futuras) e a
+                sincronização do Smoobu estão restritas ao administrador por
+                segurança. Contacta o administrador se precisares de executá-las.
+              </p>
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* FIX (ações de manutenção) — Dialog de confirmação: Eliminar Limpezas
+          Futuras. */}
+      <Dialog open={confirmarLimpar} onOpenChange={setConfirmarLimpar}>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Trash2 className="h-5 w-5 text-destructive" />
+            Eliminar Limpezas Futuras
+          </DialogTitle>
+          <DialogDescription>
+            Isto vai apagar todas as tarefas não concluídas de hoje para a frente.
+            As concluídas e canceladas serão preservadas. Queres continuar?
+          </DialogDescription>
+          <DialogClose onClick={() => setConfirmarLimpar(false)} />
+        </DialogHeader>
+        <DialogContent className="space-y-2">
+          <p className="text-sm text-muted-foreground">
+            Depois de apagar, podes clicar em &ldquo;Sincronizar Smoobu&rdquo; para recriar
+            as tarefas a partir das reservas ativas.
+          </p>
+        </DialogContent>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setConfirmarLimpar(false)}
+            disabled={limpando}
+          >
+            Cancelar
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            onClick={handleEliminarFuturas}
+            disabled={limpando}
+          >
+            {limpando ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                A apagar…
+              </>
+            ) : (
+              <>
+                <Trash2 className="mr-2 h-4 w-4" />
+                Sim, apagar
+              </>
+            )}
+          </Button>
+        </DialogFooter>
+      </Dialog>
 
       {/* Prompt 126 — Modal de Logs de Sincronização Smoobu (webhooks). */}
       <Dialog open={mostrarLogs} onOpenChange={setMostrarLogs}>

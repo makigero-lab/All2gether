@@ -698,3 +698,51 @@
   min-height: 15px !important;
 }
 
+/* ==========================================================================
+   FIX (nomes desaparecidos) — Folga Fixa com nome do staff visível.
+   Barra cinzenta compacta mas com texto legível (nome do staff).
+   ========================================================================== */
+
+/* Vista mensal — barra compacta com bolinha + nome. */
+.fc-evt-month--folga {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+  width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  background-color: #f1f5f9 !important;
+  border-left: 3px solid #94a3b8 !important;
+  padding: 1px 4px !important;
+  border-radius: calc(var(--radius) - 1px);
+  font-weight: 500;
+  color: #475569 !important;
+}
+
+.fc-evt-month--folga .fc-evt-month__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: #475569;
+}
+
+/* Vista semanal/diária — bloco compacto com nome. */
+.fc-evt-block--folga {
+  border-left: 3px solid #94a3b8 !important;
+  background-color: #f1f5f9 !important;
+}
+
+.fc-evt-block--folga .fc-evt-block__title {
+  color: #475569;
+  font-weight: 600;
+}
+
+.fc-evt-block--folga .fc-evt-block__subtitle {
+  color: #64748b;
+}
+
