@@ -516,6 +516,13 @@ exports.concluirTarefa = async (req, res) => {
     if (req.body?.observacoes !== undefined) {
       tarefa.observacoes = String(req.body.observacoes || '');
     }
+    // FIX (portal lavandaria) — Sacos de roupa suja recolhidos pelo staff.
+    // Preenchido no modal de conclusão; usado pelo portal do fornecedor para
+    // saber quantos sacos de roupa suja irão para a lavandaria.
+    if (req.body?.sacos_roupa_suja !== undefined) {
+      const n = Number(req.body.sacos_roupa_suja);
+      tarefa.sacos_roupa_suja = Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
+    }
 
     await tarefa.save();
 
