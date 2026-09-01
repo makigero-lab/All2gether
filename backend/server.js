@@ -34,6 +34,8 @@ const relatorioRoutes = require('./routes/relatorioRoutes');
 const staffRoutes = require('./routes/staffRoutes');
 const smoobuRoutes = require('./routes/smoobuRoutes');
 const parceiroRoutes = require('./routes/parceiroRoutes');
+// FIX (portal lavandaria) — Rotas do portal do fornecedor (lavandaria).
+const fornecedorRoutes = require('./routes/fornecedorRoutes');
 const { iniciarDailyBriefing } = require('./jobs/dailyBriefing');
 const { iniciarAgendaAmanha } = require('./jobs/agendaAmanha');
 const { iniciarCaoGuarda } = require('./jobs/caoGuarda');
@@ -134,6 +136,11 @@ app.use('/api/smoobu', smoobuRoutes);
 // HF17 (Fase 3) — Portal de Parceiros B2B (propriedades manuais + tarefas).
 // Protegido por auth + isParceiro.
 app.use('/api/parceiro', parceiroRoutes);
+
+// FIX (portal lavandaria) — Portal do Fornecedor (lavandaria).
+// Protegido por auth + isFornecedor. Vê tarefas dos próximos 7 dias e marca
+// roupa_entregue.
+app.use('/api/fornecedor', fornecedorRoutes);
 
 // TEMPORÁRIO — Rota de limpeza final (GET /api/cleanup-final).
 // Procura a empresa-sistema "All2gether (Sistema)" (NIF 'SISTEMA', criada pelo

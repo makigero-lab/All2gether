@@ -26,12 +26,14 @@ import {
   X,
   AlertCircle,
   Navigation,
+  Shirt,
 } from "lucide-react";
 
 import { cn, parsearDataSegura, googleMapsUrl } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -136,6 +138,9 @@ export function DetalheTarefaClient({
   const [mostrarConcluir, setMostrarConcluir] = useState(false);
   const [concluirFotos, setConcluirFotos] = useState<string[]>([]);
   const [concluirResultado, setConcluirResultado] = useState<string | null>(null);
+  // FIX (portal lavandaria) — Sacos de roupa suja recolhidos pelo staff.
+  // Enviado no PATCH /concluir para o backend guardar em tarefa.sacos_roupa_suja.
+  const [sacosRoupaSuja, setSacosRoupaSuja] = useState<string>("");
 
   // Modal de reportar atraso
   const [mostrarAtraso, setMostrarAtraso] = useState(false);
@@ -267,6 +272,8 @@ export function DetalheTarefaClient({
         body: JSON.stringify({
           observacoes_staff: observacoes,
           fotos_conclusao: concluirFotos,
+          // FIX (portal lavandaria) — Sacos de roupa suja recolhidos.
+          sacos_roupa_suja: sacosRoupaSuja === "" ? 0 : Number(sacosRoupaSuja),
         }),
       });
       const data = await res.json();
@@ -1043,6 +1050,26 @@ export function DetalheTarefaClient({
           <p className="text-xs text-muted-foreground">
             Máx. 5 fotos, até 2MB cada (JPG, PNG).
           </p>
+
+          {/* FIX (portal lavandaria) — Input de sacos de roupa suja recolhidos. */}
+          <div className="space-y-1.5 rounded-md border border-input p-3">
+            <label htmlFor="sacos-roupa-suja" className="text-sm font-medium flex items-center gap-1.5">
+              <Shirt className="h-4 w-4 text-primary" />
+              Sacos de Roupa Suja Recolhidos
+            </label>
+            <Input
+              id="sacos-roupa-suja"
+              type="number"
+              min={0}
+              step={1}
+              value={sacosRoupaSuja}
+              onChange={(e) => setSacosRoupaSuja(e.target.value)}
+              placeholder="0"
+            />
+            <p className="text-xs text-muted-foreground">
+              Nº de sacos de roupa suja recolhidos nesta limpeza (para a lavandaria).
+            </p>
+          </div>
 
           {erroConcluir && (
             <p className="flex items-center gap-2 text-sm text-destructive">

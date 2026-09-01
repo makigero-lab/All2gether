@@ -207,6 +207,20 @@ const tarefaSchema = new mongoose.Schema(
       default: null,
       min: 0,
     },
+    // FIX (portal lavandaria) — Controlo de roupa pelo fornecedor e staff.
+    // roupa_entregue: marcado pelo fornecedor no portal /fornecedor quando
+    //   entrega roupa limpa na propriedade (toggle Boolean).
+    // sacos_roupa_suja: preenchido pelo staff ao concluir a limpeza (nº de
+    //   sacos de roupa suja recolhidos para a lavandaria).
+    roupa_entregue: {
+      type: Boolean,
+      default: false,
+    },
+    sacos_roupa_suja: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
   },
   { timestamps: true }
 );

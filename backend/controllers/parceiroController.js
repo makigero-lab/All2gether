@@ -220,7 +220,9 @@ async function listarTarefas(req, res) {
       origem: 'manual',
     })
       .populate('propriedade_id', 'nome morada')
-      .select('data estado tipo observacoes tempo_limpeza_minutos origem')
+      // FIX (portal lavandaria) — Inclui hospedes (bug latente: não era enviado)
+      // e os novos campos de roupa para o portal do fornecedor.
+      .select('data estado tipo observacoes hospedes tempo_limpeza_minutos origem roupa_entregue sacos_roupa_suja')
       .sort({ data: -1 })
       .lean();
 

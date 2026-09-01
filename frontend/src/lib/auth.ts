@@ -34,7 +34,7 @@
  *   login page (após cookie definido) e pelo logout (após cookie limpo).
  */
 
-export type Role = "admin" | "gestor" | "staff" | "parceiro";
+export type Role = "admin" | "gestor" | "staff" | "parceiro" | "fornecedor";
 
 export interface UtilizadorAuth {
   id: string;
@@ -190,6 +190,7 @@ export function rotaPorRole(role: Role): string {
   if (role === "admin") return "/gestor";
   if (role === "gestor") return "/gestor";
   if (role === "parceiro") return "/parceiro";
+  if (role === "fornecedor") return "/fornecedor";
   return "/staff";
 }
 

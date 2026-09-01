@@ -88,7 +88,7 @@ const utilizadorSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ['admin', 'gestor', 'staff', 'parceiro'],
+      enum: ['admin', 'gestor', 'staff', 'parceiro', 'fornecedor'],
       default: 'staff',
       required: true,
     },
