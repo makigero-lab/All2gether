@@ -150,6 +150,15 @@ const propriedadeSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+    // FIX (restrição lavandaria) — Fornecedor (lavandaria) atribuído a esta
+    // propriedade. O fornecedor só vê as tarefas das propriedades que lhe
+    // estão atribuídas (isolamento por propriedade, não global).
+    fornecedor_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Utilizador',
+      default: null,
+      index: true,
+    },
     // HF21 — Número de staff necessário para limpar esta propriedade.
     // Se > 1, o load balancer atribui uma equipa (Top N) em vez de 1 pessoa.
     // Default: 1 (comportamento original — 1 staff por tarefa).

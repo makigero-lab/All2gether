@@ -296,6 +296,8 @@ export default function PropriedadesPage() {
     morada_cidade: "",
     // FIX (parceiro associado relacional) — ID do parceiro B2B associado.
     parceiro_id: "",
+    // FIX (restrição lavandaria) — Fornecedor (lavandaria) atribuído.
+    fornecedor_id: "",
     // FIX (lotação máxima) — Capacidade máxima de hóspedes (lotação da casa).
     // Usada como fallback quando o Smoobu não envia o número de hóspedes.
     capacidade_hospedes: "",
@@ -347,6 +349,10 @@ export default function PropriedadesPage() {
           ...(manualForm.parceiro_id.trim()
             ? { parceiro_id: manualForm.parceiro_id.trim() }
             : {}),
+          // FIX (restrição lavandaria) — Fornecedor (lavandaria) atribuído.
+          ...(manualForm.fornecedor_id.trim()
+            ? { fornecedor_id: manualForm.fornecedor_id.trim() }
+            : {}),
           // FIX (lotação máxima) — capacidade_hospedes (lotação da casa).
           ...(manualForm.capacidade_hospedes.trim()
             ? { capacidade_hospedes: Number(manualForm.capacidade_hospedes) }
@@ -354,7 +360,7 @@ export default function PropriedadesPage() {
         }
       );
       // Limpa o formulário e fecha o modal.
-      setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1", dias_fixos_limpeza: [], observacoes: "", morada_rua: "", morada_codigo_postal: "", morada_cidade: "", parceiro_id: "", capacidade_hospedes: "" });
+      setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1", dias_fixos_limpeza: [], observacoes: "", morada_rua: "", morada_codigo_postal: "", morada_cidade: "", parceiro_id: "", fornecedor_id: "", capacidade_hospedes: "" });
       setManualOpen(false);
       await carregar();
     } catch (e) {
@@ -379,6 +385,8 @@ export default function PropriedadesPage() {
     morada_cidade: "",
     // FIX (parceiro associado relacional) — ID do parceiro B2B associado.
     parceiro_id: "",
+    // FIX (restrição lavandaria) — Fornecedor (lavandaria) atribuído.
+    fornecedor_id: "",
     // FIX (equipas preferenciais) — IDs de staff que formam a equipa
     // preferencial desta propriedade (select múltiplo no modal de edição).
     equipa_preferencial: [] as string[],
@@ -450,12 +458,16 @@ export default function PropriedadesPage() {
   // FIX (parceiro associado relacional) — Lista de parceiros da empresa
   // (para o select de associação nos formulários de criação/edição).
   const [parceirosList, setParceirosList] = useState<UtilizadorDTO[]>([]);
+  // FIX (restrição lavandaria) — Lista de fornecedores (lavandarias) da empresa
+  // (para o select "Lavandaria Atribuída" nos formulários de criação/edição).
+  const [fornecedoresList, setFornecedoresList] = useState<UtilizadorDTO[]>([]);
   useEffect(() => {
     (async () => {
       try {
-        const [staffRes, parceirosRes] = await Promise.all([
+        const [staffRes, parceirosRes, fornecedoresRes] = await Promise.all([
           adminGet<{ utilizadores: UtilizadorDTO[] }>("/api/gestor/equipa"),
           adminGet<{ utilizadores: UtilizadorDTO[] }>("/api/gestor/parceiros"),
+          adminGet<{ utilizadores: UtilizadorDTO[] }>("/api/gestor/fornecedores"),
         ]);
         // Só interessa staff ativo (o backend valida isto ao gravar).
         setStaffList(
@@ -465,6 +477,8 @@ export default function PropriedadesPage() {
         );
         // FIX (parceiro associado relacional) — Carrega parceiros para o select.
         setParceirosList(parceirosRes.utilizadores ?? []);
+        // FIX (restrição lavandaria) — Carrega fornecedores para o select.
+        setFornecedoresList(fornecedoresRes.utilizadores ?? []);
       } catch {
         // Silencioso — os selects aparecem vazios mas não bloqueiam a edição.
       }
@@ -503,6 +517,11 @@ export default function PropriedadesPage() {
       // FIX (lotação máxima) — capacidade_hospedes (lotação da casa).
       capacidade_hospedes:
         p.capacidade_hospedes != null ? String(p.capacidade_hospedes) : "",
+      // FIX (restrição lavandaria) — fornecedor_id (lavandaria atribuída).
+      fornecedor_id:
+        p.fornecedor_id && typeof p.fornecedor_id === "object"
+          ? p.fornecedor_id._id
+          : (p.fornecedor_id as string) ?? "",
     });
     setEditErro(null);
     // Prompt 126 — Reset dos avisos de morada ao abrir o modal.
@@ -630,6 +649,11 @@ export default function PropriedadesPage() {
           ...(editForm.parceiro_id.trim()
             ? { parceiro_id: editForm.parceiro_id.trim() }
             : { parceiro_id: null }),
+          // FIX (restrição lavandaria) — Fornecedor (lavandaria) atribuído.
+          // String vazia → null no backend (remove associação).
+          ...(editForm.fornecedor_id.trim()
+            ? { fornecedor_id: editForm.fornecedor_id.trim() }
+            : { fornecedor_id: null }),
           // FIX (lotação máxima) — capacidade_hospedes (lotação da casa).
           // String vazia → null no backend (limpa o valor).
           ...(editForm.capacidade_hospedes.trim()
@@ -722,7 +746,7 @@ export default function PropriedadesPage() {
             onClick={() => {
               setManualOpen(true);
               setManualErro(null);
-              setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1", dias_fixos_limpeza: [], observacoes: "", morada_rua: "", morada_codigo_postal: "", morada_cidade: "", parceiro_id: "", capacidade_hospedes: "" });
+              setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1", dias_fixos_limpeza: [], observacoes: "", morada_rua: "", morada_codigo_postal: "", morada_cidade: "", parceiro_id: "", fornecedor_id: "", capacidade_hospedes: "" });
             }}
           >
             <Plus className="h-4 w-4" />
@@ -1287,6 +1311,29 @@ export default function PropriedadesPage() {
                 Associa esta propriedade a um parceiro B2B. O nome aparece no Badge da listagem.
               </p>
             </div>
+            {/* FIX (restrição lavandaria) — Select de lavandaria atribuída. */}
+            <div className="space-y-1.5">
+              <label htmlFor="manual-fornecedor" className="text-sm font-medium">
+                Lavandaria Atribuída (opcional)
+              </label>
+              <select
+                id="manual-fornecedor"
+                value={manualForm.fornecedor_id}
+                onChange={(e) =>
+                  setManualForm((f) => ({ ...f, fornecedor_id: e.target.value }))
+                }
+                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <option value="">Nenhuma (sem lavandaria)</option>
+                {fornecedoresList.map((f) => (
+                  <option key={f._id} value={f._id}>{f.nome}</option>
+                ))}
+              </select>
+              <p className="text-xs text-muted-foreground">
+                Atribui uma lavandaria a esta propriedade. O fornecedor só vê as
+                tarefas das propriedades que lhe estão atribuídas.
+              </p>
+            </div>
             <div className="space-y-1.5">
               <label
                 htmlFor="manual-tempo"
@@ -1600,6 +1647,29 @@ export default function PropriedadesPage() {
                   </select>
                   <p className="text-xs text-muted-foreground">
                     Associa esta propriedade a um parceiro B2B. O nome aparece no Badge da listagem.
+                  </p>
+                </div>
+                {/* FIX (restrição lavandaria) — Select de lavandaria atribuída (edição). */}
+                <div className="space-y-1.5">
+                  <label htmlFor="edit-fornecedor" className="text-sm font-medium">
+                    Lavandaria Atribuída
+                  </label>
+                  <select
+                    id="edit-fornecedor"
+                    value={editForm.fornecedor_id}
+                    onChange={(e) =>
+                      setEditForm((f) => ({ ...f, fornecedor_id: e.target.value }))
+                    }
+                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <option value="">Nenhuma (sem lavandaria)</option>
+                    {fornecedoresList.map((f) => (
+                      <option key={f._id} value={f._id}>{f.nome}</option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-muted-foreground">
+                    Atribui uma lavandaria a esta propriedade. O fornecedor só vê as
+                    tarefas das propriedades que lhe estão atribuídas.
                   </p>
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">

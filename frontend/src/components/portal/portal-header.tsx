@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { User, LogOut, ChevronDown } from "lucide-react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -19,6 +20,7 @@ import { lerUtilizador, fazerLogout, type Role } from "@/lib/auth";
  * a sidebar do gestor com o logout integrado).
  */
 export function UserMenu() {
+  const router = useRouter();
   const [user, setUser] = useState<{ nome: string; role: Role } | null>(null);
   const [aberto, setAberto] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -90,21 +92,25 @@ export function UserMenu() {
             </p>
           </div>
 
-          {/* Perfil — link genérico (página de perfil pode não existir ainda) */}
-          <a
-            href="#"
-            onClick={(e) => {
-              e.preventDefault();
+          {/* Perfil — FIX (botão perfil) — Navega para a página de perfil
+              do portal correspondente (parceiro ou fornecedor). */}
+          <button
+            type="button"
+            onClick={() => {
               setAberto(false);
-              // FIX: placeholder — a página de perfil não existe ainda nos portais.
-              // Quando existir (ex: /parceiro/perfil), redirecionar via router.push.
+              const rotaPerfil = user?.role === "parceiro"
+                ? "/parceiro/perfil"
+                : user?.role === "fornecedor"
+                  ? "/fornecedor/perfil"
+                  : "/staff";
+              router.push(rotaPerfil);
             }}
-            className="flex cursor-pointer items-center gap-2 rounded-sm px-3 py-2 text-sm transition-colors hover:bg-accent"
+            className="flex w-full cursor-pointer items-center gap-2 rounded-sm px-3 py-2 text-sm transition-colors hover:bg-accent"
             role="menuitem"
           >
             <User className="h-4 w-4" />
             Perfil
-          </a>
+          </button>
 
           {/* Terminar Sessão */}
           <button
