@@ -51,6 +51,8 @@ const {
   setupClienteZero,
   // FIX (gestão de parceiros) — novo controller para listar parceiros B2B.
   getParceiros,
+  // FIX (restrição lavandaria) — novo controller para listar fornecedores.
+  getFornecedores,
 } = require('../controllers/gestorController');
 const { reportarAtrasoTarefa, criarTarefa, atribuirTarefa, reatribuirTarefa, atualizarEstadoTarefa, apagarTarefasFuturas, listarIndisponiveisData, autoAtribuirTarefas, criarTarefaEspontanea } = require('../controllers/tarefaController');
 // CRUD de Modelos de Checklist (futuro: Modelos de Protocolo Clínico)
@@ -154,6 +156,9 @@ router.get('/equipa', auth, isGestor, getEquipa);
 router.post('/equipa', auth, isGestor, criarMembroEquipa);
 // FIX (gestão de parceiros) — rota dedicada para parceiros B2B.
 router.get('/parceiros', auth, isGestor, getParceiros);
+
+// FIX (restrição lavandaria) — rota dedicada para fornecedores (lavandarias).
+router.get('/fornecedores', auth, isGestor, getFornecedores);
 router.put('/equipa/:id', auth, isGestor, atualizarMembroEquipa);
 router.patch('/equipa/:id/estado', auth, isGestor, alternarEstadoMembro);
 router.delete('/equipa/:id', auth, isGestor, eliminarMembroEquipa);

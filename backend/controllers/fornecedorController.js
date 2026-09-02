@@ -18,13 +18,32 @@ const Propriedade = require('../models/Propriedade');
 /* ------------------------------------------------------------------ */
 exports.listarTarefas = async (req, res) => {
   try {
+    const fornecedorId = req.user && req.user.id;
     const empresaId = req.user && req.user.empresa_id;
-    if (!empresaId) {
+    if (!fornecedorId || !empresaId) {
       return res.status(400).json({ erro: 'empresa_id em falta no token.' });
     }
 
-    // FIX (portal lavandaria) — Tarefas dos próximos 7 dias (hoje + 7).
-    // Inclui tarefas não canceladas (por_atribuir, atribuida, em_curso, concluida).
+    // FIX (restrição lavandaria) — Passo 1: buscar as propriedades onde
+    // fornecedor_id === req.user.id. O fornecedor só vê tarefas das
+    // propriedades que lhe estão explicitamente atribuídas (não é global).
+    const propriedadesAtribuidas = await Propriedade.find({
+      fornecedor_id: fornecedorId,
+      ativo: true,
+    })
+      .select('_id')
+      .lean();
+
+    const propriedadeIds = propriedadesAtribuidas.map((p) => p._id);
+
+    if (propriedadeIds.length === 0) {
+      // Sem propriedades atribuídas → devolve lista vazia (não erro).
+      return res.status(200).json({ tarefas: [] });
+    }
+
+    // FIX (restrição lavandaria) — Passo 2: filtrar Tarefas para retornar
+    // apenas as cujo propriedade_id está no array de propriedades atribuídas.
+    // Tarefas dos próximos 7 dias (hoje + 7), não canceladas.
     const inicio = new Date();
     inicio.setUTCHours(0, 0, 0, 0); // meia-noite UTC de hoje
     const fim = new Date(inicio);
@@ -32,6 +51,7 @@ exports.listarTarefas = async (req, res) => {
 
     const tarefas = await Tarefa.find({
       empresa_id: empresaId,
+      propriedade_id: { $in: propriedadeIds },
       data: { $gte: inicio, $lt: fim },
       estado: { $ne: 'cancelada' },
     })

@@ -213,6 +213,8 @@ export interface PropriedadeDTO {
   // Populado pelo backend com { _id, nome, email, role } para o frontend
   // mostrar no Badge sem extrair das observações.
   parceiro_id?: string | { _id: string; nome: string; email: string; role: string } | null;
+  // FIX (restrição lavandaria) — Fornecedor (lavandaria) atribuído à propriedade.
+  fornecedor_id?: string | { _id: string; nome: string; email: string; role: string } | null;
   // FIX (morada estruturada) — Morada decomposta (rua, codigo_postal, cidade).
   // Retrocompatível: se vazio, o frontend faz fallback para `morada` (string única).
   morada_estruturada?: {

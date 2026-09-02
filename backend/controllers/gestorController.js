@@ -228,7 +228,7 @@ exports.criarPropriedade = async (req, res) => {
     const { ok, empresaId } = obterEmpresaId(req, res);
     if (!ok) return;
 
-    const { nome, morada, tempo_limpeza_minutos, parceiro_id, staff_necessario, dias_fixos_limpeza, nome_responsavel, contacto, frequencia_limpeza, horario_limpeza, observacoes, morada_estruturada, equipa_preferencial, capacidade_hospedes } = req.body || {};
+    const { nome, morada, tempo_limpeza_minutos, parceiro_id, fornecedor_id, staff_necessario, dias_fixos_limpeza, nome_responsavel, contacto, frequencia_limpeza, horario_limpeza, observacoes, morada_estruturada, equipa_preferencial, capacidade_hospedes } = req.body || {};
 
     // Validações de presença.
     // FIX (morada estruturada) — Aceita morada OU morada_estruturada (pelo menos
@@ -320,6 +320,10 @@ exports.criarPropriedade = async (req, res) => {
       horario_limpeza: horario_limpeza ? String(horario_limpeza).trim().slice(0, 100) : '', // HF23
       // FIX (parceiro associado) — Observações livres (notas internas do gestor).
       observacoes: observacoes ? String(observacoes).trim().slice(0, 2000) : '',
+      // FIX (restrição lavandaria) — Fornecedor (lavandaria) atribuído.
+      ...(fornecedor_id && mongoose.isValidObjectId(fornecedor_id)
+        ? { fornecedor_id: String(fornecedor_id).trim() }
+        : {}),
       // FIX (equipas preferenciais) — Array de IDs de staff preferenciais.
       ...(Array.isArray(equipa_preferencial)
         ? { equipa_preferencial: equipa_preferencial.filter((id) => mongoose.isValidObjectId(id)) }
@@ -1122,7 +1126,7 @@ exports.atualizarPropriedade = async (req, res) => {
       });
     }
 
-    const { nome, morada, tempo_limpeza_minutos, funcionario_preferencial_id, modelo_checklist_id, observacoes, morada_estruturada, parceiro_id, equipa_preferencial, capacidade_hospedes } = req.body || {};
+    const { nome, morada, tempo_limpeza_minutos, funcionario_preferencial_id, modelo_checklist_id, observacoes, morada_estruturada, parceiro_id, fornecedor_id, equipa_preferencial, capacidade_hospedes } = req.body || {};
 
     // Tem de haver pelo menos um campo para atualizar.
     if (
@@ -1134,7 +1138,8 @@ exports.atualizarPropriedade = async (req, res) => {
       observacoes === undefined &&
       morada_estruturada === undefined &&
       req.body?.checklist === undefined &&
-      capacidade_hospedes === undefined
+      capacidade_hospedes === undefined &&
+      fornecedor_id === undefined
     ) {
       return res.status(400).json({
         erro: 'Nenhum campo para atualizar. Envie nome, morada, tempo_limpeza_minutos, checklist, funcionario_preferencial_id, modelo_checklist_id, observacoes ou morada_estruturada.',
@@ -1371,6 +1376,33 @@ exports.atualizarPropriedade = async (req, res) => {
       propriedade.capacidade_hospedes = n;
     }
 
+    // FIX (restrição lavandaria) — fornecedor_id (lavandaria atribuída).
+    // Aceita null/string vazia para limpar a associação.
+    if (fornecedor_id !== undefined) {
+      const valor = fornecedor_id === null || fornecedor_id === ''
+        ? null
+        : String(fornecedor_id).trim();
+      if (valor !== null) {
+        if (!mongoose.isValidObjectId(valor)) {
+          return res.status(400).json({ erro: 'fornecedor_id inválido.' });
+        }
+        // Valida que é um utilizador com role 'fornecedor' da mesma empresa.
+        const Utilizador = require('../models/Utilizador');
+        const fornecedor = await Utilizador.findOne({
+          _id: valor,
+          empresa_id: empresaId,
+          role: 'fornecedor',
+          eliminado_em: null,
+        }).lean();
+        if (!fornecedor) {
+          return res.status(400).json({
+            erro: 'Fornecedor não encontrado (não é um utilizador com role "fornecedor" desta empresa).',
+          });
+        }
+      }
+      propriedade.fornecedor_id = valor;
+    }
+
     await propriedade.save();
 
     // Auditoria.
@@ -1434,7 +1466,7 @@ exports.getEquipa = async (req, res) => {
     const utilizadores = await Utilizador.find({
       empresa_id: empresaId,
       eliminado_em: null,
-      role: { $nin: ['admin', 'parceiro'] },
+      role: { $nin: ['admin', 'parceiro', 'fornecedor'] },
     })
       .select('-password_hash') // nunca expor a hash
       .populate({ path: 'responsavel_id', select: 'nome email role' })
@@ -1487,6 +1519,35 @@ exports.getParceiros = async (req, res) => {
     return res.status(200).json({ utilizadores });
   } catch (err) {
     console.error('❌ getParceiros:', err.message);
+    return res.status(500).json({ erro: 'Erro interno do servidor.' });
+  }
+};
+
+/**
+ * GET /api/gestor/fornecedores
+ * FIX (restrição lavandaria) — Lista utilizadores com role 'fornecedor'
+ * (lavandarias). Usado pelo select "Lavandaria Atribuída" no formulário
+ * de propriedades. Mostra ativos e inativos; exclui eliminados (soft delete).
+ *
+ * Resposta 200: { utilizadores: [...] } (sem password_hash).
+ */
+exports.getFornecedores = async (req, res) => {
+  try {
+    const { ok, empresaId } = obterEmpresaId(req, res);
+    if (!ok) return;
+
+    const utilizadores = await Utilizador.find({
+      empresa_id: empresaId,
+      eliminado_em: null,
+      role: 'fornecedor',
+    })
+      .select('-password_hash')
+      .sort({ nome: 1 })
+      .lean();
+
+    return res.status(200).json({ utilizadores });
+  } catch (err) {
+    console.error('❌ getFornecedores:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
   }
 };
