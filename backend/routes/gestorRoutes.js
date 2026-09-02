@@ -59,6 +59,8 @@ const { reportarAtrasoTarefa, criarTarefa, atribuirTarefa, reatribuirTarefa, atu
 const { listarModelos, criarModelo, obterModelo, atualizarModelo, apagarModelo } = require('../controllers/checklistController');
 // Smoobu — importação/sincronização de propriedades (HF5) + reservas (HF7).
 const { getPropriedadesSmoobu, importarPropriedades, sincronizarReservas } = require('../controllers/smoobuController');
+// FIX (import/export excel) — Controller de importação/exportação de Excel.
+const { exportarExcel, importarExcel } = require('../controllers/excelController');
 
 // Bootstrap do ambiente de testes — Cliente Zero. PÚBLICO (sem auth).
 router.get('/setup', setupClienteZero);
@@ -130,6 +132,10 @@ router.get('/calendario/dados', auth, isGestor, getDadosCalendario);
 
 // Exportação CSV de tarefas.
 router.get('/tarefas/export', auth, isGestor, exportarTarefasCSV);
+
+// FIX (import/export excel) — Rotas de importação/exportação de reservas.
+router.get('/reservas/exportar-excel', auth, isGestor, exportarExcel);
+router.post('/reservas/importar-excel', auth, isGestor, importarExcel);
 
 // Reportar atraso numa tarefa.
 router.post('/tarefas/:id/atraso', auth, isGestor, reportarAtrasoTarefa);
