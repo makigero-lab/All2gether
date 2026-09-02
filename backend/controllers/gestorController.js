@@ -1527,10 +1527,11 @@ exports.criarMembroEquipa = async (req, res) => {
 
     // Validação do role (se vier, tem de ser um dos permitidos).
     // HF27 — adicionado 'parceiro' (B2B externo que cria reservas manuais).
+    // FIX (role fornecedor) — adicionado 'fornecedor' (Lavandaria — portal /fornecedor).
     const roleFinal = role || 'staff';
-    if (!['admin', 'gestor', 'staff', 'parceiro'].includes(roleFinal)) {
+    if (!['admin', 'gestor', 'staff', 'parceiro', 'fornecedor'].includes(roleFinal)) {
       return res.status(400).json({
-        erro: 'Role inválido. Valores permitidos: admin, gestor, staff, parceiro.',
+        erro: 'Role inválido. Valores permitidos: admin, gestor, staff, parceiro, fornecedor.',
       });
     }
 
@@ -1748,10 +1749,11 @@ exports.atualizarMembroEquipa = async (req, res) => {
 
     // --- Role ---
     // HF27 — adicionado 'parceiro' (B2B externo).
+    // FIX (role fornecedor) — adicionado 'fornecedor' (Lavandaria — portal /fornecedor).
     if (role !== undefined) {
-      if (!['gestor', 'staff', 'parceiro'].includes(role)) {
+      if (!['gestor', 'staff', 'parceiro', 'fornecedor'].includes(role)) {
         return res.status(400).json({
-          erro: 'Role inválido. Valores permitidos via edição: gestor, staff, parceiro.',
+          erro: 'Role inválido. Valores permitidos via edição: gestor, staff, parceiro, fornecedor.',
         });
       }
       utilizador.role = role;

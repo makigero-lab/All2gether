@@ -296,9 +296,10 @@ exports.criarUtilizadorEmpresa = async (req, res) => {
       });
     }
 
-    if (!['gestor', 'staff', 'parceiro'].includes(roleFinal)) {
+    // FIX (role fornecedor) — adicionado 'fornecedor' (Lavandaria — portal /fornecedor).
+    if (!['gestor', 'staff', 'parceiro', 'fornecedor'].includes(roleFinal)) {
       return res.status(400).json({
-        erro: 'Role inválido. Valores permitidos: gestor, staff, parceiro.',
+        erro: 'Role inválido. Valores permitidos: gestor, staff, parceiro, fornecedor.',
       });
     }
 
