@@ -8,6 +8,8 @@ import {
   Building2,
   Calendar,
   Users,
+  Upload,
+  Download,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -57,6 +59,12 @@ export default function ParceiroReservasPage() {
     hospedes: "",
     observacoes: "",
   });
+
+  // FIX (excel parceiro) — Estado para o modal de importação de Excel.
+  const [importOpen, setImportOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importLoading, setImportLoading] = useState(false);
+  const [importResult, setImportResult] = useState<string | null>(null);
 
   const carregar = useCallback(async () => {
     setLoading(true);
@@ -116,6 +124,52 @@ export default function ParceiroReservasPage() {
     }
   }
 
+  // FIX (excel parceiro) — Exporta as reservas do parceiro para .xlsx.
+  async function handleExportarExcel() {
+    try {
+      const res = await fetch("/api/parceiro/reservas/exportar-excel", {
+        method: "GET",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Erro ao exportar Excel.");
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "minhas_reservas.xlsx";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Erro ao exportar Excel.");
+    }
+  }
+
+  // FIX (excel parceiro) — Importa reservas de um .xlsx.
+  async function handleImportarExcel() {
+    if (!importFile) return;
+    setImportLoading(true);
+    setImportResult(null);
+    try {
+      const arrayBuffer = await importFile.arrayBuffer();
+      const res = await fetch("/api/parceiro/reservas/importar-excel", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+        body: arrayBuffer,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.erro || `Erro ${res.status}`);
+      setImportResult(data.message || `${data.criadas} criadas, ${data.ignoradas} ignoradas, ${data.erros} erros.`);
+      await carregar();
+    } catch (e) {
+      setImportResult(e instanceof Error ? e.message : "Erro ao importar Excel.");
+    } finally {
+      setImportLoading(false);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
       <div className="flex items-center justify-between">
@@ -137,6 +191,30 @@ export default function ParceiroReservasPage() {
         >
           <CalendarPlus className="h-4 w-4" />
           Nova Reserva
+        </Button>
+        {/* FIX (excel parceiro) — Botões de importar/exportar Excel. */}
+        <Button
+          variant="outline"
+          onClick={handleExportarExcel}
+          className="gap-2"
+          title="Exporta as tuas reservas para Excel (.xlsx)."
+        >
+          <Download className="h-4 w-4" />
+          <span className="hidden sm:inline">Exportar</span>
+        </Button>
+        <Button
+          variant="outline"
+          onClick={() => {
+            setImportOpen(true);
+            setImportFile(null);
+            setImportResult(null);
+          }}
+          disabled={importLoading}
+          className="gap-2"
+          title="Importa reservas em massa de um ficheiro Excel (.xlsx)."
+        >
+          <Upload className="h-4 w-4" />
+          <span className="hidden sm:inline">Importar</span>
         </Button>
       </div>
 
@@ -276,6 +354,71 @@ export default function ParceiroReservasPage() {
           <Button onClick={handleCriar} disabled={submitting}>
             {submitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CalendarPlus className="mr-2 h-4 w-4" />}
             Criar Reserva
+          </Button>
+        </DialogFooter>
+      </Dialog>
+
+      {/* FIX (excel parceiro) — Modal de importação de Excel. */}
+      <Dialog open={importOpen} onOpenChange={(o) => !o && !importLoading && setImportOpen(o)}>
+        <DialogHeader>
+          <div>
+            <DialogTitle className="flex items-center gap-2">
+              <Upload className="h-5 w-5 text-primary" />
+              Importar Reservas (Excel)
+            </DialogTitle>
+            <DialogDescription>
+              Carrega um ficheiro .xlsx com as colunas: Propriedade, Check-in,
+              Check-out, Hóspedes (opcional). O sistema só aceita propriedades
+              que te estão atribuídas.
+            </DialogDescription>
+          </div>
+          <DialogClose onClick={() => !importLoading && setImportOpen(false)} />
+        </DialogHeader>
+        <DialogContent className="space-y-4">
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Ficheiro Excel (.xlsx)</label>
+            <input
+              type="file"
+              accept=".xlsx,.xls"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                setImportFile(f ?? null);
+                setImportResult(null);
+              }}
+              className="flex w-full cursor-pointer items-center gap-2 rounded-md border border-dashed border-input bg-muted/30 px-3 py-2 text-sm text-muted-foreground hover:bg-muted/50"
+            />
+            {importFile && (
+              <p className="text-xs text-muted-foreground">
+                Ficheiro selecionado: {importFile.name} ({(importFile.size / 1024).toFixed(0)} KB)
+              </p>
+            )}
+          </div>
+          {importResult && (
+            <div className="rounded-md bg-muted/50 p-3 text-sm">
+              <span className="font-medium">Resultado: </span>
+              {importResult}
+            </div>
+          )}
+        </DialogContent>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setImportOpen(false)}
+            disabled={importLoading}
+          >
+            Cancelar
+          </Button>
+          <Button
+            type="button"
+            onClick={handleImportarExcel}
+            disabled={!importFile || importLoading}
+          >
+            {importLoading ? (
+              <><Loader2 className="mr-2 h-4 w-4 animate-spin" />A importar…</>
+            ) : (
+              <><Upload className="mr-2 h-4 w-4" />Importar</>
+            )}
           </Button>
         </DialogFooter>
       </Dialog>
