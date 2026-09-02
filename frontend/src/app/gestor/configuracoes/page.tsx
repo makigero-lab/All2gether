@@ -448,7 +448,7 @@ export default function ConfiguracoesPage() {
                 ) : (
                   <Download className="h-4 w-4" />
                 )}
-                {sincronizando ? "A sincronizar…" : "Sincronizar Smoobu"}
+                {sincronizando ? "A sincronizar…" : "Sincronizar Limpezas (Smoobu + Parceiros)"}
               </Button>
 
               {/* Eliminar Limpezas Futuras */}
@@ -503,7 +503,7 @@ export default function ConfiguracoesPage() {
         </DialogHeader>
         <DialogContent className="space-y-2">
           <p className="text-sm text-muted-foreground">
-            Depois de apagar, podes clicar em &ldquo;Sincronizar Smoobu&rdquo; para recriar
+            Depois de apagar, podes clicar em &ldquo;Sincronizar Limpezas&rdquo; para recriar
             as tarefas a partir das reservas ativas.
           </p>
         </DialogContent>

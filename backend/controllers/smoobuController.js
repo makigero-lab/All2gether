@@ -1745,6 +1745,93 @@ async function sincronizarReservas(req, res) {
         `${existentes} já existiam, ${erros} com erro.`
     );
 
+    // FIX (sync integral parceiros) — Após sincronizar o Smoobu, percorre as
+    // reservas manuais (ReservaManual criadas por parceiros) cuja tarefa
+    // gerada NÃO EXISTE (útil após "Eliminar Futuras") e recria a Tarefa de
+    // limpeza para o check-out. Isto garante que reservas de parceiros não
+    // ficam órfãs quando o gestor faz reset da agenda.
+    let parceirosCriadas = 0;
+    let parceirosSkipped = 0;
+    try {
+      const ReservaManual = require('../models/ReservaManual');
+      const hoje = new Date();
+      hoje.setUTCHours(0, 0, 0, 0);
+      // Busca reservas manuais futuras (check_out >= hoje) sem tarefa gerada
+      // OU cuja tarefa foi cancelada/apagada (tarefa_gerada_id null ou inexistente).
+      const reservasManuais = await ReservaManual.find({
+        empresa_id: empresaId,
+        check_out: { $gte: hoje },
+      }).lean();
+
+      for (const rm of reservasManuais) {
+        // Verifica se a tarefa gerada ainda existe.
+        let tarefaExiste = false;
+        if (rm.tarefa_gerada_id) {
+          tarefaExiste = await Tarefa.exists({ _id: rm.tarefa_gerada_id });
+        }
+        if (tarefaExiste) {
+          parceirosSkipped++;
+          continue;
+        }
+
+        // Recria a tarefa de limpeza para o check-out.
+        const propriedadeRM = await Propriedade.findById(rm.propriedade_id).lean();
+        if (!propriedadeRM) {
+          parceirosSkipped++;
+          continue;
+        }
+
+        const dataCheckOutRM = new Date(rm.check_out);
+        const dataTarefaRM = new Date(
+          Date.UTC(dataCheckOutRM.getUTCFullYear(), dataCheckOutRM.getUTCMonth(), dataCheckOutRM.getUTCDate())
+        );
+        dataTarefaRM.setUTCHours(10, 0, 0, 0);
+
+        const numHospedesRM = rm.hospedes || propriedadeRM.capacidade_hospedes || null;
+
+        const novaTarefaRM = await Tarefa.create({
+          empresa_id: empresaId,
+          propriedade_id: rm.propriedade_id,
+          smoobu_reserva_id: null,
+          origem: 'manual',
+          utilizador_id: null,
+          equipa_atribuida: [],
+          data: dataTarefaRM,
+          tempo_limpeza_minutos: propriedadeRM.tempo_limpeza_minutos || 45,
+          tipo: 'limpeza',
+          estado: 'por_atribuir',
+          observacoes: rm.observacoes || '',
+          hospedes: numHospedesRM,
+          origem_parceiro: true, // FIX (sync parceiros) — marca como origem parceiro
+          checklist: propriedadeRM.checklist || [],
+          detalhes_reserva: {
+            checkin: rm.check_in ? new Date(rm.check_in).toISOString().slice(0, 10) : null,
+            checkout: new Date(rm.check_out).toISOString().slice(0, 10),
+            pax: numHospedesRM,
+          },
+        });
+
+        // Associa a nova tarefa à reserva manual.
+        await ReservaManual.updateOne(
+          { _id: rm._id },
+          { $set: { tarefa_gerada_id: novaTarefaRM._id } }
+        );
+        parceirosCriadas++;
+      }
+
+      if (parceirosCriadas > 0 || parceirosSkipped > 0) {
+        console.log(
+          `🤝 [Parceiros] sync integral: ${parceirosCriadas} tarefa(s) recriada(s) de reservas manuais, ` +
+          `${parceirosSkipped} já tinham tarefa.`
+        );
+      }
+    } catch (errParceiros) {
+      console.warn(
+        '⚠️  [Parceiros] sync integral falhou (não bloqueia o Smoobu):',
+        errParceiros.message
+      );
+    }
+
     // Atualiza ultima_sincronizacao da empresa (HF6).
     try {
       const Empresa = require('../models/Empresa');
@@ -1759,9 +1846,10 @@ async function sincronizarReservas(req, res) {
     }
 
     // message legível para toasts (executarAcao do configuracoes/page.tsx).
-    let message = `${criadas} tarefa(s) criada(s)`;
+    let message = `${criadas} tarefa(s) Smoobu criada(s)`;
     if (existentes > 0) message += `, ${existentes} já existiam`;
     if (erros > 0) message += `, ${erros} com erro`;
+    if (parceirosCriadas > 0) message += ` · ${parceirosCriadas} de reservas de parceiros recriada(s)`;
     message += ` (de ${reservas.length} reservas).`;
 
     return res.status(200).json({
@@ -1771,6 +1859,8 @@ async function sincronizarReservas(req, res) {
       existentes,
       erros,
       detalheErros,
+      parceirosCriadas,
+      parceirosSkipped,
       message,
     });
   } catch (err) {
