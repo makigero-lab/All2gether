@@ -103,7 +103,7 @@ async function handleResponse<T>(res: Response): Promise<T> {
 /* Tipos que espelham os modelos do backend                            */
 /* ------------------------------------------------------------------ */
 
-export type Role = "admin" | "gestor" | "staff" | "parceiro";
+export type Role = "admin" | "gestor" | "staff" | "parceiro" | "fornecedor";
 
 export type EstadoTarefa =
   | "por_atribuir"
@@ -263,6 +263,9 @@ export interface UtilizadorDTO {
   exclusivo_preferenciais?: boolean;
   // FIX (alocação bidirecional) — Propriedades às quais este staff está alocado.
   propriedades_alocadas?: string[];
+  // FIX (atribuição bidirecional fornecedor) — Propriedades atribuídas ao
+  // fornecedor (lavandaria). Injetado pelo backend no getEquipa.
+  propriedades_atribuidas?: string[];
   createdAt?: string;
   updatedAt?: string;
 }

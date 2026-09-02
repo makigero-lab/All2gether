@@ -94,6 +94,7 @@ const ROLE_LABEL: Record<Role, string> = {
   gestor: "Gestor",
   staff: "Staff",
   parceiro: "Parceiro",
+  fornecedor: "Fornecedor",
 };
 
 const ROLE_VARIANT: Record<Role, "default" | "secondary" | "outline"> = {
@@ -101,6 +102,7 @@ const ROLE_VARIANT: Record<Role, "default" | "secondary" | "outline"> = {
   gestor: "secondary",
   staff: "outline",
   parceiro: "outline",
+  fornecedor: "outline",
 };
 
 const DIAS_SEMANA = [
@@ -280,6 +282,9 @@ function EquipaPage() {
     // FIX (toggle exclusivo) — Se true, este staff SÓ é elegível para tarefas
     // de propriedades onde consta na equipa_preferencial.
     exclusivo_preferenciais: false,
+    // FIX (atribuição bidirecional fornecedor) — Propriedades atribuídas a
+    // este fornecedor (lavandaria). Só se aplica se role === 'fornecedor'.
+    propriedades_atribuidas: [] as string[],
   });
   const [submitting, setSubmitting] = useState(false);
   const [formErro, setFormErro] = useState<string | null>(null);
@@ -302,6 +307,9 @@ function EquipaPage() {
     // FIX (toggle exclusivo) — Se true, este staff SÓ é elegível para tarefas
     // de propriedades onde consta na equipa_preferencial.
     exclusivo_preferenciais: false,
+    // FIX (atribuição bidirecional fornecedor) — Propriedades atribuídas a
+    // este fornecedor (lavandaria). Só se aplica se role === 'fornecedor'.
+    propriedades_atribuidas: [] as string[],
   });
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editErro, setEditErro] = useState<string | null>(null);
@@ -430,8 +438,13 @@ function EquipaPage() {
         propriedades_alocadas: form.propriedades_alocadas,
         // FIX (toggle exclusivo) — Envia o estado do toggle de exclusividade.
         exclusivo_preferenciais: form.exclusivo_preferenciais,
+        // FIX (atribuição bidirecional fornecedor) — Propriedades atribuídas
+        // ao fornecedor (só aplicável se role === 'fornecedor').
+        ...(form.role === "fornecedor"
+          ? { propriedades_atribuidas: form.propriedades_atribuidas }
+          : {}),
       });
-      setForm({ nome: "", email: "", password: "", role: "staff", responsavel_id: "", dias_folga: [], telefone: "", propriedades_alocadas: [], exclusivo_preferenciais: false });
+      setForm({ nome: "", email: "", password: "", role: "staff", responsavel_id: "", dias_folga: [], telefone: "", propriedades_alocadas: [], exclusivo_preferenciais: false, propriedades_atribuidas: [] });
       setMostrarForm(false);
       await carregar();
     } catch (e) {
@@ -470,6 +483,11 @@ function EquipaPage() {
         : [],
       // FIX (toggle exclusivo) — Carrega o estado de exclusividade do staff.
       exclusivo_preferenciais: Boolean(u.exclusivo_preferenciais),
+      // FIX (atribuição bidirecional fornecedor) — Carrega as propriedades
+      // atribuídas ao fornecedor (injetadas pelo backend no getEquipa).
+      propriedades_atribuidas: Array.isArray(u.propriedades_atribuidas)
+        ? [...u.propriedades_atribuidas]
+        : [],
     });
     setNovaFolga({ data: "", motivo: "" });
     setEditErro(null);
@@ -543,6 +561,11 @@ function EquipaPage() {
         propriedades_alocadas: editForm.propriedades_alocadas,
         // FIX (toggle exclusivo) — Envia o estado do toggle de exclusividade.
         exclusivo_preferenciais: editForm.exclusivo_preferenciais,
+        // FIX (atribuição bidirecional fornecedor) — Propriedades atribuídas
+        // ao fornecedor (só aplicável se role === 'fornecedor').
+        ...(editForm.role === "fornecedor"
+          ? { propriedades_atribuidas: editForm.propriedades_atribuidas }
+          : {}),
       };
       if (editForm.password) body.password = editForm.password;
 
@@ -1029,6 +1052,63 @@ function EquipaPage() {
                   />
                 </div>
 
+                  {/* FIX (atribuição bidirecional fornecedor) — Multi-select de
+                      propriedades atribuídas, só visível se role === 'fornecedor'. */}
+                  {form.role === "fornecedor" && (
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium leading-none">
+                        Propriedades Atribuídas (Lavandaria)
+                      </label>
+                      <p className="text-xs text-muted-foreground">
+                        Seleciona as propriedades que esta lavandaria irá servir.
+                        O fornecedor só vê as tarefas das propriedades atribuídas.
+                      </p>
+                      {propriedades.length === 0 ? (
+                        <p className="text-xs italic text-muted-foreground">
+                          Sem propriedades disponíveis.
+                        </p>
+                      ) : (
+                        <div className="grid max-h-48 gap-1.5 overflow-y-auto rounded-md border border-input p-2 sm:grid-cols-2">
+                          {propriedades
+                            .filter((p) => p.ativo || form.propriedades_atribuidas.includes(p._id))
+                            .map((p) => {
+                            const checked = form.propriedades_atribuidas.includes(p._id);
+                            return (
+                              <label
+                                key={p._id}
+                                className={`flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm transition-colors ${
+                                  checked
+                                    ? "border-primary bg-primary/10 text-primary"
+                                    : "border-input text-muted-foreground hover:bg-muted/50"
+                                }`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={(e) => {
+                                    setForm((f) => ({
+                                      ...f,
+                                      propriedades_atribuidas: e.target.checked
+                                        ? [...f.propriedades_atribuidas, p._id]
+                                        : f.propriedades_atribuidas.filter((id) => id !== p._id),
+                                    }));
+                                  }}
+                                  className="h-3.5 w-3.5"
+                                />
+                                <span className="flex-1 truncate" title={p.nome}>{p.nome}</span>
+                                {!p.ativo && (
+                                  <Badge variant="outline" className="text-[10px]">
+                                    inativa
+                                  </Badge>
+                                )}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {formErro && (
                     <p className="flex items-center gap-2 text-sm text-destructive">
                       <AlertCircle className="h-4 w-4" />
@@ -1053,7 +1133,7 @@ function EquipaPage() {
                       onClick={() => {
                         setMostrarForm(false);
                         setFormErro(null);
-                        setForm({ nome: "", email: "", password: "", role: "staff", responsavel_id: "", dias_folga: [], telefone: "", propriedades_alocadas: [], exclusivo_preferenciais: false });
+                        setForm({ nome: "", email: "", password: "", role: "staff", responsavel_id: "", dias_folga: [], telefone: "", propriedades_alocadas: [], exclusivo_preferenciais: false, propriedades_atribuidas: [] });
                       }}
                       disabled={submitting}
                     >
@@ -1639,6 +1719,63 @@ function EquipaPage() {
                     aria-label="Staff exclusivo"
                   />
                 </div>
+
+                {/* FIX (atribuição bidirecional fornecedor) — Multi-select de
+                    propriedades atribuídas (edição), só se role === 'fornecedor'. */}
+                {editForm.role === "fornecedor" && (
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium leading-none">
+                      Propriedades Atribuídas (Lavandaria)
+                    </label>
+                    <p className="text-xs text-muted-foreground">
+                      Seleciona as propriedades que esta lavandaria irá servir.
+                      O fornecedor só vê as tarefas das propriedades atribuídas.
+                    </p>
+                    {propriedades.length === 0 ? (
+                      <p className="text-xs italic text-muted-foreground">
+                        Sem propriedades disponíveis.
+                      </p>
+                    ) : (
+                      <div className="grid max-h-48 gap-1.5 overflow-y-auto rounded-md border border-input p-2 sm:grid-cols-2">
+                        {propriedades
+                          .filter((p) => p.ativo || editForm.propriedades_atribuidas.includes(p._id))
+                          .map((p) => {
+                          const checked = editForm.propriedades_atribuidas.includes(p._id);
+                          return (
+                            <label
+                              key={p._id}
+                              className={`flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm transition-colors ${
+                                checked
+                                  ? "border-primary bg-primary/10 text-primary"
+                                  : "border-input text-muted-foreground hover:bg-muted/50"
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(e) => {
+                                  setEditForm((f) => ({
+                                    ...f,
+                                    propriedades_atribuidas: e.target.checked
+                                      ? [...f.propriedades_atribuidas, p._id]
+                                      : f.propriedades_atribuidas.filter((id) => id !== p._id),
+                                  }));
+                                }}
+                                className="h-3.5 w-3.5"
+                              />
+                              <span className="flex-1 truncate" title={p.nome}>{p.nome}</span>
+                              {!p.ativo && (
+                                <Badge variant="outline" className="text-[10px]">
+                                  inativa
+                                </Badge>
+                              )}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {editErro && (
                   <p className="flex items-center gap-2 text-sm text-destructive">

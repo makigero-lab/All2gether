@@ -1463,10 +1463,13 @@ exports.getEquipa = async (req, res) => {
     // FIX (soft-delete com desatribuição) — Mostra tanto ativos como inativos
     // (removido o filtro ativo: true) para o gestor poder ver e reativar
     // utilizadores inativos. O soft-delete (eliminado_em) continua a excluir.
+    // FIX (visibilidade fornecedor) — fornecedores voltam a ser listados na
+    // Equipa (removido 'fornecedor' do $nin) para o gestor poder editá-los
+    // e atribuir propriedades no modal de edição.
     const utilizadores = await Utilizador.find({
       empresa_id: empresaId,
       eliminado_em: null,
-      role: { $nin: ['admin', 'parceiro', 'fornecedor'] },
+      role: { $nin: ['admin', 'parceiro'] },
     })
       .select('-password_hash') // nunca expor a hash
       .populate({ path: 'responsavel_id', select: 'nome email role' })
@@ -1485,6 +1488,33 @@ exports.getEquipa = async (req, res) => {
           : null,
       };
     });
+
+    // FIX (atribuição bidirecional) — Para cada fornecedor, busca as
+    // propriedades onde fornecedor_id === user._id e injeta um array
+    // com esses IDs num novo campo `propriedades_atribuidas` no objeto.
+    const fornecedoresComProps = transformados.filter((u) => u.role === 'fornecedor');
+    if (fornecedoresComProps.length > 0) {
+      const fornecedorIds = fornecedoresComProps.map((u) => u._id);
+      const props = await Propriedade.find({
+        fornecedor_id: { $in: fornecedorIds },
+        empresa_id: empresaId,
+      })
+        .select('_id fornecedor_id')
+        .lean();
+      // Mapa: fornecedor_id → [propriedade_id, ...]
+      const mapa = new Map();
+      for (const p of props) {
+        const fid = String(p.fornecedor_id);
+        if (!mapa.has(fid)) mapa.set(fid, []);
+        mapa.get(fid).push(String(p._id));
+      }
+      // Injeta propriedades_atribuidas em cada fornecedor.
+      for (const u of transformados) {
+        if (u.role === 'fornecedor') {
+          u.propriedades_atribuidas = mapa.get(String(u._id)) ?? [];
+        }
+      }
+    }
 
     return res.status(200).json({ utilizadores: transformados });
   } catch (err) {
@@ -1570,7 +1600,7 @@ exports.criarMembroEquipa = async (req, res) => {
     const { ok, empresaId } = obterEmpresaId(req, res);
     if (!ok) return;
 
-    const { nome, email, password, role, responsavel_id, dias_folga, telefone, nif, observacoes, exclusivo_preferenciais, propriedades_alocadas } = req.body || {};
+    const { nome, email, password, role, responsavel_id, dias_folga, telefone, nif, observacoes, exclusivo_preferenciais, propriedades_alocadas, propriedades_atribuidas } = req.body || {};
 
     // Validações de presença.
     if (!nome || !email || !password) {
@@ -1687,6 +1717,21 @@ exports.criarMembroEquipa = async (req, res) => {
     const utilizador = novo.toObject();
     delete utilizador.password_hash;
 
+    // FIX (atribuição bidirecional fornecedor) — Se o role for fornecedor e
+    // o body contiver propriedades_atribuidas (array de IDs), atribui esse
+    // fornecedor a essas propriedades (fornecedor_id = novoUser._id).
+    if (roleFinal === 'fornecedor' && Array.isArray(propriedades_atribuidas)) {
+      const idsValidos = propriedades_atribuidas.filter((pid) => mongoose.isValidObjectId(pid));
+      if (idsValidos.length > 0) {
+        await Propriedade.updateMany(
+          { _id: { $in: idsValidos }, empresa_id: empresaId },
+          { fornecedor_id: novo._id }
+        );
+      }
+      // Injeta no objeto de resposta para o frontend ficar consistente.
+      utilizador.propriedades_atribuidas = idsValidos;
+    }
+
     // Auditoria.
     registarAuditoria({
       utilizador_id: req.user.id,
@@ -1742,7 +1787,7 @@ exports.atualizarMembroEquipa = async (req, res) => {
       return res.status(400).json({ erro: 'ID de utilizador inválido.' });
     }
 
-    const { nome, email, role, password, responsavel_id, dias_folga, telefone, folgas_rotativas, nif, observacoes, exclusivo_preferenciais, propriedades_alocadas } = req.body || {};
+    const { nome, email, role, password, responsavel_id, dias_folga, telefone, folgas_rotativas, nif, observacoes, exclusivo_preferenciais, propriedades_alocadas, propriedades_atribuidas } = req.body || {};
     if (
       nome === undefined &&
       email === undefined &&
@@ -1958,6 +2003,29 @@ exports.atualizarMembroEquipa = async (req, res) => {
         });
       }
       utilizador.password_hash = await bcrypt.hash(String(password), 10);
+    }
+
+    // FIX (atribuição bidirecional fornecedor) — Se o role do utilizador for
+    // (ou ficar) fornecedor e o body contiver propriedades_atribuidas:
+    //   1. Limpa todas as propriedades onde fornecedor_id === user._id (antigas).
+    //   2. Atribui as novas propriedades (fornecedor_id = user._id).
+    const isFornecedorFinal = role !== undefined ? role === 'fornecedor' : utilizador.role === 'fornecedor';
+    if (isFornecedorFinal && propriedades_atribuidas !== undefined) {
+      // Passo 1: limpa as antigas.
+      await Propriedade.updateMany(
+        { fornecedor_id: utilizador._id, empresa_id: empresaId },
+        { fornecedor_id: null }
+      );
+      // Passo 2: aplica as novas.
+      const idsValidos = Array.isArray(propriedades_atribuidas)
+        ? propriedades_atribuidas.filter((pid) => mongoose.isValidObjectId(pid))
+        : [];
+      if (idsValidos.length > 0) {
+        await Propriedade.updateMany(
+          { _id: { $in: idsValidos }, empresa_id: empresaId },
+          { fornecedor_id: utilizador._id }
+        );
+      }
     }
 
     await utilizador.save();

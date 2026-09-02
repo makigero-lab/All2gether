@@ -23,7 +23,8 @@
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^8.5.1",
     "node-cron": "^4.5.0",
-    "web-push": "^3.6.7"
+    "web-push": "^3.6.7",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "jest": "^30.4.2",

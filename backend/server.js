@@ -70,7 +70,9 @@ app.use(
 );
 
 // Permite receber e enviar JSON no corpo dos pedidos.
-app.use(express.json());
+// FIX (import/export excel) — Limite aumentado para 10mb para aceitar uploads
+// de ficheiros Excel (.xlsx) na rota /api/gestor/reservas/importar-excel.
+app.use(express.json({ limit: '10mb' }));
 
 // Rate limiting global: 100 pedidos por IP a cada 15 minutos.
 // Em ambiente de teste (Jest) o limite é desativado para não bloquear
