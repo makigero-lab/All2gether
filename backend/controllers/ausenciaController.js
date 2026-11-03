@@ -145,7 +145,7 @@ exports.registarAusencia = async (req, res) => {
     if (!utilizador) {
       return res.status(400).json({
         erro:
-          'Utilizador não encontrado (ou não é staff/gestor da empresa).',
+          'Utilizador não encontrado (ou não é da equipa/gestor da empresa).',
       });
     }
 

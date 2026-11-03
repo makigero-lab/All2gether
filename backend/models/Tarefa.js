@@ -106,7 +106,7 @@ const tarefaSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
-    // Alerta automático gerado pelo webhook Smoobu (ex: "Staff exclusivo de folga").
+    // Alerta automático gerado pelo webhook Smoobu (ex: "Equipa exclusiva de folga").
     // Preenchido quando a tarefa é criada mas não pode ser atribuída ao staff
     // exclusivo da propriedade porque ele está de folga no dia do check-out.
     // O gestor vê este alerta no painel e gere a substituição manualmente.
@@ -117,7 +117,7 @@ const tarefaSchema = new mongoose.Schema(
     },
     // HF24 — Motivo detalhado de não atribuição (quando estado = 'por_atribuir'
     // ou 'nao_atribuida'). Preenchido pelo load balancer com a razão exata:
-    // "Nenhum staff disponível", "Todos de folga/férias", "SLA excedido", etc.
+    // "Nenhum elemento da equipa disponível", "Todos de folga/férias", "SLA excedido", etc.
     motivo_nao_atribuicao: {
       type: String,
       default: null,

@@ -369,7 +369,7 @@ exports.criarTarefa = async (req, res) => {
       });
       if (!user) {
         return res.status(400).json({
-          erro: 'Utilizador não encontrado (ou não é staff/gestor ativo da empresa).',
+          erro: 'Utilizador não encontrado (ou não é da equipa/gestor ativo da empresa).',
         });
       }
 
@@ -585,7 +585,7 @@ exports.atribuirTarefa = async (req, res) => {
       });
       if (!user) {
         return res.status(400).json({
-          erro: 'Utilizador não encontrado (ou não é staff/gestor ativo).',
+          erro: 'Utilizador não encontrado (ou não é da equipa/gestor ativo).',
         });
       }
 
@@ -766,7 +766,7 @@ exports.reatribuirTarefa = async (req, res) => {
     }).lean();
     if (!novoUser) {
       return res.status(400).json({
-        erro: 'Utilizador não encontrado (ou não é staff/gestor ativo).',
+        erro: 'Utilizador não encontrado (ou não é da equipa/gestor ativo).',
       });
     }
 
@@ -1147,7 +1147,7 @@ exports.autoAtribuirTarefas = async (req, res) => {
           // FIX (motivo_falha_atribuicao) — Preenche motivo_nao_atribuicao
           // com a justificação exata para o gestor perceber porque falhou.
           let slaExcedido = false;
-          let motivoFalha = 'Sem staff disponível';
+          let motivoFalha = 'Sem equipa disponível';
           try {
             const Utilizador = require('../models/Utilizador');
             const temStaffAtivo = await Utilizador.exists({
@@ -1159,9 +1159,9 @@ exports.autoAtribuirTarefas = async (req, res) => {
             // Se há staff ativo mas o load balancer não atribuiu → SLA excedido.
             slaExcedido = !!temStaffAtivo;
             if (slaExcedido) {
-              motivoFalha = 'Lotação máxima excedida (todos os staff > 8h/dia)';
+              motivoFalha = 'Lotação máxima excedida (toda a equipa > 8h/dia)';
             } else {
-              motivoFalha = 'Toda a equipa de folga/férias ou sem staff ativo';
+              motivoFalha = 'Toda a equipa de folga/férias ou sem equipa ativa';
             }
           } catch (e) {
             // Se falha a verificação, mantém por_atribuir (seguro).
@@ -1328,7 +1328,7 @@ exports.criarTarefaEspontanea = async (req, res) => {
       });
       if (!user) {
         return res.status(400).json({
-          erro: 'Utilizador não encontrado (ou não é staff/gestor ativo da empresa).',
+          erro: 'Utilizador não encontrado (ou não é da equipa/gestor ativo da empresa).',
         });
       }
       utilizadorValidado = user._id;

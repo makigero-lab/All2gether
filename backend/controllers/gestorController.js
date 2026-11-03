@@ -794,7 +794,7 @@ exports.getDadosCalendario = async (req, res) => {
           start: new Date(a.data_inicio),
           end: endExclusive,
           allDay: true,
-          title: `${tituloPorTipo}: ${a.utilizador_id?.nome ?? 'Staff'}`,
+          title: `${tituloPorTipo}: ${a.utilizador_id?.nome ?? 'Elemento da equipa'}`,
           utilizador_id: a.utilizador_id
             ? { _id: String(a.utilizador_id._id), nome: a.utilizador_id.nome }
             : null,
@@ -827,7 +827,7 @@ exports.getDadosCalendario = async (req, res) => {
           start: new Date(a.data_inicio),
           end: endExclusive,
           allDay: true,
-          title: `${tituloPorTipo}${sufixoEmergencia} (Pendente): ${a.utilizador_id?.nome ?? 'Staff'}`,
+          title: `${tituloPorTipo}${sufixoEmergencia} (Pendente): ${a.utilizador_id?.nome ?? 'Elemento da equipa'}`,
           utilizador_id: a.utilizador_id
             ? { _id: String(a.utilizador_id._id), nome: a.utilizador_id.nome }
             : null,
@@ -871,7 +871,7 @@ exports.getDadosCalendario = async (req, res) => {
           );
           if (estaAusente) {
             t.alerta_orfao = true;
-            t.alerta_mensagem = 'Staff de férias nesta data — tarefa órfã';
+            t.alerta_mensagem = 'Equipa de férias nesta data — tarefa órfã';
           }
         }
       }
@@ -1286,7 +1286,7 @@ exports.atualizarPropriedade = async (req, res) => {
         }).lean();
         if (!parceiro) {
           return res.status(400).json({
-            erro: 'Parceiro não encontrado (não é um utilizador com role "parceiro" desta empresa).',
+            erro: 'Proprietário não encontrado (não é um proprietário desta empresa).',
           });
         }
       }
@@ -1355,7 +1355,7 @@ exports.atualizarPropriedade = async (req, res) => {
         }).lean();
         if (!staffPref) {
           return res.status(400).json({
-            erro: 'Funcionário preferencial não encontrado (não é staff ativo desta empresa).',
+            erro: 'Elemento da equipa preferencial não encontrado (não está ativo nesta empresa).',
           });
         }
       }
@@ -1422,7 +1422,7 @@ exports.atualizarPropriedade = async (req, res) => {
         }).lean();
         if (!fornecedor) {
           return res.status(400).json({
-            erro: 'Fornecedor não encontrado (não é um utilizador com role "fornecedor" desta empresa).',
+            erro: 'Lavandaria não encontrada (não é uma lavandaria desta empresa).',
           });
         }
       }

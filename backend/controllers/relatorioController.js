@@ -417,7 +417,7 @@ function construirPrompt(contexto) {
           s.taxaConclusao * 100
         )}%), carga ${Math.round(s.carga_minutos / 60 * 10) / 10}h`
     )
-    .join('\n') || '- (sem dados de staff)';
+    .join('\n') || '- (sem dados da equipa)';
 
   const topProps = [...contexto.porPropriedade]
     .sort((a, b) => b.total - a.total)
@@ -442,7 +442,7 @@ Dados:
 - Tempo médio estimado por tarefa: ${tempoMedio}h
 - Tempo real médio por tarefa (concluídas): ${tempoReal}h
 
-Top staff (por taxa de conclusão):
+Melhores da equipa (por taxa de conclusão):
 ${topStaff}
 
 Top propriedades (por nº de tarefas):
@@ -608,7 +608,7 @@ function gerarPlaceholder(contexto) {
       const min = Math.min(...cargas);
       if (max > min * 2) {
         tendencias.push(
-          `- **Distribuição de carga desequilibrada**: o staff com mais tarefas tem ${max} e o com menos tem ${min} — possível sobrecarga pontual.`
+          `- **Distribuição de carga desequilibrada**: o elemento da equipa com mais tarefas tem ${max} e o com menos tem ${min} — possível sobrecarga pontual.`
         );
       }
     }
@@ -657,7 +657,7 @@ function gerarPlaceholder(contexto) {
 
   if (contexto.porStaff.length > 1) {
     recomendacoes.push(
-      `Avaliar redistribuição de carga entre staff: equilibrar tarefas por capacidade e experiência, garantindo cobertura adequada das propriedades com maior volume.`
+      `Avaliar redistribuição de carga entre a equipa: equilibrar tarefas por capacidade e experiência, garantindo cobertura adequada das propriedades com maior volume.`
     );
   }
 
