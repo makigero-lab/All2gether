@@ -62,6 +62,10 @@ const ACOES_ATUALIZAR = [
   'updated',
 ];
 const ACOES_CANCELAR = [
+  // Nomes oficiais da documentação do Smoobu (docs.smoobu.com › Webhooks).
+  'cancelReservation',
+  'deleteReservation',
+  // Variantes legacy / de outros formatos.
   'cancellation',
   'cancel',
   'reservation_cancelled',
@@ -208,6 +212,10 @@ function extrairDadosReserva(payload) {
   nomeHospede =
     nomeHospede != null ? String(nomeHospede).trim().slice(0, 200) : null;
 
+  // Tipo da reserva no Smoobu ('reservation' | 'modification of booking' |
+  // 'cancellation'). Um updateReservation com type 'cancellation' é um cancelamento.
+  const tipoReserva = String(data.type ?? content.type ?? '');
+
   const detalhesReserva = {
     checkin,
     checkout,
@@ -221,6 +229,7 @@ function extrairDadosReserva(payload) {
     dataCheckInRaw: dataCheckInRaw != null ? String(dataCheckInRaw) : null,
     dataCheckOutRaw: dataCheckOutRaw != null ? String(dataCheckOutRaw) : null,
     reservaId,
+    tipoReserva,
     detalhesReserva,
     content,
   };
@@ -1011,12 +1020,16 @@ async function processarReservaSmoobu(payload, empresaId, empresaRestrita = null
     dataCheckInRaw,
     dataCheckOutRaw,
     reservaId,
+    tipoReserva,
     detalhesReserva,
     content,
   } = extrairDadosReserva(payload);
 
-  // 1. Cancelamento.
-  if (ACOES_CANCELAR.includes(action)) {
+  // 1. Cancelamento (ação de cancelamento, ou atualização cujo tipo é 'cancellation').
+  if (
+    ACOES_CANCELAR.includes(action) ||
+    (ACOES_ATUALIZAR.includes(action) && /cancel/i.test(tipoReserva))
+  ) {
     return cancelarTarefaPorReserva(reservaId, empresaRestrita);
   }
 
