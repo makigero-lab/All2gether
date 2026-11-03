@@ -24,6 +24,8 @@ const buttonVariants = cva(
         sm: "h-8 rounded-md px-3 text-xs",
         lg: "h-10 rounded-md px-8",
         icon: "h-9 w-9",
+        // Alvo de toque confortável (44px) para a área staff em telemóvel.
+        touch: "h-11 rounded-md px-5",
       },
     },
     defaultVariants: {

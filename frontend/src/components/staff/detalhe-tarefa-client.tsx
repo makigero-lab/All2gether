@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { comprimirImagem } from "@/lib/imagem";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
@@ -154,6 +155,7 @@ export function DetalheTarefaClient({
   // HF13 — fotos em base64 (upload simplificado, sem object storage).
   // O input type="file" lê o ficheiro e converte para base64 via FileReader.
   const [avariaFotos, setAvariaFotos] = useState<string[]>([]);
+  const [erroFotosAvaria, setErroFotosAvaria] = useState<string | null>(null);
   const [avariaSubmitting, setAvariaSubmitting] = useState(false);
   const [avariaResultado, setAvariaResultado] = useState<string | null>(null);
 
@@ -235,24 +237,24 @@ export function DetalheTarefaClient({
   };
 
   // HF19 — Processa a seleção de fotos para a conclusão (mesma lógica das avarias).
-  function handleSelecionarFotosConcluir(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleSelecionarFotosConcluir(e: React.ChangeEvent<HTMLInputElement>) {
     const ficheiros = Array.from(e.target.files || []);
+    e.target.value = "";
     if (ficheiros.length === 0) return;
     const slotsDisponiveis = 5 - concluirFotos.length;
-    const ficheirosParaLer = ficheiros.slice(0, slotsDisponiveis);
-    for (const ficheiro of ficheirosParaLer) {
-      if (!ficheiro.type.startsWith("image/")) continue;
-      if (ficheiro.size > 2 * 1024 * 1024) continue;
-      const reader = new FileReader();
-      reader.onload = () => {
-        const base64 = reader.result as string;
-        if (base64) {
-          setConcluirFotos((prev) => [...prev, base64].slice(0, 5));
-        }
-      };
-      reader.readAsDataURL(ficheiro);
+    if (ficheiros.length > slotsDisponiveis) {
+      setErroConcluir("Máximo de 5 fotos. As restantes foram ignoradas.");
+    } else {
+      setErroConcluir(null);
     }
-    e.target.value = "";
+    for (const ficheiro of ficheiros.slice(0, Math.max(0, slotsDisponiveis))) {
+      const r = await comprimirImagem(ficheiro);
+      if (r.ok) {
+        setConcluirFotos((prev) => [...prev, r.dataUrl].slice(0, 5));
+      } else {
+        setErroConcluir(r.erro);
+      }
+    }
   }
 
   function removerFotoConcluir(index: number) {
@@ -357,31 +359,22 @@ export function DetalheTarefaClient({
 
   // HF13 — Processa a seleção de ficheiros e converte para base64.
   // Limita a 5 fotos, cada uma até ~2MB (base64 incluído no payload JSON).
-  function handleSelecionarFotos(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleSelecionarFotos(e: React.ChangeEvent<HTMLInputElement>) {
     const ficheiros = Array.from(e.target.files || []);
-    if (ficheiros.length === 0) return;
-
-    // Limita a 5 fotos no total (incluindo as já adicionadas).
-    const slotsDisponiveis = 5 - avariaFotos.length;
-    const ficheirosParaLer = ficheiros.slice(0, slotsDisponiveis);
-
-    for (const ficheiro of ficheirosParaLer) {
-      // Valida tipo (só imagens).
-      if (!ficheiro.type.startsWith("image/")) continue;
-      // Valida tamanho (~2MB — base64 aumenta ~33%, pelo que ~2.6MB no payload).
-      if (ficheiro.size > 2 * 1024 * 1024) continue;
-
-      const reader = new FileReader();
-      reader.onload = () => {
-        const base64 = reader.result as string;
-        if (base64) {
-          setAvariaFotos((prev) => [...prev, base64].slice(0, 5));
-        }
-      };
-      reader.readAsDataURL(ficheiro);
-    }
-    // Limpa o input para permitir re-selecionar o mesmo ficheiro.
     e.target.value = "";
+    if (ficheiros.length === 0) return;
+    const slotsDisponiveis = 5 - avariaFotos.length;
+    setErroFotosAvaria(
+      ficheiros.length > slotsDisponiveis ? "Máximo de 5 fotos. As restantes foram ignoradas." : null
+    );
+    for (const ficheiro of ficheiros.slice(0, Math.max(0, slotsDisponiveis))) {
+      const r = await comprimirImagem(ficheiro);
+      if (r.ok) {
+        setAvariaFotos((prev) => [...prev, r.dataUrl].slice(0, 5));
+      } else {
+        setErroFotosAvaria(r.erro);
+      }
+    }
   }
 
   // HF13 — Remove uma foto da lista (botão X sobre a preview).
@@ -876,7 +869,7 @@ export function DetalheTarefaClient({
               />
               </div>
 
-              {/* HF13 — Input de fotos (opcional, máx. 5, até 2MB cada) */}
+              {/* HF13 — Input de fotos (opcional, máx. 5) */}
               <div className="space-y-2">
                 <label className="text-sm font-medium">
                   Fotos (opcional)
@@ -925,8 +918,11 @@ export function DetalheTarefaClient({
                     />
                   </label>
                 )}
+                {erroFotosAvaria && (
+                  <p role="alert" className="text-sm text-destructive">{erroFotosAvaria}</p>
+                )}
                 <p className="text-xs text-muted-foreground">
-                  Máx. 5 fotos, até 2MB cada (JPG, PNG).
+                  Máx. 5 fotos (são reduzidas automaticamente).
                 </p>
               </div>
             </>
@@ -1048,7 +1044,7 @@ export function DetalheTarefaClient({
           )}
 
           <p className="text-xs text-muted-foreground">
-            Máx. 5 fotos, até 2MB cada (JPG, PNG).
+            Máx. 5 fotos (são reduzidas automaticamente).
           </p>
 
           {/* FIX (portal lavandaria) — Input de sacos de roupa suja recolhidos. */}
