@@ -424,7 +424,7 @@ export default function ConfiguracoesPage() {
             <CardTitle className="flex items-center gap-2 text-base text-destructive">
               <ShieldAlert className="h-5 w-5" />
               Ações de Manutenção
-              <Badge variant="outline" className="ml-1 text-[10px]">Admin</Badge>
+              <Badge variant="outline" className="ml-1 text-xs">Admin</Badge>
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -606,7 +606,7 @@ export default function ConfiguracoesPage() {
                   <li key={w._id} className="flex items-start gap-3 px-3 py-2.5">
                     <div className="flex min-w-0 flex-1 flex-col gap-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant={variant} className="shrink-0 text-[10px]">
+                        <Badge variant={variant} className="shrink-0 text-xs">
                           {label}
                         </Badge>
                         <span className="truncate text-sm font-medium">

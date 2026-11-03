@@ -2218,7 +2218,7 @@ function EquipaMapa({ tarefas, equipa, periodo, loading }: EquipaMapaProps) {
               {dias.map((dia, i) => (
                 <th key={i} className="px-2 py-2 text-center font-medium min-w-[60px]">
                   <div className="flex flex-col">
-                    <span className="text-[10px] uppercase">
+                    <span className="text-xs uppercase">
                       {format(dia, "EEE", { locale: pt })}
                     </span>
                     <span className="text-sm font-bold">

@@ -66,7 +66,7 @@ export function DetalhesReservaCard({
           <div className="flex items-start gap-2 rounded-md bg-background/60 p-2.5">
             <LogIn className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
             <div className="min-w-0">
-              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Check-in
               </p>
               <p className="text-sm font-semibold">
@@ -77,7 +77,7 @@ export function DetalhesReservaCard({
           <div className="flex items-start gap-2 rounded-md bg-background/60 p-2.5">
             <LogOut className="mt-0.5 h-4 w-4 shrink-0 text-rose-600" />
             <div className="min-w-0">
-              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Check-out
               </p>
               <p className="text-sm font-semibold">
@@ -88,7 +88,7 @@ export function DetalhesReservaCard({
           <div className="flex items-start gap-2 rounded-md bg-background/60 p-2.5">
             <Users className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
             <div className="min-w-0">
-              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Hóspedes
               </p>
               <p className="text-sm font-semibold">
@@ -99,7 +99,7 @@ export function DetalhesReservaCard({
           <div className="flex items-start gap-2 rounded-md bg-background/60 p-2.5">
             <User className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
             <div className="min-w-0">
-              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Hóspede
               </p>
               <p className="truncate text-sm font-semibold" title={detalhes.nome_hospede ?? undefined}>

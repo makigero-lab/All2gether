@@ -423,14 +423,10 @@ export default function PropriedadesPage() {
   // Prompt 113 — Aplicar checklist padrão a todas as propriedades.
   const [checklistLoading, setChecklistLoading] = useState(false);
 
+  const [confirmarChecklistAberto, setConfirmarChecklistAberto] = useState(false);
+
   async function handleAplicarChecklistPadrao() {
-    if (!confirm(
-      "Isto vai SUBSTITUIR o checklist de TODAS as propriedades pelo padrão " +
-      "(Esvaziar lixo, Trocar roupa da cama, Trocar Toalhas, Limpar chão, " +
-      "Limpar vidros, Limpar pó). Continuar?"
-    )) {
-      return;
-    }
+    setConfirmarChecklistAberto(false);
     setChecklistLoading(true);
     setErro(null);
     setFeedbackOk(null);
@@ -727,7 +723,7 @@ export default function PropriedadesPage() {
           {/* Prompt 113 — Aplicar checklist padrão a todas as propriedades */}
           <Button
             variant="outline"
-            onClick={handleAplicarChecklistPadrao}
+            onClick={() => setConfirmarChecklistAberto(true)}
             disabled={checklistLoading || propriedades.length === 0}
             title="Aplica um checklist padrão (6 itens) a todas as propriedades. Substitui o existente."
           >
@@ -740,6 +736,28 @@ export default function PropriedadesPage() {
               {checklistLoading ? "A aplicar…" : "Checklist Padrão"}
             </span>
           </Button>
+          {/* Confirmação da ação destrutiva em massa (substitui o confirm() nativo). */}
+          <Dialog open={confirmarChecklistAberto} onOpenChange={setConfirmarChecklistAberto}>
+            <DialogHeader>
+              <DialogTitle>Substituir o checklist de todas as propriedades?</DialogTitle>
+              <DialogDescription>
+                Esta ação substitui o checklist de TODAS as propriedades pelo padrão e não pode ser desfeita.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogContent>
+              <p className="text-sm text-muted-foreground">
+                Checklist padrão: Esvaziar lixo, Trocar roupa da cama, Trocar toalhas, Limpar chão, Limpar vidros, Limpar pó.
+              </p>
+            </DialogContent>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setConfirmarChecklistAberto(false)}>
+                Cancelar
+              </Button>
+              <Button variant="destructive" onClick={handleAplicarChecklistPadrao}>
+                Substituir tudo
+              </Button>
+            </DialogFooter>
+          </Dialog>
           {/* HF23 — Botão "Nova Propriedade" (Smoobu) removido.
               Mantém-se apenas o "Adicionar Manual". */}
           <Button
@@ -1041,7 +1059,7 @@ export default function PropriedadesPage() {
                               mostra "All2gether". */}
                           <Badge
                             variant="secondary"
-                            className="text-[10px]"
+                            className="text-xs"
                             title={
                               p.parceiro_id && typeof p.parceiro_id === "object"
                                 ? `Parceiro Associado: ${p.parceiro_id.nome}`
@@ -1811,7 +1829,7 @@ export default function PropriedadesPage() {
                             {s.exclusivo_preferenciais && (
                               <Badge
                                 variant="outline"
-                                className="text-[10px]"
+                                className="text-xs"
                                 title="Staff exclusivo — só recebe tarefas de propriedades onde está na equipa preferencial"
                               >
                                 exclusivo

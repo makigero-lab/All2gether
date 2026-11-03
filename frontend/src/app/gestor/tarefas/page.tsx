@@ -896,14 +896,14 @@ export default function AdminTarefasPage() {
         <TabsList className="grid w-full grid-cols-4 sm:inline-flex sm:w-auto">
           <TabsTrigger value="todas" className="gap-1.5">
             Todas
-            <Badge variant="secondary" className="ml-1 px-1.5 py-0 text-[10px]">
+            <Badge variant="secondary" className="ml-1 px-1.5 py-0 text-xs">
               {tarefas.length}
             </Badge>
           </TabsTrigger>
           <TabsTrigger value="por_atribuir" className="gap-1.5">
             Por Atribuir
             {tarefas.filter((t) => t.estado === "por_atribuir").length > 0 && (
-              <Badge variant="destructive" className="ml-1 px-1.5 py-0 text-[10px]">
+              <Badge variant="destructive" className="ml-1 px-1.5 py-0 text-xs">
                 {tarefas.filter((t) => t.estado === "por_atribuir").length}
               </Badge>
             )}
@@ -911,7 +911,7 @@ export default function AdminTarefasPage() {
           <TabsTrigger value="pendentes" className="gap-1.5">
             Pendentes
             {tarefas.filter((t) => t.estado === "atribuida" || t.estado === "em_curso").length > 0 && (
-              <Badge variant="secondary" className="ml-1 px-1.5 py-0 text-[10px]">
+              <Badge variant="secondary" className="ml-1 px-1.5 py-0 text-xs">
                 {tarefas.filter((t) => t.estado === "atribuida" || t.estado === "em_curso").length}
               </Badge>
             )}
@@ -919,7 +919,7 @@ export default function AdminTarefasPage() {
           <TabsTrigger value="concluidas" className="gap-1.5">
             Concluídas
             {tarefas.filter((t) => t.estado === "concluida").length > 0 && (
-              <Badge variant="secondary" className="ml-1 px-1.5 py-0 text-[10px]">
+              <Badge variant="secondary" className="ml-1 px-1.5 py-0 text-xs">
                 {tarefas.filter((t) => t.estado === "concluida").length}
               </Badge>
             )}
@@ -1065,7 +1065,7 @@ export default function AdminTarefasPage() {
                           {t.origem_parceiro && (
                             <Badge
                               variant="secondary"
-                              className="shrink-0 gap-1 whitespace-nowrap text-[10px] px-1.5 py-0"
+                              className="shrink-0 gap-1 whitespace-nowrap text-xs px-1.5 py-0"
                               title="Tarefa gerada por reserva de parceiro B2B"
                             >
                               🤝 Parceiro
@@ -1074,7 +1074,7 @@ export default function AdminTarefasPage() {
                           {temAvarias && (
                             <Badge
                               variant="destructive"
-                              className="shrink-0 gap-1 whitespace-nowrap text-[10px] px-1.5 py-0"
+                              className="shrink-0 gap-1 whitespace-nowrap text-xs px-1.5 py-0"
                               title={`${t.avarias!.length} avaria(s) reportada(s)`}
                             >
                               <Wrench className="h-3 w-3" />

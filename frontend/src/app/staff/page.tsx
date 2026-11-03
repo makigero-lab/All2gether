@@ -192,10 +192,6 @@ export default function StaffPage() {
     .join("")
     .toUpperCase();
 
-  const totalMinutos = tarefas.reduce(
-    (acc, t) => acc + t.tempo_limpeza_minutos,
-    0
-  );
 
   // Prompt 120 — Evitar mismatch de hidratação: a data formatada depende do
   // timezone do cliente. No SSR (servidor UTC) e no CSR (browser Lisboa) o
@@ -249,6 +245,8 @@ export default function StaffPage() {
   }, [tarefas, diaSelecionadoStr]);
 
   const tarefasAtivasDia = tarefasDoDia.filter((t) => t.estado !== "concluida");
+  // Resumo do cabeçalho: só tarefas por fazer do dia selecionado.
+  const totalMinutos = tarefasAtivasDia.reduce((acc, t) => acc + t.tempo_limpeza_minutos, 0);
   const tarefasConcluidasDia = tarefasDoDia.filter((t) => t.estado === "concluida");
 
   return (
@@ -289,7 +287,7 @@ export default function StaffPage() {
           <div className="flex items-center gap-3 text-xs text-muted-foreground">
             <span className="flex items-center gap-1">
               <ClipboardList className="h-3.5 w-3.5" />
-              {tarefas.length} tarefas
+              {tarefasAtivasDia.length} {tarefasAtivasDia.length === 1 ? "tarefa" : "tarefas"}
             </span>
             <span className="flex items-center gap-1">
               <Clock className="h-3.5 w-3.5" />

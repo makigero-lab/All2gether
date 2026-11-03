@@ -457,7 +457,7 @@ export function DetalheTarefaClient({
           <div className="mt-3 flex items-center gap-3 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5">
             <CalendarRange className="h-5 w-5 shrink-0 text-primary" />
             <div className="flex-1">
-              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Data da Limpeza
               </p>
               <p className="text-sm font-bold text-foreground">
@@ -554,7 +554,7 @@ export function DetalheTarefaClient({
                         </div>
                         <Badge
                           variant={secConcluidos === secTotal ? "success" : "outline"}
-                          className="shrink-0 text-[10px]"
+                          className="shrink-0 text-xs"
                         >
                           {secConcluidos}/{secTotal}
                         </Badge>
