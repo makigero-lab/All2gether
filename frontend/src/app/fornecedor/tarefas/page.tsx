@@ -252,7 +252,7 @@ function GrupoTarefasLavandaria({
                   {hospedesReal}
                   {/* FIX (fallback hospedes) — Mostra visualmente se é lotação máxima. */}
                   {(!t.hospedes || t.hospedes === 0) && (
-                    <span className="text-[10px] text-muted-foreground" title="Lotação máxima da casa">
+                    <span className="text-xs text-muted-foreground" title="Lotação máxima da casa">
                       (máx)
                     </span>
                   )}

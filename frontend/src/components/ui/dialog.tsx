@@ -16,16 +16,70 @@ interface DialogProps {
   children: React.ReactNode;
 }
 
+/** Liga o DialogTitle ao painel (aria-labelledby). */
+const DialogTitleIdContext = React.createContext<string | undefined>(undefined);
+
+/** Pilha de diálogos abertos: só o do topo reage ao Esc / prende o foco. */
+const pilhaDialogs: string[] = [];
+
+const FOCAVEIS =
+  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 export function Dialog({ open, onOpenChange, children }: DialogProps) {
-  // Fecha ao pressionar Esc.
+  const id = React.useId();
+  const titleId = `${id}-titulo`;
+  const painelRef = React.useRef<HTMLDivElement>(null);
+  const onOpenChangeRef = React.useRef(onOpenChange);
+  onOpenChangeRef.current = onOpenChange;
+
+  // Esc (só no diálogo do topo), focus-trap (Tab) e devolução do foco ao fechar.
   React.useEffect(() => {
     if (!open) return;
+    const anterior = document.activeElement as HTMLElement | null;
+    pilhaDialogs.push(id);
+
+    // Foca o painel (ou o 1.º elemento focável) ao abrir.
+    const painel = painelRef.current;
+    if (painel && !painel.contains(document.activeElement)) {
+      painel.focus();
+    }
+
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onOpenChange(false);
+      if (pilhaDialogs[pilhaDialogs.length - 1] !== id) return;
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onOpenChangeRef.current(false);
+        return;
+      }
+      if (e.key === "Tab" && painelRef.current) {
+        const itens = Array.from(
+          painelRef.current.querySelectorAll<HTMLElement>(FOCAVEIS)
+        ).filter((el) => el.offsetParent !== null);
+        if (itens.length === 0) {
+          e.preventDefault();
+          painelRef.current.focus();
+          return;
+        }
+        const primeiro = itens[0];
+        const ultimo = itens[itens.length - 1];
+        const ativo = document.activeElement;
+        if (e.shiftKey && (ativo === primeiro || ativo === painelRef.current)) {
+          e.preventDefault();
+          ultimo.focus();
+        } else if (!e.shiftKey && ativo === ultimo) {
+          e.preventDefault();
+          primeiro.focus();
+        }
+      }
     };
     window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [open, onOpenChange]);
+    return () => {
+      window.removeEventListener("keydown", handler);
+      const i = pilhaDialogs.lastIndexOf(id);
+      if (i >= 0) pilhaDialogs.splice(i, 1);
+      anterior?.focus?.();
+    };
+  }, [open, id]);
 
   // Bloqueia scroll do body quando aberto.
   React.useEffect(() => {
@@ -50,11 +104,16 @@ export function Dialog({ open, onOpenChange, children }: DialogProps) {
       />
       {/* Painel */}
       <div
+        ref={painelRef}
         role="dialog"
         aria-modal="true"
-        className="relative z-10 w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-md border border-border/60 bg-card shadow-lg"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className="relative z-10 w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-md border border-border/60 bg-card shadow-lg outline-none"
       >
-        {children}
+        <DialogTitleIdContext.Provider value={titleId}>
+          {children}
+        </DialogTitleIdContext.Provider>
       </div>
     </div>
   );
@@ -81,8 +140,9 @@ export function DialogTitle({
   className?: string;
   children: React.ReactNode;
 }) {
+  const titleId = React.useContext(DialogTitleIdContext);
   return (
-    <h2 className={cn("text-base font-semibold tracking-tight", className)}>
+    <h2 id={titleId} className={cn("text-base font-semibold tracking-tight", className)}>
       {children}
     </h2>
   );

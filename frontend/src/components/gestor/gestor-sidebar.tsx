@@ -179,7 +179,7 @@ export function GestorSidebar() {
       <div className="flex flex-col leading-none">
         <span className="text-sm font-bold">All2gether</span>
         {/* FIX (perfil admin dinâmico) — label reflete o role real do utilizador */}
-        <span className="text-[11px] text-muted-foreground">{roleLabel}</span>
+        <span className="text-xs text-muted-foreground">{roleLabel}</span>
       </div>
     </div>
   );

@@ -385,10 +385,10 @@ export default function ChecklistsPage() {
                     </div>
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                    <Badge variant="secondary" className="text-[10px]">
+                    <Badge variant="secondary" className="text-xs">
                       {totalSecoes} secç{totalSecoes === 1 ? "ão" : "ões"}
                     </Badge>
-                    <Badge variant="outline" className="text-[10px]">
+                    <Badge variant="outline" className="text-xs">
                       {totalItens} item{totalItens === 1 ? "" : "ns"}
                     </Badge>
                   </div>
@@ -402,13 +402,13 @@ export default function ChecklistsPage() {
                       <p className="text-xs font-semibold text-foreground">
                         {s.nome}
                       </p>
-                      <p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">
+                      <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
                         {(s.items ?? []).join(" · ")}
                       </p>
                     </div>
                   ))}
                   {(m.seccoes?.length ?? 0) > 3 && (
-                    <p className="text-[11px] text-muted-foreground">
+                    <p className="text-xs text-muted-foreground">
                       +{(m.seccoes?.length ?? 0) - 3} secç
                       {((m.seccoes?.length ?? 0) - 3) === 1 ? "ão" : "ões"}…
                     </p>
@@ -506,7 +506,7 @@ export default function ChecklistsPage() {
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium">Secções</span>
-                <Badge variant="outline" className="text-[10px]">
+                <Badge variant="outline" className="text-xs">
                   {form.seccoes.length} secç{form.seccoes.length === 1 ? "ão" : "ões"}
                 </Badge>
               </div>

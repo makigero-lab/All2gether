@@ -545,7 +545,7 @@ export default function AusenciasPage() {
                             {estadoExibido.label}
                           </Badge>
                           {jaPassada && a.estado === "aprovada" && (
-                            <span className="ml-1 text-[10px] text-muted-foreground">
+                            <span className="ml-1 text-xs text-muted-foreground">
                               (terminou)
                             </span>
                           )}

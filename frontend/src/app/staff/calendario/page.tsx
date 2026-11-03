@@ -279,7 +279,7 @@ export default function StaffCalendarioPage() {
                                 <span className="text-sm font-bold tabular-nums text-primary">
                                   {hora}
                                 </span>
-                                <span className="text-[10px] uppercase text-primary/70">
+                                <span className="text-xs uppercase text-primary/70">
                                   início
                                 </span>
                               </div>

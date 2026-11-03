@@ -120,7 +120,7 @@ export function TaskCard({ tarefa }: { tarefa: TarefaMock }) {
             <div className="flex items-center gap-2">
               <Clock className="h-4 w-4 text-muted-foreground" />
               <div className="flex flex-col">
-                <span className="text-[11px] uppercase text-muted-foreground">
+                <span className="text-xs uppercase text-muted-foreground">
                   Início
                 </span>
                 <span className="font-medium tabular-nums">{hora}</span>
@@ -129,7 +129,7 @@ export function TaskCard({ tarefa }: { tarefa: TarefaMock }) {
             <div className="flex items-center gap-2">
               <Timer className="h-4 w-4 text-muted-foreground" />
               <div className="flex flex-col">
-                <span className="text-[11px] uppercase text-muted-foreground">
+                <span className="text-xs uppercase text-muted-foreground">
                   Estimativa
                 </span>
                 <span className="font-medium">

@@ -629,7 +629,7 @@ export default function IntegracoesPage() {
           <CardTitle className="flex items-center gap-2 text-base text-destructive">
             <ShieldAlert className="h-5 w-5" />
             Ações de Manutenção
-            <Badge variant="outline" className="ml-1 text-[10px]">Admin</Badge>
+            <Badge variant="outline" className="ml-1 text-xs">Admin</Badge>
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">

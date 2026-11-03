@@ -1019,7 +1019,7 @@ function EquipaPage() {
                                 />
                                 <span className="flex-1 truncate" title={p.nome}>{p.nome}</span>
                                 {!p.ativo && (
-                                  <Badge variant="outline" className="text-[10px]">
+                                  <Badge variant="outline" className="text-xs">
                                     inativa
                                   </Badge>
                                 )}
@@ -1097,7 +1097,7 @@ function EquipaPage() {
                                 />
                                 <span className="flex-1 truncate" title={p.nome}>{p.nome}</span>
                                 {!p.ativo && (
-                                  <Badge variant="outline" className="text-[10px]">
+                                  <Badge variant="outline" className="text-xs">
                                     inativa
                                   </Badge>
                                 )}
@@ -1206,7 +1206,7 @@ function EquipaPage() {
                               {u.exclusivo_preferenciais && (
                                 <Badge
                                   variant="outline"
-                                  className="gap-1 text-[10px]"
+                                  className="gap-1 text-xs"
                                   title="Staff exclusivo — só recebe tarefas de propriedades onde está na equipa preferencial"
                                 >
                                   <Lock className="h-3 w-3" />
@@ -1214,19 +1214,19 @@ function EquipaPage() {
                                 </Badge>
                               )}
                               {ausenteTipo === "ferias" && (
-                                <Badge variant="destructive" className="text-[10px]">
+                                <Badge variant="destructive" className="text-xs">
                                   De Férias
                                 </Badge>
                               )}
                               {ausenteTipo === "doenca" && (
-                                <Badge variant="destructive" className="text-[10px]">
+                                <Badge variant="destructive" className="text-xs">
                                   Doente
                                 </Badge>
                               )}
                               {ausenteTipo &&
                                 ausenteTipo !== "ferias" &&
                                 ausenteTipo !== "doenca" && (
-                                  <Badge variant="destructive" className="text-[10px]">
+                                  <Badge variant="destructive" className="text-xs">
                                     Ausente
                                   </Badge>
                                 )}
@@ -1689,7 +1689,7 @@ function EquipaPage() {
                               />
                               <span className="flex-1 truncate" title={p.nome}>{p.nome}</span>
                               {!p.ativo && (
-                                <Badge variant="outline" className="text-[10px]">
+                                <Badge variant="outline" className="text-xs">
                                   inativa
                                 </Badge>
                               )}
@@ -1765,7 +1765,7 @@ function EquipaPage() {
                               />
                               <span className="flex-1 truncate" title={p.nome}>{p.nome}</span>
                               {!p.ativo && (
-                                <Badge variant="outline" className="text-[10px]">
+                                <Badge variant="outline" className="text-xs">
                                   inativa
                                 </Badge>
                               )}
