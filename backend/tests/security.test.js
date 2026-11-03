@@ -228,3 +228,29 @@ describe('A4 — token de utilizador desativado/eliminado', () => {
     expect(res.status).toBe(401);
   });
 });
+
+describe('Rate-limit de login por conta', () => {
+  beforeAll(() => { process.env.TEST_LOGIN_LIMIT = '1'; });
+  afterAll(() => { delete process.env.TEST_LOGIN_LIMIT; });
+
+  it('bloqueia a conta após 10 falhas (429) mas outra conta não é afetada', async () => {
+    for (let i = 0; i < 10; i++) {
+      const r = await request(app).post('/api/auth/login').send({ email: 'gestor@a.pt', password: 'errada' });
+      expect(r.status).toBe(401);
+    }
+    const bloqueada = await request(app).post('/api/auth/login').send({ email: 'gestor@a.pt', password: PASSWORD });
+    expect(bloqueada.status).toBe(429);
+    const outra = await request(app).post('/api/auth/login').send({ email: 'staff@a.pt', password: PASSWORD });
+    expect(outra.status).toBe(200);
+  });
+});
+
+describe('RGPD — retenção dos logs de webhook', () => {
+  it('o modelo WebhookLog tem índice TTL de 90 dias sobre createdAt', async () => {
+    await WebhookLog.init();
+    const indices = await WebhookLog.collection.indexes();
+    const ttl = indices.find((i) => i.key && i.key.createdAt === 1 && i.expireAfterSeconds !== undefined);
+    expect(ttl).toBeDefined();
+    expect(ttl.expireAfterSeconds).toBe(90 * 24 * 60 * 60);
+  });
+});

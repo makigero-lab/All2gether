@@ -1098,7 +1098,7 @@ describe('Super Admin (rotas exclusivas /api/admin)', () => {
     const res = await authPost(`/api/admin/empresas/${emp._id}/utilizadores`, {
       nome: 'Novo Gestor P101',
       email: 'novo.gestor.p101@teste.pt',
-      password: 'senha123',
+      password: 'senha12345',
       role: 'gestor',
     });
     expect(res.status).toBe(201);
@@ -1121,7 +1121,7 @@ describe('Super Admin (rotas exclusivas /api/admin)', () => {
     const resAdmin = await authPost(`/api/admin/empresas/${emp._id}/utilizadores`, {
       nome: 'X',
       email: 'x.p101@teste.pt',
-      password: 'senha123',
+      password: 'senha12345',
       role: 'admin',
     });
     expect(resAdmin.status).toBe(403);
@@ -1130,7 +1130,7 @@ describe('Super Admin (rotas exclusivas /api/admin)', () => {
     await authPost(`/api/admin/empresas/${emp._id}/utilizadores`, {
       nome: 'Gestor Dup',
       email: 'dup.p101@teste.pt',
-      password: 'senha123',
+      password: 'senha12345',
       role: 'gestor',
     });
 
@@ -1138,7 +1138,7 @@ describe('Super Admin (rotas exclusivas /api/admin)', () => {
     const resDup = await authPost(`/api/admin/empresas/${emp._id}/utilizadores`, {
       nome: 'Outro',
       email: 'dup.p101@teste.pt',
-      password: 'senha123',
+      password: 'senha12345',
       role: 'gestor',
     });
     expect(resDup.status).toBe(409);
