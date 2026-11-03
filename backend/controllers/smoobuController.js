@@ -342,7 +342,8 @@ async function criarTarefaPorReserva(
   smoobuPropId,
   dataTarefaRaw,
   detalhesReserva,
-  content
+  content,
+  empresaRestrita = null
 ) {
   if (!smoobuPropId || !dataTarefaRaw) {
     throw new Error(
@@ -375,7 +376,12 @@ async function criarTarefaPorReserva(
   }
 
   // 2. Match de propriedade por smoobu_id.
-  const propriedade = await Propriedade.findOne({ smoobu_id: smoobuPropId });
+  const propriedade = await Propriedade.findOne({
+    smoobu_id: smoobuPropId,
+    // SEGURANÇA (multi-tenant): se o webhook foi autenticado por uma empresa,
+    // só pode afetar propriedades dessa empresa.
+    ...(empresaRestrita ? { empresa_id: empresaRestrita } : {}),
+  });
   if (!propriedade) {
     throw new Error(
       `Propriedade Smoobu ${smoobuPropId} não encontrada na BD. Importa/sincroniza as propriedades Smoobu primeiro.`
@@ -774,10 +780,13 @@ async function criarTarefaPorReserva(
  * @param {string} reservaId
  * @returns {Promise<{canceladas: number, total: number}|null>}
  */
-async function cancelarTarefaPorReserva(reservaId) {
+async function cancelarTarefaPorReserva(reservaId, empresaRestrita = null) {
   if (!reservaId) return null;
 
-  const tarefas = await Tarefa.find({ smoobu_reserva_id: reservaId });
+  const tarefas = await Tarefa.find({
+    smoobu_reserva_id: reservaId,
+    ...(empresaRestrita ? { empresa_id: empresaRestrita } : {}),
+  });
   if (tarefas.length === 0) return null;
 
   let canceladas = 0;
@@ -811,11 +820,15 @@ async function atualizarTarefaPorReserva(
   smoobuPropId,
   dataTarefaRaw,
   detalhesReserva,
-  content
+  content,
+  empresaRestrita = null
 ) {
   if (!reservaId) return null;
 
-  const tarefa = await Tarefa.findOne({ smoobu_reserva_id: reservaId });
+  const tarefa = await Tarefa.findOne({
+    smoobu_reserva_id: reservaId,
+    ...(empresaRestrita ? { empresa_id: empresaRestrita } : {}),
+  });
   if (!tarefa) return null; // caller cai para criarTarefaPorReserva
 
   // Tarefas concluídas são intocáveis.
@@ -837,7 +850,10 @@ async function atualizarTarefaPorReserva(
 
   // 2. Atualizar propriedade (se apartamento trocado).
   if (smoobuPropId) {
-    const propriedade = await Propriedade.findOne({ smoobu_id: smoobuPropId });
+    const propriedade = await Propriedade.findOne({
+      smoobu_id: smoobuPropId,
+      ...(empresaRestrita ? { empresa_id: empresaRestrita } : {}),
+    });
     if (propriedade) {
       if (String(tarefa.propriedade_id) !== String(propriedade._id)) {
         tarefa.propriedade_id = propriedade._id;
@@ -988,7 +1004,7 @@ async function atualizarTarefaPorReserva(
  * @param {import('mongoose').Types.ObjectId} [empresaId] - para resolver a API key (HF6).
  * @returns {Promise<Tarefa|{canceladas:number,total:number}|null>}
  */
-async function processarReservaSmoobu(payload, empresaId) {
+async function processarReservaSmoobu(payload, empresaId, empresaRestrita = null) {
   const {
     action,
     smoobuPropId,
@@ -1001,7 +1017,7 @@ async function processarReservaSmoobu(payload, empresaId) {
 
   // 1. Cancelamento.
   if (ACOES_CANCELAR.includes(action)) {
-    return cancelarTarefaPorReserva(reservaId);
+    return cancelarTarefaPorReserva(reservaId, empresaRestrita);
   }
 
   // 2. Enriquecimento (se precisa de departure ou nome_hospede).
@@ -1041,7 +1057,8 @@ async function processarReservaSmoobu(payload, empresaId) {
       smoobuPropId,
       dataTarefaRaw,
       detalhesFinal,
-      content
+      content,
+      empresaRestrita
     );
     if (atualizada) return atualizada;
     // Sem tarefa existente → cai para criar (reserva pode ter sido criada
@@ -1055,7 +1072,8 @@ async function processarReservaSmoobu(payload, empresaId) {
       smoobuPropId,
       dataTarefaRaw,
       detalhesFinal,
-      content
+      content,
+      empresaRestrita
     );
   }
 
@@ -1074,9 +1092,9 @@ async function processarReservaSmoobu(payload, empresaId) {
  * @param {import('mongoose').Types.ObjectId} webhookLogId - ID do WebhookLog criado na receção.
  * @param {import('mongoose').Types.ObjectId|null} empresaId - empresa resolvida na receção (best-effort).
  */
-async function processarWebhookSmoobu(payload, webhookLogId, empresaId) {
+async function processarWebhookSmoobu(payload, webhookLogId, empresaId, empresaRestrita = null) {
   try {
-    const resultado = await processarReservaSmoobu(payload, empresaId);
+    const resultado = await processarReservaSmoobu(payload, empresaId, empresaRestrita);
 
     // Atualiza o WebhookLog para 'processado'.
     try {
@@ -1718,7 +1736,7 @@ async function sincronizarReservas(req, res) {
           continue;
         }
 
-        const resultado = await processarReservaSmoobu(payloadWebhook, empresaId);
+        const resultado = await processarReservaSmoobu(payloadWebhook, empresaId, empresaId);
 
         if (jaExistia) {
           existentes++;

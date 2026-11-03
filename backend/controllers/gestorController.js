@@ -2582,154 +2582,6 @@ exports.getAuditoria = async (req, res) => {
 /* Setup do "Cliente Zero" (bootstrap do ambiente de testes)          */
 /* ------------------------------------------------------------------ */
 
-/**
- * GET /api/gestor/setup
- *
- * Cria o "Cliente Zero" — dados iniciais para testes:
- *   - 1 Empresa: "All2gether Teste"
- *   - 1 Utilizador Staff: "João Staff"
- *   - 1 Propriedade: "Apartamento Teste"
- *
- * F0: Removido smoobu_id (integração Smoobu eliminada).
- *
- * Idempotente: antes de criar, verifica se a empresa já existe (por nome).
- * Se já existir, reutiliza-a e cria apenas o que faltar.
- *
- * Devolve o `empresa_id` gerado/reutilizado no JSON de resposta.
- */
-exports.setupClienteZero = async (req, res) => {
-  try {
-    const NOME_EMPRESA = 'All2gether Teste';
-    const NOME_PROPRIEDADE = 'Apartamento Teste';
-    // F0 — SMOOBU_ID_TESTE removido.
-    // Password comum de teste do Cliente Zero (em produção, cada utilizador
-    // deve alterar a sua password após o primeiro login).
-    const PASSWORD_TESTE = 'all2gether123';
-
-    // Utilizadores a garantir (admin + gestor + staff).
-    const UTILIZADORES_TESTE = [
-      {
-        nome: 'Diretor All2gether', // admin — para ti (dono da conta)
-        email: 'admin@all2gether.pt',
-        role: 'admin',
-      },
-      {
-        nome: 'Gestor de Operações', // gestor — gere a equipa
-        email: 'gestor@all2gether.pt',
-        role: 'gestor',
-      },
-      {
-        nome: 'João Staff', // staff — executante
-        email: 'joao.staff@all2gether.pt',
-        role: 'staff',
-      },
-    ];
-
-    // 1) Empresa — não duplicar (procura por nome).
-    let empresa = await Empresa.findOne({ nome: NOME_EMPRESA });
-    let empresaCriada = false;
-    if (!empresa) {
-      empresa = await Empresa.create({
-        nome: NOME_EMPRESA,
-      });
-      empresaCriada = true;
-    }
-
-    // 2) Utilizadores (admin + gestor + staff) — não duplicar (email único).
-    //    Para cada um: cria se não existir, ou define password se existir sem.
-    const utilizadores = [];
-    for (const u of UTILIZADORES_TESTE) {
-      let user = await Utilizador.findOne({ email: u.email });
-      let criado = false;
-      let passwordDefinida = false;
-
-      if (!user) {
-        const password_hash = await bcrypt.hash(PASSWORD_TESTE, 10);
-        user = await Utilizador.create({
-          nome: u.nome,
-          email: u.email,
-          password_hash,
-          empresa_id: empresa._id,
-          role: u.role,
-          ativo: true,
-        });
-        criado = true;
-        passwordDefinida = true;
-      } else if (!user.password_hash) {
-        // Retrocompatibilidade: utilizador criado antes do auth, sem password.
-        const password_hash = await bcrypt.hash(PASSWORD_TESTE, 10);
-        user.empresa_id = user.empresa_id || empresa._id;
-        user.password_hash = password_hash;
-        // Garante que o role está correto (caso tenha sido criado com role antigo).
-        user.role = u.role;
-        await user.save();
-        passwordDefinida = true;
-      }
-
-      utilizadores.push({
-        id: user._id,
-        nome: user.nome,
-        email: user.email,
-        role: user.role,
-        criado,
-        password_definida: passwordDefinida,
-        credenciais_teste: {
-          email: u.email,
-          password: PASSWORD_TESTE,
-        },
-      });
-    }
-
-    // 3) Propriedade — não duplicar (procura por nome + empresa).
-    // F0 — procura por nome em vez de smoobu_id (campo removido).
-    let propriedade = await Propriedade.findOne({ nome: NOME_PROPRIEDADE, empresa_id: empresa._id });
-    let propriedadeCriada = false;
-    if (!propriedade) {
-      propriedade = await Propriedade.create({
-        nome: NOME_PROPRIEDADE,
-        empresa_id: empresa._id,
-        tempo_limpeza_minutos: 45,
-      });
-      propriedadeCriada = true;
-    }
-
-    const algoCriado =
-      empresaCriada ||
-      utilizadores.some((u) => u.criado) ||
-      propriedadeCriada;
-
-    return res.status(200).json({
-      mensagem: algoCriado
-        ? 'Cliente Zero criado com sucesso.'
-        : 'Cliente Zero já existia (nada foi alterado).',
-      empresa_id: empresa._id,
-      empresa: {
-        id: empresa._id,
-        nome: empresa.nome,
-        criada: empresaCriada,
-      },
-      // 3 utilizadores: admin (dono), gestor (responsável clínico), staff (executante).
-      utilizadores,
-      propriedade: {
-        id: propriedade._id,
-        nome: propriedade.nome,
-        criada: propriedadeCriada,
-      },
-    });
-  } catch (err) {
-    console.error('❌ setupClienteZero:', err.message);
-
-    if (err.code === 11000) {
-      return res.status(409).json({
-        erro: 'Conflito de dados duplicados.',
-        detalhe: err.keyValue,
-      });
-    }
-
-    return res.status(500).json({ erro: 'Erro interno do servidor.' });
-  }
-};
-
 /* ------------------------------------------------------------------ */
 /* Webhooks — Logs de integrações externas                           */
 /* ------------------------------------------------------------------ */
@@ -2749,13 +2601,16 @@ exports.setupClienteZero = async (req, res) => {
  */
 exports.getWebhooks = async (req, res) => {
   try {
-    // Não usamos obterEmpresaId aqui porque o WebhookLog é global — não tem
-    // empresa_id. A auth continua a ser exigida (rota protegida) para que só
-    // admins autenticados vejam os logs.
+    // SEGURANÇA (multi-tenant): só devolve logs da empresa do token. Nunca
+    // aceita empresa_id vindo da query. Logs sem empresa resolvida ficam ocultos.
+    const empresaId = req.user?.empresa_id;
+    if (!empresaId) {
+      return res.status(400).json({ erro: 'empresa_id em falta no token.' });
+    }
     const { status } = req.query;
     const limit = Math.min(Number(req.query?.limit) || 50, 200);
 
-    const filtro = {};
+    const filtro = { empresa_id: empresaId };
     if (status && ['recebido', 'processado', 'erro'].includes(status)) {
       filtro.status = status;
     }

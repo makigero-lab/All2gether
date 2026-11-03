@@ -48,7 +48,6 @@ const {
   getAuditoria,
   getWebhooks,
   reprocessarWebhook,
-  setupClienteZero,
   // FIX (gestão de parceiros) — novo controller para listar parceiros B2B.
   getParceiros,
   // FIX (restrição lavandaria) — novo controller para listar fornecedores.
@@ -62,8 +61,8 @@ const { getPropriedadesSmoobu, importarPropriedades, sincronizarReservas } = req
 // FIX (import/export excel) — Controller de importação/exportação de Excel.
 const { exportarExcel, importarExcel } = require('../controllers/excelController');
 
-// Bootstrap do ambiente de testes — Cliente Zero. PÚBLICO (sem auth).
-router.get('/setup', setupClienteZero);
+// SEGURANÇA: a rota pública GET /setup foi removida (criava admin com password fixa).
+// O admin inicial é criado por `seed-admin.js` (npm start / npm run seed:admin).
 
 // Dashboard com dados reais.
 router.get('/dashboard', auth, isGestor, getDashboard);

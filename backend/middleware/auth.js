@@ -15,6 +15,16 @@
 
 const jwt = require('jsonwebtoken');
 
+// SEGURANÇA (fail-closed): em produção o segredo é OBRIGATÓRIO (>= 32 chars).
+// O fallback só existe para desenvolvimento/testes locais.
+if (
+  process.env.NODE_ENV === 'production' &&
+  (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32)
+) {
+  throw new Error(
+    'JWT_SECRET em falta ou demasiado curto (mín. 32 caracteres) em produção. Defina-o nas variáveis de ambiente.'
+  );
+}
 const JWT_SECRET = process.env.JWT_SECRET || 'all2gether-dev-secret-change-me';
 
 function extrairToken(req) {
@@ -38,7 +48,7 @@ function auth(req, res, next) {
   }
 
   try {
-    const payload = jwt.verify(token, JWT_SECRET);
+    const payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
     req.user = {
       id: payload.id,
       role: payload.role,
@@ -48,7 +58,6 @@ function auth(req, res, next) {
   } catch (err) {
     return res.status(401).json({
       erro: 'Token inválido ou expirado.',
-      detalhe: err.message,
     });
   }
 }

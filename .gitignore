@@ -1,0 +1,23 @@
+# Segredos
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Agentes locais (fora do git)
+.agentes/
+
+# Dependências / builds / logs
+node_modules/
+.next/
+dist/
+build/
+coverage/
+*.log
+
+# Sistema / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
