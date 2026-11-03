@@ -62,7 +62,7 @@ const gestorNavItems: NavItem[] = [
   { label: "Limpezas", href: "/gestor/tarefas", icon: ClipboardList },
   { label: "Propriedades", href: "/gestor/propriedades", icon: Building2 },
   { label: "Equipa", href: "/gestor/equipa", icon: Users },
-  { label: "Parceiros", href: "/gestor/parceiros", icon: Handshake },
+  { label: "Proprietários", href: "/gestor/parceiros", icon: Handshake },
   { label: "Ausências / Férias", href: "/gestor/ausencias", icon: CalendarOff },
   { label: "Relatórios", href: "/gestor/relatorios", icon: BarChart3 },
   { label: "Notificações", href: "/gestor/notificacoes", icon: Bell },

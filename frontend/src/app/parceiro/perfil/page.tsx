@@ -7,5 +7,5 @@ import { PerfilContent } from "@/components/portal/perfil-content";
  * UserMenu do cabeçalho agora navega para esta rota.
  */
 export default function ParceiroPerfilPage() {
-  return <PerfilContent portalLabel="Parceiro" />;
+  return <PerfilContent portalLabel="Proprietário" />;
 }

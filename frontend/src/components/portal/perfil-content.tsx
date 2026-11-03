@@ -83,9 +83,9 @@ export function PerfilContent({ portalLabel }: { portalLabel: string }) {
   const ROLE_LABEL: Record<Role, string> = {
     admin: "Admin",
     gestor: "Gestor",
-    staff: "Staff",
-    parceiro: "Parceiro",
-    fornecedor: "Fornecedor",
+    staff: "Equipa",
+    parceiro: "Proprietário",
+    fornecedor: "Lavandaria",
   };
 
   if (loading) {

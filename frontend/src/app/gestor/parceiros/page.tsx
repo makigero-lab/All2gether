@@ -203,7 +203,7 @@ export default function ParceirosPage() {
       {/* Cabeçalho */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="hidden flex-col gap-1 lg:flex">
-          <h1 className="text-2xl font-bold tracking-tight">Parceiros</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Proprietários</h1>
           <p className="text-sm text-muted-foreground">
             Gestão de parceiros B2B externos (criam reservas no portal /parceiro).
           </p>
@@ -247,7 +247,7 @@ export default function ParceirosPage() {
             <div className="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">
               <Handshake className="h-10 w-10 opacity-40" />
               <p className="text-sm">Ainda não há parceiros.</p>
-              <p className="text-xs">Clica em &quot;Novo Parceiro&quot; para adicionar o primeiro.</p>
+              <p className="text-xs">Clica em &quot;Novo Proprietário&quot; para adicionar o primeiro.</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -402,7 +402,7 @@ export default function ParceirosPage() {
                 value={criarForm.observacoes}
                 onChange={(e) => setCriarForm((f) => ({ ...f, observacoes: e.target.value }))}
                 rows={2}
-                placeholder="Notas internas (ex: Parceiro desde 2024, desconto 10%)"
+                placeholder="Notas internas (ex: Proprietário desde 2024, desconto 10%)"
                 className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </div>
@@ -421,7 +421,7 @@ export default function ParceirosPage() {
               {criarSubmitting ? (
                 <><Loader2 className="mr-2 h-4 w-4 animate-spin" />A criar…</>
               ) : (
-                <><Handshake className="mr-2 h-4 w-4" />Criar Parceiro</>
+                <><Handshake className="mr-2 h-4 w-4" />Criar Proprietário</>
               )}
             </Button>
           </DialogFooter>

@@ -427,7 +427,7 @@ export default function CalendarioOperacionalPage() {
         // e aplicamos uma classe CSS para o estilo de banner.
         return [{
           id: t._id,
-          title: t.title ?? `Ausência: ${t.utilizador_id?.nome ?? "Staff"}`,
+          title: t.title ?? `Ausência: ${t.utilizador_id?.nome ?? "Elemento da equipa"}`,
           start: t.start ?? t.data,
           end: t.end,
           allDay: true,
@@ -449,7 +449,7 @@ export default function CalendarioOperacionalPage() {
       if (t.tipo === "ausencia_pendente") {
         return [{
           id: t._id,
-          title: t.title ?? `Ausência (Pendente): ${t.utilizador_id?.nome ?? "Staff"}`,
+          title: t.title ?? `Ausência (Pendente): ${t.utilizador_id?.nome ?? "Elemento da equipa"}`,
           start: t.start ?? t.data,
           end: t.end,
           allDay: true,
@@ -471,7 +471,7 @@ export default function CalendarioOperacionalPage() {
         const dataFolga = typeof t.data === "string" ? t.data.slice(0, 10) : new Date(t.data).toISOString().slice(0, 10);
         return [{
           id: t._id,
-          title: `Folga - ${t.utilizador_id?.nome ?? "Staff"}`,
+          title: `Folga - ${t.utilizador_id?.nome ?? "Elemento da equipa"}`,
           start: dataFolga,
           allDay: true,
           backgroundColor: "#e2e8f0",
@@ -637,7 +637,7 @@ export default function CalendarioOperacionalPage() {
     // Renderiza um conteúdo minimalista — o título já vem do backend
     // ("🌴 Férias: Nome"). Não mostra hora nem bolinha.
     if (isAusencia) {
-      const bannerTitle = t.title ?? `Ausência: ${staff ?? "Staff"}`;
+      const bannerTitle = t.title ?? `Ausência: ${staff ?? "Elemento da equipa"}`;
       return (
         <div className="fc-evt-ausencia__content" title={bannerTitle}>
           <span className="fc-evt-ausencia__title">{bannerTitle}</span>
@@ -649,7 +649,7 @@ export default function CalendarioOperacionalPage() {
     // Visualmente distinto das aprovadas para o gestor perceber que precisa
     // de aprovar. Inclui a justificação no tooltip se existir.
     if (isAusenciaPendente) {
-      const bannerTitle = t.title ?? `Ausência (Pendente): ${staff ?? "Staff"}`;
+      const bannerTitle = t.title ?? `Ausência (Pendente): ${staff ?? "Elemento da equipa"}`;
       const tooltip = t.justificacao
         ? `${bannerTitle}\nJustificação: ${t.justificacao}`
         : bannerTitle;
@@ -667,7 +667,7 @@ export default function CalendarioOperacionalPage() {
     //     não têm propriedade associada. Usa arg.event.title (que o backend
     //     já define como "Folga - {nome}") ou o nome do staff diretamente. ---
     if (isFolga) {
-      const folgaTitle = arg.event.title ?? `Folga - ${staff ?? "Staff"}`;
+      const folgaTitle = arg.event.title ?? `Folga - ${staff ?? "Elemento da equipa"}`;
       if (isMonthView) {
         return (
           <div className="fc-evt-month fc-evt-month--folga" title={folgaTitle}>
@@ -1116,7 +1116,7 @@ export default function CalendarioOperacionalPage() {
       }));
 
       const ws = XLSX.utils.json_to_sheet(linhas, {
-        header: ["Data", "Propriedade", "Reserva", "Funcionário", "Horário", "Estado"],
+        header: ["Data", "Propriedade", "Reserva", "Equipa", "Horário", "Estado"],
       });
       // Larguras de coluna estimadas (em caracteres).
       ws["!cols"] = [
@@ -1271,7 +1271,7 @@ export default function CalendarioOperacionalPage() {
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Staff</label>
+            <label className="text-xs font-medium text-muted-foreground">Equipa</label>
             <select
               value={filtros.utilizadorId}
               onChange={(e) => setFiltros((f) => ({ ...f, utilizadorId: e.target.value }))}
@@ -1443,7 +1443,7 @@ export default function CalendarioOperacionalPage() {
                     <th className="px-4 py-3 font-medium">Data</th>
                     <th className="px-4 py-3 font-medium">Propriedade</th>
                     <th className="px-4 py-3 font-medium">Reserva</th>
-                    <th className="px-4 py-3 font-medium">Funcionário</th>
+                    <th className="px-4 py-3 font-medium">Equipa</th>
                     <th className="px-4 py-3 font-medium">Horário</th>
                     <th className="px-4 py-3 font-medium">Estado</th>
                   </tr>

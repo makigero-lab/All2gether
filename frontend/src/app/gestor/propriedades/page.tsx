@@ -1300,7 +1300,7 @@ export default function PropriedadesPage() {
                   setManualForm((f) => ({ ...f, observacoes: e.target.value }))
                 }
                 rows={2}
-                placeholder="Notas internas (ex: Parceiro Associado: Particulares, frequência, etc.)"
+                placeholder="Notas internas (ex: Proprietário Associado: Particulares, frequência, etc.)"
                 className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
               <p className="text-xs text-muted-foreground">
@@ -1638,7 +1638,7 @@ export default function PropriedadesPage() {
                       setEditForm((f) => ({ ...f, observacoes: e.target.value }))
                     }
                     rows={2}
-                    placeholder="Notas internas (ex: Parceiro Associado: Particulares, frequência, etc.)"
+                    placeholder="Notas internas (ex: Proprietário Associado: Particulares, frequência, etc.)"
                     className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
                   />
                   <p className="text-xs text-muted-foreground">
@@ -1830,7 +1830,7 @@ export default function PropriedadesPage() {
                               <Badge
                                 variant="outline"
                                 className="text-xs"
-                                title="Staff exclusivo — só recebe tarefas de propriedades onde está na equipa preferencial"
+                                title="Equipa exclusiva — só recebe tarefas de propriedades onde está na equipa preferencial"
                               >
                                 exclusivo
                               </Badge>
