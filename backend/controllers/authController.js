@@ -625,6 +625,21 @@ exports.pushVapidPublicKey = async (req, res) => {
  * Resposta 400: subscription em falta ou inválida
  * Resposta 503: Web Push não configurado
  */
+const HOSTS_PUSH = [
+  /^fcm\.googleapis\.com$/,
+  /^updates\.push\.services\.mozilla\.com$/,
+  /(^|\.)push\.apple\.com$/,
+  /(^|\.)notify\.windows\.com$/,
+];
+function endpointPushValido(endpoint) {
+  try {
+    const u = new URL(String(endpoint));
+    return u.protocol === 'https:' && HOSTS_PUSH.some((re) => re.test(u.hostname));
+  } catch {
+    return false;
+  }
+}
+
 exports.pushSubscribe = async (req, res) => {
   try {
     const { isConfigured } = require('../utils/push');
@@ -640,6 +655,12 @@ exports.pushSubscribe = async (req, res) => {
       return res.status(400).json({
         erro: 'Subscrição inválida: falta o objeto subscription com endpoint.',
       });
+    }
+
+    // SEGURANÇA (SSRF): o servidor faz POST ao endpoint da subscrição; só
+    // aceita https e serviços de push conhecidos.
+    if (!endpointPushValido(subscription.endpoint)) {
+      return res.status(400).json({ erro: 'Endpoint de push não permitido.' });
     }
 
     // Guarda a subscrição no utilizador logado.

@@ -199,3 +199,32 @@ describe('Webhook Smoobu — isolamento por empresa (A1)', () => {
     expect(await Tarefa.countDocuments({ propriedade_id: propA._id })).toBeGreaterThan(0);
   });
 });
+
+describe('A4 — token de utilizador desativado/eliminado', () => {
+  it('perde acesso imediatamente ao ser desativado, apesar do token válido', async () => {
+    const hash = await bcrypt.hash(PASSWORD, 10);
+    const u = await Utilizador.create({
+      nome: 'Gestor Temp', email: 'temp@a.pt', password_hash: hash,
+      empresa_id: empresaA._id, role: 'gestor', ativo: true,
+    });
+    const token = await login('temp@a.pt');
+    const ok = await request(app).get('/api/gestor/dashboard').set('Authorization', `Bearer ${token}`);
+    expect(ok.status).toBe(200);
+
+    await Utilizador.updateOne({ _id: u._id }, { $set: { ativo: false } });
+    const bloqueado = await request(app).get('/api/gestor/dashboard').set('Authorization', `Bearer ${token}`);
+    expect(bloqueado.status).toBe(401);
+  });
+
+  it('perde acesso se for eliminado', async () => {
+    const hash = await bcrypt.hash(PASSWORD, 10);
+    const u = await Utilizador.create({
+      nome: 'Gestor Elim', email: 'elim@a.pt', password_hash: hash,
+      empresa_id: empresaA._id, role: 'gestor', ativo: true,
+    });
+    const token = await login('elim@a.pt');
+    await Utilizador.updateOne({ _id: u._id }, { $set: { eliminado_em: new Date() } });
+    const res = await request(app).get('/api/gestor/dashboard').set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(401);
+  });
+});

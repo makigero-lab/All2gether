@@ -107,7 +107,7 @@ router.post('/propriedades/default-checklist', auth, isGestor, async (req, res) 
       correspondidas: resultado.matchedCount,
     });
   } catch (err) {
-    return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
+    return res.status(500).json({ erro: 'Erro interno.' });
   }
 });
 
@@ -226,7 +226,7 @@ router.get('/configuracoes', auth, isGestor, async (req, res) => {
       smoobu_ativo: Boolean(process.env.SMOOBU_API_KEY || temChaveBD),
     });
   } catch (err) {
-    return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
+    return res.status(500).json({ erro: 'Erro interno.' });
   }
 });
 
@@ -270,7 +270,7 @@ router.put('/configuracoes', auth, isGestor, async (req, res) => {
       smoobu_ativo: Boolean(process.env.SMOOBU_API_KEY || temChaveBD),
     });
   } catch (err) {
-    return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
+    return res.status(500).json({ erro: 'Erro interno.' });
   }
 });
 
@@ -281,7 +281,7 @@ router.post('/configuracoes/forcar-daily-briefing', auth, isGestor, async (req, 
     await executarBriefing();
     return res.status(200).json({ message: 'Daily Briefing executado.' });
   } catch (err) {
-    return res.status(500).json({ erro: 'Erro ao executar.', detalhe: err.message });
+    return res.status(500).json({ erro: 'Erro ao executar.' });
   }
 });
 
@@ -292,7 +292,7 @@ router.post('/configuracoes/forcar-agenda-amanha', auth, isGestor, async (req, r
     await executarAgendaAmanha();
     return res.status(200).json({ message: 'Agenda de Amanhã executada.' });
   } catch (err) {
-    return res.status(500).json({ erro: 'Erro ao executar.', detalhe: err.message });
+    return res.status(500).json({ erro: 'Erro ao executar.' });
   }
 });
 
@@ -359,7 +359,7 @@ router.get('/configuracoes/integracoes', auth, isGestor, async (req, res) => {
       google_maps_ativo: require('../utils/geocoding').googleMapsAtivo(),
     });
   } catch (err) {
-    return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
+    return res.status(500).json({ erro: 'Erro interno.' });
   }
 });
 
@@ -440,7 +440,7 @@ router.put('/configuracoes/integracoes', auth, isGestor, async (req, res) => {
       },
     });
   } catch (err) {
-    return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
+    return res.status(500).json({ erro: 'Erro interno.' });
   }
 });
 
