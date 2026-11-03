@@ -254,3 +254,40 @@ describe('RGPD — retenção dos logs de webhook', () => {
     expect(ttl.expireAfterSeconds).toBe(90 * 24 * 60 * 60);
   });
 });
+
+describe('SSO Autocell — validação do token', () => {
+  const SEGREDO = 'segredo-sso-de-teste-com-mais-de-32-caracteres';
+  let adminEmail = 'admin-sso@a.pt';
+  const sso = (token) => request(app).get(`/api/auth/sso?json=true&token=${encodeURIComponent(token)}`);
+
+  beforeAll(async () => {
+    process.env.AUTOCELL_SSO_SECRET = SEGREDO;
+    const hash = await bcrypt.hash(PASSWORD, 10);
+    await Utilizador.create({
+      nome: 'Admin SSO', email: adminEmail, password_hash: hash,
+      empresa_id: empresaA._id, role: 'admin', ativo: true,
+    });
+  });
+  afterAll(() => { delete process.env.AUTOCELL_SSO_SECRET; });
+
+  it('aceita um token válido (como o emitido pelo Autocell) e rejeita a reutilização', async () => {
+    const token = jwt.sign({ email: adminEmail, sub: adminEmail }, SEGREDO, { expiresIn: '5m' });
+    const ok = await sso(token);
+    expect(ok.status).toBe(200);
+    expect(ok.body.token).toBeTruthy();
+    const replay = await sso(token);
+    expect(replay.status).toBe(401);
+  });
+
+  it('rejeita segredo errado, token expirado, sem iat e algoritmo diferente', async () => {
+    expect((await sso(jwt.sign({ email: adminEmail }, 'outro-segredo', { expiresIn: '5m' }))).status).toBe(401);
+    expect((await sso(jwt.sign({ email: adminEmail, jti: 'x1' }, SEGREDO, { expiresIn: -10 }))).status).toBe(401);
+    expect((await sso(jwt.sign({ email: adminEmail, jti: 'x2' }, SEGREDO, { noTimestamp: true, expiresIn: '5m' }))).status).toBe(401);
+    expect((await sso(jwt.sign({ email: adminEmail, jti: 'x3' }, SEGREDO, { algorithm: 'HS512', expiresIn: '5m' }))).status).toBe(401);
+  });
+
+  it('um utilizador que não é admin nunca entra via SSO', async () => {
+    const token = jwt.sign({ email: 'gestor@a.pt', sub: 'gestor@a.pt', jti: 'x4' }, SEGREDO, { expiresIn: '5m' });
+    expect((await sso(token)).status).toBe(401);
+  });
+});

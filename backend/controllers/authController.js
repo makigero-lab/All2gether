@@ -427,6 +427,20 @@ exports.concluirMinhaTarefa = async (req, res) => {
 /* Single Sign-On (SSO) com o portal Autocell                          */
 /* ------------------------------------------------------------------ */
 
+// Tokens SSO já consumidos (hash -> expiração). Em memória: protege contra
+// reutilização dentro da janela de validade numa instância.
+const tokensSsoUsados = new Map();
+function registarTokenSsoUsado(token) {
+  const agora = Date.now();
+  for (const [h, ate] of tokensSsoUsados) {
+    if (ate <= agora) tokensSsoUsados.delete(h);
+  }
+  const hash = require('crypto').createHash('sha256').update(String(token)).digest('hex');
+  if (tokensSsoUsados.has(hash)) return false;
+  tokensSsoUsados.set(hash, agora + 15 * 60 * 1000);
+  return true;
+}
+
 /**
  * GET /api/auth/sso  (PÚBLICO — sem auth, validado por segredo partilhado)
  *
@@ -517,11 +531,21 @@ exports.ssoLogin = async (req, res) => {
     }
 
     // 2. Valida o JWT externo com o segredo partilhado do Autocell.
+    // SEGURANÇA: só HS256 e idade máxima de 10 min (o Autocell emite tokens
+    // de 5 min com iat; maxAge também rejeita tokens sem iat).
     let payload;
     try {
-      payload = jwt.verify(token, SSO_SECRET);
+      payload = jwt.verify(token, SSO_SECRET, {
+        algorithms: ['HS256'],
+        maxAge: '10m',
+      });
     } catch (err) {
       return responderErro(`token SSO inválido/expirado: ${err.message}`);
+    }
+
+    // Anti-replay: cada token SSO só pode ser usado uma vez.
+    if (!registarTokenSsoUsado(token)) {
+      return responderErro('token SSO já utilizado (replay).');
     }
 
     // 3. Extrai o email do payload (suporta email ou sub — convenção JWT).
