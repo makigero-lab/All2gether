@@ -1,14 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import {
   Clock,
   ClipboardList,
   LogOut,
-  CalendarDays,
-  CalendarOff,
-  Bell,
   Loader2,
   AlertTriangle,
   Send,
@@ -184,7 +180,7 @@ export default function StaffPage() {
     }
   }
 
-  const nome = user?.nome ?? "Staff";
+  const nome = user?.nome ?? "Equipa";
   const iniciais = nome
     .split(" ")
     .map((p) => p[0])
@@ -302,52 +298,31 @@ export default function StaffPage() {
         {/* v1.66.0 (Prompt 89) — PushNotificationSetup movido para staff/layout.tsx
             para que apareça em TODAS as páginas do staff, não só no dashboard. */}
 
-        {/* Reportar Falta Hoje — botão ou aviso de já reportado */}
+        {/* Reportar Falta Hoje — aviso se já reportada, senão ação discreta.
+            (Agenda, Ausências e Avisos estão na barra de navegação inferior.) */}
         {faltaPendente ? (
           <div className="flex items-start gap-2 rounded-lg border border-amber-500/50 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
             <span>
-              <strong>Falta reportada.</strong> Aguarda confirmação do Administrador.
+              <strong>Falta reportada.</strong> Aguarda confirmação do Gestor.
             </span>
           </div>
         ) : (
-          <Button
-            variant="outline"
-            size="touch"
-            className="w-full justify-center gap-2 border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive"
-            onClick={() => {
-              setMostrarDialogFalta(true);
-              setErroFalta(null);
-            }}
-          >
-            <AlertTriangle className="h-4 w-4" />
-            Reportar Falta Hoje
-          </Button>
+          <div className="flex justify-end">
+            <Button
+              variant="ghost"
+              size="touch"
+              className="gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              onClick={() => {
+                setMostrarDialogFalta(true);
+                setErroFalta(null);
+              }}
+            >
+              <AlertTriangle className="h-4 w-4" />
+              Reportar falta hoje
+            </Button>
+          </div>
         )}
-
-        {/* Botão Ver a minha Agenda */}
-        <Link href="/staff/calendario" prefetch>
-          <Button variant="outline" size="touch" className="w-full justify-center gap-2">
-            <CalendarDays className="h-4 w-4" />
-            Ver a minha Agenda
-          </Button>
-        </Link>
-
-        {/* Botão Pedidos de Ausência */}
-        <Link href="/staff/ausencias" prefetch>
-          <Button variant="outline" size="touch" className="w-full justify-center gap-2">
-            <CalendarOff className="h-4 w-4" />
-            Pedidos de Ausência
-          </Button>
-        </Link>
-
-        {/* Task 131 — Botão Histórico de Notificações */}
-        <Link href="/staff/notificacoes" prefetch>
-          <Button variant="outline" size="touch" className="w-full justify-center gap-2">
-            <Bell className="h-4 w-4" />
-            Histórico de Notificações
-          </Button>
-        </Link>
 
         {loading ? (
           <div className="flex items-center justify-center gap-2 py-20 text-sm text-muted-foreground">

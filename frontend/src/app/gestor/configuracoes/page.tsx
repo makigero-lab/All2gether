@@ -448,7 +448,7 @@ export default function ConfiguracoesPage() {
                 ) : (
                   <Download className="h-4 w-4" />
                 )}
-                {sincronizando ? "A sincronizar…" : "Sincronizar Limpezas (Smoobu + Parceiros)"}
+                {sincronizando ? "A sincronizar…" : "Sincronizar Limpezas (Smoobu + Proprietários)"}
               </Button>
 
               {/* Eliminar Limpezas Futuras */}

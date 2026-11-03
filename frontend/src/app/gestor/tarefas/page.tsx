@@ -763,7 +763,7 @@ export default function AdminTarefasPage() {
                   </select>
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-sm font-medium">Funcionário (opcional)</label>
+                  <label className="text-sm font-medium">Equipa (opcional)</label>
                   <select
                     value={form.utilizador_id}
                     onChange={(e) => setForm((f) => ({ ...f, utilizador_id: e.target.value }))}
@@ -963,7 +963,7 @@ export default function AdminTarefasPage() {
             </select>
           </div>
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Funcionário</label>
+            <label className="text-xs font-medium text-muted-foreground">Equipa</label>
             <select
               value={filtroStaff}
               onChange={(e) => { setFiltroStaff(e.target.value); setPagina(1); }}
@@ -1043,7 +1043,7 @@ export default function AdminTarefasPage() {
                     <th className="px-4 py-3 font-medium">Hóspede</th>
                     {/* FIX (qtd hóspedes) — Coluna Qtd. Hóspedes com fallback à lotação. */}
                     <th className="px-4 py-3 font-medium">Qtd. Hóspedes</th>
-                    <th className="px-4 py-3 font-medium">Funcionário</th>
+                    <th className="px-4 py-3 font-medium">Equipa</th>
                     <th className="px-4 py-3 font-medium">Estado</th>
                     {/* v1.68.0 (Prompt 91) — Coluna Observações / Avaria */}
                     <th className="px-4 py-3 font-medium">Observações / Avaria</th>
@@ -1252,7 +1252,7 @@ export default function AdminTarefasPage() {
         </DialogHeader>
         <DialogContent className="space-y-4">
           <div className="space-y-1.5">
-            <label className="text-sm font-medium">Funcionário</label>
+            <label className="text-sm font-medium">Equipa</label>
             <select
               value={atribuirUserId}
               onChange={(e) => setAtribuirUserId(e.target.value)}

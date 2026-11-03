@@ -368,7 +368,7 @@ export default function AusenciasPage() {
   /** HF20 — Submete a nova ausência (intervalo de datas). */
   async function handleCriarAusencia() {
     if (!form.utilizador_id || !form.data_inicio || !form.data_fim) {
-      setFormErro("Funcionário, Data de Início e Data de Fim são obrigatórios.");
+      setFormErro("Elemento da equipa, Data de Início e Data de Fim são obrigatórios.");
       return;
     }
     if (form.data_fim < form.data_inicio) {
@@ -505,7 +505,7 @@ export default function AusenciasPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
-                    <th className="px-4 py-3 font-medium">Funcionário</th>
+                    <th className="px-4 py-3 font-medium">Equipa</th>
                     <th className="px-4 py-3 font-medium">Tipo</th>
                     <th className="px-4 py-3 font-medium">Período</th>
                     <th className="px-4 py-3 font-medium">Estado</th>
@@ -730,7 +730,7 @@ export default function AusenciasPage() {
           {aEliminar && (
             <div className="rounded-md bg-muted/50 p-3 text-sm">
               <p>
-                <strong>Funcionário:</strong>{" "}
+                <strong>Equipa:</strong>{" "}
                 {aEliminar.utilizador?.nome ?? "—"}
               </p>
               <p>
@@ -803,7 +803,7 @@ export default function AusenciasPage() {
           {aCancelar && (
             <div className="rounded-md bg-muted/50 p-3 text-sm">
               <p>
-                <strong>Funcionário:</strong>{" "}
+                <strong>Equipa:</strong>{" "}
                 {aCancelar.utilizador?.nome ?? "—"}
               </p>
               <p>
@@ -879,7 +879,7 @@ export default function AusenciasPage() {
         <DialogContent className="space-y-4">
           {/* Funcionário */}
           <div className="space-y-1.5">
-            <label className="text-sm font-medium">Funcionário</label>
+            <label className="text-sm font-medium">Equipa</label>
             <select
               value={form.utilizador_id}
               onChange={(e) =>

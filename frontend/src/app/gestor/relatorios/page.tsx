@@ -260,7 +260,7 @@ export default function RelatoriosPage() {
 
       const maxStaff = Math.max(1, ...data.porStaff.map(x => x.total));
       const staffHtml = data.porStaff.length > 0
-        ? '<h2>Produtividade por Staff</h2><table><thead><tr><th>Staff</th><th>Total</th><th>Concluidas</th><th>Taxa</th><th>Carga (min)</th><th>Volume</th></tr></thead><tbody>' +
+        ? '<h2>Produtividade por elemento da equipa</h2><table><thead><tr><th>Equipa</th><th>Total</th><th>Concluidas</th><th>Taxa</th><th>Carga (min)</th><th>Volume</th></tr></thead><tbody>' +
           data.porStaff.map(s => {
             const pct = Math.round(s.taxaConclusao * 100);
             const largura = Math.round((s.total / maxStaff) * 100);

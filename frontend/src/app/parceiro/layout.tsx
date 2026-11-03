@@ -27,7 +27,7 @@ export default function ParceiroLayout({
 }) {
   return (
     <RouteGuard role="parceiro">
-      <PortalHeader portalLabel="Parceiro" />
+      <PortalHeader portalLabel="Proprietário" />
       {children}
     </RouteGuard>
   );

@@ -135,7 +135,7 @@ export default function AdminDashboardPage() {
   const stats = data
     ? [
         { label: "Propriedades", value: `${data.propriedadesAtivas}/${data.totalPropriedades}`, icon: Building2 },
-        { label: "Staff ativo", value: data.membrosEquipaAtivos, icon: Users },
+        { label: "Equipa ativa", value: data.membrosEquipaAtivos, icon: Users },
         { label: "Limpezas hoje", value: data.tarefasHoje, icon: ClipboardList },
         { label: "Por atribuir", value: data.tarefasPorAtribuir, icon: AlertCircle },
         { label: "Concluídas", value: data.tarefasConcluidasHoje, icon: CheckCircle2 },
@@ -226,7 +226,7 @@ export default function AdminDashboardPage() {
                   </div>
                   <div className="flex-1">
                     <p className="text-sm font-semibold text-destructive">
-                      🚨 {em.utilizador?.nome ?? "Funcionário"} reportou que vai faltar hoje!
+                      🚨 {em.utilizador?.nome ?? "Elemento da equipa"} reportou que vai faltar hoje!
                     </p>
                     {em.justificacao && (
                       <p className="mt-0.5 text-sm text-destructive/80">

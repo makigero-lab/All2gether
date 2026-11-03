@@ -92,9 +92,9 @@ import { formatarDataSegura, parsearDataSegura } from "@/lib/utils";
 const ROLE_LABEL: Record<Role, string> = {
   admin: "Admin",
   gestor: "Gestor",
-  staff: "Staff",
-  parceiro: "Parceiro",
-  fornecedor: "Fornecedor",
+  staff: "Equipa",
+  parceiro: "Proprietário",
+  fornecedor: "Lavandaria",
 };
 
 const ROLE_VARIANT: Record<Role, "default" | "secondary" | "outline"> = {
@@ -804,9 +804,9 @@ function EquipaPage() {
               aria-label="Filtrar por role"
             >
               <option value="todos">Função: Todas</option>
-              <option value="staff">Função: Staff</option>
+              <option value="staff">Função: Equipa</option>
               <option value="gestor">Função: Gestor</option>
-              <option value="parceiro">Função: Parceiro</option>
+              <option value="parceiro">Função: Proprietário</option>
             </select>
           </div>
 
@@ -903,10 +903,10 @@ function EquipaPage() {
                         }
                         className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                       >
-                        <option value="staff">Staff (funcionário de limpezas)</option>
+                        <option value="staff">Equipa (limpezas)</option>
                         <option value="gestor">Responsável (gere a equipa)</option>
-                        <option value="parceiro">Parceiro (B2B externo — cria reservas)</option>
-                        <option value="fornecedor">Fornecedor (Lavandaria — gestão de roupa)</option>
+                        <option value="parceiro">Proprietário (B2B externo — cria reservas)</option>
+                        <option value="fornecedor">Lavandaria (gestão de roupa)</option>
                       </select>
                       {form.role === "parceiro" && (
                         <p className="text-xs text-muted-foreground">
@@ -1048,7 +1048,7 @@ function EquipaPage() {
                   <Switch
                     checked={form.exclusivo_preferenciais}
                     onCheckedChange={(v) => setForm((f) => ({ ...f, exclusivo_preferenciais: v }))}
-                    aria-label="Staff exclusivo"
+                    aria-label="Equipa exclusiva"
                   />
                 </div>
 
@@ -1124,7 +1124,7 @@ function EquipaPage() {
                           A guardar…
                         </>
                       ) : (
-                        "Guardar Funcionário"
+                        "Guardar elemento da equipa"
                       )}
                     </Button>
                     <Button
@@ -1207,7 +1207,7 @@ function EquipaPage() {
                                 <Badge
                                   variant="outline"
                                   className="gap-1 text-xs"
-                                  title="Staff exclusivo — só recebe tarefas de propriedades onde está na equipa preferencial"
+                                  title="Equipa exclusiva — só recebe tarefas de propriedades onde está na equipa preferencial"
                                 >
                                   <Lock className="h-3 w-3" />
                                   Exclusivo
@@ -1421,10 +1421,10 @@ function EquipaPage() {
                     }
                     className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                   >
-                    <option value="staff">Staff (funcionário de limpezas)</option>
+                    <option value="staff">Equipa (limpezas)</option>
                     <option value="gestor">Responsável (gere a equipa)</option>
-                    <option value="parceiro">Parceiro (B2B externo — cria reservas)</option>
-                    <option value="fornecedor">Fornecedor (Lavandaria — gestão de roupa)</option>
+                    <option value="parceiro">Proprietário (B2B externo — cria reservas)</option>
+                    <option value="fornecedor">Lavandaria (gestão de roupa)</option>
                   </select>
                   {editForm.role === "parceiro" && (
                     <p className="text-xs text-muted-foreground">
@@ -1716,7 +1716,7 @@ function EquipaPage() {
                   <Switch
                     checked={editForm.exclusivo_preferenciais}
                     onCheckedChange={(v) => setEditForm((f) => ({ ...f, exclusivo_preferenciais: v }))}
-                    aria-label="Staff exclusivo"
+                    aria-label="Equipa exclusiva"
                   />
                 </div>
 
@@ -2081,7 +2081,7 @@ function EquipaPage() {
           {aprEliminarAlvo && (
             <div className="rounded-lg border bg-muted/30 p-4 space-y-2 text-sm">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-muted-foreground">Funcionário</span>
+                <span className="text-muted-foreground">Equipa</span>
                 <span className="font-medium">
                   {aprEliminarAlvo.utilizador?.nome ?? "—"}
                 </span>
