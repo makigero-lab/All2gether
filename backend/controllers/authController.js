@@ -61,13 +61,13 @@ exports.login = async (req, res) => {
     if (!utilizador.ativo) {
       return res
         .status(401)
-        .json({ erro: 'Utilizador inativo. Contacta o administrador.' });
+        .json({ erro: 'Utilizador inativo. Contacta o gestor.' });
     }
 
     if (!utilizador.password_hash) {
       // Utilizador migrado sem password (ex.: criado antes do auth).
       return res.status(401).json({
-        erro: 'Ainda não tem password definida. Contacta o administrador.',
+        erro: 'Ainda não tem password definida. Contacta o gestor.',
       });
     }
 

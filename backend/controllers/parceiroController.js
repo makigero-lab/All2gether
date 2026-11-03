@@ -159,7 +159,7 @@ async function criarTarefa(req, res) {
 
     if (!propriedade) {
       return res.status(404).json({
-        erro: 'Propriedade não encontrada (ou não pertence a este parceiro).',
+        erro: 'Propriedade não encontrada (ou não pertence a este proprietário).',
       });
     }
 
@@ -290,7 +290,7 @@ async function criarReserva(req, res) {
 
     if (!propriedade) {
       return res.status(404).json({
-        erro: 'Propriedade não encontrada (ou não pertence a este parceiro).',
+        erro: 'Propriedade não encontrada (ou não pertence a este proprietário).',
       });
     }
 
@@ -377,7 +377,7 @@ async function criarReserva(req, res) {
         estadoInicial = 'atribuida';
       } else {
         // LB não encontrou ninguém — distingue SLA excedido vs sem staff ativo.
-        motivoNaoAtribuicao = 'Sem staff disponível (folga/férias ou lotação excedida)';
+        motivoNaoAtribuicao = 'Sem equipa disponível (folga/férias ou lotação excedida)';
       }
     } catch (errAtribuicao) {
       console.warn('⚠️  [Parceiro] auto-atribuição falhou (tarefa fica por atribuir):', errAtribuicao.message);

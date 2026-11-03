@@ -292,7 +292,7 @@ async function determinarUtilizadorAtribuido(
 
   if (disponiveis.length === 0) {
     console.log(
-      `⚠️  [FIX folgas] Nenhum staff disponível para o dia ${range.start.toISOString().slice(0, 10)} ` +
+      `⚠️  [FIX folgas] Nenhum elemento da equipa disponível para o dia ${range.start.toISOString().slice(0, 10)} ` +
         `(diaSemana=${diaSemana}). ` +
         `Total staff=${staff.length}, ausentes=${setAusentes.size}, ` +
         `excluídos explicitamente=${setExcluidos ? setExcluidos.size : 0}.`

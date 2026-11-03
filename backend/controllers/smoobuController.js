@@ -444,13 +444,13 @@ async function criarTarefaPorReserva(
   //      (c) Se o Load Balancer também não encontrar ninguém → por_atribuir
   //          (com alerta explicativo).
   //    Alertas (para o gestor intervir manualmente):
-  //      - "Staff exclusivo de folga (motivo)" — mas com fallback ao LB bem-sucedido
+  //      - "Equipa exclusiva de folga (motivo)" — mas com fallback ao LB bem-sucedido
   //        NÃO gera alerta (a tarefa foi atribuída a outra pessoa).
-  //      - "Staff exclusivo de folga (motivo) — sem substituto disponível" — se o
+  //      - "Equipa exclusiva de folga (motivo) — sem substituto disponível" — se o
   //        LB também falhou.
-  //      - "Sem staff disponível (load balancer não encontrou ninguém)" — se a
+  //      - "Sem equipa disponível (load balancer não encontrou ninguém)" — se a
   //        propriedade não tem preferencial e o LB falhou.
-  //      - "Staff exclusivo sobrecarregado (início após 14h) — redistribuído" —
+  //      - "Equipa exclusiva sobrecarregada (início após 14h) — redistribuído" —
   //        se o VIP só começava tarde e o LB encontrou alguém mais cedo (alerta
   //        informativo, não bloqueante).
 
@@ -500,7 +500,7 @@ async function criarTarefaPorReserva(
       }
 
       if (folgaFixa || folgaRotativa) {
-        // Staff exclusivo de folga → fallback ao LB.
+        // Equipa exclusiva de folga → fallback ao LB.
         const motivo = folgaRotativa && motivoFolga ? ` (${motivoFolga})` : '';
         console.log(
           `📋 [Smoobu] staff exclusivo ${staffExclusivoId} de folga no dia ` +
@@ -508,7 +508,7 @@ async function criarTarefaPorReserva(
             `rotativa=${folgaRotativa})${motivo} — fallback para load balancer.`
         );
         // Guarda o motivo para o alerta caso o LB também falhe.
-        alertaTarefa = `Staff exclusivo de folga${motivo}`;
+        alertaTarefa = `Equipa exclusiva de folga${motivo}`;
       } else {
         // HF12 — Staff exclusivo disponível. Verifica se consegue começar cedo.
         // Se só conseguir começar depois das 14h (carga alta), faz fallback ao LB.
@@ -570,7 +570,7 @@ async function criarTarefaPorReserva(
           tempoViagemMinutos = Number(resultadoEquipa.equipa[0].tempoViagem) || 0;
           // Se a equipa é insuficiente, gera alerta.
           if (resultadoEquipa.insuficiente) {
-            alertaTarefa = `Equipa parcial: ${resultadoEquipa.equipa.length}/${staffNecessario} staff disponíveis`;
+            alertaTarefa = `Equipa parcial: ${resultadoEquipa.equipa.length}/${staffNecessario} elementos disponíveis`;
           }
           console.log(
             `👥 [HF21] Equipa de ${resultadoEquipa.equipa.length}/${staffNecessario} atribuída.`
@@ -601,7 +601,7 @@ async function criarTarefaPorReserva(
       }
       // HF12: VIP sobrecarregado + LB encontrou alguém.
       if (vipSobrecarregado && utilizadorAtribuido) {
-        alertaTarefa = `Staff exclusivo sobrecarregado (início após 14h) — redistribuído para ${utilizadorAtribuido}`;
+        alertaTarefa = `Equipa exclusiva sobrecarregada (início após 14h) — redistribuído para ${utilizadorAtribuido}`;
         console.log(
           `✅ [HF12] load balancer redistribuiu tarefa para ${utilizadorAtribuido} ` +
             `(VIP estava sobrecarregado).`
@@ -619,12 +619,12 @@ async function criarTarefaPorReserva(
   if (!utilizadorAtribuido) {
     if (tentouLoadBalancer && !alertaTarefa) {
       // Sem staff exclusivo e LB não encontrou ninguém.
-      alertaTarefa = 'Sem staff disponível (load balancer não encontrou ninguém)';
+      alertaTarefa = 'Sem equipa disponível (load balancer não encontrou ninguém)';
     } else if (alertaTarefa) {
-      // Staff exclusivo de folga E LB não encontrou substituto.
+      // Equipa exclusiva de folga E LB não encontrou substituto.
       alertaTarefa = `${alertaTarefa} — sem substituto disponível`;
     } else {
-      alertaTarefa = 'Sem staff disponível';
+      alertaTarefa = 'Sem equipa disponível';
     }
   }
 
@@ -697,10 +697,10 @@ async function criarTarefaPorReserva(
   if (!utilizadorAtribuido) {
     if (staffExclusivoId && !tentouLoadBalancer) {
       // Staff exclusivo estava de folga/inativo e não chegou ao LB.
-      motivoNaoAtribuicao = alertaTarefa || 'Staff exclusivo indisponível';
+      motivoNaoAtribuicao = alertaTarefa || 'Equipa exclusiva indisponível';
     } else if (tentouLoadBalancer) {
       // LB tentou mas não encontrou ninguém.
-      motivoNaoAtribuicao = 'Nenhum staff disponível (todos ocupados, de folga ou de férias)';
+      motivoNaoAtribuicao = 'Nenhum elemento da equipa disponível (todos ocupados, de folga ou de férias)';
     } else {
       motivoNaoAtribuicao = 'Erro no load balancer — atribuição não tentada';
     }
@@ -977,7 +977,7 @@ async function atualizarTarefaPorReserva(
             // Marca motivo de falha.
             await Tarefa.updateOne(
               { _id: tarefa._id },
-              { $set: { motivo_nao_atribuicao: 'Sem staff disponível após update de data (Smoobu)' } }
+              { $set: { motivo_nao_atribuicao: 'Sem equipa disponível após update de data (Smoobu)' } }
             );
           }
         }
@@ -1866,7 +1866,7 @@ async function sincronizarReservas(req, res) {
     let message = `${criadas} tarefa(s) Smoobu criada(s)`;
     if (existentes > 0) message += `, ${existentes} já existiam`;
     if (erros > 0) message += `, ${erros} com erro`;
-    if (parceirosCriadas > 0) message += ` · ${parceirosCriadas} de reservas de parceiros recriada(s)`;
+    if (parceirosCriadas > 0) message += ` · ${parceirosCriadas} de reservas de proprietários recriada(s)`;
     message += ` (de ${reservas.length} reservas).`;
 
     return res.status(200).json({

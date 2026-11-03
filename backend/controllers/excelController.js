@@ -341,7 +341,7 @@ exports.exportarExcel = async (req, res) => {
       'Parceiro': t.origem_parceiro ? 'Sim' : 'Não',
       'Tipo': t.tipo ?? '',
       'Estado': t.estado ?? '',
-      'Funcionário': t.utilizador_id?.nome ?? '',
+      'Equipa': t.utilizador_id?.nome ?? '',
       'Check-in': t.detalhes_reserva?.checkin ?? '',
       'Check-out': t.detalhes_reserva?.checkout ?? '',
       'Nome Hóspede': t.detalhes_reserva?.nome_hospede ?? '',

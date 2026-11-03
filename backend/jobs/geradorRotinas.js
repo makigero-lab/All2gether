@@ -144,7 +144,7 @@ async function executarGeradorRotinas() {
             novaTarefa.tempo_viagem_minutos = Number(resultadoEquipa.equipa[0].tempoViagem) || 0;
 
             if (resultadoEquipa.insuficiente) {
-              novaTarefa.alerta = `Equipa parcial: ${equipaIds.length}/${staffNecessario} staff disponíveis`;
+              novaTarefa.alerta = `Equipa parcial: ${equipaIds.length}/${staffNecessario} elementos disponíveis`;
             }
 
             await novaTarefa.save();
