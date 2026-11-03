@@ -8,7 +8,7 @@ const mongoose = require('mongoose');
 const { MongoMemoryServer } = require('mongodb-memory-server');
 const request = require('supertest');
 const bcrypt = require('bcryptjs');
-const XLSX = require('xlsx');
+const ExcelJS = require('exceljs');
 
 jest.mock('../utils/geocoding', () => ({
   obterCoordenadas: jest.fn().mockResolvedValue({ lat: 38.7223, lng: -9.1393 }),
@@ -36,11 +36,27 @@ let casaParceiro;
 let casaOutroParceiro;
 let casaOutraEmpresa;
 
-function xlsxBuffer(linhas) {
-  const ws = XLSX.utils.json_to_sheet(linhas);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Reservas');
-  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+async function xlsxBuffer(linhas) {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Reservas');
+  const cols = [...new Set(linhas.flatMap((l) => Object.keys(l)))];
+  ws.addRow(cols);
+  for (const l of linhas) ws.addRow(cols.map((c) => (l[c] === undefined ? null : l[c])));
+  return Buffer.from(await wb.xlsx.writeBuffer());
+}
+
+async function lerXlsx(buffer) {
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buffer);
+  const ws = wb.worksheets[0];
+  const cab = ws.getRow(1).values.slice(1);
+  const out = [];
+  ws.eachRow((row, n) => {
+    if (n === 1) return;
+    const vals = row.values.slice(1);
+    out.push(Object.fromEntries(cab.map((c, i) => [c, vals[i] ?? ''])));
+  });
+  return out;
 }
 
 function importar(url, token, buffer, contentType = MIME) {
@@ -90,7 +106,7 @@ describe('Importação Excel — gestor', () => {
   const URL = '/api/gestor/reservas/importar-excel';
 
   it('importa um .xlsx real enviado como body cru e aplica fallback de hóspedes', async () => {
-    const buf = xlsxBuffer([
+    const buf = await xlsxBuffer([
       { Propriedade: 'casa gestor', 'Check-in': '08/06/2030', 'Check-out': '10/06/2030', 'Hóspedes': '' },
     ]);
     const res = await importar(URL, gestorToken, buf);
@@ -103,7 +119,7 @@ describe('Importação Excel — gestor', () => {
   });
 
   it('é idempotente: re-importar o mesmo ficheiro ignora duplicados', async () => {
-    const buf = xlsxBuffer([{ Propriedade: 'Casa Gestor', 'Check-out': '10/06/2030' }]);
+    const buf = await xlsxBuffer([{ Propriedade: 'Casa Gestor', 'Check-out': '10/06/2030' }]);
     const res = await importar(URL, gestorToken, buf);
     expect(res.status).toBe(200);
     expect(res.body.criadas).toBe(0);
@@ -116,7 +132,7 @@ describe('Importação Excel — gestor', () => {
       data: new Date(Date.UTC(2030, 6, 15, 10)), tipo: 'manutencao', estado: 'por_atribuir',
       tempo_limpeza_minutos: 30,
     });
-    const buf = xlsxBuffer([{ Propriedade: 'Casa Gestor', 'Check-out': '15/07/2030' }]);
+    const buf = await xlsxBuffer([{ Propriedade: 'Casa Gestor', 'Check-out': '15/07/2030' }]);
     const res = await importar(URL, gestorToken, buf);
     expect(res.status).toBe(200);
     expect(res.body.criadas).toBe(1);
@@ -126,7 +142,7 @@ describe('Importação Excel — gestor', () => {
     // 47000 = 2028-09-... ; calculamos o esperado.
     const serial = 47300;
     const esperado = new Date(Date.UTC(1899, 11, 30) + serial * 86400000).toISOString().slice(0, 10);
-    const buf = xlsxBuffer([{ Propriedade: 'Casa Gestor', 'Check-out': serial }]);
+    const buf = await xlsxBuffer([{ Propriedade: 'Casa Gestor', 'Check-out': serial }]);
     const res = await importar(URL, gestorToken, buf);
     expect(res.status).toBe(200);
     expect(res.body.criadas).toBe(1);
@@ -134,8 +150,20 @@ describe('Importação Excel — gestor', () => {
     expect(t).not.toBeNull();
   });
 
+  it('aceita células de data reais do Excel (tipo Date)', async () => {
+    const buf = await xlsxBuffer([
+      { Propriedade: 'Casa Gestor', 'Check-in': new Date(Date.UTC(2031, 0, 3)), 'Check-out': new Date(Date.UTC(2031, 0, 5)) },
+    ]);
+    const res = await importar(URL, gestorToken, buf);
+    expect(res.status).toBe(200);
+    expect(res.body.criadas).toBe(1);
+    const t = await Tarefa.findOne({ 'detalhes_reserva.checkout': '2031-01-05' });
+    expect(t).not.toBeNull();
+    expect(t.detalhes_reserva.checkin).toBe('2031-01-03');
+  });
+
   it('rejeita datas impossíveis (31/02 e 32/13) como erro de linha', async () => {
-    const buf = xlsxBuffer([
+    const buf = await xlsxBuffer([
       { Propriedade: 'Casa Gestor', 'Check-out': '31/02/2030' },
       { Propriedade: 'Casa Gestor', 'Check-out': '32/13/2030' },
     ]);
@@ -146,7 +174,7 @@ describe('Importação Excel — gestor', () => {
   });
 
   it('não encontra propriedades de outra empresa', async () => {
-    const buf = xlsxBuffer([{ Propriedade: 'Casa Alheia', 'Check-out': '01/08/2030' }]);
+    const buf = await xlsxBuffer([{ Propriedade: 'Casa Alheia', 'Check-out': '01/08/2030' }]);
     const res = await importar(URL, gestorToken, buf);
     expect(res.body.criadas).toBe(0);
     expect(res.body.erros).toBe(1);
@@ -161,7 +189,7 @@ describe('Importação Excel — gestor', () => {
   });
 
   it('staff e parceiro não podem usar a importação do gestor (403)', async () => {
-    const buf = xlsxBuffer([{ Propriedade: 'Casa Gestor', 'Check-out': '01/09/2030' }]);
+    const buf = await xlsxBuffer([{ Propriedade: 'Casa Gestor', 'Check-out': '01/09/2030' }]);
     expect((await importar(URL, staffToken, buf)).status).toBe(403);
     expect((await importar(URL, parceiroToken, buf)).status).toBe(403);
   });
@@ -171,7 +199,7 @@ describe('Importação Excel — parceiro (isolamento)', () => {
   const URL = '/api/parceiro/reservas/importar-excel';
 
   it('cria reservas nas suas casas com origem_parceiro=true', async () => {
-    const buf = xlsxBuffer([{ Propriedade: 'Casa Parceiro', 'Check-out': '20/06/2030', 'Hóspedes': 3 }]);
+    const buf = await xlsxBuffer([{ Propriedade: 'Casa Parceiro', 'Check-out': '20/06/2030', 'Hóspedes': 3 }]);
     const res = await importar(URL, parceiroToken, buf);
     expect(res.status).toBe(200);
     expect(res.body.criadas).toBe(1);
@@ -181,7 +209,7 @@ describe('Importação Excel — parceiro (isolamento)', () => {
   });
 
   it('NÃO cria reservas em casas de outro parceiro nem do gestor', async () => {
-    const buf = xlsxBuffer([
+    const buf = await xlsxBuffer([
       { Propriedade: 'Casa Do Outro', 'Check-out': '21/06/2030' },
       { Propriedade: 'Casa Gestor', 'Check-out': '22/06/2030' },
     ]);
@@ -193,7 +221,7 @@ describe('Importação Excel — parceiro (isolamento)', () => {
   });
 
   it('staff não acede (403)', async () => {
-    const buf = xlsxBuffer([{ Propriedade: 'Casa Parceiro', 'Check-out': '23/06/2030' }]);
+    const buf = await xlsxBuffer([{ Propriedade: 'Casa Parceiro', 'Check-out': '23/06/2030' }]);
     expect((await importar(URL, staffToken, buf)).status).toBe(403);
   });
 });
@@ -214,8 +242,7 @@ describe('Exportação Excel', () => {
     expect(res.status).toBe(200);
     expect(res.headers['content-type']).toContain('spreadsheetml');
     expect(res.body[0]).toBe(0x50); // 'P' de PK
-    const wb = XLSX.read(res.body, { type: 'buffer' });
-    const linhas = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+    const linhas = await lerXlsx(res.body);
     expect(linhas.length).toBeGreaterThan(0);
     expect(linhas.some((l) => /^\d{2}\/\d{2}\/\d{4}$/.test(l['Data']))).toBe(true);
   });
@@ -227,8 +254,7 @@ describe('Exportação Excel', () => {
       .buffer(true)
       .parse(binario);
     expect(res.status).toBe(200);
-    const wb = XLSX.read(res.body, { type: 'buffer' });
-    const linhas = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+    const linhas = await lerXlsx(res.body);
     expect(linhas.length).toBeGreaterThan(0);
     expect(linhas.every((l) => l['Propriedade'] === 'Casa Parceiro')).toBe(true);
   });

@@ -13,7 +13,7 @@
  * antes de ser lido; nunca se devolve err.message ao cliente.
  */
 
-const XLSX = require('xlsx');
+const ExcelJS = require('exceljs');
 const Tarefa = require('../models/Tarefa');
 const Propriedade = require('../models/Propriedade');
 const ReservaManual = require('../models/ReservaManual');
@@ -87,11 +87,25 @@ function col(linha, ...nomes) {
   return null;
 }
 
+/** Normaliza o valor de uma célula ExcelJS (texto rico, fórmula, link, data...). */
+function valorCelula(v) {
+  if (v === null || v === undefined) return '';
+  if (v instanceof Date) return v;
+  if (typeof v === 'object') {
+    if (Array.isArray(v.richText)) return v.richText.map((r) => r.text).join('');
+    if ('result' in v) return valorCelula(v.result);
+    if ('text' in v) return valorCelula(v.text);
+    if ('error' in v) return '';
+    return '';
+  }
+  return v;
+}
+
 /**
  * Lê e valida o .xlsx enviado em req.body (Buffer). Devolve { linhas } ou
- * { status, erro }.
+ * { status, erro }. A 1.ª linha da 1.ª folha são os cabeçalhos.
  */
-function lerLinhasExcel(req) {
+async function lerLinhasExcel(req) {
   const body = req.body;
   if (!Buffer.isBuffer(body) || body.length === 0) {
     return { status: 400, erro: 'Ficheiro Excel em falta. Envie o .xlsx no body do pedido.' };
@@ -99,20 +113,40 @@ function lerLinhasExcel(req) {
   if (body.length < 4 || body[0] !== 0x50 || body[1] !== 0x4b) {
     return { status: 400, erro: 'Ficheiro inválido: não é um .xlsx.' };
   }
-  let wb;
+  let ws;
   try {
-    wb = XLSX.read(body, { type: 'buffer' });
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(body);
+    ws = wb.worksheets[0];
   } catch {
     return { status: 400, erro: 'Ficheiro inválido: não foi possível ler o .xlsx.' };
   }
-  const ws = wb.Sheets[wb.SheetNames[0]];
   if (!ws) return { status: 400, erro: 'Sheet vazio ou inválido.' };
-  const linhas = XLSX.utils.sheet_to_json(ws, { defval: '' });
+  if (ws.actualRowCount - 1 > MAX_LINHAS_IMPORT) {
+    return { status: 400, erro: `O ficheiro excede o máximo de ${MAX_LINHAS_IMPORT} linhas.` };
+  }
+
+  const cabecalhos = [];
+  ws.getRow(1).eachCell({ includeEmpty: false }, (cell, n) => {
+    cabecalhos[n] = String(valorCelula(cell.value)).trim();
+  });
+
+  const linhas = [];
+  ws.eachRow({ includeEmpty: false }, (row, numero) => {
+    if (numero === 1) return;
+    const obj = {};
+    let temDados = false;
+    cabecalhos.forEach((nome, n) => {
+      if (!nome) return;
+      const v = valorCelula(row.getCell(n).value);
+      obj[nome] = v;
+      if (v !== '') temDados = true;
+    });
+    if (temDados) linhas.push(obj);
+  });
+
   if (linhas.length === 0) {
     return { status: 400, erro: 'O ficheiro Excel não tem linhas de dados.' };
-  }
-  if (linhas.length > MAX_LINHAS_IMPORT) {
-    return { status: 400, erro: `O ficheiro excede o máximo de ${MAX_LINHAS_IMPORT} linhas.` };
   }
   return { linhas };
 }
@@ -123,11 +157,14 @@ function mapaPorNome(propriedades) {
   return mapa;
 }
 
-function enviarXlsx(res, linhas, nomeFicheiro) {
-  const ws = XLSX.utils.json_to_sheet(linhas);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Reservas');
-  const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+async function enviarXlsx(res, linhas, nomeFicheiro) {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Reservas');
+  const colunas = Object.keys(linhas[0] || {});
+  ws.columns = colunas.map((c) => ({ header: c, key: c, width: Math.max(14, c.length + 4) }));
+  ws.getRow(1).font = { bold: true };
+  for (const l of linhas) ws.addRow(l);
+  const buffer = Buffer.from(await wb.xlsx.writeBuffer());
   res.setHeader('Content-Type', MIME_XLSX);
   res.setHeader('Content-Disposition', `attachment; filename="${nomeFicheiro}"`);
   return res.send(buffer);
@@ -328,7 +365,7 @@ exports.importarExcel = async (req, res) => {
     if (!empresaId) {
       return res.status(400).json({ erro: 'empresa_id em falta no token.' });
     }
-    const lido = lerLinhasExcel(req);
+    const lido = await lerLinhasExcel(req);
     if (lido.erro) return res.status(lido.status).json({ erro: lido.erro });
 
     const propriedades = await Propriedade.find({ empresa_id: empresaId, ativo: true }).lean();
@@ -411,7 +448,7 @@ exports.importarExcelParceiro = async (req, res) => {
     if (!parceiroId || !empresaId) {
       return res.status(400).json({ erro: 'Autenticação em falta.' });
     }
-    const lido = lerLinhasExcel(req);
+    const lido = await lerLinhasExcel(req);
     if (lido.erro) return res.status(lido.status).json({ erro: lido.erro });
 
     const propriedades = await Propriedade.find({
