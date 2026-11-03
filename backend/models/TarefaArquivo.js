@@ -40,6 +40,12 @@ const tarefaArquivoSchema = new mongoose.Schema(
       checkout: { type: String, default: null },
       pax: { type: Number, default: null, min: 0 },
       nome_hospede: { type: String, default: null, trim: true },
+      hora_checkin: { type: String, default: null, trim: true },
+      hora_checkout: { type: String, default: null, trim: true },
+      adultos: { type: Number, default: null, min: 0 },
+      criancas: { type: Number, default: null, min: 0 },
+      notas_hospede: { type: String, default: null, trim: true, maxlength: 2000 },
+      tipo_reserva: { type: String, default: null, trim: true },
     },
   },
   { timestamps: true }

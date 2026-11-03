@@ -172,6 +172,19 @@ export interface DetalhesReservaDTO {
   checkout?: string | null;
   pax?: number | null;
   nome_hospede?: string | null;
+  // Dados adicionais vindos do Smoobu.
+  hora_checkin?: string | null;
+  hora_checkout?: string | null;
+  adultos?: number | null;
+  criancas?: number | null;
+  notas_hospede?: string | null;
+  tipo_reserva?: string | null;
+}
+
+/** Email/telefone do hóspede — só o admin os obtém (GET /api/gestor/tarefas/:id/contacto-hospede). */
+export interface ContactoHospedeDTO {
+  email?: string | null;
+  telefone?: string | null;
 }
 
 export interface PropriedadeDTO {

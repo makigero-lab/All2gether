@@ -20,6 +20,10 @@ const app = require('../server');
 const Empresa = require('../models/Empresa');
 const Propriedade = require('../models/Propriedade');
 const Tarefa = require('../models/Tarefa');
+const Utilizador = require('../models/Utilizador');
+const WebhookLog = require('../models/WebhookLog');
+const ContactoHospede = require('../models/ContactoHospede');
+const bcrypt = require('bcryptjs');
 
 const CHAVE = 'chave-smoobu-de-teste';
 const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -27,6 +31,7 @@ const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
 let mongod;
 let empresa;
 let casa;
+const tokens = {};
 
 const webhook = (action, data) =>
   request(app)
@@ -69,6 +74,18 @@ beforeAll(async () => {
   casa = await Propriedade.create({
     nome: 'Casa Teste', empresa_id: empresa._id, smoobu_id: '555', ativo: true, capacidade_hospedes: 6,
   });
+  const hash = await bcrypt.hash('password-de-teste-1', 10);
+  for (const [nome, email, role] of [
+    ['Admin', 'admin@s.pt', 'admin'],
+    ['Gestor', 'gestor@s.pt', 'gestor'],
+    ['Staff', 'staff@s.pt', 'staff'],
+  ]) {
+    await Utilizador.create({ nome, email, password_hash: hash, empresa_id: empresa._id, role, ativo: true });
+  }
+  for (const k of ['admin', 'gestor', 'staff']) {
+    const r = await request(app).post('/api/auth/login').send({ email: `${k}@s.pt`, password: 'password-de-teste-1' });
+    tokens[k] = r.body.token;
+  }
 });
 
 afterAll(async () => {
@@ -137,5 +154,144 @@ describe('Webhook Smoobu — ações sem impacto nas limpezas', () => {
     expect((await webhook('updateRates', { 555: { '2031-04-01': { price: 100, min_length_of_stay: 2, available: 1 } } })).status).toBe(200);
     await esperar(600);
     expect(await Tarefa.countDocuments()).toBe(antes);
+  });
+});
+
+describe('Webhook Smoobu — campos adicionais da reserva', () => {
+  it('guarda horas, adultos/crianças, notas e tipo da reserva', async () => {
+    await webhook('newReservation', reserva(9101, { notice: 'Chegada tardia, 22h' }));
+    await esperar(900);
+    const d = (await tarefaDaReserva(9101)).detalhes_reserva;
+    expect(d.hora_checkin).toBe('15:00');
+    expect(d.hora_checkout).toBe('11:00');
+    expect(d.adultos).toBe(2);
+    expect(d.criancas).toBe(1);
+    expect(d.notas_hospede).toBe('Chegada tardia, 22h');
+    expect(d.tipo_reserva).toBe('reservation');
+  });
+
+  it('um updateReservation sem notas não apaga as notas já guardadas', async () => {
+    await webhook('newReservation', reserva(9102, { notice: 'Berço extra' }));
+    await esperar(900);
+    const { notice, ...semNotas } = reserva(9102, { type: 'modification of booking' });
+    await webhook('updateReservation', semNotas);
+    await esperar(900);
+    const d = (await tarefaDaReserva(9102)).detalhes_reserva;
+    expect(d.notas_hospede).toBe('Berço extra');
+    expect(d.tipo_reserva).toBe('modification of booking');
+  });
+});
+
+describe('Email e telefone do hóspede — só admin', () => {
+  let tarefaId;
+  beforeAll(async () => {
+    await webhook('newReservation', reserva(9201));
+    await esperar(900);
+    tarefaId = String((await tarefaDaReserva(9201))._id);
+  });
+
+  it('ficam em coleção separada e NÃO dentro da tarefa', async () => {
+    const t = await Tarefa.findById(tarefaId).lean();
+    expect(JSON.stringify(t)).not.toContain('maria@exemplo.pt');
+    expect(JSON.stringify(t)).not.toContain('910000000');
+    const c = await ContactoHospede.findOne({ tarefa_id: tarefaId }).lean();
+    expect(c.email).toBe('maria@exemplo.pt');
+    expect(c.telefone).toBe('+351910000000');
+  });
+
+  it('nenhuma listagem de tarefas devolve o email/telefone (gestor)', async () => {
+    const res = await request(app)
+      .get('/api/gestor/tarefas?inicio=2031-01-01&fim=2031-12-31')
+      .set('Authorization', `Bearer ${tokens.gestor}`);
+    expect(res.status).toBe(200);
+    const texto = JSON.stringify(res.body);
+    expect(texto).toContain('Maria Silva'); // o nome continua visível
+    expect(texto).not.toContain('maria@exemplo.pt');
+    expect(texto).not.toContain('910000000');
+  });
+
+  it('o admin lê o contacto; gestor e staff recebem 403', async () => {
+    const url = `/api/gestor/tarefas/${tarefaId}/contacto-hospede`;
+    const admin = await request(app).get(url).set('Authorization', `Bearer ${tokens.admin}`);
+    expect(admin.status).toBe(200);
+    expect(admin.body).toEqual({ email: 'maria@exemplo.pt', telefone: '+351910000000' });
+    expect((await request(app).get(url).set('Authorization', `Bearer ${tokens.gestor}`)).status).toBe(403);
+    expect((await request(app).get(url).set('Authorization', `Bearer ${tokens.staff}`)).status).toBe(403);
+  });
+
+  it('o contacto expira 90 dias depois do check-out', async () => {
+    const c = await ContactoHospede.findOne({ tarefa_id: tarefaId }).lean();
+    const esperado = new Date('2031-03-14').getTime() + 90 * 24 * 3600 * 1000;
+    expect(Math.abs(new Date(c.expira_em).getTime() - esperado)).toBeLessThan(24 * 3600 * 1000);
+  });
+
+  it('os logs de webhooks escondem email/telefone ao gestor e mostram ao admin', async () => {
+    const gestor = await request(app).get('/api/gestor/webhooks?limit=200').set('Authorization', `Bearer ${tokens.gestor}`);
+    expect(gestor.status).toBe(200);
+    expect(JSON.stringify(gestor.body)).not.toContain('maria@exemplo.pt');
+    expect(JSON.stringify(gestor.body)).toContain('[oculto]');
+    const admin = await request(app).get('/api/gestor/webhooks?limit=200').set('Authorization', `Bearer ${tokens.admin}`);
+    expect(JSON.stringify(admin.body)).toContain('maria@exemplo.pt');
+  });
+});
+
+describe('Reservas bloqueadas (is-blocked-booking)', () => {
+  it('um bloqueio de calendário não cria tarefa de limpeza', async () => {
+    const res = await webhook('newReservation', reserva(9301, { 'is-blocked-booking': true, 'guest-name': '' }));
+    expect(res.status).toBe(200);
+    await esperar(900);
+    expect(await tarefaDaReserva(9301)).toBeNull();
+  });
+
+  it('se uma reserva com tarefa passa a bloqueio, a tarefa é cancelada', async () => {
+    await webhook('newReservation', reserva(9302));
+    await esperar(900);
+    expect((await tarefaDaReserva(9302)).estado).not.toBe('cancelada');
+    await webhook('updateReservation', reserva(9302, { 'is-blocked-booking': true }));
+    await esperar(900);
+    expect((await tarefaDaReserva(9302)).estado).toBe('cancelada');
+  });
+});
+
+describe('Retenção RGPD dos logs de webhooks (90 dias após o check-out)', () => {
+  it('cada log novo expira 90 dias depois do departure', async () => {
+    await webhook('newReservation', reserva(9401, { departure: '2032-06-20' }));
+    await esperar(300);
+    const log = await WebhookLog.findOne({ 'payload.data.id': 9401 }).lean();
+    const esperado = new Date('2032-06-20').getTime() + 90 * 24 * 3600 * 1000;
+    expect(Math.abs(new Date(log.expira_em).getTime() - esperado)).toBeLessThan(24 * 3600 * 1000);
+  });
+
+  it('migração: remove o índice TTL antigo (createdAt) e calcula expira_em nos logs antigos', async () => {
+    await WebhookLog.collection.createIndex({ createdAt: 1 }, { expireAfterSeconds: 90 * 24 * 3600, name: 'createdAt_1' });
+    const criado = new Date(Date.now() - 100 * 24 * 3600 * 1000); // recebido há 100 dias
+    await WebhookLog.collection.insertOne({
+      payload: { data: { id: 9501, departure: '2032-09-01' } }, status: 'processado', createdAt: criado, updatedAt: criado,
+    });
+    await WebhookLog.collection.insertOne({
+      payload: { x: 1 }, status: 'processado', createdAt: criado, updatedAt: criado,
+    });
+
+    const r = await WebhookLog.migrarRetencao();
+    expect(r.indiceAntigoRemovido).toBe(true);
+    const indices = await WebhookLog.collection.indexes();
+    expect(indices.some((i) => i.key.createdAt === 1 && i.expireAfterSeconds !== undefined)).toBe(false);
+
+    // reserva futura: expira 90 dias depois do departure (e não 90 dias após a receção)
+    const futuro = await WebhookLog.findOne({ 'payload.data.id': 9501 }).lean();
+    const esperado = new Date('2032-09-01').getTime() + 90 * 24 * 3600 * 1000;
+    expect(Math.abs(new Date(futuro.expira_em).getTime() - esperado)).toBeLessThan(24 * 3600 * 1000);
+    // sem departure: createdAt + 90 dias
+    const semDep = await WebhookLog.findOne({ 'payload.x': 1 }).lean();
+    expect(Math.abs(new Date(semDep.expira_em).getTime() - (criado.getTime() + 90 * 24 * 3600 * 1000))).toBeLessThan(24 * 3600 * 1000);
+    // idempotente
+    expect((await WebhookLog.migrarRetencao()).atualizados).toBe(0);
+  });
+
+  it('o modelo tem índice TTL sobre expira_em', async () => {
+    await WebhookLog.init();
+    const idx = (await WebhookLog.collection.indexes()).find((i) => i.key.expira_em === 1);
+    expect(idx).toBeDefined();
+    expect(idx.expireAfterSeconds).toBe(0);
   });
 });

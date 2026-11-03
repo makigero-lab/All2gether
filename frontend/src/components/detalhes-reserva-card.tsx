@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarDays, LogIn, LogOut, Users, User } from "lucide-react";
+import { CalendarDays, LogIn, LogOut, Users, User, StickyNote, Mail, Phone } from "lucide-react";
 
 import {
   Card,
@@ -8,7 +8,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import type { DetalhesReservaDTO } from "@/lib/api";
+import type { ContactoHospedeDTO, DetalhesReservaDTO } from "@/lib/api";
 
 /**
  * Card de destaque com os detalhes da reserva de Alojamento Local (Prompt 95 / Fase 1.5).
@@ -39,10 +39,34 @@ function formatarData(iso?: string | null): string {
   }
 }
 
+const TIPO_RESERVA_LABEL: Record<string, string> = {
+  reservation: "Reserva",
+  "modification of booking": "Reserva alterada",
+  cancellation: "Cancelada",
+};
+
+/** "3 (2 adultos, 1 criança)" quando há a divisão; senão só o total. */
+function textoHospedes(d: DetalhesReservaDTO): string {
+  if (d.pax == null && d.adultos == null && d.criancas == null) return "—";
+  const total = d.pax ?? (d.adultos ?? 0) + (d.criancas ?? 0);
+  const partes: string[] = [];
+  if (d.adultos != null) partes.push(`${d.adultos} ${d.adultos === 1 ? "adulto" : "adultos"}`);
+  if (d.criancas != null && d.criancas > 0) {
+    partes.push(`${d.criancas} ${d.criancas === 1 ? "criança" : "crianças"}`);
+  }
+  return partes.length > 0 ? `${total} (${partes.join(", ")})` : `${total}`;
+}
+
+/**
+ * `contacto` (email/telefone) só é passado pelo modal do gestor quando o utilizador
+ * é admin; nos restantes casos não é recebido nem mostrado.
+ */
 export function DetalhesReservaCard({
   detalhes,
+  contacto,
 }: {
   detalhes?: DetalhesReservaDTO | null;
+  contacto?: ContactoHospedeDTO | null;
 }) {
   if (!detalhes) return null;
 
@@ -50,7 +74,8 @@ export function DetalhesReservaCard({
     detalhes.checkin ||
     detalhes.checkout ||
     detalhes.pax != null ||
-    detalhes.nome_hospede;
+    detalhes.nome_hospede ||
+    detalhes.notas_hospede;
   if (!temAlgum) return null;
 
   return (
@@ -71,6 +96,7 @@ export function DetalhesReservaCard({
               </p>
               <p className="text-sm font-semibold">
                 {formatarData(detalhes.checkin)}
+                {detalhes.hora_checkin ? ` · ${detalhes.hora_checkin}` : ""}
               </p>
             </div>
           </div>
@@ -82,6 +108,7 @@ export function DetalhesReservaCard({
               </p>
               <p className="text-sm font-semibold">
                 {formatarData(detalhes.checkout)}
+                {detalhes.hora_checkout ? ` · ${detalhes.hora_checkout}` : ""}
               </p>
             </div>
           </div>
@@ -91,9 +118,7 @@ export function DetalhesReservaCard({
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Hóspedes
               </p>
-              <p className="text-sm font-semibold">
-                {detalhes.pax != null ? `${detalhes.pax}` : "—"}
-              </p>
+              <p className="text-sm font-semibold">{textoHospedes(detalhes)}</p>
             </div>
           </div>
           <div className="flex items-start gap-2 rounded-md bg-background/60 p-2.5">
@@ -108,6 +133,44 @@ export function DetalhesReservaCard({
             </div>
           </div>
         </div>
+
+        {detalhes.notas_hospede && (
+          <div className="mt-3 flex items-start gap-2 rounded-md bg-background/60 p-2.5">
+            <StickyNote className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+            <div className="min-w-0">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Notas do hóspede
+              </p>
+              <p className="whitespace-pre-line break-words text-sm">{detalhes.notas_hospede}</p>
+            </div>
+          </div>
+        )}
+
+        {detalhes.tipo_reserva && TIPO_RESERVA_LABEL[detalhes.tipo_reserva] && (
+          <p className="mt-3 text-xs text-muted-foreground">
+            Estado no Smoobu: {TIPO_RESERVA_LABEL[detalhes.tipo_reserva]}
+          </p>
+        )}
+
+        {contacto && (contacto.email || contacto.telefone) && (
+          <div className="mt-3 space-y-1 rounded-md border border-dashed p-2.5 text-sm">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Contacto (visível só ao admin)
+            </p>
+            {contacto.email && (
+              <p className="flex items-center gap-2 break-all">
+                <Mail className="h-4 w-4 shrink-0 text-primary" />
+                <a href={`mailto:${contacto.email}`} className="hover:underline">{contacto.email}</a>
+              </p>
+            )}
+            {contacto.telefone && (
+              <p className="flex items-center gap-2">
+                <Phone className="h-4 w-4 shrink-0 text-primary" />
+                <a href={`tel:${contacto.telefone}`} className="hover:underline">{contacto.telefone}</a>
+              </p>
+            )}
+          </div>
+        )}
       </CardContent>
     </Card>
   );
