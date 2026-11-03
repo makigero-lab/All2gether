@@ -95,6 +95,11 @@ function extrairApiKey(req) {
     if (valor && valor.trim()) return valor.trim();
   }
 
+  // Query string: o Smoobu não permite headers custom, mas deixa configurar o
+  // URL do webhook. Ex.: https://api.../api/smoobu/webhook?key=<SMOOBU_API_KEY>
+  const qk = req.query && (req.query.key || req.query.secret);
+  if (typeof qk === 'string' && qk.trim()) return qk.trim();
+
   // Authorization: Bearer <key> (standard).
   const auth = req.get('Authorization');
   if (auth && auth.toLowerCase().startsWith('bearer ')) {
@@ -172,7 +177,7 @@ async function validarChaveSmoobu(chaveRecebida) {
 
   // 3. Modo dev: sem env var E sem empresas com chave → aceita sem auth.
   //    Isto só acontece quando o sistema ainda não foi configurado.
-  if (!SMOOBU_API_KEY_ENV) {
+  if (!SMOOBU_API_KEY_ENV && process.env.NODE_ENV !== 'production') {
     try {
       const algumaEmpresaComChave = await Empresa.exists({
         ativa: true,

@@ -16,6 +16,11 @@ import {
   buildBackendUrl,
   ERRO_BACKEND_NAO_CONFIGURADO,
 } from "@/lib/backend";
+import {
+  lerCorpo,
+  responderBackend,
+  segmentosSeguros,
+} from "@/lib/proxy-utils";
 
 const COOKIE_NAME = "all2gether_token";
 
@@ -25,6 +30,9 @@ async function proxyHandler(
 ) {
   try {
     const { path } = await params;
+    if (!segmentosSeguros(path)) {
+      return NextResponse.json({ erro: "Caminho inválido." }, { status: 400 });
+    }
     const pathString = path.join("/");
 
     const cookieStore = await cookies();
@@ -42,10 +50,11 @@ async function proxyHandler(
     };
 
     const method = req.method;
-    let body: string | undefined;
+    let body: string | ArrayBuffer | undefined;
     if (method !== "GET" && method !== "DELETE") {
-      headers["Content-Type"] = "application/json";
-      body = await req.text();
+      const corpo = await lerCorpo(req);
+      headers["Content-Type"] = corpo.contentType;
+      body = corpo.body;
     }
 
     const url = new URL(req.url);
@@ -66,13 +75,7 @@ async function proxyHandler(
       cache: "no-store",
     });
 
-    const data = await res.json();
-
-    const response = NextResponse.json(data, { status: res.status });
-    if (res.status === 401) {
-      response.cookies.delete(COOKIE_NAME);
-    }
-    return response;
+    return responderBackend(res, COOKIE_NAME);
   } catch {
     return NextResponse.json(
       { erro: "Erro ao comunicar com o backend." },

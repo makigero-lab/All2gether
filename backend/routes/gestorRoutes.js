@@ -26,6 +26,7 @@
 const express = require('express');
 const router = express.Router();
 
+const rawXlsx = require('../middleware/rawXlsx');
 const { auth } = require('../middleware/auth');
 const { isGestor, isAdmin } = require('../middleware/requireRole');
 const {
@@ -134,7 +135,7 @@ router.get('/tarefas/export', auth, isGestor, exportarTarefasCSV);
 
 // FIX (import/export excel) — Rotas de importação/exportação de reservas.
 router.get('/reservas/exportar-excel', auth, isGestor, exportarExcel);
-router.post('/reservas/importar-excel', auth, isGestor, importarExcel);
+router.post('/reservas/importar-excel', auth, isGestor, rawXlsx, importarExcel);
 
 // Reportar atraso numa tarefa.
 router.post('/tarefas/:id/atraso', auth, isGestor, reportarAtrasoTarefa);
