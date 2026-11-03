@@ -86,7 +86,9 @@ const globalLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { erro: 'Muitos pedidos. Tente novamente mais tarde.' },
-  skip: (req) => req.path.startsWith('/api/smoobu'),
+  // req.originalUrl (e não req.path): dentro de app.use('/api/', ...) o req.path é
+  // relativo ao ponto de montagem ('/smoobu/webhook') e nunca coincidia.
+  skip: (req) => req.originalUrl.startsWith('/api/smoobu'),
 });
 app.use('/api/', globalLimiter);
 
