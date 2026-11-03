@@ -36,7 +36,8 @@ export function StaffHeader({ title, showBack = false, userName }: StaffHeaderPr
             <Link
               href="/staff"
               prefetch
-              className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+              aria-label="Voltar"
+              className="-m-2.5 inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 p-2.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
             >
               <ArrowLeft className="h-4 w-4" />
               <span className="hidden sm:inline">Voltar</span>

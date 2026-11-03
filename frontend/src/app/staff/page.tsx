@@ -90,6 +90,7 @@ export default function StaffPage() {
   const [user, setUser] = useState<UtilizadorAuth | null>(null);
   const [tarefas, setTarefas] = useState<TarefaReal[]>([]);
   const [loading, setLoading] = useState(true);
+  const [erroCarregar, setErroCarregar] = useState(false); // falha de rede/servidor (≠ lista vazia)
 
   // Estado da funcionalidade "Reportar Falta Hoje".
   const [faltaPendente, setFaltaPendente] = useState(false); // já reportou hoje?
@@ -113,6 +114,7 @@ export default function StaffPage() {
       const userData = await lerUtilizador();
       if (userData) setUser(userData);
 
+      setErroCarregar(false);
       const [tarefasRes, ausenciasRes] = await Promise.all([
         fetch("/api/auth/me/tarefas", { credentials: "include", cache: "no-store" }),
         fetch("/api/staff/ausencias", { credentials: "include", cache: "no-store" }),
@@ -121,6 +123,9 @@ export default function StaffPage() {
       if (tarefasRes.ok) {
         const data = await tarefasRes.json();
         setTarefas(data.tarefas ?? []);
+      } else {
+        // 401 é tratado pelo middleware/login; qualquer outra falha é mostrada.
+        setErroCarregar(true);
       }
 
       // Verifica se já existe uma ausência pendente_emergencia para hoje.
@@ -140,7 +145,7 @@ export default function StaffPage() {
         setFaltaPendente(temFaltaHoje);
       }
     } catch {
-      // silencioso
+      setErroCarregar(true);
     } finally {
       setLoading(false);
     }
@@ -310,6 +315,7 @@ export default function StaffPage() {
         ) : (
           <Button
             variant="outline"
+            size="touch"
             className="w-full justify-center gap-2 border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive"
             onClick={() => {
               setMostrarDialogFalta(true);
@@ -323,7 +329,7 @@ export default function StaffPage() {
 
         {/* Botão Ver a minha Agenda */}
         <Link href="/staff/calendario" prefetch>
-          <Button variant="outline" className="w-full justify-center gap-2">
+          <Button variant="outline" size="touch" className="w-full justify-center gap-2">
             <CalendarDays className="h-4 w-4" />
             Ver a minha Agenda
           </Button>
@@ -331,7 +337,7 @@ export default function StaffPage() {
 
         {/* Botão Pedidos de Ausência */}
         <Link href="/staff/ausencias" prefetch>
-          <Button variant="outline" className="w-full justify-center gap-2">
+          <Button variant="outline" size="touch" className="w-full justify-center gap-2">
             <CalendarOff className="h-4 w-4" />
             Pedidos de Ausência
           </Button>
@@ -339,7 +345,7 @@ export default function StaffPage() {
 
         {/* Task 131 — Botão Histórico de Notificações */}
         <Link href="/staff/notificacoes" prefetch>
-          <Button variant="outline" className="w-full justify-center gap-2">
+          <Button variant="outline" size="touch" className="w-full justify-center gap-2">
             <Bell className="h-4 w-4" />
             Histórico de Notificações
           </Button>
@@ -356,7 +362,7 @@ export default function StaffPage() {
             <div className="flex items-center justify-between gap-2">
               <Button
                 variant="outline"
-                size="sm"
+                size="touch"
                 onClick={() => setOffsetDia((d) => d - 1)}
                 className="gap-1"
                 title="Dia anterior"
@@ -371,7 +377,7 @@ export default function StaffPage() {
                 {offsetDia !== 0 && (
                   <button
                     onClick={() => setOffsetDia(0)}
-                    className="text-xs text-primary hover:underline"
+                    className="px-2 py-2 text-xs font-medium text-primary hover:underline"
                   >
                     Voltar a Hoje
                   </button>
@@ -379,7 +385,7 @@ export default function StaffPage() {
               </div>
               <Button
                 variant="outline"
-                size="sm"
+                size="touch"
                 onClick={() => setOffsetDia((d) => d + 1)}
                 className="gap-1"
                 title="Dia seguinte"
@@ -415,8 +421,21 @@ export default function StaffPage() {
               </div>
             )}
 
+            {/* Falha ao carregar — distinto de "sem tarefas" */}
+            {erroCarregar && (
+              <div
+                role="alert"
+                className="flex flex-col items-center gap-3 rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-center text-sm text-destructive"
+              >
+                <p>Não foi possível carregar as tuas tarefas. Verifica a ligação e tenta de novo.</p>
+                <Button variant="outline" size="touch" onClick={() => { setLoading(true); carregar(); }}>
+                  Tentar de novo
+                </Button>
+              </div>
+            )}
+
             {/* Sem tarefas no dia selecionado */}
-            {tarefasDoDia.length === 0 && (
+            {!erroCarregar && tarefasDoDia.length === 0 && (
               <div className="mt-10 flex flex-col items-center gap-2 text-center text-muted-foreground">
                 <ClipboardList className="h-10 w-10 opacity-40" />
                 <p className="text-sm">Sem tarefas neste dia.</p>
