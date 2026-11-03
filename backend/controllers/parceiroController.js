@@ -89,7 +89,7 @@ async function criarPropriedade(req, res) {
     return res.status(201).json({ propriedade: novaPropriedade });
   } catch (err) {
     console.error('❌ parceiroController.criarPropriedade:', err.message);
-    return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
+    return res.status(500).json({ erro: 'Erro interno.' });
   }
 }
 
@@ -192,7 +192,7 @@ async function criarTarefa(req, res) {
     return res.status(201).json({ tarefa: novaTarefa });
   } catch (err) {
     console.error('❌ parceiroController.criarTarefa:', err.message);
-    return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
+    return res.status(500).json({ erro: 'Erro interno.' });
   }
 }
 
@@ -423,7 +423,7 @@ async function criarReserva(req, res) {
     return res.status(201).json({ reserva: novaReserva, tarefa: novaTarefa });
   } catch (err) {
     console.error('❌ parceiroController.criarReserva:', err.message);
-    return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
+    return res.status(500).json({ erro: 'Erro interno.' });
   }
 }
 

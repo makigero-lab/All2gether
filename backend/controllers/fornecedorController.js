@@ -29,6 +29,7 @@ exports.listarTarefas = async (req, res) => {
     // propriedades que lhe estão explicitamente atribuídas (não é global).
     const propriedadesAtribuidas = await Propriedade.find({
       fornecedor_id: fornecedorId,
+      empresa_id: empresaId,
       ativo: true,
     })
       .select('_id')
@@ -87,15 +88,27 @@ exports.marcarRoupaEntregue = async (req, res) => {
       return res.status(400).json({ erro: 'ID de tarefa inválido.' });
     }
 
-    // FIX (segurança multi-tenant) — Filtra estritamente por empresa_id.
+    const fornecedorId = req.user && req.user.id;
+
+    // SEGURANÇA: o fornecedor só pode alterar tarefas de propriedades que lhe
+    // estão atribuídas (fornecedor_id) e da sua empresa. Devolve 404 igual nos
+    // dois casos para não revelar a existência de tarefas alheias.
+    const propsPermitidas = await Propriedade.find({
+      fornecedor_id: fornecedorId,
+      empresa_id: empresaId,
+    })
+      .select('_id')
+      .lean();
+
     const tarefa = await Tarefa.findOne({
       _id: id,
       empresa_id: empresaId,
+      propriedade_id: { $in: propsPermitidas.map((p) => p._id) },
     });
 
     if (!tarefa) {
       return res.status(404).json({
-        erro: 'Tarefa não encontrada (ou não pertence à tua empresa).',
+        erro: 'Tarefa não encontrada (ou não tens acesso a ela).',
       });
     }
 

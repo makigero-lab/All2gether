@@ -243,6 +243,32 @@ exports.criarPropriedade = async (req, res) => {
 
     // F0 — Validação de unicidade do smoobu_id removida.
 
+    // SEGURANÇA (multi-tenant): parceiro_id / fornecedor_id, quando enviados,
+    // têm de ser utilizadores da MESMA empresa com a role certa.
+    {
+      const Utilizador = require('../models/Utilizador');
+      for (const [campo, valorCampo, roleEsperada] of [
+        ['parceiro_id', parceiro_id, 'parceiro'],
+        ['fornecedor_id', fornecedor_id, 'fornecedor'],
+      ]) {
+        if (valorCampo === undefined || valorCampo === null || valorCampo === '') continue;
+        if (!mongoose.isValidObjectId(valorCampo)) {
+          return res.status(400).json({ erro: `${campo} inválido.` });
+        }
+        const existe = await Utilizador.exists({
+          _id: valorCampo,
+          empresa_id: empresaId,
+          role: roleEsperada,
+          eliminado_em: null,
+        });
+        if (!existe) {
+          return res.status(400).json({
+            erro: `${campo} não corresponde a um utilizador "${roleEsperada}" desta empresa.`,
+          });
+        }
+      }
+    }
+
     // Validação de tempo_limpeza_minutos (se vier, tem de ser número >= 0).
     let tempo = 45;
     if (tempo_limpeza_minutos !== undefined && tempo_limpeza_minutos !== null) {

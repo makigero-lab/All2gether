@@ -14,6 +14,8 @@
  */
 
 const jwt = require('jsonwebtoken');
+const mongoose = require('mongoose');
+const Utilizador = require('../models/Utilizador');
 
 // SEGURANÇA (fail-closed): em produção o segredo é OBRIGATÓRIO (>= 32 chars).
 // O fallback só existe para desenvolvimento/testes locais.
@@ -38,7 +40,28 @@ function extrairToken(req) {
   return null;
 }
 
-function auth(req, res, next) {
+// SEGURANÇA (A4): o JWT dura vários dias, por isso confirmamos a cada pedido
+// que o utilizador continua ativo e não foi eliminado. Cache curta (30 s) para
+// não sobrecarregar a BD; 0 em testes para resultados determinísticos.
+const CACHE_TTL_MS = process.env.NODE_ENV === 'test' ? 0 : 30 * 1000;
+const cacheUtilizadores = new Map(); // id -> { ok, ate }
+
+async function utilizadorContinuaAtivo(id) {
+  if (!mongoose.isValidObjectId(id)) return false;
+  const agora = Date.now();
+  const emCache = cacheUtilizadores.get(String(id));
+  if (emCache && emCache.ate > agora) return emCache.ok;
+
+  const u = await Utilizador.findById(id).select('ativo eliminado_em').lean();
+  const ok = Boolean(u && u.ativo !== false && !u.eliminado_em);
+  if (CACHE_TTL_MS > 0) {
+    if (cacheUtilizadores.size > 5000) cacheUtilizadores.clear();
+    cacheUtilizadores.set(String(id), { ok, ate: agora + CACHE_TTL_MS });
+  }
+  return ok;
+}
+
+async function auth(req, res, next) {
   const token = extrairToken(req);
 
   if (!token) {
@@ -47,19 +70,28 @@ function auth(req, res, next) {
     });
   }
 
+  let payload;
   try {
-    const payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
-    req.user = {
-      id: payload.id,
-      role: payload.role,
-      empresa_id: payload.empresa_id,
-    };
-    return next();
-  } catch (err) {
-    return res.status(401).json({
-      erro: 'Token inválido ou expirado.',
-    });
+    payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
+  } catch {
+    return res.status(401).json({ erro: 'Token inválido ou expirado.' });
   }
+
+  try {
+    if (!(await utilizadorContinuaAtivo(payload.id))) {
+      return res.status(401).json({ erro: 'Sessão inválida. Inicie sessão novamente.' });
+    }
+  } catch (err) {
+    console.error('❌ auth: falha a validar utilizador:', err.message);
+    return res.status(503).json({ erro: 'Serviço temporariamente indisponível.' });
+  }
+
+  req.user = {
+    id: payload.id,
+    role: payload.role,
+    empresa_id: payload.empresa_id,
+  };
+  return next();
 }
 
 module.exports = { auth, JWT_SECRET };

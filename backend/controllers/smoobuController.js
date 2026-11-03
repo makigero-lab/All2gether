@@ -1325,7 +1325,7 @@ async function getPropriedadesSmoobu(req, res) {
       });
     }
     console.error('❌ [Smoobu] getPropriedadesSmoobu: erro interno:', err.message);
-    return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
+    return res.status(500).json({ erro: 'Erro interno.' });
   }
 }
 
@@ -1505,7 +1505,7 @@ async function importarPropriedades(req, res) {
       });
     }
     console.error('❌ [Smoobu] importarPropriedades: erro interno:', err.message);
-    return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
+    return res.status(500).json({ erro: 'Erro interno.' });
   }
 }
 
@@ -1635,7 +1635,6 @@ async function sincronizarReservas(req, res) {
       console.error('❌ [Smoobu] sincronizarReservas: fetch falhou:', err.message);
       return res.status(502).json({
         erro: 'Não foi possível ligar ao Smoobu.',
-        detalhe: err.message,
       });
     }
 
@@ -1883,7 +1882,7 @@ async function sincronizarReservas(req, res) {
     });
   } catch (err) {
     console.error('❌ [Smoobu] sincronizarReservas: erro interno:', err.message);
-    return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
+    return res.status(500).json({ erro: 'Erro interno.' });
   }
 }
 
