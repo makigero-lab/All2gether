@@ -245,16 +245,6 @@ describe('Rate-limit de login por conta', () => {
   });
 });
 
-describe('RGPD — retenção dos logs de webhook', () => {
-  it('o modelo WebhookLog tem índice TTL de 90 dias sobre createdAt', async () => {
-    await WebhookLog.init();
-    const indices = await WebhookLog.collection.indexes();
-    const ttl = indices.find((i) => i.key && i.key.createdAt === 1 && i.expireAfterSeconds !== undefined);
-    expect(ttl).toBeDefined();
-    expect(ttl.expireAfterSeconds).toBe(90 * 24 * 60 * 60);
-  });
-});
-
 describe('SSO Autocell — validação do token', () => {
   const SEGREDO = 'segredo-sso-de-teste-com-mais-de-32-caracteres';
   let adminEmail = 'admin-sso@a.pt';

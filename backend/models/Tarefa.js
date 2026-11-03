@@ -199,6 +199,14 @@ const tarefaSchema = new mongoose.Schema(
       pax: { type: Number, default: null, min: 0 },
       // Nome do hóspede principal da reserva.
       nome_hospede: { type: String, default: null, trim: true },
+      // Dados adicionais do Smoobu (hora de check-in/out, composição, notas, tipo).
+      hora_checkin: { type: String, default: null, trim: true },
+      hora_checkout: { type: String, default: null, trim: true },
+      adultos: { type: Number, default: null, min: 0 },
+      criancas: { type: Number, default: null, min: 0 },
+      notas_hospede: { type: String, default: null, trim: true, maxlength: 2000 },
+      // Tipo da reserva no Smoobu: 'reservation' | 'modification of booking' | 'cancellation'.
+      tipo_reserva: { type: String, default: null, trim: true },
     },
     // HF23 — Número de hóspedes para cálculo dinâmico de lavandaria.
     // Vem do payload do Smoobu (adults + children) ou da capacidade da propriedade.

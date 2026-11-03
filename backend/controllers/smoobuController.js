@@ -39,6 +39,7 @@
 
 const Propriedade = require('../models/Propriedade');
 const Tarefa = require('../models/Tarefa');
+const ContactoHospede = require('../models/ContactoHospede');
 const WebhookLog = require('../models/WebhookLog');
 const Ausencia = require('../models/Ausencia');
 const Utilizador = require('../models/Utilizador');
@@ -216,12 +217,42 @@ function extrairDadosReserva(payload) {
   // 'cancellation'). Um updateReservation com type 'cancellation' é um cancelamento.
   const tipoReserva = String(data.type ?? content.type ?? '');
 
+  // Campos adicionais (docs.smoobu.com): horas, composição, notas, contacto.
+  // Nota: 'check-in'/'check-out' (com hífen) são HORAS; as datas vêm em arrival/departure.
+  const texto = (v, max) => {
+    if (v === null || v === undefined) return null;
+    const t = String(v).trim();
+    return t ? t.slice(0, max) : null;
+  };
+  const inteiro = (v) => {
+    if (v === null || v === undefined || v === '') return null;
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 ? Math.floor(n) : null;
+  };
+  const primeiro = (...vals) => vals.find((v) => v !== undefined && v !== null && v !== '');
+
   const detalhesReserva = {
     checkin,
     checkout,
     pax,
     nome_hospede: nomeHospede,
+    hora_checkin: texto(primeiro(data['check-in'], content['check-in']), 20),
+    hora_checkout: texto(primeiro(data['check-out'], content['check-out']), 20),
+    adultos: inteiro(primeiro(data.adults, content.adults)),
+    criancas: inteiro(primeiro(data.children, content.children)),
+    notas_hospede: texto(primeiro(data.notice, content.notice), 2000),
+    tipo_reserva: texto(tipoReserva, 60),
   };
+
+  // Email/telefone: dados pessoais, guardados à parte (ContactoHospede), só admin.
+  const contactoHospede = {
+    email: texto(primeiro(data.email, content.email), 254),
+    telefone: texto(primeiro(data.phone, content.phone), 50),
+  };
+
+  // Bloqueio de calendário (sem hóspede): não gera limpeza.
+  const bloqueadaRaw = primeiro(data['is-blocked-booking'], content['is-blocked-booking']);
+  const bloqueada = bloqueadaRaw === true || bloqueadaRaw === 'true' || bloqueadaRaw === 1 || bloqueadaRaw === '1';
 
   return {
     action: String(action),
@@ -231,8 +262,53 @@ function extrairDadosReserva(payload) {
     reservaId,
     tipoReserva,
     detalhesReserva,
+    contactoHospede,
+    bloqueada,
     content,
   };
+}
+
+/** Junta `extra` a `base` preenchendo só os campos de `base` que estão vazios. */
+function preencherVazios(base, extra) {
+  const r = { ...base };
+  for (const [k, v] of Object.entries(extra || {})) {
+    if ((r[k] === null || r[k] === undefined || r[k] === '') && v !== null && v !== undefined && v !== '') {
+      r[k] = v;
+    }
+  }
+  return r;
+}
+
+/** Só os campos definidos (não nulos) — para atualizar sem apagar dados já guardados. */
+function apenasDefinidos(obj) {
+  return Object.fromEntries(
+    Object.entries(obj || {}).filter(([, v]) => v !== null && v !== undefined && v !== '')
+  );
+}
+
+/**
+ * Guarda/atualiza o email e o telefone do hóspede na coleção ContactoHospede
+ * (separada das tarefas; só o admin os pode ler). Best-effort.
+ */
+async function guardarContactoHospede(tarefa, contacto) {
+  try {
+    const c = apenasDefinidos(contacto);
+    if (!tarefa || (!c.email && !c.telefone)) return;
+    const checkout = tarefa.detalhes_reserva?.checkout || tarefa.data;
+    await ContactoHospede.findOneAndUpdate(
+      { tarefa_id: tarefa._id },
+      {
+        $set: {
+          empresa_id: tarefa.empresa_id,
+          ...c,
+          expira_em: ContactoHospede.calcularExpiracao(checkout),
+        },
+      },
+      { upsert: true, setDefaultsOnInsert: true }
+    );
+  } catch (err) {
+    console.error('⚠️  [Smoobu] falha ao guardar contacto do hóspede (não bloqueia):', err.message);
+  }
 }
 
 /**
@@ -310,11 +386,18 @@ async function enriquecerReservaSmoobu(reservaId, empresaId) {
     }
     if (nomeHospede) nomeHospede = String(nomeHospede).trim().slice(0, 200);
 
+    // Campos adicionais (horas, composição, notas, contacto, bloqueio): reaproveita
+    // o extrator do webhook, pois a REST devolve o mesmo objeto de reserva.
+    const extra = extrairDadosReserva({ data: reserva });
+
     return {
       departure: departure != null ? String(departure) : null,
       arrival: arrival != null ? String(arrival) : null,
       pax: Number.isFinite(Number(pax)) ? Number(pax) : null,
       nome_hospede: nomeHospede,
+      detalhes: extra.detalhesReserva,
+      contacto: extra.contactoHospede,
+      bloqueada: extra.bloqueada,
     };
   } catch (err) {
     console.warn(
@@ -352,7 +435,8 @@ async function criarTarefaPorReserva(
   dataTarefaRaw,
   detalhesReserva,
   content,
-  empresaRestrita = null
+  empresaRestrita = null,
+  contacto = null
 ) {
   if (!smoobuPropId || !dataTarefaRaw) {
     throw new Error(
@@ -372,8 +456,14 @@ async function criarTarefaPorReserva(
       if (existente.estado === 'cancelada') {
         // Reserva foi re-ativada no Smoobu → reativa a tarefa.
         existente.estado = existente.utilizador_id ? 'atribuida' : 'por_atribuir';
-        if (detalhesReserva) existente.detalhes_reserva = detalhesReserva;
+        if (detalhesReserva) {
+          existente.detalhes_reserva = {
+            ...(existente.detalhes_reserva?.toObject?.() ?? {}),
+            ...apenasDefinidos(detalhesReserva),
+          };
+        }
         await existente.save();
+        await guardarContactoHospede(existente, contacto);
         console.log(
           `🔄 [Smoobu] tarefa ${existente._id} reativada (reserva ${reservaId} re-ativada).`
         );
@@ -750,6 +840,8 @@ async function criarTarefaPorReserva(
     hospedes: numHospedes, // HF23 — número de hóspedes para lavandaria
   });
 
+  await guardarContactoHospede(novaTarefa, contacto);
+
   console.log(
     `🧹 [Smoobu] tarefa ${novaTarefa._id} criada (reserva ${reservaId}, ` +
       `propriedade "${propriedade.nome}", estado ${estadoInicial}` +
@@ -830,7 +922,8 @@ async function atualizarTarefaPorReserva(
   dataTarefaRaw,
   detalhesReserva,
   content,
-  empresaRestrita = null
+  empresaRestrita = null,
+  contacto = null
 ) {
   if (!reservaId) return null;
 
@@ -891,7 +984,11 @@ async function atualizarTarefaPorReserva(
 
   // 3b. Atualiza detalhes_reserva.
   if (detalhesReserva) {
-    tarefa.detalhes_reserva = detalhesReserva;
+    // Junta aos dados já guardados (um update sem notas não apaga as notas).
+    tarefa.detalhes_reserva = {
+      ...(tarefa.detalhes_reserva?.toObject?.() ?? {}),
+      ...apenasDefinidos(detalhesReserva),
+    };
     mudou = true;
   }
 
@@ -932,6 +1029,7 @@ async function atualizarTarefaPorReserva(
 
   if (mudou) {
     await tarefa.save();
+    await guardarContactoHospede(tarefa, contacto);
     console.log(
       `📝 [Smoobu] tarefa ${tarefa._id} atualizada (reserva ${reservaId}).`
     );
@@ -1022,8 +1120,19 @@ async function processarReservaSmoobu(payload, empresaId, empresaRestrita = null
     reservaId,
     tipoReserva,
     detalhesReserva,
+    contactoHospede,
+    bloqueada,
     content,
   } = extrairDadosReserva(payload);
+
+  // 0. Bloqueio de calendário (is-blocked-booking): não há hóspede e a limpeza
+  //    faz-se no check-out da reserva anterior. Ignora, e cancela qualquer
+  //    tarefa que já existisse para este id (reserva convertida em bloqueio).
+  if (bloqueada) {
+    console.log(`ℹ️  [Smoobu] reserva ${reservaId} é um bloqueio de calendário — ignorada.`);
+    await cancelarTarefaPorReserva(reservaId, empresaRestrita);
+    return null;
+  }
 
   // 1. Cancelamento (ação de cancelamento, ou atualização cujo tipo é 'cancellation').
   if (
@@ -1036,6 +1145,7 @@ async function processarReservaSmoobu(payload, empresaId, empresaRestrita = null
   // 2. Enriquecimento (se precisa de departure ou nome_hospede).
   let dataCheckOutFinal = dataCheckOutRaw;
   let detalhesFinal = detalhesReserva;
+  let contactoFinal = contactoHospede;
   const precisaEnriquecimento =
     reservaId &&
     (ACOES_CRIAR.includes(action) || ACOES_ATUALIZAR.includes(action)) &&
@@ -1046,12 +1156,22 @@ async function processarReservaSmoobu(payload, empresaId, empresaRestrita = null
     if (enriched) {
       dataCheckOutFinal = enriched.departure || dataCheckOutRaw || null;
       detalhesFinal = {
+        ...detalhesReserva, // mantém os campos adicionais já vindos do webhook
         checkin: detalhesReserva.checkin || enriched.arrival || null,
         checkout: enriched.departure || detalhesReserva.checkout || null,
         pax: detalhesReserva.pax ?? enriched.pax ?? null,
         nome_hospede:
           detalhesReserva.nome_hospede || enriched.nome_hospede || null,
       };
+      // Completa os campos adicionais (horas, notas, adultos/crianças...) que o
+      // webhook não trouxe, com os da REST API.
+      detalhesFinal = preencherVazios(detalhesFinal, enriched.detalhes);
+      contactoFinal = preencherVazios(contactoFinal, enriched.contacto);
+      if (enriched.bloqueada) {
+        console.log(`ℹ️  [Smoobu] reserva ${reservaId} é um bloqueio de calendário — ignorada.`);
+        await cancelarTarefaPorReserva(reservaId, empresaRestrita);
+        return null;
+      }
     }
   }
 
@@ -1071,7 +1191,8 @@ async function processarReservaSmoobu(payload, empresaId, empresaRestrita = null
       dataTarefaRaw,
       detalhesFinal,
       content,
-      empresaRestrita
+      empresaRestrita,
+      contactoFinal
     );
     if (atualizada) return atualizada;
     // Sem tarefa existente → cai para criar (reserva pode ter sido criada
@@ -1086,7 +1207,8 @@ async function processarReservaSmoobu(payload, empresaId, empresaRestrita = null
       dataTarefaRaw,
       detalhesFinal,
       content,
-      empresaRestrita
+      empresaRestrita,
+      contactoFinal
     );
   }
 
@@ -1714,6 +1836,9 @@ async function sincronizarReservas(req, res) {
         const payloadWebhook = {
           action: 'newReservation',
           data: {
+            // Reserva completa da REST API (horas, adultos/crianças, notas, contacto,
+            // is-blocked-booking...); os campos abaixo normalizam os que variam de nome.
+            ...reserva,
             id: reserva.id,
             arrival: reserva.arrival ?? reserva.start_date ?? reserva.startDate,
             departure: reserva.departure ?? reserva.end_date ?? reserva.endDate,

@@ -53,6 +53,7 @@ const {
   getParceiros,
   // FIX (restrição lavandaria) — novo controller para listar fornecedores.
   getFornecedores,
+  getContactoHospede,
 } = require('../controllers/gestorController');
 const { reportarAtrasoTarefa, criarTarefa, atribuirTarefa, reatribuirTarefa, atualizarEstadoTarefa, apagarTarefasFuturas, listarIndisponiveisData, autoAtribuirTarefas, criarTarefaEspontanea } = require('../controllers/tarefaController');
 // CRUD de Modelos de Checklist (futuro: Modelos de Protocolo Clínico)
@@ -187,6 +188,8 @@ router.get('/auditoria', auth, isGestor, getAuditoria);
 
 // Webhooks — logs de integrações externas (lista + reproccessamento manual).
 router.get('/webhooks', auth, isGestor, getWebhooks);
+// Email/telefone do hóspede: EXCLUSIVO do admin (RGPD), com registo em auditoria.
+router.get('/tarefas/:id/contacto-hospede', auth, isAdmin, getContactoHospede);
 router.post('/webhooks/:id/reprocessar', auth, isGestor, reprocessarWebhook);
 
 // Configurações do Gestor (tenant local).

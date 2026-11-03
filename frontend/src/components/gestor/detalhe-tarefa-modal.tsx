@@ -17,7 +17,10 @@ import {
 } from "lucide-react";
 
 // Prompt Extra — parsearDataSegura para compatibilidade Safari/iOS.
+import { useEffect, useState } from "react";
 import { parsearDataSegura } from "@/lib/utils";
+import { adminGet, type ContactoHospedeDTO } from "@/lib/api";
+import { lerUtilizador } from "@/lib/auth";
 
 import {
   Dialog,
@@ -183,6 +186,30 @@ export function DetalheTarefaModal({
 }) {
   const Icon = tarefa ? (tipoIcon[tarefa.tipo] ?? SprayCan) : SprayCan;
 
+  // Email/telefone do hóspede: só o admin os pede (o backend recusa os outros).
+  const [contacto, setContacto] = useState<ContactoHospedeDTO | null>(null);
+  const tarefaId = tarefa?._id;
+  useEffect(() => {
+    setContacto(null);
+    if (!open || !tarefaId) return;
+    let cancelado = false;
+    (async () => {
+      try {
+        const user = await lerUtilizador();
+        if (user?.role !== "admin") return;
+        const c = await adminGet<ContactoHospedeDTO>(
+          `/api/gestor/tarefas/${tarefaId}/contacto-hospede`
+        );
+        if (!cancelado) setContacto(c);
+      } catch {
+        // Sem contacto disponível: o cartão simplesmente não o mostra.
+      }
+    })();
+    return () => {
+      cancelado = true;
+    };
+  }, [open, tarefaId]);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogHeader>
@@ -262,7 +289,7 @@ export function DetalheTarefaModal({
               )}
 
             {/* Prompt 95 — Card de detalhes da reserva Smoobu */}
-            <DetalhesReservaCard detalhes={tarefa.detalhes_reserva} />
+            <DetalhesReservaCard detalhes={tarefa.detalhes_reserva} contacto={contacto} />
 
             {/* Observações do gestor */}
             {tarefa.observacoes && (

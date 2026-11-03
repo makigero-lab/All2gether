@@ -2232,3 +2232,22 @@ Stage Summary:
 - **UI limpa:** ferramentas de dev (Diagnóstico, Reaplicar) removidas da página de Ausências. Produção sem utilitários técnicos.
 - **Sem regressões:** 111/111 testes Jest; tsc 0 erros; ESLint 0 erros.
 - **Próximo passo (este commit):** commit + push para `dev` com a mensagem `fix: associa parceiro relacional, status smoobu real, configs restritas a admin e limpa dev UI`.
+
+
+---
+
+Task ID: SMOOBU-DADOS-RESERVA
+Agent: Claude Code (Master)
+Task: Guardar mais dados das reservas do Smoobu, ignorar bloqueios e rever a retenção RGPD.
+
+Work Log:
+- **Campos novos em `detalhes_reserva`** (Tarefa e TarefaArquivo): `hora_checkin`, `hora_checkout`, `adultos`, `criancas`, `notas_hospede`, `tipo_reserva`. Extraídos em `extrairDadosReserva` (também pela sincronização manual, que agora passa a reserva completa). Um `updateReservation` junta os dados novos aos já guardados em vez de os substituir.
+- **Email e telefone** ficam na coleção separada `ContactoHospede` (nunca dentro da tarefa), com índice TTL: apagam-se 90 dias depois do check-out. Só o admin os lê, em `GET /api/gestor/tarefas/:id/contacto-hospede`, e cada consulta fica em auditoria. No modal do gestor só se mostram se o utilizador for admin.
+- **Reservas bloqueadas** (`is-blocked-booking`): são ignoradas (não geram limpeza) e, se uma reserva com tarefa passar a bloqueio, a tarefa é cancelada. A limpeza faz-se no check-out da reserva anterior.
+- **Cancelamentos**: passam a ser reconhecidos `cancelReservation` e `deleteReservation` (nomes oficiais do Smoobu) e `updateReservation` com `type` "cancellation".
+- **Retenção dos logs de webhooks**: `WebhookLog.expira_em` = check-out + 90 dias (antes eram 90 dias após a receção, o que apagava a cópia de reservas feitas com muita antecedência). Migração idempotente no arranque: remove o índice TTL antigo sobre `createdAt` e calcula `expira_em` nos logs existentes.
+- **Logs no painel**: o email e o telefone aparecem como "[oculto]" para quem não é admin.
+
+Stage Summary:
+- Backend: 171/171 testes ✓ (3 execuções seguidas); frontend: `tsc`, lint e build ✓.
+- Atenção no primeiro arranque após o deploy: o log do servidor mostra "Retenção de WebhookLog: índice antigo removido=true, logs atualizados=N".

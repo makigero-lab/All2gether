@@ -2612,6 +2612,19 @@ exports.getAuditoria = async (req, res) => {
 /* Webhooks — Logs de integrações externas                           */
 /* ------------------------------------------------------------------ */
 
+/** Substitui email/telefone (e o link da app do hóspede) por "[oculto]", em qualquer nível. */
+function ocultarContactos(valor) {
+  if (Array.isArray(valor)) return valor.map(ocultarContactos);
+  if (valor && typeof valor === 'object') {
+    const r = {};
+    for (const [k, v] of Object.entries(valor)) {
+      r[k] = /^(email|phone|telefone|guest-app-url)$/i.test(k) ? '[oculto]' : ocultarContactos(v);
+    }
+    return r;
+  }
+  return valor;
+}
+
 /**
  * GET /api/gestor/webhooks
  * Lista os WebhookLogs recebidos (ordenados por data desc).
@@ -2649,7 +2662,13 @@ exports.getWebhooks = async (req, res) => {
       WebhookLog.countDocuments(filtro),
     ]);
 
-    return res.status(200).json({ webhooks, total });
+    // RGPD: email/telefone do hóspede só são visíveis ao admin.
+    const visiveis =
+      req.user && req.user.role === 'admin'
+        ? webhooks
+        : webhooks.map((w) => ({ ...w, payload: ocultarContactos(w.payload) }));
+
+    return res.status(200).json({ webhooks: visiveis, total });
   } catch (err) {
     console.error('❌ getWebhooks:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
@@ -2666,4 +2685,48 @@ exports.reprocessarWebhook = async (req, res) => {
   return res.status(410).json({
     erro: 'Reprocessamento de webhooks foi desativado (integração Smoobu removida na F0).',
   });
+};
+
+/**
+ * GET /api/gestor/tarefas/:id/contacto-hospede   (EXCLUSIVO do admin)
+ *
+ * Devolve o email e o telefone do hóspede (guardados à parte, em ContactoHospede,
+ * e apagados 90 dias depois do check-out). Cada consulta fica em auditoria.
+ *
+ * Resposta 200: { email: string|null, telefone: string|null }
+ */
+exports.getContactoHospede = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const empresaId = req.user && req.user.empresa_id;
+    if (!mongoose.isValidObjectId(id) || !empresaId) {
+      return res.status(400).json({ erro: 'Pedido inválido.' });
+    }
+    const Tarefa = require('../models/Tarefa');
+    const ContactoHospede = require('../models/ContactoHospede');
+
+    const tarefa = await Tarefa.findOne({ _id: id, empresa_id: empresaId }).select('_id').lean();
+    if (!tarefa) {
+      return res.status(404).json({ erro: 'Tarefa não encontrada.' });
+    }
+    const contacto = await ContactoHospede.findOne({ tarefa_id: id, empresa_id: empresaId }).lean();
+
+    registarAuditoria({
+      utilizador_id: req.user.id,
+      utilizador_nome: req.user.nome || 'Admin',
+      empresa_id: empresaId,
+      acao: 'ver_contacto_hospede',
+      recurso: 'tarefa',
+      recurso_id: id,
+      descricao: 'Consulta do email/telefone do hóspede de uma tarefa.',
+    });
+
+    return res.status(200).json({
+      email: contacto ? contacto.email : null,
+      telefone: contacto ? contacto.telefone : null,
+    });
+  } catch (err) {
+    console.error('❌ getContactoHospede:', err.message);
+    return res.status(500).json({ erro: 'Erro interno do servidor.' });
+  }
 };

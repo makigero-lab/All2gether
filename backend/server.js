@@ -188,6 +188,13 @@ if (require.main === module) {
     .connect(process.env.MONGODB_URI)
     .then(async () => {
       console.log('✅ Ligado ao MongoDB com sucesso.');
+      // Retenção RGPD dos logs de webhooks (idempotente).
+      try {
+        const r = await require('./models/WebhookLog').migrarRetencao();
+        console.log(`🧹 Retenção de WebhookLog: índice antigo removido=${r.indiceAntigoRemovido}, logs atualizados=${r.atualizados}.`);
+      } catch (e) {
+        console.error('⚠️  Falha na migração de retenção do WebhookLog (não bloqueia):', e.message);
+      }
 
       // Prompt 131 — Remove o índice único antigo { utilizador_id, data_inicio }
       // da coleção Ausencia. Este índice foi removido do schema Mongoose no
