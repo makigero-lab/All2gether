@@ -53,4 +53,10 @@ const webhookLogSchema = new mongoose.Schema(
 // Índice para consultar webhooks com erro (reprocesso).
 webhookLogSchema.index({ status: 1, createdAt: -1 });
 
+// RGPD (minimização/retenção): o payload bruto contém dados pessoais de hóspedes
+// (nome, email, telefone). O MongoDB apaga automaticamente os logs com mais de
+// 90 dias (índice TTL sobre createdAt).
+const RETENCAO_DIAS = 90;
+webhookLogSchema.index({ createdAt: 1 }, { expireAfterSeconds: RETENCAO_DIAS * 24 * 60 * 60 });
+
 module.exports = mongoose.model('WebhookLog', webhookLogSchema);

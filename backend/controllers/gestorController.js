@@ -1635,10 +1635,10 @@ exports.criarMembroEquipa = async (req, res) => {
       });
     }
 
-    // Validação da password (mínimo 6 caracteres).
-    if (String(password).length < 6) {
+    // Validação da password (mínimo 10 caracteres).
+    if (String(password).length < 10) {
       return res.status(400).json({
-        erro: 'A password deve ter pelo menos 6 caracteres.',
+        erro: 'A password deve ter pelo menos 10 caracteres.',
       });
     }
 
@@ -2023,9 +2023,9 @@ exports.atualizarMembroEquipa = async (req, res) => {
 
     // --- Password (opcional: só se vier, faz hash nova) ---
     if (password !== undefined && password !== null && String(password) !== '') {
-      if (String(password).length < 6) {
+      if (String(password).length < 10) {
         return res.status(400).json({
-          erro: 'A password deve ter pelo menos 6 caracteres.',
+          erro: 'A password deve ter pelo menos 10 caracteres.',
         });
       }
       utilizador.password_hash = await bcrypt.hash(String(password), 10);

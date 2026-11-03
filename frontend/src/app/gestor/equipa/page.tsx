@@ -418,8 +418,8 @@ function EquipaPage() {
       setFormErro("Nome, Email e Password são obrigatórios.");
       return;
     }
-    if (form.password.length < 6) {
-      setFormErro("A password deve ter pelo menos 6 caracteres.");
+    if (form.password.length < 10) {
+      setFormErro("A password deve ter pelo menos 10 caracteres.");
       return;
     }
 
@@ -536,8 +536,8 @@ function EquipaPage() {
       setEditErro("Nome e Email são obrigatórios.");
       return;
     }
-    if (editForm.password && editForm.password.length < 6) {
-      setEditErro("A nova password deve ter pelo menos 6 caracteres.");
+    if (editForm.password && editForm.password.length < 10) {
+      setEditErro("A nova password deve ter pelo menos 10 caracteres.");
       return;
     }
 

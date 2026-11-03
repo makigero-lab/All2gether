@@ -42,21 +42,45 @@ const {
  *   - 15 minutos é um equilíbrio: não penaliza demasiado o utilizador
  *     legítimo, mas atrasa significativamente um ataque.
  */
+// Em testes o limitador fica desligado, salvo se o teste o ativar de propósito.
+const limitadorDesligado = () =>
+  process.env.NODE_ENV === 'test' && !process.env.TEST_LOGIN_LIMIT;
+
+// Limite por IP: só conta tentativas FALHADAS (logins com sucesso não gastam
+// quota). Nota: atrás da Vercel o IP visto pode ser o do proxy, partilhado por
+// vários utilizadores — por isso é mais tolerante e a defesa principal é o
+// limite por conta, abaixo.
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 5, // máximo 5 tentativas por IP por janela
-  standardHeaders: true, // envia headers RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset
-  legacyHeaders: false, // não envia headers X-RateLimit-* antigos
-  // Em ambiente de teste, desativa o limitador (os testes fazem muitos logins
-  // seguidos para validar os fluxos de auth). Não afeta produção.
-  skip: () => process.env.NODE_ENV === 'test',
+  max: 20,
+  skipSuccessfulRequests: true,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: limitadorDesligado,
   message: {
     erro: 'Muitas tentativas de login. Tente novamente mais tarde.',
   },
 });
 
+// Limite por CONTA (email): trava força bruta sobre uma password específica,
+// independentemente do IP. 10 falhas / 15 min por email; sucessos não contam.
+const loginAccountLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  skipSuccessfulRequests: true,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: limitadorDesligado,
+  keyGenerator: (req) =>
+    `conta:${String((req.body && req.body.email) || '').toLowerCase().trim()}`,
+  validate: { keyGeneratorIpFallback: false },
+  message: {
+    erro: 'Muitas tentativas para esta conta. Tente novamente mais tarde.',
+  },
+});
+
 // Login — público, mas com rate limiting anti-força bruta.
-router.post('/login', loginLimiter, login);
+router.post('/login', loginLimiter, loginAccountLimiter, login);
 
 // Single Sign-On (SSO) com o portal Autocell — público.
 // Recebe um JWT externo na query string (?token=...), valida-o com
