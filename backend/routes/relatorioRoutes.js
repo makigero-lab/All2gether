@@ -18,12 +18,13 @@ const express = require('express');
 const router = express.Router();
 
 const { auth } = require('../middleware/auth');
+const { isGestor } = require('../middleware/requireRole');
 const {
   getRelatorioProdutividade,
   getResumoIA,
 } = require('../controllers/relatorioController');
 
-router.get('/produtividade', auth, getRelatorioProdutividade);
-router.post('/ai-summary', auth, getResumoIA);
+router.get('/produtividade', auth, isGestor, getRelatorioProdutividade);
+router.post('/ai-summary', auth, isGestor, getResumoIA);
 
 module.exports = router;

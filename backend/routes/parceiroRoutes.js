@@ -13,6 +13,7 @@
  */
 
 const express = require('express');
+const rawXlsx = require('../middleware/rawXlsx');
 const { auth } = require('../middleware/auth');
 const { isParceiro } = require('../middleware/requireRole');
 const {
@@ -38,6 +39,6 @@ router.post('/reservas', auth, isParceiro, criarReserva);
 
 // FIX (excel parceiro) — Rotas de importação/exportação de Excel (parceiro).
 router.get('/reservas/exportar-excel', auth, isParceiro, exportarExcelParceiro);
-router.post('/reservas/importar-excel', auth, isParceiro, importarExcelParceiro);
+router.post('/reservas/importar-excel', auth, isParceiro, rawXlsx, importarExcelParceiro);
 
 module.exports = router;

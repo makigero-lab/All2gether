@@ -26,6 +26,7 @@
 const express = require('express');
 const router = express.Router();
 
+const rawXlsx = require('../middleware/rawXlsx');
 const { auth } = require('../middleware/auth');
 const { isGestor, isAdmin } = require('../middleware/requireRole');
 const {
@@ -48,7 +49,6 @@ const {
   getAuditoria,
   getWebhooks,
   reprocessarWebhook,
-  setupClienteZero,
   // FIX (gestão de parceiros) — novo controller para listar parceiros B2B.
   getParceiros,
   // FIX (restrição lavandaria) — novo controller para listar fornecedores.
@@ -62,8 +62,8 @@ const { getPropriedadesSmoobu, importarPropriedades, sincronizarReservas } = req
 // FIX (import/export excel) — Controller de importação/exportação de Excel.
 const { exportarExcel, importarExcel } = require('../controllers/excelController');
 
-// Bootstrap do ambiente de testes — Cliente Zero. PÚBLICO (sem auth).
-router.get('/setup', setupClienteZero);
+// SEGURANÇA: a rota pública GET /setup foi removida (criava admin com password fixa).
+// O admin inicial é criado por `seed-admin.js` (npm start / npm run seed:admin).
 
 // Dashboard com dados reais.
 router.get('/dashboard', auth, isGestor, getDashboard);
@@ -135,7 +135,7 @@ router.get('/tarefas/export', auth, isGestor, exportarTarefasCSV);
 
 // FIX (import/export excel) — Rotas de importação/exportação de reservas.
 router.get('/reservas/exportar-excel', auth, isGestor, exportarExcel);
-router.post('/reservas/importar-excel', auth, isGestor, importarExcel);
+router.post('/reservas/importar-excel', auth, isGestor, rawXlsx, importarExcel);
 
 // Reportar atraso numa tarefa.
 router.post('/tarefas/:id/atraso', auth, isGestor, reportarAtrasoTarefa);
