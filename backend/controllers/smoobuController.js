@@ -40,6 +40,7 @@
 const Propriedade = require('../models/Propriedade');
 const Tarefa = require('../models/Tarefa');
 const ContactoHospede = require('../models/ContactoHospede');
+const { registarAuditoria } = require('../utils/auditoria');
 const WebhookLog = require('../models/WebhookLog');
 const Ausencia = require('../models/Ausencia');
 const Utilizador = require('../models/Utilizador');
@@ -893,6 +894,7 @@ async function cancelarTarefaPorReserva(reservaId, empresaRestrita = null) {
   let canceladas = 0;
   for (const tarefa of tarefas) {
     if (tarefa.estado === 'cancelada') continue; // idempotente
+    if (tarefa.estado === 'concluida') continue; // histórico: limpeza já feita
     tarefa.estado = 'cancelada';
     tarefa.utilizador_id = null; // liberta o staff
     await tarefa.save();
@@ -1124,6 +1126,18 @@ async function processarReservaSmoobu(payload, empresaId, empresaRestrita = null
     bloqueada,
     content,
   } = extrairDadosReserva(payload);
+
+  // -1. Ações sem impacto nas limpezas (updateRates, newMessage, onlineCheckInUpdate,
+  //     priceElement*...). Não têm datas de reserva: ignora logo, em vez de falhar
+  //     com "sem datas" e marcar o log como erro.
+  const acaoConhecida =
+    ACOES_CRIAR.includes(action) ||
+    ACOES_ATUALIZAR.includes(action) ||
+    ACOES_CANCELAR.includes(action);
+  if (!acaoConhecida) {
+    console.log(`ℹ️  [Smoobu] ação "${action}" não afeta limpezas — ignorada.`);
+    return null;
+  }
 
   // 0. Bloqueio de calendário (is-blocked-booking): não há hóspede e a limpeza
   //    faz-se no check-out da reserva anterior. Ignora, e cancela qualquer
@@ -2024,6 +2038,119 @@ async function sincronizarReservas(req, res) {
   }
 }
 
+/**
+ * POST /api/gestor/smoobu/reconciliar-cancelamentos   (EXCLUSIVO do admin)
+ *
+ * Procura limpezas ainda ativas cuja reserva já foi cancelada (ou passou a bloqueio
+ * de calendário) no Smoobu, mas cujo webhook foi ignorado (ex.: cancelReservation
+ * antes da correção). Compara com o ÚLTIMO webhook recebido de cada reserva.
+ *
+ * Body: { aplicar?: boolean }   (por defeito só lista — "dry-run")
+ * Só cancela limpezas por fazer; as "em_curso" ficam para revisão manual e as
+ * "concluida" nunca são alteradas.
+ *
+ * Resposta 200: { aplicado, total, canceladas, candidatas: [...], revisao_manual: [...] }
+ */
+async function reconciliarCancelamentos(req, res) {
+  try {
+    const empresaId = req.user && req.user.empresa_id;
+    if (!empresaId) {
+      return res.status(400).json({ erro: 'empresa_id em falta no token.' });
+    }
+    const aplicar = Boolean(req.body && req.body.aplicar === true);
+
+    // 1. Limpezas ativas de reservas do Smoobu.
+    const tarefas = await Tarefa.find({
+      empresa_id: empresaId,
+      smoobu_reserva_id: { $nin: [null, ''] },
+      estado: { $nin: ['cancelada', 'concluida'] },
+    })
+      .select('smoobu_reserva_id estado data propriedade_id')
+      .populate({ path: 'propriedade_id', select: 'nome' })
+      .lean();
+
+    if (tarefas.length === 0) {
+      return res.status(200).json({ aplicado: aplicar, total: 0, canceladas: 0, candidatas: [], revisao_manual: [] });
+    }
+
+    // 2. Último webhook de cada reserva (o id vem como número ou texto no payload).
+    const ids = [...new Set(tarefas.map((t) => String(t.smoobu_reserva_id)))];
+    const idsMistos = [...ids, ...ids.filter((i) => /^\d+$/.test(i)).map(Number)];
+    const logs = await WebhookLog.find({
+      'payload.data.id': { $in: idsMistos },
+      'payload.action': { $in: [...ACOES_CRIAR, ...ACOES_ATUALIZAR, ...ACOES_CANCELAR] },
+    })
+      .select('payload.action payload.data.id payload.data.type payload.data.is-blocked-booking createdAt')
+      .sort({ createdAt: -1 })
+      .limit(50000)
+      .lean();
+
+    const ultimo = new Map();
+    for (const log of logs) {
+      const k = String(log.payload.data.id);
+      if (!ultimo.has(k)) ultimo.set(k, log);
+    }
+
+    const motivoDoLog = (log) => {
+      const acao = log.payload.action;
+      const data = log.payload.data || {};
+      if (ACOES_CANCELAR.includes(acao)) return 'Cancelada no Smoobu';
+      if (ACOES_ATUALIZAR.includes(acao) && /cancel/i.test(String(data.type || ''))) return 'Cancelada no Smoobu';
+      const bloq = data['is-blocked-booking'];
+      if (bloq === true || bloq === 'true' || bloq === 1 || bloq === '1') return 'Convertida em bloqueio de calendário';
+      return null;
+    };
+
+    // 3. Candidatas = limpezas ativas cujo último webhook é cancelamento/bloqueio.
+    const candidatas = [];
+    for (const t of tarefas) {
+      const log = ultimo.get(String(t.smoobu_reserva_id));
+      const motivo = log ? motivoDoLog(log) : null;
+      if (!motivo) continue;
+      candidatas.push({
+        tarefa_id: String(t._id),
+        reserva_id: String(t.smoobu_reserva_id),
+        propriedade: (t.propriedade_id && t.propriedade_id.nome) || '—',
+        data: t.data,
+        estado: t.estado,
+        motivo,
+        recebido_em: log.createdAt,
+      });
+    }
+
+    const revisaoManual = candidatas.filter((c) => c.estado === 'em_curso');
+    const paraCancelar = candidatas.filter((c) => c.estado !== 'em_curso');
+
+    let canceladas = 0;
+    if (aplicar && paraCancelar.length > 0) {
+      const r = await Tarefa.updateMany(
+        { _id: { $in: paraCancelar.map((c) => c.tarefa_id) }, empresa_id: empresaId, estado: { $nin: ['cancelada', 'concluida', 'em_curso'] } },
+        { $set: { estado: 'cancelada', utilizador_id: null } }
+      );
+      canceladas = r.modifiedCount;
+      registarAuditoria({
+        utilizador_id: req.user.id,
+        utilizador_nome: req.user.nome || 'Admin',
+        empresa_id: empresaId,
+        acao: 'reconciliar_cancelamentos',
+        recurso: 'tarefa',
+        descricao: `Canceladas ${canceladas} limpeza(s) de reservas já canceladas/bloqueadas no Smoobu.`,
+      });
+    }
+
+    return res.status(200).json({
+      aplicado: aplicar,
+      total: candidatas.length,
+      canceladas,
+      candidatas: paraCancelar,
+      revisao_manual: revisaoManual,
+    });
+  } catch (err) {
+    console.error('❌ reconciliarCancelamentos:', err.message);
+    return res.status(500).json({ erro: 'Erro interno do servidor.' });
+  }
+}
+
 module.exports = {
   processarWebhookSmoobu,
   processarReservaSmoobu, // exportado para reprocesso manual / testes
@@ -2035,6 +2162,7 @@ module.exports = {
   getPropriedadesSmoobu, // GET /api/gestor/smoobu/propriedades (dropdown)
   importarPropriedades, // POST /api/gestor/smoobu/propriedades (upsert em massa)
   sincronizarReservas, // POST /api/gestor/smoobu/sincronizar (backfill em massa)
+  reconciliarCancelamentos, // POST /api/gestor/smoobu/reconciliar-cancelamentos (admin)
   extrairMoradaSmoobu, // exportado para testes
   obterApiKeySmoobu, // exportado para reutilização
 };
