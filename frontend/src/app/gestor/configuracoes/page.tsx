@@ -175,6 +175,39 @@ export default function ConfiguracoesPage() {
   const [limpando, setLimpando] = useState(false);
   const [sincronizando, setSincronizando] = useState(false);
 
+  // Cancelamentos do Smoobu por aplicar (webhooks ignorados no passado).
+  type CancelamentoPendente = { tarefa_id: string; reserva_id: string; propriedade: string; data: string; estado: string; motivo: string };
+  const [verificando, setVerificando] = useState(false);
+  const [pendentes, setPendentes] = useState<{ candidatas: CancelamentoPendente[]; revisao_manual: CancelamentoPendente[] } | null>(null);
+
+  async function handleVerificarCancelamentos() {
+    setVerificando(true);
+    try {
+      const res = await adminPost<{ candidatas: CancelamentoPendente[]; revisao_manual: CancelamentoPendente[] }>(
+        "/api/gestor/smoobu/reconciliar-cancelamentos", {});
+      setPendentes({ candidatas: res.candidatas, revisao_manual: res.revisao_manual });
+      const n = res.candidatas.length + res.revisao_manual.length;
+      showToast(n === 0 ? "sucesso" : "erro", n === 0 ? "Nada por cancelar." : `${n} limpeza(s) de reservas canceladas.`);
+    } catch (e) {
+      showToast("erro", e instanceof Error ? e.message : "Erro ao verificar.");
+    } finally {
+      setVerificando(false);
+    }
+  }
+
+  async function handleAplicarCancelamentos() {
+    setVerificando(true);
+    try {
+      const res = await adminPost<{ canceladas: number }>("/api/gestor/smoobu/reconciliar-cancelamentos", { aplicar: true });
+      setPendentes(null);
+      showToast("sucesso", `${res.canceladas} limpeza(s) cancelada(s).`);
+    } catch (e) {
+      showToast("erro", e instanceof Error ? e.message : "Erro ao cancelar.");
+    } finally {
+      setVerificando(false);
+    }
+  }
+
   async function handleEliminarFuturas() {
     setLimpando(true);
     setConfirmarLimpar(false);
@@ -451,6 +484,16 @@ export default function ConfiguracoesPage() {
                 {sincronizando ? "A sincronizar…" : "Sincronizar Limpezas (Smoobu + Proprietários)"}
               </Button>
 
+              <Button
+                variant="outline"
+                onClick={handleVerificarCancelamentos}
+                disabled={verificando}
+                title="Procura limpezas ativas de reservas que já foram canceladas no Smoobu."
+              >
+                {verificando ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldAlert className="h-4 w-4" />}
+                {verificando ? "A verificar…" : "Verificar Cancelamentos Pendentes"}
+              </Button>
+
               {/* Eliminar Limpezas Futuras */}
               <Button
                 variant="outline"
@@ -467,6 +510,32 @@ export default function ConfiguracoesPage() {
                 Eliminar Limpezas Futuras
               </Button>
             </div>
+            {pendentes && (
+              <div className="space-y-2 rounded-md border p-3 text-sm">
+                {pendentes.candidatas.length === 0 && pendentes.revisao_manual.length === 0 ? (
+                  <p>Nenhuma limpeza ativa corresponde a reservas canceladas no Smoobu.</p>
+                ) : (
+                  <>
+                    {pendentes.candidatas.length > 0 && (
+                      <>
+                        <p className="font-medium">{pendentes.candidatas.length} limpeza(s) de reservas já canceladas ou bloqueadas no Smoobu:</p>
+                        <ul className="max-h-56 list-disc space-y-0.5 overflow-y-auto pl-5">
+                          {pendentes.candidatas.slice(0, 50).map((c) => (
+                            <li key={c.tarefa_id}>{c.propriedade} · {String(c.data).slice(0, 10)} · {c.motivo}</li>
+                          ))}
+                        </ul>
+                        <Button variant="outline" className="border-destructive/40 text-destructive hover:bg-destructive/10" onClick={handleAplicarCancelamentos} disabled={verificando}>
+                          Cancelar estas {pendentes.candidatas.length} limpeza(s)
+                        </Button>
+                      </>
+                    )}
+                    {pendentes.revisao_manual.length > 0 && (
+                      <p className="text-muted-foreground">{pendentes.revisao_manual.length} limpeza(s) já em curso de reservas canceladas: revê-as manualmente.</p>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
         )}
