@@ -59,7 +59,7 @@ const { reportarAtrasoTarefa, criarTarefa, atribuirTarefa, reatribuirTarefa, atu
 // CRUD de Modelos de Checklist (futuro: Modelos de Protocolo Clínico)
 const { listarModelos, criarModelo, obterModelo, atualizarModelo, apagarModelo } = require('../controllers/checklistController');
 // Smoobu — importação/sincronização de propriedades (HF5) + reservas (HF7).
-const { getPropriedadesSmoobu, importarPropriedades, sincronizarReservas } = require('../controllers/smoobuController');
+const { getPropriedadesSmoobu, importarPropriedades, sincronizarReservas, reconciliarCancelamentos } = require('../controllers/smoobuController');
 // FIX (import/export excel) — Controller de importação/exportação de Excel.
 const { exportarExcel, importarExcel } = require('../controllers/excelController');
 
@@ -124,6 +124,8 @@ router.post('/propriedades/default-checklist', auth, isGestor, async (req, res) 
 router.get('/smoobu/propriedades', auth, isGestor, getPropriedadesSmoobu);
 router.post('/smoobu/propriedades', auth, isGestor, importarPropriedades);
 router.post('/smoobu/sincronizar', auth, isAdmin, sincronizarReservas);
+// Cancela limpezas de reservas já canceladas/bloqueadas no Smoobu cujo webhook foi ignorado.
+router.post('/smoobu/reconciliar-cancelamentos', auth, isAdmin, reconciliarCancelamentos);
 
 // Calendário Geral de Operações — lista tarefas com filtro de datas.
 router.get('/tarefas', auth, isGestor, getTarefas);

@@ -194,7 +194,8 @@ async function calcularTempoViagemReal(origem, destino, dataTarefa) {
     }
 
     const elemento = body.rows[0].elements[0];
-    if (elemento.status !== 'OK' || !elemento.duration?.value) {
+    // duration.value === 0 é válido (origem e destino no mesmo local).
+    if (elemento.status !== 'OK' || typeof elemento.duration?.value !== 'number') {
       throw new Error(`Google Maps: elemento status=${elemento.status}`);
     }
 

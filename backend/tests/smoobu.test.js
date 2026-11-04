@@ -26,7 +26,16 @@ const ContactoHospede = require('../models/ContactoHospede');
 const bcrypt = require('bcryptjs');
 
 const CHAVE = 'chave-smoobu-de-teste';
-const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
+// Aguarda o processamento assíncrono dos webhooks: espera até não haver logs "recebido"
+// (cada log passa a "processado" ou "erro" quando termina). O argumento é ignorado.
+const esperar = async () => {
+  await new Promise((r) => setTimeout(r, 150));
+  const limite = Date.now() + 10000;
+  while (Date.now() < limite) {
+    if ((await WebhookLog.countDocuments({ status: 'recebido' })) === 0) return;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+};
 
 let mongod;
 let empresa;
@@ -293,5 +302,99 @@ describe('Retenção RGPD dos logs de webhooks (90 dias após o check-out)', () 
     const idx = (await WebhookLog.collection.indexes()).find((i) => i.key.expira_em === 1);
     expect(idx).toBeDefined();
     expect(idx.expireAfterSeconds).toBe(0);
+  });
+});
+
+describe('Ações do Smoobu sem impacto nas limpezas deixam de ser "erro"', () => {
+  it('newMessage, onlineCheckInUpdate e updateRates ficam "processado" (não "erro")', async () => {
+    await webhook('newMessage', { id: 5001, sender: 'guest', booking: { id: 9001 } });
+    await webhook('onlineCheckInUpdate', { bookingId: 5002 });
+    await webhook('updateRates', { 555: { '2031-05-01': { price: 90, min_length_of_stay: 1, available: 1 } } });
+    await esperar(900);
+    const logs = await WebhookLog.find({ 'payload.action': { $in: ['newMessage', 'onlineCheckInUpdate', 'updateRates'] } }).lean();
+    expect(logs.length).toBeGreaterThanOrEqual(3);
+    expect(logs.every((l) => l.status === 'processado')).toBe(true);
+    expect(logs.some((l) => /sem datas/i.test(l.erro_msg || ''))).toBe(false);
+  });
+});
+
+describe('Reconciliação de cancelamentos antigos (admin)', () => {
+  const URL = '/api/gestor/smoobu/reconciliar-cancelamentos';
+  const post = (token, body = {}) =>
+    request(app).post(URL).set('Authorization', `Bearer ${token}`).send(body);
+
+  // Simula um webhook que foi IGNORADO no passado: grava só o log (sem processar).
+  const logAntigo = (action, id, extraData = {}, quando = new Date()) =>
+    WebhookLog.collection.insertOne({
+      payload: { action, user: 1, data: { id, ...extraData } },
+      status: 'processado',
+      createdAt: quando,
+      updatedAt: quando,
+      expira_em: new Date(Date.now() + 90 * 24 * 3600 * 1000),
+    });
+
+  let idCancelada;
+  let idReativada;
+  let idEmCurso;
+  let idNormal;
+
+  beforeAll(async () => {
+    idCancelada = 9601; idReativada = 9602; idEmCurso = 9603; idNormal = 9604;
+    for (const id of [idCancelada, idReativada, idEmCurso, idNormal]) {
+      await webhook('newReservation', reserva(id));
+    }
+    await esperar(1500);
+    await Tarefa.updateOne({ smoobu_reserva_id: String(idEmCurso) }, { $set: { estado: 'em_curso' } });
+
+    const t0 = Date.now();
+    // cancelada: último webhook é cancelReservation (ignorado no passado)
+    await logAntigo('cancelReservation', idCancelada, { type: 'cancellation' }, new Date(t0 + 1000));
+    // reativada: cancelou mas depois voltou a ser reserva ativa -> NÃO é candidata
+    await logAntigo('cancelReservation', idReativada, { type: 'cancellation' }, new Date(t0 + 1000));
+    await logAntigo('updateReservation', idReativada, { type: 'modification of booking' }, new Date(t0 + 2000));
+    // em curso: cancelada mas a limpeza já está a decorrer -> revisão manual
+    await logAntigo('deleteReservation', idEmCurso, {}, new Date(t0 + 1000));
+  });
+
+  it('só o admin pode usar (gestor e staff recebem 403)', async () => {
+    expect((await post(tokens.gestor)).status).toBe(403);
+    expect((await post(tokens.staff)).status).toBe(403);
+  });
+
+  it('por defeito só lista (dry-run) e não altera nada', async () => {
+    const res = await post(tokens.admin);
+    expect(res.status).toBe(200);
+    expect(res.body.aplicado).toBe(false);
+    expect(res.body.canceladas).toBe(0);
+    const ids = res.body.candidatas.map((c) => c.reserva_id);
+    expect(ids).toContain(String(idCancelada));
+    expect(ids).not.toContain(String(idReativada)); // voltou a ser reserva ativa
+    expect(ids).not.toContain(String(idNormal));     // nunca foi cancelada
+    expect(res.body.revisao_manual.map((c) => c.reserva_id)).toContain(String(idEmCurso));
+    expect((await tarefaDaReserva(idCancelada)).estado).not.toBe('cancelada');
+  });
+
+  it('com aplicar=true cancela as limpezas por fazer e deixa a "em_curso" para revisão', async () => {
+    const res = await post(tokens.admin, { aplicar: true });
+    expect(res.status).toBe(200);
+    expect(res.body.canceladas).toBeGreaterThanOrEqual(1);
+    expect((await tarefaDaReserva(idCancelada)).estado).toBe('cancelada');
+    expect((await tarefaDaReserva(idReativada)).estado).not.toBe('cancelada');
+    expect((await tarefaDaReserva(idNormal)).estado).not.toBe('cancelada');
+    expect((await tarefaDaReserva(idEmCurso)).estado).toBe('em_curso');
+  });
+
+  it('é idempotente: uma segunda execução não cancela mais nada', async () => {
+    const res = await post(tokens.admin, { aplicar: true });
+    expect(res.body.canceladas).toBe(0);
+  });
+
+  it('um cancelamento tardio nunca reescreve uma limpeza já concluída', async () => {
+    await webhook('newReservation', reserva(9605));
+    await esperar(900);
+    await Tarefa.updateOne({ smoobu_reserva_id: '9605' }, { $set: { estado: 'concluida' } });
+    await webhook('cancelReservation', reserva(9605, { type: 'cancellation' }));
+    await esperar(900);
+    expect((await tarefaDaReserva(9605)).estado).toBe('concluida');
   });
 });

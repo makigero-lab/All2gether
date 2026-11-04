@@ -2251,3 +2251,22 @@ Work Log:
 Stage Summary:
 - Backend: 171/171 testes ✓ (3 execuções seguidas); frontend: `tsc`, lint e build ✓.
 - Atenção no primeiro arranque após o deploy: o log do servidor mostra "Retenção de WebhookLog: índice antigo removido=true, logs atualizados=N".
+
+
+---
+
+Task ID: SMOOBU-REVISAO-LOGS-RENDER
+Agent: Claude Code (Master)
+Task: Rever os logs do Render, limpar falsos erros do Smoobu e recuperar cancelamentos ignorados.
+
+Work Log:
+- **Falsos erros "Payload sem datas"**: eventos do Smoobu sem datas de reserva (`updateRates`, `newMessage`, `onlineCheckInUpdate`...) eram validados antes de a ação ser reconhecida e ficavam marcados como `erro` no painel de webhooks. Passam a ser ignorados logo no início e ficam `processado`.
+- **Cancelamentos antigos**: `cancelReservation` esteve a ser ignorado até à correção de 3/11 (logs de 12:42, 14:34 e 16:30). Novo `POST /api/gestor/smoobu/reconciliar-cancelamentos` (só admin, por defeito apenas lista): compara cada limpeza ativa com o ÚLTIMO webhook da reserva e cancela as que ficaram canceladas ou convertidas em bloqueio. As limpezas `em_curso` ficam para revisão manual e as `concluida` nunca são alteradas. Botão "Verificar Cancelamentos Pendentes" em Configurações → Integrações → Ações de Manutenção.
+- **Cancelar** nunca reescreve limpezas já concluídas.
+- **Push (VAPID)**: as chaves passam por normalização (aspas, espaços, quebras de linha e `=` finais), e a mensagem de erro diz o comprimento recebido (a chave pública deve ter 87 caracteres).
+- **Google Maps**: `duration.value = 0` (origem e destino no mesmo local, ex.: quartos do mesmo edifício) passa a ser aceite em vez de cair no fallback Haversine com aviso.
+- **Testes**: esperam pelo fim do processamento dos webhooks em vez de um tempo fixo (falhavam de forma intermitente); 180 testes, 6 execuções seguidas.
+
+Stage Summary:
+- No Render, o log do arranque de 3/11 21:58 confirma a migração de retenção: "índice antigo removido=true, logs atualizados=11609".
+- Pendente (config no Render, fora do código): confirmar `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY`; sem chaves válidas as notificações push não funcionam.

@@ -145,7 +145,16 @@ describe('Autenticação JWT', () => {
 });
 
 describe('Webhook Smoobu — isolamento por empresa (A1)', () => {
-  const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
+  // Aguarda o processamento assíncrono dos webhooks: espera até não haver logs "recebido"
+  // (cada log passa a "processado" ou "erro" quando termina). O argumento é ignorado.
+  const esperar = async () => {
+    await new Promise((r) => setTimeout(r, 150));
+    const limite = Date.now() + 10000;
+    while (Date.now() < limite) {
+      if ((await WebhookLog.countDocuments({ status: 'recebido' })) === 0) return;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  };
   let propA;
   let propB;
 
