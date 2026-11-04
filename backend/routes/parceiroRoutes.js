@@ -23,6 +23,8 @@ const {
   listarTarefas,
   criarReserva,
   listarReservas,
+  atualizarReserva,
+  eliminarReserva,
 } = require('../controllers/parceiroController');
 // FIX (excel parceiro) — Controller de Excel partilhado (funções dedicadas).
 const { exportarExcelParceiro, importarExcelParceiro } = require('../controllers/excelController');
@@ -36,6 +38,8 @@ router.post('/tarefas', auth, isParceiro, criarTarefa);
 // HF23 — Reservas manuais
 router.get('/reservas', auth, isParceiro, listarReservas);
 router.post('/reservas', auth, isParceiro, criarReserva);
+router.put('/reservas/:id', auth, isParceiro, atualizarReserva);
+router.delete('/reservas/:id', auth, isParceiro, eliminarReserva);
 
 // FIX (excel parceiro) — Rotas de importação/exportação de Excel (parceiro).
 router.get('/reservas/exportar-excel', auth, isParceiro, exportarExcelParceiro);

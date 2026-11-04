@@ -6,21 +6,16 @@ import {
   Loader2,
   AlertCircle,
   Building2,
-  Calendar,
-  Users,
   Upload,
   Download,
+  Pencil,
+  Trash2,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogHeader,
@@ -30,7 +25,13 @@ import {
   DialogContent,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { adminGet, adminPost, type PropriedadeDTO } from "@/lib/api";
+import {
+  adminGet,
+  adminPost,
+  adminPut,
+  adminDelete,
+  type PropriedadeDTO,
+} from "@/lib/api";
 
 interface ReservaDTO {
   _id: string;
@@ -39,6 +40,10 @@ interface ReservaDTO {
   check_out: string;
   hospedes: number | null;
   observacoes?: string;
+  nome_hospede?: string | null;
+  plataforma?: string | null;
+  hora_checkin?: string | null;
+  horario_preferido?: string | null;
   tarefa_gerada_id: { estado: string; data: string } | null;
   createdAt: string;
 }
@@ -52,13 +57,22 @@ export default function ParceiroReservasPage() {
   const [mostrarForm, setMostrarForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [formErro, setFormErro] = useState<string | null>(null);
-  const [form, setForm] = useState({
+  const FORM_VAZIO = {
     propriedade_id: "",
     check_in: "",
     check_out: "",
     hospedes: "",
     observacoes: "",
-  });
+    nome_hospede: "",
+    plataforma: "",
+    hora_checkin: "",
+    horario_preferido: "",
+  };
+  const [form, setForm] = useState(FORM_VAZIO);
+  // Id da reserva em edição (null = nova reserva) e da reserva a eliminar.
+  const [editId, setEditId] = useState<string | null>(null);
+  const [eliminar, setEliminar] = useState<ReservaDTO | null>(null);
+  const [eliminando, setEliminando] = useState(false);
 
   // FIX (excel parceiro) — Estado para o modal de importação de Excel.
   const [importOpen, setImportOpen] = useState(false);
@@ -87,30 +101,99 @@ export default function ParceiroReservasPage() {
     carregar();
   }, [carregar]);
 
-  async function handleCriar() {
-    if (!form.propriedade_id || !form.check_in || !form.check_out) {
+  function abrirNova() {
+    setEditId(null);
+    setForm(FORM_VAZIO);
+    setFormErro(null);
+    setMostrarForm(true);
+  }
+
+  function abrirEditar(r: ReservaDTO) {
+    setEditId(r._id);
+    setForm({
+      propriedade_id: "",
+      check_in: r.check_in.slice(0, 10),
+      check_out: r.check_out.slice(0, 10),
+      hospedes: r.hospedes != null ? String(r.hospedes) : "",
+      observacoes: r.observacoes ?? "",
+      nome_hospede: r.nome_hospede ?? "",
+      plataforma: r.plataforma ?? "",
+      hora_checkin: r.hora_checkin ?? "",
+      horario_preferido: r.horario_preferido ?? "",
+    });
+    setFormErro(null);
+    setMostrarForm(true);
+  }
+
+  async function handleGuardar() {
+    if (!form.check_in || !form.check_out || (!editId && !form.propriedade_id)) {
       setFormErro("Propriedade, Check-in e Check-out são obrigatórios.");
+      return;
+    }
+    if (form.check_out < form.check_in) {
+      setFormErro("O check-out não pode ser anterior ao check-in.");
       return;
     }
     setSubmitting(true);
     setFormErro(null);
     try {
-      await adminPost("/api/parceiro/reservas", {
-        propriedade_id: form.propriedade_id,
+      const corpo = {
         check_in: form.check_in,
         check_out: form.check_out,
         hospedes: form.hospedes ? Number(form.hospedes) : undefined,
-        observacoes: form.observacoes || undefined,
-      });
+        observacoes: form.observacoes,
+        nome_hospede: form.nome_hospede,
+        plataforma: form.plataforma,
+        hora_checkin: form.hora_checkin,
+        horario_preferido: form.horario_preferido,
+      };
+      if (editId) {
+        await adminPut(`/api/parceiro/reservas/${editId}`, corpo);
+      } else {
+        await adminPost("/api/parceiro/reservas", {
+          ...corpo,
+          propriedade_id: form.propriedade_id,
+        });
+      }
       setMostrarForm(false);
-      setForm({ propriedade_id: "", check_in: "", check_out: "", hospedes: "", observacoes: "" });
+      setEditId(null);
+      setForm(FORM_VAZIO);
       await carregar();
     } catch (e) {
-      setFormErro(e instanceof Error ? e.message : "Erro ao criar reserva.");
+      setFormErro(e instanceof Error ? e.message : "Erro ao guardar reserva.");
     } finally {
       setSubmitting(false);
     }
   }
+
+  async function handleEliminar() {
+    if (!eliminar) return;
+    setEliminando(true);
+    try {
+      await adminDelete(`/api/parceiro/reservas/${eliminar._id}`);
+      setEliminar(null);
+      await carregar();
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Erro ao eliminar reserva.");
+      setEliminar(null);
+    } finally {
+      setEliminando(false);
+    }
+  }
+
+  function noites(r: ReservaDTO): number {
+    const ms = new Date(r.check_out).getTime() - new Date(r.check_in).getTime();
+    return Math.max(0, Math.round(ms / 86400000));
+  }
+
+  const ESTADO_LIMPEZA: Record<string, string> = {
+    por_atribuir: "Por atribuir",
+    nao_atribuida: "Por atribuir",
+    atribuida: "Atribuída",
+    em_curso: "Em curso",
+    concluida: "Concluída",
+    cancelada: "Cancelada",
+  };
 
   function formatarData(iso: string): string {
     try {
@@ -183,10 +266,7 @@ export default function ParceiroReservasPage() {
           </p>
         </div>
         <Button
-          onClick={() => {
-            setMostrarForm(true);
-            setFormErro(null);
-          }}
+          onClick={abrirNova}
           disabled={propriedades.length === 0}
         >
           <CalendarPlus className="h-4 w-4" />
@@ -241,46 +321,93 @@ export default function ParceiroReservasPage() {
           </p>
         </div>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {reservas.map((r) => (
-            <Card key={r._id}>
-              <CardHeader className="pb-2">
-                <CardTitle className="flex items-center gap-2 text-sm">
-                  <Building2 className="h-4 w-4 text-primary" />
-                  {r.propriedade_id?.nome ?? "Propriedade"}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2 text-sm">
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <Calendar className="h-3.5 w-3.5" />
-                  <span>{formatarData(r.check_in)} → {formatarData(r.check_out)}</span>
-                </div>
-                {r.hospedes != null && (
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Users className="h-3.5 w-3.5" />
-                    <span>{r.hospedes} hóspede(s)</span>
-                  </div>
-                )}
-                {r.observacoes && (
-                  <p className="text-xs text-muted-foreground line-clamp-2">{r.observacoes}</p>
-                )}
-                {r.tarefa_gerada_id && (
-                  <Badge
-                    variant={
-                      r.tarefa_gerada_id.estado === "concluida"
-                        ? "success"
-                        : r.tarefa_gerada_id.estado === "atribuida"
-                        ? "secondary"
-                        : "outline"
-                    }
-                  >
-                    Limpeza: {r.tarefa_gerada_id.estado}
-                  </Badge>
-                )}
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+        <Card>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[1100px] text-sm">
+              <thead>
+                <tr className="border-b bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                  <th className="px-3 py-2 font-medium">Propriedade</th>
+                  <th className="px-3 py-2 font-medium">Check-in</th>
+                  <th className="px-3 py-2 font-medium">Hora c/in</th>
+                  <th className="px-3 py-2 font-medium">Check-out</th>
+                  <th className="px-3 py-2 text-right font-medium">Noites</th>
+                  <th className="px-3 py-2 text-right font-medium">Hósp.</th>
+                  <th className="px-3 py-2 font-medium">Hóspede</th>
+                  <th className="px-3 py-2 font-medium">Plataforma</th>
+                  <th className="px-3 py-2 font-medium">Horário pref. limpeza</th>
+                  <th className="px-3 py-2 font-medium">Notas</th>
+                  <th className="px-3 py-2 font-medium">Limpeza</th>
+                  <th className="px-3 py-2 text-right font-medium">Ações</th>
+                </tr>
+              </thead>
+              <tbody>
+                {reservas.map((r) => {
+                  const estado = r.tarefa_gerada_id?.estado ?? null;
+                  const bloqueada = estado === "em_curso" || estado === "concluida";
+                  return (
+                    <tr key={r._id} className="border-b last:border-0 hover:bg-muted/30">
+                      <td className="px-3 py-2 font-medium">
+                        <span className="inline-flex items-center gap-1.5">
+                          <Building2 className="h-3.5 w-3.5 text-primary" />
+                          {r.propriedade_id?.nome ?? "—"}
+                        </span>
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2">{formatarData(r.check_in)}</td>
+                      <td className="whitespace-nowrap px-3 py-2">{r.hora_checkin || "—"}</td>
+                      <td className="whitespace-nowrap px-3 py-2">{formatarData(r.check_out)}</td>
+                      <td className="px-3 py-2 text-right">{noites(r)}</td>
+                      <td className="px-3 py-2 text-right">{r.hospedes ?? "—"}</td>
+                      <td className="px-3 py-2">{r.nome_hospede || "—"}</td>
+                      <td className="px-3 py-2">{r.plataforma || "—"}</td>
+                      <td className="whitespace-nowrap px-3 py-2">{r.horario_preferido || "—"}</td>
+                      <td className="max-w-[220px] truncate px-3 py-2 text-muted-foreground" title={r.observacoes}>
+                        {r.observacoes || "—"}
+                      </td>
+                      <td className="px-3 py-2">
+                        {estado ? (
+                          <Badge
+                            variant={
+                              estado === "concluida"
+                                ? "success"
+                                : estado === "atribuida"
+                                ? "secondary"
+                                : "outline"
+                            }
+                          >
+                            {ESTADO_LIMPEZA[estado] ?? estado}
+                          </Badge>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-2 text-right">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => abrirEditar(r)}
+                          disabled={bloqueada}
+                          title={bloqueada ? "A limpeza já começou ou foi concluída." : "Editar reserva"}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setEliminar(r)}
+                          disabled={bloqueada}
+                          title={bloqueada ? "A limpeza já começou ou foi concluída." : "Eliminar reserva"}
+                          className="text-destructive hover:text-destructive"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Card>
       )}
 
       {/* Modal de Nova Reserva */}
@@ -289,15 +416,17 @@ export default function ParceiroReservasPage() {
           <div>
             <DialogTitle className="flex items-center gap-2">
               <CalendarPlus className="h-5 w-5 text-primary" />
-              Nova Reserva
+              {editId ? "Editar Reserva" : "Nova Reserva"}
             </DialogTitle>
             <DialogDescription>
               A reserva gera automaticamente uma tarefa de limpeza para o dia de check-out.
+              A hora da limpeza é definida pela equipa; o horário preferido é só uma indicação.
             </DialogDescription>
           </div>
           <DialogClose onClick={() => !submitting && setMostrarForm(false)} />
         </DialogHeader>
         <DialogContent className="space-y-4">
+          {!editId && (
           <div className="space-y-1.5">
             <label className="text-sm font-medium">Propriedade</label>
             <select
@@ -311,6 +440,7 @@ export default function ParceiroReservasPage() {
               ))}
             </select>
           </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <label className="text-sm font-medium">Check-in</label>
@@ -319,6 +449,35 @@ export default function ParceiroReservasPage() {
             <div className="space-y-1.5">
               <label className="text-sm font-medium">Check-out</label>
               <Input type="date" value={form.check_out} onChange={(e) => setForm((f) => ({ ...f, check_out: e.target.value }))} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Nome do hóspede</label>
+              <Input value={form.nome_hospede} onChange={(e) => setForm((f) => ({ ...f, nome_hospede: e.target.value }))} />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Plataforma</label>
+              <select
+                value={form.plataforma}
+                onChange={(e) => setForm((f) => ({ ...f, plataforma: e.target.value }))}
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              >
+                <option value="">—</option>
+                <option value="Booking">Booking</option>
+                <option value="Airbnb">Airbnb</option>
+                <option value="Direto">Direto</option>
+                <option value="Vrbo">Vrbo</option>
+                <option value="Outra">Outra</option>
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Hora de check-in</label>
+              <Input value={form.hora_checkin} onChange={(e) => setForm((f) => ({ ...f, hora_checkin: e.target.value }))} placeholder="ex.: 18:00" />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Horário preferido p/ limpeza</label>
+              <Input value={form.horario_preferido} onChange={(e) => setForm((f) => ({ ...f, horario_preferido: e.target.value }))} placeholder="ex.: 11h - 14h" />
             </div>
           </div>
           <div className="space-y-1.5">
@@ -351,9 +510,36 @@ export default function ParceiroReservasPage() {
           <Button variant="outline" onClick={() => setMostrarForm(false)} disabled={submitting}>
             Cancelar
           </Button>
-          <Button onClick={handleCriar} disabled={submitting}>
+          <Button onClick={handleGuardar} disabled={submitting}>
             {submitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CalendarPlus className="mr-2 h-4 w-4" />}
-            Criar Reserva
+            {editId ? "Guardar Alterações" : "Criar Reserva"}
+          </Button>
+        </DialogFooter>
+      </Dialog>
+
+      {/* Confirmação de eliminação */}
+      <Dialog open={!!eliminar} onOpenChange={(o) => !o && !eliminando && setEliminar(null)}>
+        <DialogHeader>
+          <div>
+            <DialogTitle className="flex items-center gap-2">
+              <Trash2 className="h-5 w-5 text-destructive" />
+              Eliminar reserva
+            </DialogTitle>
+            <DialogDescription>
+              {eliminar
+                ? `Eliminar a reserva de ${eliminar.propriedade_id?.nome ?? "propriedade"} (${formatarData(eliminar.check_in)} → ${formatarData(eliminar.check_out)})? A limpeza associada será cancelada.`
+                : ""}
+            </DialogDescription>
+          </div>
+          <DialogClose onClick={() => !eliminando && setEliminar(null)} />
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setEliminar(null)} disabled={eliminando}>
+            Cancelar
+          </Button>
+          <Button variant="destructive" onClick={handleEliminar} disabled={eliminando}>
+            {eliminando ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+            Eliminar
           </Button>
         </DialogFooter>
       </Dialog>

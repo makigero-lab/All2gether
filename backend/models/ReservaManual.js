@@ -45,6 +45,13 @@ const reservaManualSchema = new mongoose.Schema(
       default: '',
       trim: true,
     },
+    // Dados adicionais da reserva (opcionais).
+    nome_hospede: { type: String, default: null, trim: true, maxlength: 120 },
+    plataforma: { type: String, default: null, trim: true, maxlength: 40 },
+    hora_checkin: { type: String, default: null, trim: true, maxlength: 60 },
+    // Preferência do parceiro para a limpeza (ex.: "11h - 14h", "depois das 11h").
+    // É só uma preferência: a hora real da tarefa é decidida pelo sistema.
+    horario_preferido: { type: String, default: null, trim: true, maxlength: 60 },
     // ID da tarefa de limpeza gerada automaticamente para o check-out.
     tarefa_gerada_id: {
       type: mongoose.Schema.Types.ObjectId,

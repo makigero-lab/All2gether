@@ -202,6 +202,8 @@ const tarefaSchema = new mongoose.Schema(
       // Dados adicionais do Smoobu (hora de check-in/out, composição, notas, tipo).
       hora_checkin: { type: String, default: null, trim: true },
       hora_checkout: { type: String, default: null, trim: true },
+      // Preferência de horário da limpeza indicada pelo parceiro (informativa).
+      horario_preferido: { type: String, default: null, trim: true, maxlength: 60 },
       adultos: { type: Number, default: null, min: 0 },
       criancas: { type: Number, default: null, min: 0 },
       notas_hospede: { type: String, default: null, trim: true, maxlength: 2000 },
