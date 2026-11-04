@@ -140,7 +140,7 @@ export function PushNotificationSetup() {
       {!sucesso && (
         <>
           <Button
-            size="sm"
+            size="touch"
             onClick={handleAtivar}
             disabled={ativando}
             className="shrink-0"

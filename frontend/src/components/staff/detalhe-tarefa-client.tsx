@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { comprimirImagem } from "@/lib/imagem";
 import { useRouter } from "next/navigation";
@@ -31,6 +31,14 @@ import {
 } from "lucide-react";
 
 import { cn, parsearDataSegura, googleMapsUrl } from "@/lib/utils";
+import {
+  MSG_SEM_LIGACAO,
+  eErroDeRede,
+  guardarRascunho,
+  lerRascunho,
+  limparRascunho,
+  mensagemErro,
+} from "@/lib/rascunho-staff";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
@@ -126,11 +134,17 @@ export function DetalheTarefaClient({
     }))
   );
 
+  // Rascunho local (notas + checklist flat) para sobreviver a falhas de rede.
+  const [rascunhoInicial] = useState(() =>
+    jaConcluida || typeof window === "undefined"
+      ? null
+      : lerRascunho(String(tarefa.id), checklist.length)
+  );
   const [itensMarcados, setItensMarcados] = useState<boolean[]>(
     // Se já estiver concluída, pré-marca todos os itens (reflete o final).
-    () => checklist.map(() => jaConcluida)
+    () => rascunhoInicial?.itens ?? checklist.map(() => jaConcluida)
   );
-  const [observacoes, setObservacoes] = useState("");
+  const [observacoes, setObservacoes] = useState(rascunhoInicial?.observacoes ?? "");
   const [concluida, setConcluida] = useState(jaConcluida);
   const [concluindo, setConcluindo] = useState(false);
   const [erroConcluir, setErroConcluir] = useState<string | null>(null);
@@ -176,6 +190,12 @@ export function DetalheTarefaClient({
   // Se a checklist estiver vazia, o botão fica sempre ativo (não há itens para marcar).
   const todasMarcadas = totalItens === 0 || itensConcluidos === totalItens;
 
+  // Guarda o rascunho sempre que muda (nunca fotos nem dados do hóspede).
+  useEffect(() => {
+    if (concluida) return;
+    guardarRascunho(String(tarefa.id), { observacoes, itens: itensMarcados });
+  }, [tarefa.id, observacoes, itensMarcados, concluida]);
+
   const toggleItem = (index: number, value: boolean) => {
     setItensMarcados((prev) => {
       const next = [...prev];
@@ -219,9 +239,11 @@ export function DetalheTarefaClient({
       // Erro — reverte ao estado anterior.
       setDinamica(estadoAnterior);
       setErroConcluir(
-        e instanceof Error
-          ? `Não foi possível atualizar o item: ${e.message}`
-          : "Erro ao atualizar item da checklist."
+        eErroDeRede(e)
+          ? MSG_SEM_LIGACAO
+          : e instanceof Error
+            ? `Não foi possível atualizar o item: ${e.message}`
+            : "Erro ao atualizar item da checklist."
       );
       // Limpa a mensagem após 4s.
       setTimeout(() => setErroConcluir(null), 4000);
@@ -281,13 +303,12 @@ export function DetalheTarefaClient({
       const data = await res.json();
       if (!res.ok) throw new Error(data?.erro || `Erro ${res.status}`);
       setConcluida(true);
+      limparRascunho(String(tarefa.id));
       setMostrarConcluir(false);
       // Mostra a mensagem verde durante 1.2s antes de redirecionar.
       setTimeout(() => router.push("/staff"), 1200);
     } catch (e) {
-      setErroConcluir(
-        e instanceof Error ? e.message : "Erro ao concluir tarefa."
-      );
+      setErroConcluir(mensagemErro(e, "Erro ao concluir tarefa."));
     } finally {
       setConcluindo(false);
     }
@@ -314,9 +335,7 @@ export function DetalheTarefaClient({
         );
       }
     } catch (e) {
-      setAtrasoResultado(
-        e instanceof Error ? e.message : "Erro ao reportar atraso."
-      );
+      setAtrasoResultado(mensagemErro(e, "Erro ao reportar atraso."));
     } finally {
       setAtrasoSubmitting(false);
     }
@@ -349,9 +368,7 @@ export function DetalheTarefaClient({
         setAvariaResultado(null);
       }, 1500);
     } catch (e) {
-      setAvariaResultado(
-        e instanceof Error ? e.message : "Erro ao reportar avaria."
-      );
+      setAvariaResultado(mensagemErro(e, "Erro ao reportar avaria."));
     } finally {
       setAvariaSubmitting(false);
     }
@@ -693,7 +710,7 @@ export function DetalheTarefaClient({
         {/* Botão Reportar Atraso */}
         {!concluida && (
           <div className="flex gap-2">
-            <Button
+            <Button size="touch"
               variant="outline"
               className="flex-1 gap-2 text-amber-600 border-amber-300 hover:bg-amber-50"
               onClick={() => {
@@ -706,7 +723,7 @@ export function DetalheTarefaClient({
               Atraso
             </Button>
             {/* Botão Reportar Avaria (v1.38.0) */}
-            <Button
+            <Button size="touch"
               variant="outline"
               className="flex-1 gap-2 text-destructive border-destructive/40 hover:bg-destructive/10"
               onClick={() => {
@@ -723,7 +740,7 @@ export function DetalheTarefaClient({
 
         {!concluida && (
           <Button
-            size="lg"
+            size="touch"
             className="w-full bg-emerald-600 text-white hover:bg-emerald-700"
             disabled={!todasMarcadas || concluindo}
             onClick={handleConcluir}
@@ -794,7 +811,7 @@ export function DetalheTarefaClient({
           )}
         </DialogContent>
         <DialogFooter>
-          <Button
+          <Button size="touch"
             type="button"
             variant="outline"
             onClick={() => setMostrarAtraso(false)}
@@ -803,7 +820,7 @@ export function DetalheTarefaClient({
             {atrasoResultado ? "Fechar" : "Cancelar"}
           </Button>
           {!atrasoResultado && (
-            <Button
+            <Button size="touch"
               type="button"
               className="bg-amber-500 text-white hover:bg-amber-600"
               disabled={minutosAtraso === null || atrasoSubmitting}
@@ -933,7 +950,7 @@ export function DetalheTarefaClient({
           )}
         </DialogContent>
         <DialogFooter>
-          <Button
+          <Button size="touch"
             type="button"
             variant="outline"
             onClick={() => setMostrarAvaria(false)}
@@ -942,7 +959,7 @@ export function DetalheTarefaClient({
             {avariaResultado ? "Fechar" : "Cancelar"}
           </Button>
           {!avariaResultado && (
-            <Button
+            <Button size="touch"
               type="button"
               variant="destructive"
               disabled={!avariaDesc.trim() || avariaSubmitting}
@@ -1075,7 +1092,7 @@ export function DetalheTarefaClient({
           )}
         </DialogContent>
         <DialogFooter>
-          <Button
+          <Button size="touch"
             type="button"
             variant="outline"
             onClick={() => setMostrarConcluir(false)}
@@ -1083,7 +1100,7 @@ export function DetalheTarefaClient({
           >
             Cancelar
           </Button>
-          <Button
+          <Button size="touch"
             type="button"
             disabled={concluirFotos.length === 0 || concluindo}
             onClick={handleConfirmarConclusao}

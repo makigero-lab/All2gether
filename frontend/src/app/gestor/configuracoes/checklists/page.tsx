@@ -279,7 +279,7 @@ export default function ChecklistsPage() {
       setApagarNome("");
       await carregar();
     } catch (e) {
-      setErro(e instanceof Error ? e.message : "Erro ao apagar modelo.");
+      setErro(e instanceof Error ? e.message : "Erro ao eliminar modelo.");
     } finally {
       setApagando(false);
     }
@@ -639,10 +639,10 @@ export default function ChecklistsPage() {
           <div>
             <DialogTitle className="flex items-center gap-2">
               <AlertCircle className="h-5 w-5 text-destructive" />
-              Apagar Modelo
+              Eliminar Modelo
             </DialogTitle>
             <DialogDescription>
-              Tens a certeza que queres apagar o modelo{" "}
+              Tens a certeza que queres eliminar o modelo{" "}
               <strong>&quot;{apagarNome}&quot;</strong>?
               <br />
               Esta ação não pode ser desfeita. As propriedades associadas ficam
@@ -682,12 +682,12 @@ export default function ChecklistsPage() {
             {apagando ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
-                A apagar…
+                A eliminar…
               </>
             ) : (
               <>
                 <Trash2 className="h-4 w-4" />
-                Apagar Modelo
+                Eliminar Modelo
               </>
             )}
           </Button>

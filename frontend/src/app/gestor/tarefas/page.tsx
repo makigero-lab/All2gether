@@ -1,5 +1,6 @@
 "use client";
 
+import { ResultadoImportacao, lerDetalheErros } from "@/components/resultado-importacao";
 import { useCallback, useEffect, useState } from "react";
 import {
   Plus,
@@ -448,6 +449,7 @@ export default function AdminTarefasPage() {
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importLoading, setImportLoading] = useState(false);
   const [importResult, setImportResult] = useState<string | null>(null);
+  const [importErros, setImportErros] = useState<string[]>([]);
   const [espontaneaForm, setEspontaneaForm] = useState({
     propriedade_id: "",
     data: "",
@@ -585,6 +587,7 @@ export default function AdminTarefasPage() {
     if (!importFile) return;
     setImportLoading(true);
     setImportResult(null);
+    setImportErros([]);
     try {
       // Lê o ficheiro como ArrayBuffer e envia como raw body.
       const arrayBuffer = await importFile.arrayBuffer();
@@ -596,6 +599,7 @@ export default function AdminTarefasPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.erro || `Erro ${res.status}`);
+      setImportErros(lerDetalheErros(data.detalheErros));
       setImportResult(data.message || `${data.criadas} criadas, ${data.ignoradas} ignoradas, ${data.erros} erros.`);
       // Recarrega as tarefas para mostrar as importadas.
       await carregar();
@@ -650,7 +654,7 @@ export default function AdminTarefasPage() {
           <Button
             onClick={() => setConfirmarAutoAtribuir(true)}
             disabled={autoAtribuindo}
-            title="Corre o load balancer para atribuir automaticamente todas as tarefas futuras sem funcionário."
+            title="Atribui automaticamente todas as tarefas futuras sem funcionário."
             className="bg-primary text-primary-foreground hover:bg-primary/90"
           >
             {autoAtribuindo ? (
@@ -1310,7 +1314,7 @@ export default function AdminTarefasPage() {
         </DialogHeader>
         <DialogContent className="space-y-2">
           <p className="text-sm text-muted-foreground">
-            O load balancer vai procurar o staff com menor carga para cada
+            O sistema vai procurar o funcionário com menor carga para cada
             tarefa, respeitando férias, folgas fixas, tempo de viagem e hora
             de almoço (13h-14h). As tarefas que não conseguirem ser atribuídas
             (sem staff disponível) continuam por atribuir.
@@ -1606,10 +1610,7 @@ export default function AdminTarefasPage() {
             )}
           </div>
           {importResult && (
-            <div className="rounded-md bg-muted/50 p-3 text-sm">
-              <span className="font-medium">Resultado: </span>
-              {importResult}
-            </div>
+            <ResultadoImportacao resumo={importResult} detalheErros={importErros} />
           )}
         </DialogContent>
         <DialogFooter>

@@ -59,6 +59,66 @@ const ESTADO_LABEL: Record<string, string> = {
   nao_atribuida: "Não Atribuída",
 };
 
+/** Data YYYY-MM-DD no fuso de Lisboa (en-CA formata como ISO). */
+function chaveDiaLisboa(d: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Lisbon",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}
+
+/** Resumo de um dia: nº de casas (distintas) e total de hóspedes. */
+function resumirDia(tarefas: TarefaFornecedorDTO[], chave: string) {
+  const casas = new Set<string>();
+  let hospedes = 0;
+  let incluiLotacaoMaxima = false;
+  for (const t of tarefas) {
+    if (t.estado === "cancelada") continue;
+    const d = parsearDataSegura(t.data);
+    if (!d || chaveDiaLisboa(d) !== chave) continue;
+    casas.add(t.propriedade_id?.nome ?? t._id);
+    if (t.hospedes && t.hospedes > 0) {
+      hospedes += t.hospedes;
+    } else if (t.propriedade_id?.capacidade_hospedes) {
+      hospedes += t.propriedade_id.capacidade_hospedes;
+      incluiLotacaoMaxima = true;
+    }
+  }
+  return { casas: casas.size, hospedes, incluiLotacaoMaxima };
+}
+
+function CartaoDia({
+  titulo,
+  resumo,
+}: {
+  titulo: string;
+  resumo: { casas: number; hospedes: number; incluiLotacaoMaxima: boolean };
+}) {
+  return (
+    <Card>
+      <CardContent className="p-4">
+        <p className="text-xs font-medium uppercase text-muted-foreground">{titulo}</p>
+        {resumo.casas === 0 ? (
+          <p className="mt-1 text-sm text-muted-foreground">Sem tarefas</p>
+        ) : (
+          <>
+            <p className="mt-1 text-2xl font-bold">
+              {resumo.casas} {resumo.casas === 1 ? "casa" : "casas"}
+            </p>
+            <p className="text-sm text-muted-foreground">
+              {resumo.incluiLotacaoMaxima ? "até " : ""}
+              {resumo.hospedes} {resumo.hospedes === 1 ? "hóspede" : "hóspedes"}
+              {resumo.incluiLotacaoMaxima && " (inclui lotação máxima)"}
+            </p>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function FornecedorTarefasPage() {
   const [tarefas, setTarefas] = useState<TarefaFornecedorDTO[]>([]);
   const [loading, setLoading] = useState(true);
@@ -127,6 +187,16 @@ export default function FornecedorTarefasPage() {
     return grupos;
   }, [tarefas]);
 
+  // Cartões Hoje / Amanhã (dia civil em Europe/Lisbon).
+  const resumoHojeAmanha = useMemo(() => {
+    const agora = new Date();
+    const hoje = chaveDiaLisboa(agora);
+    // Soma 1 dia ao calendário (via UTC, sem efeitos de mudança de hora).
+    const [a, m, d] = hoje.split("-").map(Number);
+    const amanha = new Date(Date.UTC(a, m - 1, d + 1)).toISOString().slice(0, 10);
+    return { hoje: resumirDia(tarefas, hoje), amanha: resumirDia(tarefas, amanha) };
+  }, [tarefas]);
+
   return (
     <div className="flex min-h-screen flex-col gap-6 p-4 sm:p-6 lg:p-8">
       {/* Cabeçalho */}
@@ -152,6 +222,13 @@ export default function FornecedorTarefasPage() {
             {erro}
           </CardContent>
         </Card>
+      )}
+
+      {!loading && tarefas.length > 0 && (
+        <div className="grid grid-cols-2 gap-3">
+          <CartaoDia titulo="Hoje" resumo={resumoHojeAmanha.hoje} />
+          <CartaoDia titulo="Amanhã" resumo={resumoHojeAmanha.amanha} />
+        </div>
       )}
 
       {loading ? (

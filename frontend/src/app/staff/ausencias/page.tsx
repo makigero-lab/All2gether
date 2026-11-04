@@ -308,7 +308,7 @@ export default function StaffAusenciasPage() {
               <span>{erro}</span>
               <Button
                 variant="outline"
-                size="sm"
+                size="touch"
                 onClick={carregar}
                 className="ml-auto"
               >
@@ -319,7 +319,7 @@ export default function StaffAusenciasPage() {
         )}
 
         {/* Botão Novo Pedido */}
-        <Button
+        <Button size="touch"
           onClick={() => {
             setMostrarForm(true);
             setFormErro(null);
@@ -482,7 +482,7 @@ export default function StaffAusenciasPage() {
             )}
           </DialogContent>
           <DialogFooter>
-            <Button
+            <Button size="touch"
               type="button"
               variant="outline"
               onClick={() => setMostrarForm(false)}
@@ -490,7 +490,7 @@ export default function StaffAusenciasPage() {
             >
               Cancelar
             </Button>
-            <Button type="submit" disabled={submitting}>
+            <Button size="touch" type="submit" disabled={submitting}>
               {submitting ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -554,7 +554,7 @@ export default function StaffAusenciasPage() {
           )}
         </DialogContent>
         <DialogFooter>
-          <Button
+          <Button size="touch"
             type="button"
             variant="outline"
             onClick={() => setMostrarConfirmacao(false)}
@@ -562,7 +562,7 @@ export default function StaffAusenciasPage() {
           >
             Cancelar
           </Button>
-          <Button
+          <Button size="touch"
             type="button"
             onClick={handleConfirmarEnvio}
             disabled={submitting}
@@ -635,7 +635,7 @@ export default function StaffAusenciasPage() {
           )}
         </DialogContent>
         <DialogFooter>
-          <Button
+          <Button size="touch"
             type="button"
             variant="outline"
             onClick={() => setACancelar(null)}
@@ -643,7 +643,7 @@ export default function StaffAusenciasPage() {
           >
             Voltar
           </Button>
-          <Button
+          <Button size="touch"
             type="button"
             variant="destructive"
             onClick={handleCancelar}

@@ -1,5 +1,6 @@
 "use client";
 
+import { ResultadoImportacao, lerDetalheErros } from "@/components/resultado-importacao";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Loader2,
@@ -85,6 +86,7 @@ function Celula({
   disabled,
   placeholder,
   align,
+  rotulo,
   onCommit,
 }: {
   value: string;
@@ -93,6 +95,8 @@ function Celula({
   disabled?: boolean;
   placeholder?: string;
   align?: "right";
+  /** Nome acessível da célula (aria-label), ex.: "Check-in, Casa Azul". */
+  rotulo: string;
   onCommit: (novo: string) => Promise<void> | void;
 }) {
   const [v, setV] = useState(value);
@@ -120,12 +124,15 @@ function Celula({
   const comum = {
     ref,
     disabled,
+    "aria-label": rotulo,
+    "aria-invalid": erro || undefined,
     title: erro ? "Não foi possível guardar" : undefined,
     className: `${CELULA} ${align === "right" ? "text-right" : ""} ${erro ? "ring-2 ring-inset ring-destructive" : ""}`,
   };
 
   if (type === "select") {
     return (
+      <div className="relative">
       <select
         {...comum}
         value={v}
@@ -139,9 +146,12 @@ function Celula({
           <option key={o} value={o}>{o}</option>
         ))}
       </select>
+      {erro && <AvisoCelula />}
+      </div>
     );
   }
   return (
+    <div className="relative">
     <input
       {...comum}
       type={type}
@@ -158,6 +168,20 @@ function Celula({
         }
       }}
     />
+    {erro && <AvisoCelula />}
+    </div>
+  );
+}
+
+/** Aviso visível (texto, não só tooltip) quando a gravação de uma célula falha. */
+function AvisoCelula() {
+  return (
+    <span
+      role="alert"
+      className="pointer-events-none absolute left-1 top-full z-10 whitespace-nowrap rounded bg-destructive px-1.5 py-0.5 text-[11px] text-white shadow"
+    >
+      Não foi possível guardar
+    </span>
   );
 }
 
@@ -191,6 +215,7 @@ export default function ParceiroReservasPage() {
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importLoading, setImportLoading] = useState(false);
   const [importResult, setImportResult] = useState<string | null>(null);
+  const [importErros, setImportErros] = useState<string[]>([]);
 
   const carregar = useCallback(async () => {
     setLoading(true);
@@ -308,6 +333,7 @@ export default function ParceiroReservasPage() {
     if (!importFile) return;
     setImportLoading(true);
     setImportResult(null);
+    setImportErros([]);
     try {
       const arrayBuffer = await importFile.arrayBuffer();
       const res = await fetch("/api/parceiro/reservas/importar-excel", {
@@ -318,6 +344,7 @@ export default function ParceiroReservasPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.erro || `Erro ${res.status}`);
+      setImportErros(lerDetalheErros(data.detalheErros));
       setImportResult(data.message || `${data.criadas} criadas, ${data.ignoradas} ignoradas, ${data.erros} erros.`);
       await carregar();
     } catch (e) {
@@ -373,7 +400,7 @@ export default function ParceiroReservasPage() {
       </div>
 
       {erro && (
-        <Card className="border-destructive/50">
+        <Card className="sticky top-2 z-20 border-destructive/50 bg-background" role="alert">
           <CardContent className="flex items-center gap-2 p-4 text-sm text-destructive">
             <AlertCircle className="h-4 w-4 shrink-0" />
             {erro}
@@ -478,37 +505,38 @@ export default function ParceiroReservasPage() {
                     <tr key={r._id} className="border-b last:border-0 hover:bg-muted/30">
                       <td className="whitespace-nowrap px-2 py-1 font-medium">{r.propriedade_id?.nome ?? "—"}</td>
                       <td className="p-0">
-                        <Celula type="date" value={ci} disabled={bloqueada} onCommit={(v) => v ? atualizar(r._id, { check_in: v }) : undefined} />
+                        <Celula type="date" value={ci} rotulo={`Check-in, ${r.propriedade_id?.nome ?? "reserva"}`} disabled={bloqueada} onCommit={(v) => v ? atualizar(r._id, { check_in: v }) : undefined} />
                       </td>
                       <td className="p-0">
-                        <Celula value={r.hora_checkin ?? ""} disabled={bloqueada} onCommit={(v) => atualizar(r._id, { hora_checkin: v })} />
+                        <Celula value={r.hora_checkin ?? ""} rotulo={`Hora de check-in, ${r.propriedade_id?.nome ?? "reserva"}`} disabled={bloqueada} onCommit={(v) => atualizar(r._id, { hora_checkin: v })} />
                       </td>
                       <td className="p-0">
-                        <Celula type="date" value={co} disabled={bloqueada} onCommit={(v) => v ? atualizar(r._id, { check_out: v }) : undefined} />
+                        <Celula type="date" value={co} rotulo={`Check-out, ${r.propriedade_id?.nome ?? "reserva"}`} disabled={bloqueada} onCommit={(v) => v ? atualizar(r._id, { check_out: v }) : undefined} />
                       </td>
                       <td className="w-16 p-0">
                         <Celula
                           type="number"
                           align="right"
+                          rotulo={`Noites, ${r.propriedade_id?.nome ?? "reserva"}`}
                           value={String(noites(ci, co))}
                           disabled={bloqueada}
                           onCommit={(v) => v !== "" ? atualizar(r._id, { check_out: somarDias(ci, Number(v)) }) : undefined}
                         />
                       </td>
                       <td className="w-16 p-0">
-                        <Celula type="number" align="right" value={r.hospedes != null ? String(r.hospedes) : ""} disabled={bloqueada} onCommit={(v) => atualizar(r._id, { hospedes: v === "" ? null : Number(v) })} />
+                        <Celula type="number" align="right" value={r.hospedes != null ? String(r.hospedes) : ""} rotulo={`Hóspedes, ${r.propriedade_id?.nome ?? "reserva"}`} disabled={bloqueada} onCommit={(v) => atualizar(r._id, { hospedes: v === "" ? null : Number(v) })} />
                       </td>
                       <td className="p-0">
-                        <Celula value={r.nome_hospede ?? ""} disabled={bloqueada} onCommit={(v) => atualizar(r._id, { nome_hospede: v })} />
+                        <Celula value={r.nome_hospede ?? ""} rotulo={`Nome do hóspede, ${r.propriedade_id?.nome ?? "reserva"}`} disabled={bloqueada} onCommit={(v) => atualizar(r._id, { nome_hospede: v })} />
                       </td>
                       <td className="p-0">
-                        <Celula type="select" options={PLATAFORMAS} value={r.plataforma ?? ""} disabled={bloqueada} onCommit={(v) => atualizar(r._id, { plataforma: v })} />
+                        <Celula type="select" options={PLATAFORMAS} rotulo={`Plataforma, ${r.propriedade_id?.nome ?? "reserva"}`} value={r.plataforma ?? ""} disabled={bloqueada} onCommit={(v) => atualizar(r._id, { plataforma: v })} />
                       </td>
                       <td className="p-0">
-                        <Celula value={r.horario_preferido ?? ""} disabled={bloqueada} onCommit={(v) => atualizar(r._id, { horario_preferido: v })} />
+                        <Celula value={r.horario_preferido ?? ""} rotulo={`Horário preferido, ${r.propriedade_id?.nome ?? "reserva"}`} disabled={bloqueada} onCommit={(v) => atualizar(r._id, { horario_preferido: v })} />
                       </td>
                       <td className="p-0">
-                        <Celula value={r.observacoes ?? ""} disabled={bloqueada} onCommit={(v) => atualizar(r._id, { observacoes: v })} />
+                        <Celula value={r.observacoes ?? ""} rotulo={`Observações, ${r.propriedade_id?.nome ?? "reserva"}`} disabled={bloqueada} onCommit={(v) => atualizar(r._id, { observacoes: v })} />
                       </td>
                       <td className="whitespace-nowrap px-2">
                         {estado ? (
@@ -598,8 +626,9 @@ export default function ParceiroReservasPage() {
         </DialogHeader>
         <DialogContent className="space-y-4">
           <div className="space-y-2">
-            <label className="text-sm font-medium">Ficheiro Excel (.xlsx)</label>
+            <label htmlFor="importar-ficheiro-excel" className="text-sm font-medium">Ficheiro Excel (.xlsx)</label>
             <input
+              id="importar-ficheiro-excel"
               type="file"
               accept=".xlsx,.xls"
               onChange={(e) => {
@@ -616,10 +645,7 @@ export default function ParceiroReservasPage() {
             )}
           </div>
           {importResult && (
-            <div className="rounded-md bg-muted/50 p-3 text-sm">
-              <span className="font-medium">Resultado: </span>
-              {importResult}
-            </div>
+            <ResultadoImportacao resumo={importResult} detalheErros={importErros} />
           )}
         </DialogContent>
         <DialogFooter>

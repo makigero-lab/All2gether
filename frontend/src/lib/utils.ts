@@ -223,3 +223,17 @@ export function googleMapsUrl(
   if (!morada) return null;
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(morada)}`;
 }
+
+/**
+ * Escapa um valor para o inserir de forma segura em HTML construído por
+ * concatenação (ex.: janela de impressão com document.write).
+ * Aceita qualquer valor; null/undefined viram texto vazio.
+ */
+export function escaparHtml(valor: unknown): string {
+  return String(valor ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}

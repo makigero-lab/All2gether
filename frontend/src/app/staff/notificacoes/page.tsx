@@ -180,7 +180,7 @@ export default function StaffNotificacoesPage() {
         {/* Ações */}
         <div className="flex flex-wrap items-center gap-2">
           {naoLidas > 0 && (
-            <Button
+            <Button size="touch"
               onClick={handleMarcarTodas}
               disabled={marcando}
               className="flex-1 justify-center gap-2"
@@ -212,7 +212,7 @@ export default function StaffNotificacoesPage() {
               <span>{erro}</span>
               <Button
                 variant="outline"
-                size="sm"
+                size="touch"
                 onClick={carregar}
                 className="ml-auto"
               >

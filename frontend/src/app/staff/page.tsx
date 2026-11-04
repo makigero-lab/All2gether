@@ -456,7 +456,7 @@ export default function StaffPage() {
             )}
           </DialogContent>
           <DialogFooter>
-            <Button
+            <Button size="touch"
               type="button"
               variant="outline"
               onClick={() => setMostrarDialogFalta(false)}
@@ -464,7 +464,7 @@ export default function StaffPage() {
             >
               Cancelar
             </Button>
-            <Button
+            <Button size="touch"
               type="submit"
               variant="destructive"
               disabled={submetendoFalta}

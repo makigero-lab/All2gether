@@ -187,7 +187,7 @@ export function TaskCard({ tarefa }: { tarefa: TarefaMock }) {
             </p>
           )}
 
-          <Button
+          <Button size="touch"
             variant={porAtribuir ? "outline" : "default"}
             className="w-full"
             disabled={porAtribuir}

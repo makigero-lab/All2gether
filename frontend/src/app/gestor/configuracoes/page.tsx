@@ -565,7 +565,7 @@ export default function ConfiguracoesPage() {
             Eliminar Limpezas Futuras
           </DialogTitle>
           <DialogDescription>
-            Isto vai apagar todas as tarefas não concluídas de hoje para a frente.
+            Isto vai eliminar todas as tarefas não concluídas de hoje para a frente.
             As concluídas e canceladas serão preservadas. Queres continuar?
           </DialogDescription>
           <DialogClose onClick={() => setConfirmarLimpar(false)} />

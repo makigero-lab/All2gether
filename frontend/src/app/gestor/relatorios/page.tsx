@@ -41,6 +41,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { adminGet, adminPost } from "@/lib/api";
+import { escaparHtml } from "@/lib/utils";
 
 /* ------------------------------------------------------------------ */
 /* Tipos                                                               */
@@ -264,7 +265,7 @@ export default function RelatoriosPage() {
           data.porStaff.map(s => {
             const pct = Math.round(s.taxaConclusao * 100);
             const largura = Math.round((s.total / maxStaff) * 100);
-            return '<tr><td>' + s.nome + '</td><td>' + s.total + '</td><td>' + s.concluidas + '</td><td>' + pct + '%</td><td>' + s.carga_minutos + '</td><td><div class="barra-container"><div class="barra" style="width:' + largura + '%"></div></div></td></tr>';
+            return '<tr><td>' + escaparHtml(s.nome) + '</td><td>' + s.total + '</td><td>' + s.concluidas + '</td><td>' + pct + '%</td><td>' + s.carga_minutos + '</td><td><div class="barra-container"><div class="barra" style="width:' + largura + '%"></div></div></td></tr>';
           }).join('') + '</tbody></table>'
         : '';
 
@@ -273,7 +274,7 @@ export default function RelatoriosPage() {
         ? '<h2>Limpezas por Propriedade</h2><table><thead><tr><th>Propriedade</th><th>Total</th><th>Concluidas</th><th>Volume</th></tr></thead><tbody>' +
           data.porPropriedade.slice(0, 15).map(p => {
             const largura = Math.round((p.total / maxProp) * 100);
-            return '<tr><td>' + p.nome + '</td><td>' + p.total + '</td><td>—</td><td><div class="barra-container"><div class="barra" style="width:' + largura + '%"></div></div></td></tr>';
+            return '<tr><td>' + escaparHtml(p.nome) + '</td><td>' + p.total + '</td><td>—</td><td><div class="barra-container"><div class="barra" style="width:' + largura + '%"></div></div></td></tr>';
           }).join('') + '</tbody></table>'
         : '';
 
@@ -282,17 +283,17 @@ export default function RelatoriosPage() {
         ? '<h2>Distribuicao por Estado</h2><table><thead><tr><th>Estado</th><th>Total</th><th>%</th></tr></thead><tbody>' +
           data.porEstado.map(e => {
             const pct = Math.round((e.total / totalTarefas) * 100);
-            return '<tr><td>' + e.estado + '</td><td>' + e.total + '</td><td>' + pct + '%</td></tr>';
+            return '<tr><td>' + escaparHtml(e.estado) + '</td><td>' + e.total + '</td><td>' + pct + '%</td></tr>';
           }).join('') + '</tbody></table>'
         : '';
 
       const iaHtml = aiResumo
-        ? '<h2>Resumo Executivo IA</h2><div class="ia-box">' + aiResumo.replace(/</g, '&lt;') + '</div>'
+        ? '<h2>Resumo Executivo IA</h2><div class="ia-box">' + escaparHtml(aiResumo) + '</div>'
         : '';
 
       const html = [
         '<!DOCTYPE html><html lang="pt-PT"><head><meta charset="utf-8">',
-        '<title>Relatorio All2gether - ' + periodo + '</title>',
+        '<title>Relatorio All2gether - ' + escaparHtml(periodo) + '</title>',
         '<style>',
         '* { box-sizing: border-box; margin: 0; padding: 0; }',
         'body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color: #0f172a; font-size: 12px; line-height: 1.5; padding: 20px; }',
@@ -313,8 +314,8 @@ export default function RelatoriosPage() {
         '@media print { body { padding: 0; } }',
         '</style></head><body>',
         '<div class="header"><h1>Relatorio de Produtividade - All2gether</h1>',
-        '<div style="font-size:12px;color:#475569;margin-top:2px;">Periodo: ' + periodo + '</div>',
-        '<div style="font-size:11px;color:#64748b;margin-top:2px;">Gerado em ' + geradoEm + '</div></div>',
+        '<div style="font-size:12px;color:#475569;margin-top:2px;">Periodo: ' + escaparHtml(periodo) + '</div>',
+        '<div style="font-size:11px;color:#64748b;margin-top:2px;">Gerado em ' + escaparHtml(geradoEm) + '</div></div>',
         iaHtml,
         '<h2>KPIs</h2><div class="kpis">' + kpisHtml + '</div>',
         staffHtml,
