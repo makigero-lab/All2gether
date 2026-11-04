@@ -1,19 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  CalendarPlus,
   Loader2,
   AlertCircle,
-  Building2,
+  Table2,
   Upload,
   Download,
-  Pencil,
   Trash2,
+  Plus,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -48,29 +46,143 @@ interface ReservaDTO {
   createdAt: string;
 }
 
+const ESTADO_LIMPEZA: Record<string, string> = {
+  por_atribuir: "Por atribuir",
+  nao_atribuida: "Por atribuir",
+  atribuida: "Atribuída",
+  em_curso: "Em curso",
+  concluida: "Concluída",
+  cancelada: "Cancelada",
+};
+
+const PLATAFORMAS = ["Booking", "Airbnb", "Direto", "Vrbo", "Outra"];
+
+const CELULA =
+  "h-9 w-full bg-transparent px-2 text-sm outline-none focus:bg-primary/5 focus:ring-2 focus:ring-inset focus:ring-primary disabled:cursor-not-allowed disabled:opacity-60";
+
+const dia = (iso: string) => iso.slice(0, 10);
+
+function somarDias(isoDia: string, n: number): string {
+  const d = new Date(`${isoDia}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+function noites(ci: string, co: string): number {
+  if (!ci || !co) return 0;
+  const ms = new Date(`${co}T00:00:00Z`).getTime() - new Date(`${ci}T00:00:00Z`).getTime();
+  return Math.max(0, Math.round(ms / 86400000));
+}
+
+/**
+ * Célula editável estilo Excel: mostra sempre um input discreto; guarda ao
+ * sair da célula (blur) ou com Enter; Esc repõe o valor anterior.
+ */
+function Celula({
+  value,
+  type = "text",
+  options,
+  disabled,
+  placeholder,
+  align,
+  onCommit,
+}: {
+  value: string;
+  type?: "text" | "date" | "number" | "select";
+  options?: string[];
+  disabled?: boolean;
+  placeholder?: string;
+  align?: "right";
+  onCommit: (novo: string) => Promise<void> | void;
+}) {
+  const [v, setV] = useState(value);
+  const [erro, setErro] = useState(false);
+  const ref = useRef<HTMLInputElement & HTMLSelectElement>(null);
+
+  useEffect(() => setV(value), [value]);
+
+  async function guardar(novo: string) {
+    if (novo === value) return;
+    // Datas não podem ficar vazias: repõe o valor anterior.
+    if (novo === "" && type === "date") {
+      setV(value);
+      return;
+    }
+    try {
+      setErro(false);
+      await onCommit(novo);
+    } catch {
+      setErro(true);
+      setV(value);
+    }
+  }
+
+  const comum = {
+    ref,
+    disabled,
+    title: erro ? "Não foi possível guardar" : undefined,
+    className: `${CELULA} ${align === "right" ? "text-right" : ""} ${erro ? "ring-2 ring-inset ring-destructive" : ""}`,
+  };
+
+  if (type === "select") {
+    return (
+      <select
+        {...comum}
+        value={v}
+        onChange={(e) => {
+          setV(e.target.value);
+          guardar(e.target.value);
+        }}
+      >
+        <option value="">—</option>
+        {(options ?? []).map((o) => (
+          <option key={o} value={o}>{o}</option>
+        ))}
+      </select>
+    );
+  }
+  return (
+    <input
+      {...comum}
+      type={type}
+      min={type === "number" ? 0 : undefined}
+      placeholder={placeholder}
+      value={v}
+      onChange={(e) => setV(e.target.value)}
+      onBlur={() => guardar(v)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") ref.current?.blur();
+        if (e.key === "Escape") {
+          setV(value);
+          ref.current?.blur();
+        }
+      }}
+    />
+  );
+}
+
+const NOVA_VAZIA = {
+  propriedade_id: "",
+  check_in: "",
+  check_out: "",
+  hospedes: "",
+  nome_hospede: "",
+  plataforma: "",
+  hora_checkin: "",
+  horario_preferido: "",
+  observacoes: "",
+};
+
 export default function ParceiroReservasPage() {
   const [reservas, setReservas] = useState<ReservaDTO[]>([]);
   const [propriedades, setPropriedades] = useState<PropriedadeDTO[]>([]);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
 
-  const [mostrarForm, setMostrarForm] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [formErro, setFormErro] = useState<string | null>(null);
-  const FORM_VAZIO = {
-    propriedade_id: "",
-    check_in: "",
-    check_out: "",
-    hospedes: "",
-    observacoes: "",
-    nome_hospede: "",
-    plataforma: "",
-    hora_checkin: "",
-    horario_preferido: "",
-  };
-  const [form, setForm] = useState(FORM_VAZIO);
-  // Id da reserva em edição (null = nova reserva) e da reserva a eliminar.
-  const [editId, setEditId] = useState<string | null>(null);
+  const [nova, setNova] = useState(NOVA_VAZIA);
+  const [criando, setCriando] = useState(false);
+  const [novaErro, setNovaErro] = useState<string | null>(null);
+
   const [eliminar, setEliminar] = useState<ReservaDTO | null>(null);
   const [eliminando, setEliminando] = useState(false);
 
@@ -89,7 +201,10 @@ export default function ParceiroReservasPage() {
         adminGet<{ propriedades: PropriedadeDTO[] }>("/api/parceiro/propriedades"),
       ]);
       setReservas(resReservas.reservas ?? []);
-      setPropriedades(resProps.propriedades ?? []);
+      const props = resProps.propriedades ?? [];
+      setPropriedades(props);
+      // Com uma só propriedade, a linha nova já vem preenchida.
+      setNova((n) => (n.propriedade_id || props.length !== 1 ? n : { ...n, propriedade_id: props[0]._id }));
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Erro ao carregar.");
     } finally {
@@ -101,68 +216,41 @@ export default function ParceiroReservasPage() {
     carregar();
   }, [carregar]);
 
-  function abrirNova() {
-    setEditId(null);
-    setForm(FORM_VAZIO);
-    setFormErro(null);
-    setMostrarForm(true);
-  }
-
-  function abrirEditar(r: ReservaDTO) {
-    setEditId(r._id);
-    setForm({
-      propriedade_id: "",
-      check_in: r.check_in.slice(0, 10),
-      check_out: r.check_out.slice(0, 10),
-      hospedes: r.hospedes != null ? String(r.hospedes) : "",
-      observacoes: r.observacoes ?? "",
-      nome_hospede: r.nome_hospede ?? "",
-      plataforma: r.plataforma ?? "",
-      hora_checkin: r.hora_checkin ?? "",
-      horario_preferido: r.horario_preferido ?? "",
-    });
-    setFormErro(null);
-    setMostrarForm(true);
-  }
-
-  async function handleGuardar() {
-    if (!form.check_in || !form.check_out || (!editId && !form.propriedade_id)) {
-      setFormErro("Propriedade, Check-in e Check-out são obrigatórios.");
-      return;
-    }
-    if (form.check_out < form.check_in) {
-      setFormErro("O check-out não pode ser anterior ao check-in.");
-      return;
-    }
-    setSubmitting(true);
-    setFormErro(null);
+  /** Guarda uma alteração parcial e substitui a linha pela resposta do servidor. */
+  async function atualizar(id: string, parcial: Record<string, unknown>) {
     try {
-      const corpo = {
-        check_in: form.check_in,
-        check_out: form.check_out,
-        hospedes: form.hospedes ? Number(form.hospedes) : undefined,
-        observacoes: form.observacoes,
-        nome_hospede: form.nome_hospede,
-        plataforma: form.plataforma,
-        hora_checkin: form.hora_checkin,
-        horario_preferido: form.horario_preferido,
-      };
-      if (editId) {
-        await adminPut(`/api/parceiro/reservas/${editId}`, corpo);
-      } else {
-        await adminPost("/api/parceiro/reservas", {
-          ...corpo,
-          propriedade_id: form.propriedade_id,
-        });
-      }
-      setMostrarForm(false);
-      setEditId(null);
-      setForm(FORM_VAZIO);
+      const res = await adminPut<{ reserva: ReservaDTO }>(`/api/parceiro/reservas/${id}`, parcial);
+      setReservas((rs) => rs.map((r) => (r._id === id ? res.reserva : r)));
+      setErro(null);
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : "Erro ao guardar.");
+      throw e;
+    }
+  }
+
+  async function criarNova() {
+    if (criando) return;
+    if (!nova.propriedade_id || !nova.check_in || !nova.check_out) {
+      setNovaErro("Escolhe a propriedade e preenche check-in e check-out.");
+      return;
+    }
+    if (nova.check_out < nova.check_in) {
+      setNovaErro("O check-out não pode ser anterior ao check-in.");
+      return;
+    }
+    setCriando(true);
+    setNovaErro(null);
+    try {
+      await adminPost("/api/parceiro/reservas", {
+        ...nova,
+        hospedes: nova.hospedes ? Number(nova.hospedes) : undefined,
+      });
+      setNova({ ...NOVA_VAZIA, propriedade_id: nova.propriedade_id });
       await carregar();
     } catch (e) {
-      setFormErro(e instanceof Error ? e.message : "Erro ao guardar reserva.");
+      setNovaErro(e instanceof Error ? e.message : "Erro ao criar reserva.");
     } finally {
-      setSubmitting(false);
+      setCriando(false);
     }
   }
 
@@ -171,8 +259,8 @@ export default function ParceiroReservasPage() {
     setEliminando(true);
     try {
       await adminDelete(`/api/parceiro/reservas/${eliminar._id}`);
+      setReservas((rs) => rs.filter((r) => r._id !== eliminar._id));
       setEliminar(null);
-      await carregar();
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Erro ao eliminar reserva.");
       setEliminar(null);
@@ -180,20 +268,6 @@ export default function ParceiroReservasPage() {
       setEliminando(false);
     }
   }
-
-  function noites(r: ReservaDTO): number {
-    const ms = new Date(r.check_out).getTime() - new Date(r.check_in).getTime();
-    return Math.max(0, Math.round(ms / 86400000));
-  }
-
-  const ESTADO_LIMPEZA: Record<string, string> = {
-    por_atribuir: "Por atribuir",
-    nao_atribuida: "Por atribuir",
-    atribuida: "Atribuída",
-    em_curso: "Em curso",
-    concluida: "Concluída",
-    cancelada: "Cancelada",
-  };
 
   function formatarData(iso: string): string {
     try {
@@ -253,49 +327,49 @@ export default function ParceiroReservasPage() {
     }
   }
 
+  const setN = (k: keyof typeof NOVA_VAZIA) => (v: string) => setNova((n) => ({ ...n, [k]: v }));
+  const enterCria = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") criarNova();
+  };
+
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-            <CalendarPlus className="h-6 w-6 text-primary" />
+          <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
+            <Table2 className="h-6 w-6 text-primary" />
             Minhas Reservas
           </h1>
           <p className="text-sm text-muted-foreground">
-            Gere as tuas reservas. Cada reserva gera automaticamente uma tarefa de limpeza.
+            Clica numa célula para editar (guarda ao sair). Para uma reserva nova, preenche a linha
+            do topo e carrega em Enter. Cada reserva gera uma tarefa de limpeza.
           </p>
         </div>
-        <Button
-          onClick={abrirNova}
-          disabled={propriedades.length === 0}
-        >
-          <CalendarPlus className="h-4 w-4" />
-          Nova Reserva
-        </Button>
-        {/* FIX (excel parceiro) — Botões de importar/exportar Excel. */}
-        <Button
-          variant="outline"
-          onClick={handleExportarExcel}
-          className="gap-2"
-          title="Exporta as tuas reservas para Excel (.xlsx)."
-        >
-          <Download className="h-4 w-4" />
-          <span className="hidden sm:inline">Exportar</span>
-        </Button>
-        <Button
-          variant="outline"
-          onClick={() => {
-            setImportOpen(true);
-            setImportFile(null);
-            setImportResult(null);
-          }}
-          disabled={importLoading}
-          className="gap-2"
-          title="Importa reservas em massa de um ficheiro Excel (.xlsx)."
-        >
-          <Upload className="h-4 w-4" />
-          <span className="hidden sm:inline">Importar</span>
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={handleExportarExcel}
+            className="gap-2"
+            title="Exporta as tuas reservas para Excel (.xlsx)."
+          >
+            <Download className="h-4 w-4" />
+            <span className="hidden sm:inline">Exportar</span>
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => {
+              setImportOpen(true);
+              setImportFile(null);
+              setImportResult(null);
+            }}
+            disabled={importLoading}
+            className="gap-2"
+            title="Importa reservas em massa de um ficheiro Excel (.xlsx)."
+          >
+            <Upload className="h-4 w-4" />
+            <span className="hidden sm:inline">Importar</span>
+          </Button>
+        </div>
       </div>
 
       {erro && (
@@ -311,59 +385,132 @@ export default function ParceiroReservasPage() {
         <div className="flex items-center justify-center py-12">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
         </div>
-      ) : reservas.length === 0 ? (
+      ) : propriedades.length === 0 ? (
         <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
-          <CalendarPlus className="h-8 w-8 text-muted-foreground/50" />
+          <Table2 className="h-8 w-8 text-muted-foreground/50" />
           <p className="text-sm text-muted-foreground">
-            {propriedades.length === 0
-              ? "Ainda não tens propriedades. Contacta o gestor para te atribuir propriedades."
-              : "Sem reservas. Cria a tua primeira reserva."}
+            Ainda não tens propriedades. Contacta o gestor para te atribuir propriedades.
           </p>
         </div>
       ) : (
         <Card>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1100px] text-sm">
+            <table className="w-full min-w-[1250px] border-collapse text-sm">
               <thead>
                 <tr className="border-b bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
-                  <th className="px-3 py-2 font-medium">Propriedade</th>
-                  <th className="px-3 py-2 font-medium">Check-in</th>
-                  <th className="px-3 py-2 font-medium">Hora c/in</th>
-                  <th className="px-3 py-2 font-medium">Check-out</th>
-                  <th className="px-3 py-2 text-right font-medium">Noites</th>
-                  <th className="px-3 py-2 text-right font-medium">Hósp.</th>
-                  <th className="px-3 py-2 font-medium">Hóspede</th>
-                  <th className="px-3 py-2 font-medium">Plataforma</th>
-                  <th className="px-3 py-2 font-medium">Horário pref. limpeza</th>
-                  <th className="px-3 py-2 font-medium">Notas</th>
-                  <th className="px-3 py-2 font-medium">Limpeza</th>
-                  <th className="px-3 py-2 text-right font-medium">Ações</th>
+                  <th className="px-2 py-2 font-medium">Propriedade</th>
+                  <th className="px-2 py-2 font-medium">Check-in</th>
+                  <th className="px-2 py-2 font-medium">Hora c/in</th>
+                  <th className="px-2 py-2 font-medium">Check-out</th>
+                  <th className="px-2 py-2 text-right font-medium">Noites</th>
+                  <th className="px-2 py-2 text-right font-medium">Hósp.</th>
+                  <th className="px-2 py-2 font-medium">Hóspede</th>
+                  <th className="px-2 py-2 font-medium">Plataforma</th>
+                  <th className="px-2 py-2 font-medium">Horário pref. limpeza</th>
+                  <th className="px-2 py-2 font-medium">Notas</th>
+                  <th className="px-2 py-2 font-medium">Limpeza</th>
+                  <th className="px-2 py-2" />
                 </tr>
               </thead>
               <tbody>
+                {/* Linha nova (vazia) */}
+                <tr className="border-b bg-primary/5" onKeyDown={enterCria}>
+                  <td className="p-0">
+                    <select
+                      value={nova.propriedade_id}
+                      onChange={(e) => setN("propriedade_id")(e.target.value)}
+                      className={CELULA}
+                    >
+                      <option value="">Propriedade…</option>
+                      {propriedades.map((p) => (
+                        <option key={p._id} value={p._id}>{p.nome}</option>
+                      ))}
+                    </select>
+                  </td>
+                  <td className="p-0">
+                    <input type="date" value={nova.check_in} className={CELULA}
+                      onChange={(e) => setNova((n) => ({ ...n, check_in: e.target.value, check_out: n.check_out || e.target.value }))} />
+                  </td>
+                  <td className="p-0">
+                    <input value={nova.hora_checkin} onChange={(e) => setN("hora_checkin")(e.target.value)} placeholder="18:00" className={CELULA} />
+                  </td>
+                  <td className="p-0">
+                    <input type="date" value={nova.check_out} onChange={(e) => setN("check_out")(e.target.value)} className={CELULA} />
+                  </td>
+                  <td className="px-2 text-right text-muted-foreground">{noites(nova.check_in, nova.check_out) || ""}</td>
+                  <td className="p-0">
+                    <input type="number" min={0} value={nova.hospedes} onChange={(e) => setN("hospedes")(e.target.value)} className={`${CELULA} text-right`} />
+                  </td>
+                  <td className="p-0">
+                    <input value={nova.nome_hospede} onChange={(e) => setN("nome_hospede")(e.target.value)} className={CELULA} />
+                  </td>
+                  <td className="p-0">
+                    <select value={nova.plataforma} onChange={(e) => setN("plataforma")(e.target.value)} className={CELULA}>
+                      <option value="">—</option>
+                      {PLATAFORMAS.map((o) => <option key={o} value={o}>{o}</option>)}
+                    </select>
+                  </td>
+                  <td className="p-0">
+                    <input value={nova.horario_preferido} onChange={(e) => setN("horario_preferido")(e.target.value)} placeholder="11h - 14h" className={CELULA} />
+                  </td>
+                  <td className="p-0">
+                    <input value={nova.observacoes} onChange={(e) => setN("observacoes")(e.target.value)} className={CELULA} />
+                  </td>
+                  <td className="px-2 text-xs text-muted-foreground">nova</td>
+                  <td className="px-1 text-right">
+                    <Button size="sm" onClick={criarNova} disabled={criando} title="Adicionar reserva (Enter)">
+                      {criando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                    </Button>
+                  </td>
+                </tr>
+                {novaErro && (
+                  <tr>
+                    <td colSpan={12} className="px-3 py-1 text-xs text-destructive">{novaErro}</td>
+                  </tr>
+                )}
+
                 {reservas.map((r) => {
                   const estado = r.tarefa_gerada_id?.estado ?? null;
                   const bloqueada = estado === "em_curso" || estado === "concluida";
+                  const ci = dia(r.check_in);
+                  const co = dia(r.check_out);
                   return (
                     <tr key={r._id} className="border-b last:border-0 hover:bg-muted/30">
-                      <td className="px-3 py-2 font-medium">
-                        <span className="inline-flex items-center gap-1.5">
-                          <Building2 className="h-3.5 w-3.5 text-primary" />
-                          {r.propriedade_id?.nome ?? "—"}
-                        </span>
+                      <td className="whitespace-nowrap px-2 py-1 font-medium">{r.propriedade_id?.nome ?? "—"}</td>
+                      <td className="p-0">
+                        <Celula type="date" value={ci} disabled={bloqueada} onCommit={(v) => v ? atualizar(r._id, { check_in: v }) : undefined} />
                       </td>
-                      <td className="whitespace-nowrap px-3 py-2">{formatarData(r.check_in)}</td>
-                      <td className="whitespace-nowrap px-3 py-2">{r.hora_checkin || "—"}</td>
-                      <td className="whitespace-nowrap px-3 py-2">{formatarData(r.check_out)}</td>
-                      <td className="px-3 py-2 text-right">{noites(r)}</td>
-                      <td className="px-3 py-2 text-right">{r.hospedes ?? "—"}</td>
-                      <td className="px-3 py-2">{r.nome_hospede || "—"}</td>
-                      <td className="px-3 py-2">{r.plataforma || "—"}</td>
-                      <td className="whitespace-nowrap px-3 py-2">{r.horario_preferido || "—"}</td>
-                      <td className="max-w-[220px] truncate px-3 py-2 text-muted-foreground" title={r.observacoes}>
-                        {r.observacoes || "—"}
+                      <td className="p-0">
+                        <Celula value={r.hora_checkin ?? ""} disabled={bloqueada} onCommit={(v) => atualizar(r._id, { hora_checkin: v })} />
                       </td>
-                      <td className="px-3 py-2">
+                      <td className="p-0">
+                        <Celula type="date" value={co} disabled={bloqueada} onCommit={(v) => v ? atualizar(r._id, { check_out: v }) : undefined} />
+                      </td>
+                      <td className="w-16 p-0">
+                        <Celula
+                          type="number"
+                          align="right"
+                          value={String(noites(ci, co))}
+                          disabled={bloqueada}
+                          onCommit={(v) => v !== "" ? atualizar(r._id, { check_out: somarDias(ci, Number(v)) }) : undefined}
+                        />
+                      </td>
+                      <td className="w-16 p-0">
+                        <Celula type="number" align="right" value={r.hospedes != null ? String(r.hospedes) : ""} disabled={bloqueada} onCommit={(v) => atualizar(r._id, { hospedes: v === "" ? null : Number(v) })} />
+                      </td>
+                      <td className="p-0">
+                        <Celula value={r.nome_hospede ?? ""} disabled={bloqueada} onCommit={(v) => atualizar(r._id, { nome_hospede: v })} />
+                      </td>
+                      <td className="p-0">
+                        <Celula type="select" options={PLATAFORMAS} value={r.plataforma ?? ""} disabled={bloqueada} onCommit={(v) => atualizar(r._id, { plataforma: v })} />
+                      </td>
+                      <td className="p-0">
+                        <Celula value={r.horario_preferido ?? ""} disabled={bloqueada} onCommit={(v) => atualizar(r._id, { horario_preferido: v })} />
+                      </td>
+                      <td className="p-0">
+                        <Celula value={r.observacoes ?? ""} disabled={bloqueada} onCommit={(v) => atualizar(r._id, { observacoes: v })} />
+                      </td>
+                      <td className="whitespace-nowrap px-2">
                         {estado ? (
                           <Badge
                             variant={
@@ -380,16 +527,7 @@ export default function ParceiroReservasPage() {
                           "—"
                         )}
                       </td>
-                      <td className="whitespace-nowrap px-3 py-2 text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => abrirEditar(r)}
-                          disabled={bloqueada}
-                          title={bloqueada ? "A limpeza já começou ou foi concluída." : "Editar reserva"}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
+                      <td className="px-1 text-right">
                         <Button
                           variant="ghost"
                           size="sm"
@@ -407,115 +545,13 @@ export default function ParceiroReservasPage() {
               </tbody>
             </table>
           </div>
-        </Card>
-      )}
-
-      {/* Modal de Nova Reserva */}
-      <Dialog open={mostrarForm} onOpenChange={(o) => !o && !submitting && setMostrarForm(false)}>
-        <DialogHeader>
-          <div>
-            <DialogTitle className="flex items-center gap-2">
-              <CalendarPlus className="h-5 w-5 text-primary" />
-              {editId ? "Editar Reserva" : "Nova Reserva"}
-            </DialogTitle>
-            <DialogDescription>
-              A reserva gera automaticamente uma tarefa de limpeza para o dia de check-out.
-              A hora da limpeza é definida pela equipa; o horário preferido é só uma indicação.
-            </DialogDescription>
-          </div>
-          <DialogClose onClick={() => !submitting && setMostrarForm(false)} />
-        </DialogHeader>
-        <DialogContent className="space-y-4">
-          {!editId && (
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium">Propriedade</label>
-            <select
-              value={form.propriedade_id}
-              onChange={(e) => setForm((f) => ({ ...f, propriedade_id: e.target.value }))}
-              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-            >
-              <option value="">Selecionar…</option>
-              {propriedades.map((p) => (
-                <option key={p._id} value={p._id}>{p.nome}</option>
-              ))}
-            </select>
-          </div>
-          )}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">Check-in</label>
-              <Input type="date" value={form.check_in} onChange={(e) => setForm((f) => ({ ...f, check_in: e.target.value }))} />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">Check-out</label>
-              <Input type="date" value={form.check_out} onChange={(e) => setForm((f) => ({ ...f, check_out: e.target.value }))} />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">Nome do hóspede</label>
-              <Input value={form.nome_hospede} onChange={(e) => setForm((f) => ({ ...f, nome_hospede: e.target.value }))} />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">Plataforma</label>
-              <select
-                value={form.plataforma}
-                onChange={(e) => setForm((f) => ({ ...f, plataforma: e.target.value }))}
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-              >
-                <option value="">—</option>
-                <option value="Booking">Booking</option>
-                <option value="Airbnb">Airbnb</option>
-                <option value="Direto">Direto</option>
-                <option value="Vrbo">Vrbo</option>
-                <option value="Outra">Outra</option>
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">Hora de check-in</label>
-              <Input value={form.hora_checkin} onChange={(e) => setForm((f) => ({ ...f, hora_checkin: e.target.value }))} placeholder="ex.: 18:00" />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">Horário preferido p/ limpeza</label>
-              <Input value={form.horario_preferido} onChange={(e) => setForm((f) => ({ ...f, horario_preferido: e.target.value }))} placeholder="ex.: 11h - 14h" />
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium">Hóspedes (opcional)</label>
-            <Input
-              type="number"
-              min={1}
-              value={form.hospedes}
-              onChange={(e) => setForm((f) => ({ ...f, hospedes: e.target.value }))}
-              placeholder="Usa a capacidade da propriedade se vazio"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium">Observações (opcional)</label>
-            <Input
-              type="text"
-              value={form.observacoes}
-              onChange={(e) => setForm((f) => ({ ...f, observacoes: e.target.value }))}
-              placeholder="Notas para a equipa de limpeza"
-            />
-          </div>
-          {formErro && (
-            <p className="flex items-center gap-2 text-sm text-destructive">
-              <AlertCircle className="h-4 w-4" />
-              {formErro}
+          {reservas.length === 0 && (
+            <p className="px-4 py-6 text-center text-sm text-muted-foreground">
+              Sem reservas. Preenche a linha do topo para adicionar a primeira.
             </p>
           )}
-        </DialogContent>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => setMostrarForm(false)} disabled={submitting}>
-            Cancelar
-          </Button>
-          <Button onClick={handleGuardar} disabled={submitting}>
-            {submitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CalendarPlus className="mr-2 h-4 w-4" />}
-            {editId ? "Guardar Alterações" : "Criar Reserva"}
-          </Button>
-        </DialogFooter>
-      </Dialog>
+        </Card>
+      )}
 
       {/* Confirmação de eliminação */}
       <Dialog open={!!eliminar} onOpenChange={(o) => !o && !eliminando && setEliminar(null)}>
