@@ -345,6 +345,12 @@ exports.aprovarRejeitarAusencia = async (req, res) => {
     }
 
     // Se já está no estado pedido, não faz nada (idempotente).
+    if (ausencia.estado === 'cancelada') {
+      return res.status(400).json({
+        erro: 'Não é possível aprovar/rejeitar uma ausência cancelada. Cria uma nova.',
+      });
+    }
+
     if (ausencia.estado === novoEstado) {
       return res.status(200).json({
         mensagem: `Ausência já estava ${novoEstado}.`,
@@ -644,6 +650,7 @@ async function desatribuirTarefasPeriodo(utilizadorId, inicio, fim) {
   let desatribuidas = 0;
   for (const tarefa of tarefas) {
     tarefa.utilizador_id = null;
+    tarefa.equipa_atribuida = [];
     tarefa.estado = 'por_atribuir';
     await tarefa.save();
     desatribuidas++;
@@ -697,7 +704,7 @@ async function reatribuirTarefasPeriodo(empresaId, utilizadorId, inicio, fim) {
   const tarefas = await Tarefa.find({
     empresa_id: empresaId,
     data: { $gte: inicio, $lt: fimDia },
-    estado: 'por_atribuir',
+    estado: { $in: ['por_atribuir', 'nao_atribuida'] },
   })
     .populate({ path: 'propriedade_id', select: 'nome coordenadas' })
     .lean();
@@ -1046,3 +1053,4 @@ exports.diagnosticoAusencia = async (req, res) => {
 
 // Exporta o helper para reutilização (registarBaixaProlongada, falta súbita).
 exports.desatribuirTarefasPeriodo = desatribuirTarefasPeriodo;
+exports.reatribuirTarefasPeriodo = reatribuirTarefasPeriodo;

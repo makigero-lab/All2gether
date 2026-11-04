@@ -321,7 +321,7 @@ exports.faltaHoje = async (req, res) => {
       utilizador_id: utilizadorId,
       data_inicio: { $lte: hoje },
       data_fim: { $gte: hoje },
-      estado: { $ne: 'rejeitada' },
+      estado: { $in: ['pendente', 'pendente_emergencia', 'aprovada'] },
     });
     if (sobreposta) {
       console.log(`[faltaHoje] Conflito detetado: ausência ${sobreposta._id} estado=${sobreposta.estado}`);
@@ -388,7 +388,17 @@ exports.faltaHoje = async (req, res) => {
       console.error('⚠️  notificar gestores (faltaHoje):', e.message);
     }
 
-    return res.status(201).json({ ausencia: nova });
+    // O faltoso fica logo indisponível: desatribui as tarefas de hoje .
+    let redistribuicao = null;
+    try {
+      const { desatribuirTarefasPeriodo } = require('./ausenciaController');
+      // Só desatribui (o gestor reatribui manualmente: decisão do Prompt 97, sem disparos automáticos).
+      redistribuicao = await desatribuirTarefasPeriodo(utilizadorId, hoje, hoje);
+    } catch (e) {
+      console.error('⚠️  redistribuir tarefas (faltaHoje):', e.message);
+    }
+
+    return res.status(201).json({ ausencia: nova, redistribuicao });
   } catch (err) {
     console.error('❌ faltaHoje:', err.message);
     // Prompt 131 — Tratamento do erro 11000 (índice único antigo).
@@ -614,7 +624,8 @@ exports.reportarAvaria = async (req, res) => {
     // Prompt 125 — usa meia-noite LOCAL (00:00 no fuso do servidor) e não
     // UTC midnight, que em Lisboa (UTC+1) apareceria como 01:00.
     const hoje = new Date();
-    const hojeMeiaNoite = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
+    // 10:00 UTC do dia (antes 00:00 local: placeholder que contaminava o scheduler).
+    const hojeMeiaNoite = new Date(Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth(), hoje.getUTCDate(), 10));
 
     const novaTarefaManutencao = await Tarefa.create({
       empresa_id: tarefa.empresa_id,

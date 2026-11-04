@@ -573,6 +573,8 @@ async function atualizarReserva(req, res) {
     if (tarefa && checkOutMudou) {
       const propriedade = await Propriedade.findById(reserva.propriedade_id).lean();
       tarefa.estado = 'cancelada';
+      tarefa.utilizador_id = null;
+      tarefa.equipa_atribuida = [];
       await tarefa.save();
       const nova = await gerarTarefaLimpezaReserva({
         propriedade,
@@ -637,6 +639,8 @@ async function eliminarReserva(req, res) {
     }
     if (tarefa && tarefa.estado !== 'cancelada') {
       tarefa.estado = 'cancelada';
+      tarefa.utilizador_id = null;
+      tarefa.equipa_atribuida = [];
       await tarefa.save();
     }
     await reserva.deleteOne();

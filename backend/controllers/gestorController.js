@@ -1888,6 +1888,18 @@ exports.atualizarMembroEquipa = async (req, res) => {
           erro: 'Role inválido. Valores permitidos via edição: gestor, staff, parceiro, fornecedor.',
         });
       }
+      if (utilizador.role === 'fornecedor' && role !== 'fornecedor') {
+        await Propriedade.updateMany(
+          { fornecedor_id: utilizador._id, empresa_id: empresaId },
+          { $set: { fornecedor_id: null } }
+        );
+      }
+      if (utilizador.role === 'parceiro' && role !== 'parceiro') {
+        await Propriedade.updateMany(
+          { parceiro_id: utilizador._id, empresa_id: empresaId },
+          { $set: { parceiro_id: null } }
+        );
+      }
       utilizador.role = role;
     }
 
@@ -2217,6 +2229,35 @@ exports.eliminarMembroEquipa = async (req, res) => {
     utilizador.ativo = false; // garante que não consegue fazer login
     await utilizador.save();
 
+    // Limpa dependências: tarefas futuras não iniciadas voltam ao pool e as propriedades
+    // deixam de apontar para o utilizador eliminado (equipa/preferencial/lavandaria/proprietário).
+    try {
+      const hojeUTC = new Date();
+      hojeUTC.setUTCHours(0, 0, 0, 0);
+      await Tarefa.updateMany(
+        { utilizador_id: utilizador._id, data: { $gte: hojeUTC }, estado: 'atribuida' },
+        { $set: { utilizador_id: null, equipa_atribuida: [], estado: 'por_atribuir' } }
+      );
+      await Propriedade.updateMany(
+        { empresa_id: empresaId },
+        { $pull: { equipa_preferencial: utilizador._id } }
+      );
+      await Propriedade.updateMany(
+        { empresa_id: empresaId, funcionario_preferencial_id: utilizador._id },
+        { $set: { funcionario_preferencial_id: null } }
+      );
+      await Propriedade.updateMany(
+        { empresa_id: empresaId, fornecedor_id: utilizador._id },
+        { $set: { fornecedor_id: null } }
+      );
+      await Propriedade.updateMany(
+        { empresa_id: empresaId, parceiro_id: utilizador._id },
+        { $set: { parceiro_id: null } }
+      );
+    } catch (e) {
+      console.error('⚠️  limpeza de dependências (eliminar membro):', e.message);
+    }
+
     // Auditoria.
     registarAuditoria({
       utilizador_id: req.user.id,
@@ -2306,6 +2347,7 @@ exports.reportarFaltaSubita = async (req, res) => {
     } catch (err) {
       if (err.code !== 11000) {
         console.error('⚠️  Erro ao criar ausência de falta súbita:', err.message);
+        return res.status(500).json({ erro: 'Não foi possível registar a falta. Nada foi alterado.' });
       }
       // Se duplicado, não é problema — o utilizador já tem ausência hoje.
     }
@@ -2314,7 +2356,7 @@ exports.reportarFaltaSubita = async (req, res) => {
     const tarefas = await Tarefa.find({
       utilizador_id: id,
       data: { $gte: hojeInicio, $lt: amanhaInicio },
-      estado: { $in: ['atribuida', 'por_atribuir'] },
+      estado: { $in: ['atribuida', 'em_curso', 'por_atribuir'] },
     }).populate({ path: 'propriedade_id', select: 'nome' });
 
     if (tarefas.length === 0) {
@@ -2332,6 +2374,7 @@ exports.reportarFaltaSubita = async (req, res) => {
 
     for (const tarefa of tarefas) {
       tarefa.utilizador_id = null;
+      tarefa.equipa_atribuida = [];
       tarefa.estado = 'por_atribuir';
       await tarefa.save();
       desatribuidas++;
@@ -2441,6 +2484,13 @@ exports.registarBaixaProlongada = async (req, res) => {
       });
     }
 
+    const tipoBaixa = tipo || 'ferias';
+    if (!['ferias', 'doenca', 'outro'].includes(tipoBaixa)) {
+      return res.status(400).json({
+        erro: 'tipo inválido. Valores permitidos: ferias, doenca, outro.',
+      });
+    }
+
     // 1) Cria a Ausencia (ignora duplicado).
     // v1.24.0: baixa prolongada é uma ação do admin → estado 'aprovada'.
     try {
@@ -2449,13 +2499,15 @@ exports.registarBaixaProlongada = async (req, res) => {
         empresa_id: empresaId,
         data_inicio: inicio,
         data_fim: fim,
-        tipo: tipo || 'ferias',
+        tipo: tipoBaixa,
         estado: 'aprovada',
         notas: notas ? String(notas).trim() : '',
       });
     } catch (err) {
       if (err.code !== 11000) {
+        // Antes o erro era engolido: desatribuía as tarefas mas sem ausência, e o LB voltava a dar-lhe trabalho.
         console.error('⚠️  Erro ao criar ausência de baixa:', err.message);
+        return res.status(500).json({ erro: 'Não foi possível registar a ausência. Nada foi alterado.' });
       }
       // Se duplicado, não é problema.
     }
@@ -2464,7 +2516,7 @@ exports.registarBaixaProlongada = async (req, res) => {
     const tarefas = await Tarefa.find({
       utilizador_id: id,
       data: { $gte: inicio, $lt: fimDia },
-      estado: 'atribuida',
+      estado: { $in: ['atribuida', 'em_curso'] },
     }).populate({ path: 'propriedade_id', select: 'nome' });
 
     if (tarefas.length === 0) {
@@ -2482,6 +2534,7 @@ exports.registarBaixaProlongada = async (req, res) => {
 
     for (const tarefa of tarefas) {
       tarefa.utilizador_id = null;
+      tarefa.equipa_atribuida = [];
       tarefa.estado = 'por_atribuir';
       await tarefa.save();
       desatribuidas++;

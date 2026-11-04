@@ -244,4 +244,13 @@ const tarefaSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// Rotinas fixas: no máximo 1 tarefa automática por propriedade e dia (YYYY-MM-DD). Garante que
+// duas instâncias do cron (ou duas execuções simultâneas) não duplicam. Índice parcial: só
+// afeta documentos com `rotina_dia` preenchido.
+tarefaSchema.add({ rotina_dia: { type: String, default: undefined } });
+tarefaSchema.index(
+  { propriedade_id: 1, rotina_dia: 1 },
+  { unique: true, partialFilterExpression: { rotina_dia: { $type: 'string' } } }
+);
+
 module.exports = mongoose.model('Tarefa', tarefaSchema);

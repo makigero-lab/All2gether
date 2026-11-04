@@ -43,6 +43,7 @@ const ContactoHospede = require('../models/ContactoHospede');
 const { registarAuditoria } = require('../utils/auditoria');
 const WebhookLog = require('../models/WebhookLog');
 const Ausencia = require('../models/Ausencia');
+const TarefaArquivo = require('../models/TarefaArquivo');
 const Utilizador = require('../models/Utilizador');
 const { determinarUtilizadorAtribuido, determinarEquipaAtribuida } = require('../utils/loadBalancer');
 const {
@@ -455,24 +456,32 @@ async function criarTarefaPorReserva(
     const existente = await Tarefa.findOne({ smoobu_reserva_id: reservaId });
     if (existente) {
       if (existente.estado === 'cancelada') {
-        // Reserva foi re-ativada no Smoobu → reativa a tarefa.
-        existente.estado = existente.utilizador_id ? 'atribuida' : 'por_atribuir';
-        if (detalhesReserva) {
-          existente.detalhes_reserva = {
-            ...(existente.detalhes_reserva?.toObject?.() ?? {}),
-            ...apenasDefinidos(detalhesReserva),
-          };
-        }
-        await existente.save();
-        await guardarContactoHospede(existente, contacto);
+        // Reserva re-ativada no Smoobu: reutiliza o fluxo de update (atualiza data,
+        // apartamento e detalhes, e volta a passar pelo load balancer).
+        const reativada = await atualizarTarefaPorReserva(
+          reservaId,
+          smoobuPropId,
+          dataTarefaRaw,
+          detalhesReserva,
+          content,
+          empresaRestrita,
+          contacto
+        );
         console.log(
           `🔄 [Smoobu] tarefa ${existente._id} reativada (reserva ${reservaId} re-ativada).`
         );
-        return existente;
+        return reativada || existente;
       }
       // Webhook duplicado — sem ação.
       return existente;
     }
+  }
+
+  // 1b. Reserva já arquivada (tarefa concluída/cancelada há mais de 3 meses): um webhook
+  // tardio/duplicado não pode recriar a limpeza.
+  if (reservaId && (await TarefaArquivo.exists({ smoobu_reserva_id: String(reservaId) }))) {
+    console.log(`ℹ️  [Smoobu] reserva ${reservaId} já arquivada — ignorada.`);
+    return null;
   }
 
   // 2. Match de propriedade por smoobu_id.
@@ -565,6 +574,7 @@ async function criarTarefaPorReserva(
   let tempoViagemMinutos = 0;
   let alertaTarefa = null;
   let tentouLoadBalancer = false;
+  let equipaCompleta = []; // membros da equipa quando staff_necessario > 1
   let vipSobrecarregado = false; // HF12: VIP só começava tarde → fallback ao LB
 
   // (a) Tenta atribuir ao staff exclusivo se existir e não estiver de folga.
@@ -599,9 +609,21 @@ async function criarTarefaPorReserva(
         }
       }
 
-      if (folgaFixa || folgaRotativa) {
-        // Equipa exclusiva de folga → fallback ao LB.
-        const motivo = folgaRotativa && motivoFolga ? ` (${motivoFolga})` : '';
+      // Ausências (férias/baixa aprovadas ou falta súbita) também tornam o VIP indisponível.
+      let ausenciaVIP = false;
+      if (!folgaFixa && !folgaRotativa) {
+        ausenciaVIP = !!(await Ausencia.exists({
+          utilizador_id: staffExclusivoId,
+          estado: { $in: ['aprovada', 'pendente_emergencia'] },
+          data_inicio: { $lt: range.end },
+          data_fim: { $gte: range.start },
+        }));
+        if (ausenciaVIP) motivoFolga = 'ausência';
+      }
+
+      if (folgaFixa || folgaRotativa || ausenciaVIP) {
+        // Equipa exclusiva de folga/ausente → fallback ao LB.
+        const motivo = (folgaRotativa || ausenciaVIP) && motivoFolga ? ` (${motivoFolga})` : '';
         console.log(
           `📋 [Smoobu] staff exclusivo ${staffExclusivoId} de folga no dia ` +
             `${range.start.toISOString().slice(0, 10)} (fixa=${folgaFixa}, ` +
@@ -667,6 +689,7 @@ async function criarTarefaPorReserva(
           equipaResultado = resultadoEquipa;
           // O utilizador_id principal é o vencedor #1 (retrocompatibilidade).
           utilizadorAtribuido = resultadoEquipa.equipa[0].utilizadorId;
+          equipaCompleta = resultadoEquipa.equipa.map((m) => m.utilizadorId);
           tempoViagemMinutos = Number(resultadoEquipa.equipa[0].tempoViagem) || 0;
           // Se a equipa é insuficiente, gera alerta.
           if (resultadoEquipa.insuficiente) {
@@ -808,17 +831,10 @@ async function criarTarefaPorReserva(
 
   // 9. Cria a Tarefa (com alerta se aplicável).
   // HF21 — Se houver equipa atribuída (múltiplos staff), preenche equipa_atribuida.
-  const equipaIds = [];
-  if (typeof determinarEquipaAtribuida !== 'undefined' && utilizadorAtribuido) {
-    // Se a propriedade exige > 1 staff, o equipaResultado foi calculado acima.
-    // Como não temos acesso direto ao equipaResultado aqui (escopo do try/catch),
-    // usamos uma abordagem simples: se staff_necessario > 1 e temos utilizadorAtribuido,
-    // o equipa_atribuida é preenchido com o utilizador_id principal (pelo menos).
-    // Para já, o equipa_atribuida é populado apenas se a função determinarEquipaAtribuida
-    // foi chamada e devolveu resultados — isso acontece no bloco (b) acima.
-    // Para garantir que o array é preenchido, guardamos o utilizadorAtribuido.
-    equipaIds.push(utilizadorAtribuido);
-  }
+  // Guarda a equipa COMPLETA (antes só o 1.º elemento; os restantes nunca viam a tarefa).
+  const equipaIds = equipaCompleta.length > 0
+    ? equipaCompleta
+    : utilizadorAtribuido ? [utilizadorAtribuido] : [];
 
   const novaTarefa = await Tarefa.create({
     empresa_id: empresaId,
@@ -897,6 +913,7 @@ async function cancelarTarefaPorReserva(reservaId, empresaRestrita = null) {
     if (tarefa.estado === 'concluida') continue; // histórico: limpeza já feita
     tarefa.estado = 'cancelada';
     tarefa.utilizador_id = null; // liberta o staff
+    tarefa.equipa_atribuida = [];
     await tarefa.save();
     canceladas++;
   }
@@ -945,8 +962,13 @@ async function atualizarTarefaPorReserva(
   // 1. Atualizar data.
   if (dataTarefaRaw) {
     novoRange = obterRangeDia(dataTarefaRaw);
-    if (novoRange && tarefa.data.getTime() !== novoRange.start.getTime()) {
-      tarefa.data = novoRange.start;
+    const diaAtual = obterRangeDia(tarefa.data);
+    if (novoRange && diaAtual && diaAtual.start.getTime() !== novoRange.start.getTime()) {
+      // Só muda se o DIA mudou (antes qualquer update repunha a hora a 00:00).
+      // Mantém a hora 10:00 UTC por defeito; o load balancer/scheduler recalcula se houver reatribuição.
+      const novaData = new Date(novoRange.start);
+      novaData.setUTCHours(10, 0, 0, 0);
+      tarefa.data = novaData;
       mudou = true;
       mudouData = true;
     }
@@ -979,9 +1001,11 @@ async function atualizarTarefaPorReserva(
   }
 
   // 3. Re-ativar se estava cancelada (reserva foi re-ativada no Smoobu).
+  let reativada = false;
   if (tarefa.estado === 'cancelada') {
     tarefa.estado = tarefa.utilizador_id ? 'atribuida' : 'por_atribuir';
     mudou = true;
+    reativada = true;
   }
 
   // 3b. Atualiza detalhes_reserva.
@@ -1039,7 +1063,7 @@ async function atualizarTarefaPorReserva(
     // FIX (sync smoobu — reatribuição automática) — Se a data mudou e a
     // tarefa ficou 'por_atribuir' (staff desatribuído por indisponibilidade
     // na nova data), tenta reatribuir automaticamente via load balancer.
-    if (mudouData && tarefa.estado === 'por_atribuir') {
+    if ((mudouData || reativada) && tarefa.estado === 'por_atribuir') {
       try {
         const { determinarUtilizadorAtribuido } = require('../utils/loadBalancer');
         const { calcularInicioTarefaUtilizador } = require('../utils/scheduler');
@@ -1738,7 +1762,7 @@ async function sincronizarReservas(req, res) {
 
     try {
       while (currentPage <= totalPages) {
-        const url = `https://login.smoobu.com/api/reservations?arrivalFrom=${from}&page=${currentPage}`;
+        const url = `https://login.smoobu.com/api/reservations?departureFrom=${from}&page=${currentPage}`;
         const respostaSmoobu = await fetch(url, {
           method: 'GET',
           headers: {
@@ -1788,7 +1812,7 @@ async function sincronizarReservas(req, res) {
     }
 
     const reservas = todasReservas;
-    console.log(`📥 [Smoobu] sincronizarReservas: ${reservas.length} reservas recebidas (arrivalFrom=${from}).`);
+    console.log(`📥 [Smoobu] sincronizarReservas: ${reservas.length} reservas recebidas (departureFrom=${from}).`);
 
     if (!Array.isArray(reservas)) {
       return res.status(502).json({
@@ -1847,8 +1871,9 @@ async function sincronizarReservas(req, res) {
           reserva.name ??
           null;
 
+        // Reserva já conhecida → 'updateReservation' (atualiza data/apartamento); antes só criava.
         const payloadWebhook = {
-          action: 'newReservation',
+          action: jaExistia ? 'updateReservation' : 'newReservation',
           data: {
             // Reserva completa da REST API (horas, adultos/crianças, notas, contacto,
             // is-blocked-booking...); os campos abaixo normalizam os que variam de nome.
@@ -2125,7 +2150,7 @@ async function reconciliarCancelamentos(req, res) {
     if (aplicar && paraCancelar.length > 0) {
       const r = await Tarefa.updateMany(
         { _id: { $in: paraCancelar.map((c) => c.tarefa_id) }, empresa_id: empresaId, estado: { $nin: ['cancelada', 'concluida', 'em_curso'] } },
-        { $set: { estado: 'cancelada', utilizador_id: null } }
+        { $set: { estado: 'cancelada', utilizador_id: null, equipa_atribuida: [] } }
       );
       canceladas = r.modifiedCount;
       registarAuditoria({

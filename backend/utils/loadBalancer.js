@@ -272,6 +272,15 @@ async function determinarUtilizadorAtribuido(
     ) {
       return false;
     }
+    // Folgas rotativas (datas avulsas): antes só o ramo VIP do Smoobu as respeitava.
+    if (
+      Array.isArray(s.folgas_rotativas) &&
+      s.folgas_rotativas.some(
+        (fr) => fr && fr.data && new Date(fr.data) >= range.start && new Date(fr.data) < range.end
+      )
+    ) {
+      return false;
+    }
     // FIX (equipas preferenciais) — Se o staff tem exclusivo_preferenciais: true,
     // só é elegível se a propriedade estiver nas suas propriedades_alocadas OU
     // se o seu ID constar na equipa_preferencial da propriedade.
@@ -339,8 +348,10 @@ async function determinarUtilizadorAtribuido(
             const tarefaParaLibertar = await Tarefa.findOne({
               utilizador_id: vip._id,
               empresa_id: empresaId,
-              data: { $gte: range.start },
-              estado: { $in: ['atribuida', 'em_curso'] },
+              // Só liberta uma tarefa do MESMO dia e ainda não iniciada: libertar outro
+              // dia não reduz a carga deste e libertar 'em_curso' tira trabalho a quem já está a fazê-lo.
+              data: { $gte: range.start, $lt: range.end },
+              estado: 'atribuida',
             }).sort({ data: -1 }).lean();
 
             if (tarefaParaLibertar) {
