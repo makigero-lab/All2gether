@@ -260,14 +260,12 @@ if (require.main === module) {
       // move tarefas concluídas/canceladas com mais de 3 meses para o arquivo.
       iniciarArquivista();
 
-      // HF8 — Cron job "Sincronização Smoobu" DESATIVADO.
-      // O sistema é 100% reativo a webhooks (o Smoobu envia eventos que são
-      // processados automaticamente). A sincronização ativa (pull da REST API
-      // do Smoobu) foi removida do fluxo de produção porque causava 502s e não
-      // faz parte do fluxo original. A função `iniciarSincronizacaoSmoobu`
-      // mantém-se exportada para uso manual via API direta se necessário no
-      // futuro, mas NÃO é agendada.
-      // iniciarSincronizacaoSmoobu();
+      // Reconciliação Smoobu (rede de segurança dos webhooks) + retoma de webhooks presos.
+      // HF8 tinha desligado a sincronização por causar 502 (pedidos em massa a pedido do
+      // utilizador). Agora é opt-in por empresa (`rotinas.sincronizacao_automatica`, desligado
+      // por defeito), com intervalo mínimo de 1 hora, sem sobreposição, só reservas futuras e
+      // pedidos espaçados; nunca reativa tarefas canceladas. Ver docs/BACKEND.md.
+      iniciarSincronizacaoSmoobu();
 
       // HF19 — Cron job "Limpeza de Fotos": todos os dias às 03:00,
       // esvazia fotos_conclusao e avarias[*].fotos de tarefas concluídas

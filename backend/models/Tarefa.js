@@ -253,4 +253,36 @@ tarefaSchema.index(
   { unique: true, partialFilterExpression: { rotina_dia: { $type: 'string' } } }
 );
 
-module.exports = mongoose.model('Tarefa', tarefaSchema);
+// Reservas Smoobu: no máximo 1 tarefa por (reserva, empresa). Protege contra corridas entre o
+// webhook e a reconciliação periódica. Índice parcial (só valores string), por isso as tarefas
+// manuais (smoobu_reserva_id null) não são afetadas. É um índice DIFERENTE do simples
+// `smoobu_reserva_id` acima (chave composta + unique + parcial).
+tarefaSchema.index(
+  { smoobu_reserva_id: 1, empresa_id: 1 },
+  {
+    unique: true,
+    name: 'smoobu_reserva_empresa_unico',
+    partialFilterExpression: { smoobu_reserva_id: { $type: 'string' } },
+  }
+);
+
+const Tarefa = mongoose.model('Tarefa', tarefaSchema);
+
+// Se já existirem duplicados em produção a criação do índice falha (E11000 / IndexBuildFailed).
+// Isso NÃO pode impedir o arranque: regista de forma clara e continua (sem a proteção).
+Tarefa.on('index', (err) => {
+  if (err && /smoobu_reserva_empresa_unico/.test(`${err.message} ${err.errmsg || ''}`)) {
+    console.error(
+      '⚠️  [Tarefa] Não foi possível criar o índice único smoobu_reserva_empresa_unico: provavelmente ' +
+        'já existem tarefas duplicadas (mesma reserva Smoobu + empresa). A aplicação continua sem essa ' +
+        'proteção. Remove/une os duplicados e reinicia para o índice ser criado. Detalhe: ' +
+        err.message
+    );
+  }
+});
+// Evita que um 'error' emitido pelo modelo (falha de índice) sem listener derrube o processo.
+Tarefa.on('error', (err) => {
+  console.error('⚠️  [Tarefa] erro do modelo (índices):', err && err.message);
+});
+
+module.exports = Tarefa;

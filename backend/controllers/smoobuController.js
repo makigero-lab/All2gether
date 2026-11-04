@@ -400,6 +400,10 @@ async function enriquecerReservaSmoobu(reservaId, empresaId) {
       detalhes: extra.detalhesReserva,
       contacto: extra.contactoHospede,
       bloqueada: extra.bloqueada,
+      // A REST do Smoobu pode devolver o tipo (cancellation) e/ou um status.
+      cancelada:
+        /cancel/i.test(String(extra.tipoReserva ?? '')) ||
+        /cancel/i.test(String(reserva.status ?? reserva.bookingStatus ?? '')),
     };
   } catch (err) {
     console.warn(
@@ -407,6 +411,43 @@ async function enriquecerReservaSmoobu(reservaId, empresaId) {
     );
     return null;
   }
+}
+
+/**
+ * Procura em WebhookLog um evento ANTERIOR de cancelamento desta reserva
+ * (ação de cancelamento, ou updateReservation com type "cancellation").
+ * Cobre o id como string ou número no payload e exclui o log atual.
+ * Logs de autenticação falhada (payload não confiável) são ignorados.
+ *
+ * @returns {Promise<boolean>}
+ */
+async function existeCancelamentoAnterior(reservaId, empresaId, logAtualId = null) {
+  if (!reservaId) return false;
+  const ids = [String(reservaId)];
+  if (/^\d+$/.test(String(reservaId)) && Number.isSafeInteger(Number(reservaId))) {
+    ids.push(Number(reservaId));
+  }
+  const filtro = {
+    ...(logAtualId ? { _id: { $ne: logAtualId } } : {}),
+    empresa_id: { $in: [empresaId, null] },
+    erro_msg: { $not: /^Autentica/ },
+    'payload.data.id': { $in: ids },
+    $or: [
+      { 'payload.action': { $in: ACOES_CANCELAR } },
+      { 'payload.action': { $in: ACOES_ATUALIZAR }, 'payload.data.type': /cancel/i },
+    ],
+  };
+  return Boolean(await WebhookLog.exists(filtro));
+}
+
+/** Erro 11000 do índice único (smoobu_reserva_id, empresa_id). */
+function ehDuplicadoReserva(err) {
+  return Boolean(
+    err &&
+      err.code === 11000 &&
+      (err.keyPattern?.smoobu_reserva_id !== undefined ||
+        /smoobu_reserva_id/.test(String(err.message)))
+  );
 }
 
 /**
@@ -438,7 +479,8 @@ async function criarTarefaPorReserva(
   detalhesReserva,
   content,
   empresaRestrita = null,
-  contacto = null
+  contacto = null,
+  opcoes = {}
 ) {
   if (!smoobuPropId || !dataTarefaRaw) {
     throw new Error(
@@ -521,6 +563,30 @@ async function criarTarefaPorReserva(
       '⚠️  [Smoobu] verificação de empresa ativa falhou (continua):',
       empErr.message
     );
+  }
+
+  // 3c. Cancelamento que chegou ANTES da reserva (webhooks fora de ordem): se há um
+  //     evento de cancelamento anterior, confirma o estado real no Smoobu.
+  //     - cancelada/bloqueada: não cria a tarefa;
+  //     - ativa: cria normalmente;
+  //     - consulta falhou: CRIA com alerta (uma limpeza a mais é melhor que uma em falta).
+  let alertaCancelamentoPrevio = null;
+  if (reservaId && (await existeCancelamentoAnterior(reservaId, empresaId, opcoes.logId))) {
+    const confirmado = await enriquecerReservaSmoobu(reservaId, empresaId);
+    const consultaOk = Boolean(confirmado && (confirmado.arrival || confirmado.departure));
+    if (consultaOk && (confirmado.cancelada || confirmado.bloqueada)) {
+      const nota = `Ignorada: cancelamento recebido antes da reserva e confirmado no Smoobu (reserva ${reservaId}).`;
+      console.log(`ℹ️  [Smoobu] ${nota}`);
+      if (opcoes.logId) {
+        await WebhookLog.findByIdAndUpdate(opcoes.logId, { erro_msg: nota }).catch(() => {});
+      }
+      return null;
+    }
+    if (!consultaOk) {
+      alertaCancelamentoPrevio =
+        'Cancelamento recebido antes da reserva e não foi possível confirmar no Smoobu — verificar se a limpeza é necessária';
+      console.warn(`⚠️  [Smoobu] reserva ${reservaId}: ${alertaCancelamentoPrevio}.`);
+    }
   }
 
   // 4. Tempo de limpeza (payload > propriedade > default 45).
@@ -829,6 +895,12 @@ async function criarTarefaPorReserva(
     }
   }
 
+  if (alertaCancelamentoPrevio) {
+    alertaTarefa = alertaTarefa
+      ? `${alertaCancelamentoPrevio} | ${alertaTarefa}`
+      : alertaCancelamentoPrevio;
+  }
+
   // 9. Cria a Tarefa (com alerta se aplicável).
   // HF21 — Se houver equipa atribuída (múltiplos staff), preenche equipa_atribuida.
   // Guarda a equipa COMPLETA (antes só o 1.º elemento; os restantes nunca viam a tarefa).
@@ -836,7 +908,9 @@ async function criarTarefaPorReserva(
     ? equipaCompleta
     : utilizadorAtribuido ? [utilizadorAtribuido] : [];
 
-  const novaTarefa = await Tarefa.create({
+  let novaTarefa;
+  try {
+  novaTarefa = await Tarefa.create({
     empresa_id: empresaId,
     propriedade_id: propriedade._id,
     smoobu_reserva_id: reservaId || undefined,
@@ -856,6 +930,17 @@ async function criarTarefaPorReserva(
     detalhes_reserva: detalhesReserva || undefined,
     hospedes: numHospedes, // HF23 — número de hóspedes para lavandaria
   });
+  } catch (errCriar) {
+    // Corrida (webhook + reconciliação): o índice único (reserva, empresa) já tem a tarefa.
+    if (reservaId && ehDuplicadoReserva(errCriar)) {
+      const jaCriada = await Tarefa.findOne({ smoobu_reserva_id: reservaId, empresa_id: empresaId });
+      if (jaCriada) {
+        console.log(`ℹ️  [Smoobu] tarefa da reserva ${reservaId} já criada em paralelo — reutilizada.`);
+        return jaCriada;
+      }
+    }
+    throw errCriar;
+  }
 
   await guardarContactoHospede(novaTarefa, contacto);
 
@@ -1008,6 +1093,13 @@ async function atualizarTarefaPorReserva(
     reativada = true;
   }
 
+  // 3a. Número de hóspedes acompanha o pax da reserva (pax vazio/0 mantém o valor atual).
+  const paxNovo = Number(detalhesReserva?.pax);
+  if (Number.isFinite(paxNovo) && paxNovo > 0 && tarefa.hospedes !== paxNovo) {
+    tarefa.hospedes = paxNovo;
+    mudou = true;
+  }
+
   // 3b. Atualiza detalhes_reserva.
   if (detalhesReserva) {
     // Junta aos dados já guardados (um update sem notas não apaga as notas).
@@ -1137,7 +1229,7 @@ async function atualizarTarefaPorReserva(
  * @param {import('mongoose').Types.ObjectId} [empresaId] - para resolver a API key (HF6).
  * @returns {Promise<Tarefa|{canceladas:number,total:number}|null>}
  */
-async function processarReservaSmoobu(payload, empresaId, empresaRestrita = null) {
+async function processarReservaSmoobu(payload, empresaId, empresaRestrita = null, opcoes = {}) {
   const {
     action,
     smoobuPropId,
@@ -1246,7 +1338,8 @@ async function processarReservaSmoobu(payload, empresaId, empresaRestrita = null
       detalhesFinal,
       content,
       empresaRestrita,
-      contactoFinal
+      contactoFinal,
+      opcoes
     );
   }
 
@@ -1267,7 +1360,9 @@ async function processarReservaSmoobu(payload, empresaId, empresaRestrita = null
  */
 async function processarWebhookSmoobu(payload, webhookLogId, empresaId, empresaRestrita = null) {
   try {
-    const resultado = await processarReservaSmoobu(payload, empresaId, empresaRestrita);
+    const resultado = await processarReservaSmoobu(payload, empresaId, empresaRestrita, {
+      logId: webhookLogId,
+    });
 
     // Atualiza o WebhookLog para 'processado'.
     try {
@@ -1737,6 +1832,13 @@ async function sincronizarReservas(req, res) {
       return res.status(400).json({ erro: 'empresa_id em falta no token.' });
     }
 
+    // Modo reconciliação periódica (job): não reativa canceladas, não toca em concluídas/em curso,
+    // espaça os pedidos e não recria tarefas de reservas manuais. A sincronização manual (sem
+    // `req.reconciliacao`) mantém o comportamento original.
+    const reconciliacao = Boolean(req.reconciliacao);
+    const pausaMs = reconciliacao ? Number(req.pausaMs ?? 400) : 0;
+    const pausar = (ms) => (ms > 0 ? new Promise((r) => setTimeout(r, ms)) : null);
+
     const { chave: apiKey } = await obterApiKeySmoobu(empresaId);
     if (!apiKey) {
       return res.status(400).json({
@@ -1797,6 +1899,7 @@ async function sincronizarReservas(req, res) {
         // Atualiza o total de páginas (se o Smoobu não enviar page_count, para no 1).
         totalPages = body?.page_count || 1;
         currentPage++;
+        if (currentPage <= totalPages) await pausar(pausaMs);
       }
     } catch (err) {
       if (err.status) {
@@ -1838,11 +1941,18 @@ async function sincronizarReservas(req, res) {
         if (reservaId) {
           const existente = await Tarefa.findOne({
             smoobu_reserva_id: String(reservaId),
+            empresa_id: empresaId,
           }).lean();
           if (existente) {
             jaExistia = true;
+            // Reconciliação: canceladas (talvez canceladas à mão), concluídas e em curso ficam como estão.
+            if (reconciliacao && ['cancelada', 'concluida', 'em_curso'].includes(existente.estado)) {
+              existentes++;
+              continue;
+            }
           }
         }
+        await pausar(pausaMs);
 
         // Mapeia a reserva do formato REST API para o formato do webhook.
         // O processador espera: { action, data: { id, arrival, departure,
@@ -1947,15 +2057,19 @@ async function sincronizarReservas(req, res) {
     let parceirosCriadas = 0;
     let parceirosSkipped = 0;
     try {
+      // Reconciliação não recria tarefas de reservas manuais (o gestor pode tê-las apagado).
+      const reservasManuaisAlvo = reconciliacao ? [] : null;
       const ReservaManual = require('../models/ReservaManual');
       const hoje = new Date();
       hoje.setUTCHours(0, 0, 0, 0);
       // Busca reservas manuais futuras (check_out >= hoje) sem tarefa gerada
       // OU cuja tarefa foi cancelada/apagada (tarefa_gerada_id null ou inexistente).
-      const reservasManuais = await ReservaManual.find({
-        empresa_id: empresaId,
-        check_out: { $gte: hoje },
-      }).lean();
+      const reservasManuais =
+        reservasManuaisAlvo ||
+        (await ReservaManual.find({
+          empresa_id: empresaId,
+          check_out: { $gte: hoje },
+        }).lean());
 
       for (const rm of reservasManuais) {
         // Verifica se a tarefa gerada ainda existe.
