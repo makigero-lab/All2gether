@@ -333,6 +333,95 @@ function EquipaPage() {
   const [baixaForm, setBaixaForm] = useState({ data_inicio: "", data_fim: "" });
   const [baixaSubmitting, setBaixaSubmitting] = useState(false);
   const [baixaResultado, setBaixaResultado] = useState<string | null>(null);
+  // Nº de tarefas ficadas por atribuir após falta/baixa (>0 mostra o botão de reatribuir).
+  const [faltaDesatribuidas, setFaltaDesatribuidas] = useState(0);
+  const [baixaDesatribuidas, setBaixaDesatribuidas] = useState(0);
+  // Reatribuição automática opcional (só corre com clique do gestor).
+  const [autoAtribuindo, setAutoAtribuindo] = useState(false);
+  const [autoResultado, setAutoResultado] = useState<string | null>(null);
+  const [autoErro, setAutoErro] = useState<string | null>(null);
+
+  /** Reatribui automaticamente TODAS as tarefas por atribuir a partir de hoje. */
+  async function handleReatribuirAuto() {
+    setAutoAtribuindo(true);
+    setAutoErro(null);
+    setAutoResultado(null);
+    try {
+      const res = await adminPost<{
+        sucesso: boolean;
+        processadas: number;
+        reatribuidas: number;
+        orfas: number;
+        mensagem?: string;
+      }>("/api/gestor/tarefas/auto-atribuir", {});
+      setAutoResultado(
+        res.processadas === 0
+          ? res.mensagem ?? "Não há tarefas por atribuir a partir de hoje."
+          : `Foram reatribuídas ${res.reatribuidas} tarefa(s). ` +
+              (res.orfas > 0
+                ? `${res.orfas} continuam por atribuir (sem staff disponível).`
+                : "Nenhuma ficou por atribuir.")
+      );
+      await carregar();
+    } catch (e) {
+      setAutoErro(
+        e instanceof Error
+          ? `Reatribuição falhou: ${e.message}`
+          : "Erro ao reatribuir tarefas."
+      );
+    } finally {
+      setAutoAtribuindo(false);
+    }
+  }
+
+  /** Bloco com o botão de reatribuição opcional (falta súbita e baixa). */
+  function renderReatribuir(desatribuidas: number, fechar: () => void) {
+    if (desatribuidas <= 0) return null;
+    return (
+      <div className="space-y-2 rounded-md border p-3">
+        {!autoResultado && (
+          <>
+            <p className="text-xs text-muted-foreground">
+              Nada foi reatribuído automaticamente. Se carregar em
+              &quot;Reatribuir automaticamente&quot;, o sistema distribui por
+              colegas disponíveis TODAS as tarefas por atribuir a partir de hoje
+              (não só as desta pessoa). Quem está ausente não recebe tarefas.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleReatribuirAuto}
+                disabled={autoAtribuindo}
+              >
+                {autoAtribuindo ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    A reatribuir…
+                  </>
+                ) : (
+                  "Reatribuir automaticamente"
+                )}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={fechar}
+                disabled={autoAtribuindo}
+              >
+                Fechar sem reatribuir
+              </Button>
+            </div>
+          </>
+        )}
+        {autoResultado && (
+          <p className="text-sm text-green-700 dark:text-green-300">{autoResultado}</p>
+        )}
+        {autoErro && <p className="text-sm text-red-600">{autoErro}</p>}
+      </div>
+    );
+  }
 
   // Utilizadores que podem ser responsáveis (só gestor — admin não aparece).
   const responsaveisPossiveis = utilizadores.filter(
@@ -616,13 +705,20 @@ function EquipaPage() {
     if (!faltaSubita) return;
     setFaltaSubmitting(true);
     setFaltaResultado(null);
+    setFaltaDesatribuidas(0);
+    setAutoResultado(null);
+    setAutoErro(null);
     try {
-      const res = await adminPost<{ reatribuidas: number; orfas: number; total: number }>(
+      const res = await adminPost<{ desatribuidas: number; total: number }>(
         `/api/gestor/equipa/${faltaSubita._id}/falta-subita`,
         {}
       );
+      const n = res.desatribuidas ?? 0;
+      setFaltaDesatribuidas(n);
       setFaltaResultado(
-        `${res.reatribuidas} tarefa(s) reatribuída(s) aos colegas, ${res.orfas} tarefa(s) ficou(aram) por atribuir.`
+        n > 0
+          ? `Falta registada. ${n} tarefa(s) ficaram por atribuir.`
+          : "Falta registada. Não havia tarefas para hoje."
       );
       await carregar();
     } catch (e) {
@@ -1881,7 +1977,7 @@ function EquipaPage() {
                   Reportar Falta Súbita
                 </DialogTitle>
                 <DialogDescription>
-                  As tarefas de hoje serão redistribuídas pelos colegas disponíveis.
+                  As tarefas de hoje ficam por atribuir; depois pode reatribuí-las.
                 </DialogDescription>
               </div>
               <DialogClose onClick={() => setFaltaSubita(null)} />
@@ -1892,15 +1988,17 @@ function EquipaPage() {
                 <span className="font-semibold">{faltaSubita?.nome}</span>?
               </p>
               <p className="text-xs text-muted-foreground">
-                As tarefas de hoje deste funcionário serão redistribuídas pelos
-                colegas disponíveis, usando o sistema de load balancing com
-                tempo de viagem. Tarefas sem ninguém disponível ficarão por atribuir.
+                As tarefas de hoje deste funcionário ficam por atribuir. Depois de
+                confirmar, pode reatribuí-las automaticamente aos colegas
+                disponíveis, se quiser.
               </p>
               {faltaResultado && (
                 <div className="rounded-md bg-amber-50 dark:bg-amber-950/20 p-3 text-sm text-amber-800 dark:text-amber-200">
                   {faltaResultado}
                 </div>
               )}
+              {faltaResultado &&
+                renderReatribuir(faltaDesatribuidas, () => setFaltaSubita(null))}
             </DialogContent>
             <DialogFooter>
               <Button
@@ -1946,7 +2044,7 @@ function EquipaPage() {
                   Registar Baixa ou Férias
                 </DialogTitle>
                 <DialogDescription>
-                  As tarefas futuras serão redistribuídas pelos colegas disponíveis.
+                  As tarefas do período ficam por atribuir e o gestor pode reatribuí-las a seguir.
                 </DialogDescription>
               </div>
               <DialogClose onClick={() => setBaixaModal(null)} />
@@ -1987,15 +2085,18 @@ function EquipaPage() {
                     </div>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Todas as tarefas atribuídas a este funcionário no período serão
-                    reatribuídas usando o sistema de load balancing. As que não
-                    tiverem ninguém disponível ficarão por atribuir.
+                    As tarefas atribuídas a este funcionário no período ficam por
+                    atribuir. Depois de confirmar, pode reatribuí-las
+                    automaticamente, se quiser.
                   </p>
                 </>
               ) : (
-                <div className="rounded-md bg-blue-50 dark:bg-blue-950/20 p-3 text-sm text-blue-800 dark:text-blue-200">
-                  {baixaResultado}
-                </div>
+                <>
+                  <div className="rounded-md bg-blue-50 dark:bg-blue-950/20 p-3 text-sm text-blue-800 dark:text-blue-200">
+                    {baixaResultado}
+                  </div>
+                  {renderReatribuir(baixaDesatribuidas, () => setBaixaModal(null))}
+                </>
               )}
             </DialogContent>
             <DialogFooter>
@@ -2019,18 +2120,24 @@ function EquipaPage() {
                   onClick={async () => {
                     if (!baixaModal) return;
                     setBaixaSubmitting(true);
+                    setBaixaDesatribuidas(0);
+                    setAutoResultado(null);
+                    setAutoErro(null);
                     try {
                       const res = await adminPost<{
-                        reatribuidas: number;
-                        orfas: number;
+                        desatribuidas: number;
                         total: number;
                       }>(`/api/gestor/equipa/${baixaModal._id}/baixa`, {
                         data_inicio: baixaForm.data_inicio,
                         data_fim: baixaForm.data_fim,
                         tipo: "ferias",
                       });
+                      const n = res.desatribuidas ?? 0;
+                      setBaixaDesatribuidas(n);
                       setBaixaResultado(
-                        `Baixa registada. ${res.reatribuidas} tarefa(s) reatribuída(s) aos colegas, ${res.orfas} ficou(aram) por atribuir.`
+                        n > 0
+                          ? `Baixa registada. ${n} tarefa(s) ficaram por atribuir.`
+                          : "Baixa registada. Não havia tarefas no período."
                       );
                       await carregar();
                     } catch (e) {
