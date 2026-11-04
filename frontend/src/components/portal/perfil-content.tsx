@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import {
+  ArrowLeft,
   User,
   Mail,
   Phone,
@@ -107,6 +109,14 @@ export function PerfilContent({ portalLabel }: { portalLabel: string }) {
 
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
+      {/* Voltar à página inicial do portal (parceiro ou fornecedor). */}
+      <Link
+        href={`/${user.role}`}
+        className="inline-flex w-fit items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+      >
+        <ArrowLeft className="h-4 w-4" />
+        Voltar
+      </Link>
       <div>
         <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
           <User className="h-6 w-6 text-primary" />
