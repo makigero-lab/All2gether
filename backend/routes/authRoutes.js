@@ -47,12 +47,16 @@ const limitadorDesligado = () =>
   process.env.NODE_ENV === 'test' && !process.env.TEST_LOGIN_LIMIT;
 
 // Limite por IP: só conta tentativas FALHADAS (logins com sucesso não gastam
-// quota). Nota: atrás da Vercel o IP visto pode ser o do proxy, partilhado por
-// vários utilizadores — por isso é mais tolerante e a defesa principal é o
-// limite por conta, abaixo.
+// quota). Atrás da Vercel o IP visto é o do proxy (os proxies Next não
+// reencaminham o IP do cliente), partilhado por toda a equipa: com um valor
+// baixo, 20 falhas de qualquer pessoa bloqueavam o login de todos. Por isso é
+// só uma rede de segurança larga (200 falhas / 15 min por IP, contra
+// pulverização de contas e acesso direto ao backend); a defesa principal contra
+// força bruta é o limite por CONTA, abaixo, que se mantém em 10.
+// O login está FORA do limite global (ver utils/limiteGlobal.js).
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 20,
+  max: 200,
   skipSuccessfulRequests: true,
   standardHeaders: true,
   legacyHeaders: false,

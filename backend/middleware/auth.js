@@ -40,6 +40,17 @@ function extrairToken(req) {
   return null;
 }
 
+// Verificação ÚNICA do JWT (assinatura, expiração e algoritmo). Devolve o
+// payload ou null. Partilhada com o limitador global (utils/limiteGlobal.js)
+// para que ambos aceitem exatamente os mesmos tokens.
+function verificarJwt(token) {
+  try {
+    return jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
+  } catch {
+    return null;
+  }
+}
+
 // SEGURANÇA (A4): o JWT dura vários dias, por isso confirmamos a cada pedido
 // que o utilizador continua ativo e não foi eliminado. Cache curta (30 s) para
 // não sobrecarregar a BD; 0 em testes para resultados determinísticos.
@@ -70,10 +81,8 @@ async function auth(req, res, next) {
     });
   }
 
-  let payload;
-  try {
-    payload = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] });
-  } catch {
+  const payload = verificarJwt(token);
+  if (!payload) {
     return res.status(401).json({ erro: 'Token inválido ou expirado.' });
   }
 
@@ -94,4 +103,4 @@ async function auth(req, res, next) {
   return next();
 }
 
-module.exports = { auth, JWT_SECRET };
+module.exports = { auth, JWT_SECRET, extrairToken, verificarJwt };
