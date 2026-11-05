@@ -302,6 +302,8 @@ export default function CalendarioOperacionalPage() {
 
   // SSR-safe mount: FullCalendar só pode ser renderizado no cliente.
   const [mounted, setMounted] = useState(false);
+  // Telemóvel: abre na vista Dia (a semana não cabe). O utilizador pode mudar; desktop inalterado.
+  const [vistaInicialCal, setVistaInicialCal] = useState<"timeGridWeek" | "timeGridDay">("timeGridWeek");
 
   // Período atual do calendário (definido via datesSet do FullCalendar).
   const [periodo, setPeriodo] = useState<PeriodoState | null>(null);
@@ -325,6 +327,9 @@ export default function CalendarioOperacionalPage() {
 
   /* --- Marca montação no cliente (inibe o SSR do FullCalendar) --- */
   useEffect(() => {
+    if (typeof window !== "undefined" && window.matchMedia("(max-width: 639px)").matches) {
+      setVistaInicialCal("timeGridDay");
+    }
     setMounted(true);
   }, []);
 
@@ -893,8 +898,8 @@ export default function CalendarioOperacionalPage() {
           ? res.mensagem ?? "Não há tarefas por atribuir a partir de hoje."
           : `Foram reatribuídas ${res.reatribuidas} tarefa(s). ` +
             (res.orfas > 0
-              ? `${res.orfas} continuam órfãs (sem staff disponível).`
-              : "Nenhuma ficou órfã. ✅");
+              ? `${res.orfas} continuam por atribuir (sem staff disponível).`
+              : "Nenhuma ficou por atribuir. ✅");
       setAutoAtribuirResultado(msg);
 
       // Atualiza o calendário para mostrar os blocos a mudarem de vermelho para as cores dos funcionários.
@@ -1339,7 +1344,7 @@ export default function CalendarioOperacionalPage() {
           {mounted ? (
             <FullCalendar
               plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
-              initialView="timeGridWeek"
+              initialView={vistaInicialCal}
               locale={ptLocale}
               timeZone="local"
               headerToolbar={{
@@ -1896,7 +1901,7 @@ export default function CalendarioOperacionalPage() {
                 onChange={(e) => setNovaForm((f) => ({ ...f, utilizador_id: e.target.value }))}
                 className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
               >
-                <option value="">— Por atribuir (deixar órfã) —</option>
+                <option value="">— Por atribuir (sem responsável) —</option>
                 {equipa.map((u) => (
                   <option key={u._id} value={u._id}>{u.nome}</option>
                 ))}

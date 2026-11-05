@@ -291,6 +291,7 @@ export default function ParceiroReservasPage() {
   const [elimAlteradas, setElimAlteradas] = useState<string[]>([]);
   const [errosLinha, setErrosLinha] = useState<Record<string, string>>({});
   const [gravando, setGravando] = useState(false);
+  const [sessaoTerminou, setSessaoTerminou] = useState(false);
   const [resumo, setResumo] = useState("");
   const [aviso, setAviso] = useState<string | null>(null);
   const [descartarAberto, setDescartarAberto] = useState(false);
@@ -537,12 +538,14 @@ export default function ParceiroReservasPage() {
     let gravadas = 0;
     let criadas = 0;
     let semRede = false;
+    let semSessao = false;
+    setSessaoTerminou(false);
     const conflitosRestantes = { ...conflitos };
 
     const sincronizar = () => setRascunho({ edicoes: { ...edicoes }, novas: [...novas], eliminar: { ...eliminar } });
 
     for (const [id, e] of Object.entries(rascunho.edicoes)) {
-      if (semRede) break;
+      if (semRede || semSessao) break;
       // Linha a eliminar: a edição pendente não é enviada.
       if (id in rascunho.eliminar) continue;
       const reserva = reservas.find((r) => r._id === id);
@@ -581,14 +584,15 @@ export default function ParceiroReservasPage() {
         }
         sincronizar();
       } catch (err) {
-        if (eErroDeRede(err)) semRede = true; // uma só mensagem «Sem ligação» no ecrã
+        if ((err as { status?: number })?.status === 401) semSessao = true; // sessão terminada: pára e mantém o rascunho
+        else if (eErroDeRede(err)) semRede = true; // uma só mensagem «Sem ligação» no ecrã
         else erros[id] = mensagemErro(err, "Erro ao gravar.");
       }
     }
 
     let eliminadas = 0;
     for (const id of Object.keys(rascunho.eliminar)) {
-      if (semRede) break;
+      if (semRede || semSessao) break;
       const reserva = reservas.find((r) => r._id === id);
       if (!reserva) {
         // Já não existe no sistema: a eliminação está feita.
@@ -616,14 +620,15 @@ export default function ParceiroReservasPage() {
           setReservas((rs) => rs.filter((r) => r._id !== id));
           sincronizar();
         } else {
-          if (eErroDeRede(err)) semRede = true; // uma só mensagem «Sem ligação» no ecrã
+          if ((err as { status?: number })?.status === 401) semSessao = true; // sessão terminada: pára e mantém o rascunho
+        else if (eErroDeRede(err)) semRede = true; // uma só mensagem «Sem ligação» no ecrã
           else erros[id] = mensagemErro(err, "Erro ao eliminar.");
         }
       }
     }
 
     for (const n of rascunho.novas) {
-      if (semRede) break;
+      if (semRede || semSessao) break;
       const msg = validarReserva(n, n.propriedade_id);
       if (msg) {
         erros[n.tmp] = msg;
@@ -641,7 +646,8 @@ export default function ParceiroReservasPage() {
         novas = novas.filter((x) => x.tmp !== n.tmp);
         sincronizar();
       } catch (err) {
-        if (eErroDeRede(err)) semRede = true; // uma só mensagem «Sem ligação» no ecrã
+        if ((err as { status?: number })?.status === 401) semSessao = true; // sessão terminada: pára e mantém o rascunho
+        else if (eErroDeRede(err)) semRede = true; // uma só mensagem «Sem ligação» no ecrã
         else erros[n.tmp] = mensagemErro(err, "Erro ao gravar.");
       }
     }
@@ -655,13 +661,18 @@ export default function ParceiroReservasPage() {
     if (eliminadas) partes.push(`${eliminadas} reserva(s) eliminada(s)`);
     const resultado = partes.length ? partes.join(", ") : "Nada foi gravado";
     setResumo(
-      semRede
+      semRede || semSessao
         ? `${resultado}. O resto continua por gravar.`
         : comErro > 0
         ? `${resultado}. ${comErro} linha(s) com erro continuam por gravar.`
-        : `${resultado}. As limpezas foram criadas/reatribuídas.`
+        : criadas > 0 || gravadas > 0
+        ? `${resultado}. As limpezas foram criadas/reatribuídas.`
+        : `${resultado}.`
     );
-    if (semRede) setErro("Sem ligação. As alterações continuam aqui, carrega em Gravar quando a rede voltar.");
+    if (semSessao) {
+      setErro("A tua sessão terminou. Inicia sessão outra vez, as alterações ficam guardadas.");
+      setSessaoTerminou(true);
+    } else if (semRede) setErro("Sem ligação. As alterações continuam aqui, carrega em Gravar quando a rede voltar.");
     // Recarrega a lista (as reservas novas aparecem com a sua limpeza).
     if (criadas > 0 || gravadas > 0 || eliminadas > 0) await carregar(true);
     setGravando(false);
@@ -669,7 +680,7 @@ export default function ParceiroReservasPage() {
 
   /** Confirmado no diálogo: só marca a linha "a eliminar"; o envio é ao Gravar. */
   function marcarParaEliminar() {
-    if (!eliminar) return;
+    if (!eliminar || gravando) return;
     const servidor = servidorPorId[eliminar._id];
     if (servidor) setRascunho((r) => marcarEliminar(r, eliminar._id, servidor));
     setAviso(null);
@@ -677,6 +688,7 @@ export default function ParceiroReservasPage() {
   }
 
   function anularEliminacao(id: string) {
+    if (gravando) return; // durante o Gravar a eliminação já está a ser enviada
     setRascunho((r) => anularEliminar(r, id));
     setElimAlteradas((a) => a.filter((x) => x !== id));
     setErrosLinha(({ [id]: _x, ...resto }) => resto);
@@ -684,10 +696,13 @@ export default function ParceiroReservasPage() {
 
   /** A reserva mudou no sistema mas a pessoa confirma: passa a valer o estado atual. */
   function eliminarMesmoAssim(id: string) {
+    if (gravando) return;
     const servidor = servidorPorId[id];
     if (!servidor) return;
     setRascunho((r) => marcarEliminar(r, id, servidor));
     setElimAlteradas((a) => a.filter((x) => x !== id));
+    // O erro «mudou no sistema» deixa de fazer sentido: a pessoa já confirmou.
+    setErrosLinha(({ [id]: _x, ...resto }) => resto);
   }
 
   function formatarData(iso: string): string {
@@ -801,15 +816,15 @@ export default function ParceiroReservasPage() {
     const servidor = servidorPorId[l.key];
     return (
       <div role="alert" className="space-y-1 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-        {l.erro && <p>{l.erro}</p>}
+        {l.erro && !elimMudou && <p>{l.erro}</p>}
         {elimMudou && (
           <div className="space-y-1">
             <p>Esta reserva mudou no sistema desde que a marcaste para eliminar.</p>
             <div className="flex flex-wrap gap-2">
-              <Button type="button" size="sm" variant="outline" className="h-8" onClick={() => eliminarMesmoAssim(l.key)}>
+              <Button type="button" size="sm" variant="outline" className="h-8" disabled={gravando} onClick={() => eliminarMesmoAssim(l.key)}>
                 Eliminar mesmo assim
               </Button>
-              <Button type="button" size="sm" variant="outline" className="h-8" onClick={() => anularEliminacao(l.key)}>
+              <Button type="button" size="sm" variant="outline" className="h-8" disabled={gravando} onClick={() => anularEliminacao(l.key)}>
                 Anular
               </Button>
             </div>
@@ -848,7 +863,7 @@ export default function ParceiroReservasPage() {
   );
 
   return (
-    <div className={`flex flex-col gap-6 p-4 sm:p-6 lg:p-8 ${pendentes > 0 ? "pb-28 md:pb-8" : ""}`}>
+    <main className={`flex flex-col gap-6 p-4 sm:p-6 lg:p-8 ${pendentes > 0 ? "pb-28 md:pb-8" : ""}`}>
       {/* Anúncio para leitores de ecrã: pendentes e resultado da gravação. */}
       <div className="sr-only" aria-live="polite" role="status">
         {pendentes === 0 ? "Sem alterações por gravar." : `${textoPendentes(pendentes)}.`} {resumo}
@@ -872,6 +887,7 @@ export default function ParceiroReservasPage() {
           <Button
             variant="outline"
             onClick={handleExportarExcel}
+            disabled={gravando}
             className="gap-2"
             title={
               pendentes > 0
@@ -890,7 +906,7 @@ export default function ParceiroReservasPage() {
               setImportFile(null);
               setImportResult(null);
             }}
-            disabled={importLoading}
+            disabled={importLoading || gravando}
             className="gap-2"
             title="Importa reservas em massa de um ficheiro Excel (.xlsx)."
             aria-label="Importar reservas de um ficheiro Excel"
@@ -905,7 +921,17 @@ export default function ParceiroReservasPage() {
         <Card className="sticky top-2 z-20 border-destructive/50 bg-background" role="alert">
           <CardContent className="flex items-center gap-2 p-4 text-sm text-destructive">
             <AlertCircle className="h-4 w-4 shrink-0" />
-            {erro}
+            <span className="flex-1">{erro}</span>
+            {sessaoTerminou && (
+              <a
+                href="/login"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex min-h-[44px] shrink-0 items-center rounded-md border border-destructive/50 px-3 font-medium underline"
+              >
+                Iniciar sessão (abre noutro separador)
+              </a>
+            )}
           </CardContent>
         </Card>
       )}
@@ -987,7 +1013,7 @@ export default function ParceiroReservasPage() {
                       value={nova.propriedade_id}
                       onChange={(e) => setN("propriedade_id")(e.target.value)}
                       className={CELULA}
-                      aria-label="Nova reserva: propriedade"
+                      disabled={gravando} aria-label="Nova reserva: propriedade"
                     >
                       <option value="">Propriedade…</option>
                       {propriedades.map((p) => (
@@ -996,37 +1022,37 @@ export default function ParceiroReservasPage() {
                     </select>
                   </td>
                   <td className="p-0">
-                    <input type="date" value={nova.check_in} className={CELULA} aria-label="Nova reserva: check-in"
+                    <input type="date" value={nova.check_in} className={CELULA} disabled={gravando} aria-label="Nova reserva: check-in"
                       onChange={(e) => setNova((n) => ({ ...n, check_in: e.target.value, check_out: n.check_out || e.target.value }))} />
                   </td>
                   <td className="p-0">
-                    <input value={nova.hora_checkin} onChange={(e) => setN("hora_checkin")(e.target.value)} placeholder="18:00" className={CELULA} aria-label="Nova reserva: hora de check-in" />
+                    <input value={nova.hora_checkin} onChange={(e) => setN("hora_checkin")(e.target.value)} placeholder="18:00" className={CELULA} disabled={gravando} aria-label="Nova reserva: hora de check-in" />
                   </td>
                   <td className="p-0">
-                    <input type="date" value={nova.check_out} onChange={(e) => setN("check_out")(e.target.value)} className={CELULA} aria-label="Nova reserva: check-out" />
+                    <input type="date" value={nova.check_out} onChange={(e) => setN("check_out")(e.target.value)} className={CELULA} disabled={gravando} aria-label="Nova reserva: check-out" />
                   </td>
                   <td className="px-2 text-right text-muted-foreground">{noites(nova.check_in, nova.check_out) || ""}</td>
                   <td className="p-0">
-                    <input type="number" min={0} value={nova.hospedes} onChange={(e) => setN("hospedes")(e.target.value)} className={`${CELULA} text-right`} aria-label="Nova reserva: hóspedes" />
+                    <input type="number" min={0} value={nova.hospedes} onChange={(e) => setN("hospedes")(e.target.value)} className={`${CELULA} text-right`} disabled={gravando} aria-label="Nova reserva: hóspedes" />
                   </td>
                   <td className="p-0">
-                    <input value={nova.nome_hospede} onChange={(e) => setN("nome_hospede")(e.target.value)} className={CELULA} aria-label="Nova reserva: nome do hóspede" />
+                    <input value={nova.nome_hospede} onChange={(e) => setN("nome_hospede")(e.target.value)} className={CELULA} disabled={gravando} aria-label="Nova reserva: nome do hóspede" />
                   </td>
                   <td className="p-0">
-                    <select value={nova.plataforma} onChange={(e) => setN("plataforma")(e.target.value)} className={CELULA} aria-label="Nova reserva: plataforma">
+                    <select value={nova.plataforma} onChange={(e) => setN("plataforma")(e.target.value)} className={CELULA} disabled={gravando} aria-label="Nova reserva: plataforma">
                       <option value="">—</option>
                       {PLATAFORMAS.map((o) => <option key={o} value={o}>{o}</option>)}
                     </select>
                   </td>
                   <td className="p-0">
-                    <input value={nova.horario_preferido} onChange={(e) => setN("horario_preferido")(e.target.value)} placeholder="11h - 14h" className={CELULA} aria-label="Nova reserva: horário preferido de limpeza" />
+                    <input value={nova.horario_preferido} onChange={(e) => setN("horario_preferido")(e.target.value)} placeholder="11h - 14h" className={CELULA} disabled={gravando} aria-label="Nova reserva: horário preferido de limpeza" />
                   </td>
                   <td className="p-0">
-                    <input value={nova.observacoes} onChange={(e) => setN("observacoes")(e.target.value)} className={CELULA} aria-label="Nova reserva: notas" />
+                    <input value={nova.observacoes} onChange={(e) => setN("observacoes")(e.target.value)} className={CELULA} disabled={gravando} aria-label="Nova reserva: notas" />
                   </td>
                   <td className="px-2 text-xs text-muted-foreground">nova</td>
                   <td className="px-1 text-right">
-                    <Button size="sm" onClick={acrescentarNova} title="Acrescentar às reservas por gravar (Enter)" aria-label="Acrescentar reserva por gravar">
+                    <Button size="sm" onClick={acrescentarNova} title="Acrescentar às reservas por gravar (Enter)" disabled={gravando} aria-label="Acrescentar reserva por gravar">
                       <Plus className="h-4 w-4" />
                     </Button>
                   </td>
@@ -1077,6 +1103,8 @@ export default function ParceiroReservasPage() {
                         <td className="whitespace-nowrap px-2">
                           {l.nova ? (
                             <span className="rounded bg-amber-200 px-1.5 py-0.5 text-xs font-medium text-amber-900">Por gravar</span>
+                          ) : l.eliminada ? (
+                            <span className="rounded bg-destructive/15 px-1.5 py-0.5 text-xs font-medium text-destructive">A eliminar</span>
                           ) : l.estado ? (
                             <span className="inline-flex items-center gap-1">
                               <EstadoTarefaBadge estado={estadoParaParceiro(l.estado)} />
@@ -1095,7 +1123,7 @@ export default function ParceiroReservasPage() {
                             </Button>
                           ) : (
                             l.eliminada ? (
-                            <Button variant="outline" size="sm" onClick={() => anularEliminacao(l.key)} aria-label={`Anular a eliminação da reserva de ${nome}`}>
+                            <Button variant="outline" size="sm" disabled={gravando} onClick={() => anularEliminacao(l.key)} aria-label={`Anular a eliminação da reserva de ${nome}`}>
                               Anular
                             </Button>
                             ) : (
@@ -1137,7 +1165,7 @@ export default function ParceiroReservasPage() {
                   value={nova.propriedade_id}
                   onChange={(e) => setN("propriedade_id")(e.target.value)}
                   className={CELULA_CARTAO}
-                  aria-label="Nova reserva: propriedade"
+                  disabled={gravando} aria-label="Nova reserva: propriedade"
                 >
                   <option value="">Propriedade…</option>
                   {propriedades.map((p) => (
@@ -1147,36 +1175,36 @@ export default function ParceiroReservasPage() {
               </Campo>
               <div className="grid grid-cols-2 gap-3">
                 <Campo texto="Check-in">
-                  <input type="date" value={nova.check_in} className={CELULA_CARTAO} aria-label="Nova reserva: check-in"
+                  <input type="date" value={nova.check_in} className={CELULA_CARTAO} disabled={gravando} aria-label="Nova reserva: check-in"
                     onChange={(e) => setNova((n) => ({ ...n, check_in: e.target.value, check_out: n.check_out || e.target.value }))} />
                 </Campo>
                 <Campo texto="Check-out">
-                  <input type="date" value={nova.check_out} onChange={(e) => setN("check_out")(e.target.value)} className={CELULA_CARTAO} aria-label="Nova reserva: check-out" />
+                  <input type="date" value={nova.check_out} onChange={(e) => setN("check_out")(e.target.value)} className={CELULA_CARTAO} disabled={gravando} aria-label="Nova reserva: check-out" />
                 </Campo>
                 <Campo texto="Hora de check-in">
-                  <input value={nova.hora_checkin} onChange={(e) => setN("hora_checkin")(e.target.value)} placeholder="18:00" className={CELULA_CARTAO} aria-label="Nova reserva: hora de check-in" />
+                  <input value={nova.hora_checkin} onChange={(e) => setN("hora_checkin")(e.target.value)} placeholder="18:00" className={CELULA_CARTAO} disabled={gravando} aria-label="Nova reserva: hora de check-in" />
                 </Campo>
                 <Campo texto="Hóspedes">
-                  <input type="number" inputMode="numeric" min={0} value={nova.hospedes} onChange={(e) => setN("hospedes")(e.target.value)} className={CELULA_CARTAO} aria-label="Nova reserva: hóspedes" />
+                  <input type="number" inputMode="numeric" min={0} value={nova.hospedes} onChange={(e) => setN("hospedes")(e.target.value)} className={CELULA_CARTAO} disabled={gravando} aria-label="Nova reserva: hóspedes" />
                 </Campo>
               </div>
               <Campo texto="Nome do hóspede">
-                <input value={nova.nome_hospede} onChange={(e) => setN("nome_hospede")(e.target.value)} className={CELULA_CARTAO} aria-label="Nova reserva: nome do hóspede" />
+                <input value={nova.nome_hospede} onChange={(e) => setN("nome_hospede")(e.target.value)} className={CELULA_CARTAO} disabled={gravando} aria-label="Nova reserva: nome do hóspede" />
               </Campo>
               <Campo texto="Plataforma">
-                <select value={nova.plataforma} onChange={(e) => setN("plataforma")(e.target.value)} className={CELULA_CARTAO} aria-label="Nova reserva: plataforma">
+                <select value={nova.plataforma} onChange={(e) => setN("plataforma")(e.target.value)} className={CELULA_CARTAO} disabled={gravando} aria-label="Nova reserva: plataforma">
                   <option value="">—</option>
                   {PLATAFORMAS.map((o) => <option key={o} value={o}>{o}</option>)}
                 </select>
               </Campo>
               <Campo texto="Horário preferido de limpeza">
-                <input value={nova.horario_preferido} onChange={(e) => setN("horario_preferido")(e.target.value)} placeholder="11h - 14h" className={CELULA_CARTAO} aria-label="Nova reserva: horário preferido de limpeza" />
+                <input value={nova.horario_preferido} onChange={(e) => setN("horario_preferido")(e.target.value)} placeholder="11h - 14h" className={CELULA_CARTAO} disabled={gravando} aria-label="Nova reserva: horário preferido de limpeza" />
               </Campo>
               <Campo texto="Notas">
-                <input value={nova.observacoes} onChange={(e) => setN("observacoes")(e.target.value)} className={CELULA_CARTAO} aria-label="Nova reserva: notas" />
+                <input value={nova.observacoes} onChange={(e) => setN("observacoes")(e.target.value)} className={CELULA_CARTAO} disabled={gravando} aria-label="Nova reserva: notas" />
               </Campo>
               {novaErro && <p role="alert" className="text-sm text-destructive">{novaErro}</p>}
-              <Button size="touch" variant="outline" className="w-full" onClick={acrescentarNova} aria-label="Acrescentar reserva por gravar">
+              <Button size="touch" variant="outline" className="w-full" onClick={acrescentarNova} disabled={gravando} aria-label="Acrescentar reserva por gravar">
                 <Plus className="h-4 w-4" />
                 Acrescentar (fica por gravar)
               </Button>
@@ -1207,6 +1235,8 @@ export default function ParceiroReservasPage() {
                       <div className="mt-1 flex flex-wrap items-center gap-1">
                         {l.nova ? (
                           <span className="rounded bg-amber-200 px-1.5 py-0.5 text-xs font-medium text-amber-900">Por gravar</span>
+                        ) : l.eliminada ? (
+                          <span className="rounded bg-destructive/15 px-1.5 py-0.5 text-xs font-medium text-destructive">A eliminar</span>
                         ) : l.estado ? (
                           <EstadoTarefaBadge estado={estadoParaParceiro(l.estado)} />
                         ) : (
@@ -1229,7 +1259,7 @@ export default function ParceiroReservasPage() {
                       </Button>
                     ) : (
                       l.eliminada ? (
-                      <Button variant="outline" className="h-11 shrink-0" onClick={() => anularEliminacao(l.key)} aria-label={`Anular a eliminação da reserva de ${nome}`}>
+                      <Button variant="outline" className="h-11 shrink-0" disabled={gravando} onClick={() => anularEliminacao(l.key)} aria-label={`Anular a eliminação da reserva de ${nome}`}>
                         Anular
                       </Button>
                       ) : (
@@ -1391,7 +1421,7 @@ export default function ParceiroReservasPage() {
           </Button>
         </DialogFooter>
       </Dialog>
-    </div>
+    </main>
   );
 }
 

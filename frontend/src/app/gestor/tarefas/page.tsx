@@ -570,8 +570,8 @@ export default function AdminTarefasPage() {
           ? res.mensagem ?? "Não há tarefas por atribuir a partir de hoje."
           : `Foram reatribuídas ${res.reatribuidas} tarefa(s). ` +
             (res.orfas > 0
-              ? `${res.orfas} continuam órfãs (sem staff disponível).`
-              : "Nenhuma ficou órfã. ✅");
+              ? `${res.orfas} continuam por atribuir (sem staff disponível).`
+              : "Nenhuma ficou por atribuir. ✅");
       setWarningToast(msg);
 
       // Atualiza a grelha para mostrar os blocos a mudarem de vermelho para as cores dos funcionários.
@@ -968,7 +968,7 @@ export default function AdminTarefasPage() {
 
       {/* v1.58.0 (Prompt 80, ponto 3) — Abas de filtragem por estado */}
       <Tabs value={abaEstado} onValueChange={(v) => setAbaEstado(v as AbaEstado)}>
-        <TabsList className="grid w-full grid-cols-4 sm:inline-flex sm:w-auto">
+        <TabsList className="grid h-auto w-full grid-cols-2 gap-1 sm:inline-flex sm:h-9 sm:w-auto">
           <TabsTrigger value="todas" className="gap-1.5">
             Todas
             <Badge variant="secondary" className="ml-1 px-1.5 py-0 text-xs">
