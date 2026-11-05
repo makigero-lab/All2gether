@@ -41,6 +41,7 @@
  * Devolve { utilizadorId, tempoViagem } ou null se ninguém couber no SLA.
  */
 
+const mongoose = require('mongoose');
 const Utilizador = require('../models/Utilizador');
 const Ausencia = require('../models/Ausencia');
 const Tarefa = require('../models/Tarefa');
@@ -58,6 +59,14 @@ const PESO_CLUSTERING = 120;    // 2h de bónus se já está na mesma propriedad
 const PESO_ROTATIVIDADE = 30;   // 30 min de penalização se limpou ontem
 const PESO_EQUIDADE_HORA = 10;  // 10 min de penalização por hora semanal acumulada
 
+// Os `aggregate` NÃO fazem cast automático: um id em string (ex.: do JWT)
+// nunca casaria e a carga daria 0 (limite de 8h ignorado). Cast aqui, uma vez.
+function oid(v) {
+  if (v && typeof v === 'object' && v._bsontype) return v;
+  if (v && typeof v === 'object' && v._id) return oid(v._id);
+  return mongoose.Types.ObjectId.isValid(String(v)) ? new mongoose.Types.ObjectId(String(v)) : v;
+}
+
 /**
  * Soma o tempo_limpeza_minutos de todas as tarefas não-canceladas/não-concluídas
  * de um utilizador num dia (range).
@@ -67,8 +76,8 @@ async function calcularCargaLimpezaDia(empresaId, utilizadorId, range) {
   const res = await Tarefa.aggregate([
     {
       $match: {
-        empresa_id: empresaId,
-        $or: [{ utilizador_id: utilizadorId }, { equipa_atribuida: utilizadorId }],
+        empresa_id: oid(empresaId),
+        $or: [{ utilizador_id: oid(utilizadorId) }, { utilizador_id: { $ne: null }, equipa_atribuida: oid(utilizadorId) }],
         data: { $gte: range.start, $lt: range.end },
         estado: { $nin: ['cancelada', 'concluida'] },
       },
@@ -122,8 +131,8 @@ async function calcularCargaSemanal(empresaId, utilizadorId, dataReferencia) {
   const res = await Tarefa.aggregate([
     {
       $match: {
-        empresa_id: empresaId,
-        $or: [{ utilizador_id: utilizadorId }, { equipa_atribuida: utilizadorId }],
+        empresa_id: oid(empresaId),
+        $or: [{ utilizador_id: oid(utilizadorId) }, { utilizador_id: { $ne: null }, equipa_atribuida: oid(utilizadorId) }],
         data: { $gte: inicioSemana, $lt: fimSemana },
         estado: { $nin: ['cancelada'] },
       },
@@ -430,8 +439,8 @@ async function determinarUtilizadorAtribuido(
   const cargasLimpeza = await Tarefa.aggregate([
     {
       $match: {
-        empresa_id: empresaId,
-        $or: [{ utilizador_id: { $in: disponiveisIds } }, { equipa_atribuida: { $in: disponiveisIds } }],
+        empresa_id: oid(empresaId),
+        $or: [{ utilizador_id: { $in: disponiveisIds } }, { utilizador_id: { $ne: null }, equipa_atribuida: { $in: disponiveisIds } }],
         data: { $gte: range.start, $lt: range.end },
         estado: { $nin: ['cancelada', 'concluida'] },
       },
@@ -688,6 +697,7 @@ async function determinarEquipaAtribuida(
 }
 
 module.exports = {
+  oid,
   calcularCargaLimpezaDia,
   determinarUtilizadorAtribuido,
   determinarEquipaAtribuida,

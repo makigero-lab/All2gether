@@ -33,3 +33,20 @@ O Render grátis adormece após inatividade. Usa um serviço externo, **não** o
 
 ## 3. Reconciliação do Smoobu (opcional)
 Rede de segurança dos webhooks, desligada por defeito. Para ativar numa empresa: *Configurações > Integrações > Rotinas* (sincronização automática + frequência em horas, mínimo 1). Ver `docs/BACKEND.md`.
+
+## 4. Limpar equipas fantasma (uma vez)
+Tarefas sem responsável (`utilizador_id` null) com `equipa_atribuida` preenchida, nos estados `por_atribuir`, `nao_atribuida` e `cancelada`. O código já as ignora; o script limpa os dados (`equipa_atribuida: []`, `pessoas_em_falta: 0`; mais nenhum campo). Idempotente.
+
+```
+cd backend
+# 1) só conta (não altera; mostra números por estado, sem dados pessoais)
+MONGODB_URI="<uri de produção>" node scripts/limpar-equipas-fantasma.js
+# 2) depois de confirmar os números (esperado ~8 por_atribuir e ~455 cancelada)
+MONGODB_URI="<uri de produção>" node scripts/limpar-equipas-fantasma.js --aplicar
+```
+Fazer um backup antes (secção 1). Consulta só de leitura equivalente (mongosh):
+`db.tarefas.countDocuments({ utilizador_id: null, "equipa_atribuida.0": { $exists: true }, estado: { $in: ["por_atribuir","nao_atribuida","cancelada"] } })`
+
+## 5. Verificação em produção dos índices novos (só leitura)
+Os índices novos são parciais e só abrangem documentos que tenham o campo novo, por isso não falham com dados antigos. Para confirmar depois do arranque:
+`db.reservamanuals.getIndexes()` deve listar `parceiro_id_1_chave_idempotencia_1` (unique, partialFilterExpression `chave_idempotencia: {$type: "string"}`). A coleção `lockempresas` é criada na primeira importação de Excel (lock com expiração de 2 min).

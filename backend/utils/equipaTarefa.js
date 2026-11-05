@@ -7,6 +7,10 @@
  *   - Tarefas antigas com `equipa_atribuida` vazia são tratadas como equipa só
  *     com `utilizador_id` (sem migração).
  *
+ * Tarefa sem responsável (`utilizador_id` null) = sem equipa; `equipa_atribuida`
+ * preenchida nesse caso é lixo antigo e é ignorada (ver
+ * scripts/limpar-equipas-fantasma.js).
+ *
  * Este módulo é o ÚNICO sítio que sabe isto. Todas as leituras e escritas
  * passam por aqui para a segunda pessoa ver e poder agir na tarefa, e para
  * carga/conflitos/ausências contarem para cada membro.
@@ -19,6 +23,9 @@ const idStr = (v) => (v === null || v === undefined ? null : String(v && v._id ?
 /** IDs (string) dos membros: responsável primeiro, sem repetidos nem nulos. */
 function idsEquipa(tarefa) {
   if (!tarefa) return [];
+  // Sem responsável não há equipa: os "membros fantasma" (equipa preenchida com
+  // utilizador_id null, dados antigos) não contam para nada.
+  if (!idStr(tarefa.utilizador_id)) return [];
   const out = [];
   const add = (v) => {
     const s = idStr(v);
@@ -50,7 +57,7 @@ function toObjectId(v) {
  */
 function filtroMembro(utilizadorId) {
   const id = toObjectId(utilizadorId);
-  return { $or: [{ utilizador_id: id }, { equipa_atribuida: id }] };
+  return { $or: [{ utilizador_id: id }, { utilizador_id: { $ne: null }, equipa_atribuida: id }] };
 }
 
 /** Junta o critério "é membro" a um filtro existente, sem colidir com um $or próprio. */
@@ -66,7 +73,7 @@ function comMembro(filtro, utilizadorId) {
 /** Filtro para vários utilizadores de uma vez (qualquer deles é membro). */
 function filtroMembros(ids) {
   const lista = (ids || []).map(toObjectId);
-  return { $or: [{ utilizador_id: { $in: lista } }, { equipa_atribuida: { $in: lista } }] };
+  return { $or: [{ utilizador_id: { $in: lista } }, { utilizador_id: { $ne: null }, equipa_atribuida: { $in: lista } }] };
 }
 
 /**
@@ -123,6 +130,8 @@ function retirarMembroDoc(tarefa, utilizadorId) {
  * foram populados (utilizador apagado).
  */
 function membrosPopulados(tarefa) {
+  // Sem responsável não há equipa (ignora membros fantasma).
+  if (!tarefa || !tarefa.utilizador_id) return [];
   const vistos = new Set();
   const out = [];
   for (const u of [tarefa && tarefa.utilizador_id, ...((tarefa && tarefa.equipa_atribuida) || [])]) {
@@ -140,9 +149,12 @@ function membrosPopulados(tarefa) {
  * para contar carga/horas por pessoa.
  */
 const EXPR_MEMBROS = {
-  $setUnion: [
-    { $cond: [{ $ifNull: ['$utilizador_id', false] }, ['$utilizador_id'], []] },
-    { $ifNull: ['$equipa_atribuida', []] },
+  $cond: [
+    { $ifNull: ['$utilizador_id', false] },
+    {
+      $setUnion: [['$utilizador_id'], { $ifNull: ['$equipa_atribuida', []] }],
+    },
+    [], // sem responsável = sem equipa (ignora membros fantasma)
   ],
 };
 

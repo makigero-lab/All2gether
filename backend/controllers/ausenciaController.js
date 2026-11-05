@@ -19,7 +19,7 @@ const Utilizador = require('../models/Utilizador');
 const Tarefa = require('../models/Tarefa');
 const { registarAuditoria } = require('../utils/auditoria');
 const { avisarGestores } = require('../utils/notificar');
-const { diagnosticarFaltaDeStaff } = require('../utils/atribuicaoAutomatica');
+const { diagnosticarFaltaDeStaff, planearVaga, avisarColegasDoSubstituto } = require('../utils/atribuicaoAutomatica');
 const { comMembro, idsEquipa, normalizarEquipa, retirarMembroDoc } = require('../utils/equipaTarefa');
 
 /**
@@ -778,6 +778,8 @@ async function reatribuirTarefasPeriodo(empresaId, utilizadorId, inicio, fim) {
   const faltam = [];
   // Quantas tarefas recebeu cada pessoa (para uma só notificação por pessoa).
   const recebidas = new Map();
+  // Vagas em que havia candidatos mas todos com a agenda ocupada à hora da tarefa.
+  const conflitosAgenda = [];
 
   for (const tarefa of tarefas) {
     try {
@@ -796,15 +798,34 @@ async function reatribuirTarefasPeriodo(empresaId, utilizadorId, inicio, fim) {
       const parcial = tarefa.estado === 'atribuida';
       const membrosAtuais = idsEquipa(tarefa);
       const staffNecessario = Math.max(1, Number(tarefa.propriedade_id?.staff_necessario) || 1);
-      const precisa = parcial ? Number(tarefa.pessoas_em_falta) || 0 : staffNecessario;
+      let precisa = staffNecessario;
+      let novos = [];
+      let staffExcluidos = new Set([String(utilizadorId), ...membrosAtuais]);
 
-      // O ausente e quem já está na tarefa nunca entram (sem repetir membros).
-      // O load balancer filtra ainda ausências, folgas e lotação.
-      const staffExcluidos = new Set([String(utilizadorId), ...membrosAtuais]);
-      const r = await determinarEquipaAtribuida(
-        empresaId, range, coordenadas, tempoNovaTarefa, propriedadeId, precisa, staffExcluidos
-      );
-      const novos = (r?.equipa || []).map((m) => m.utilizadorId);
+      if (parcial) {
+        // Só a vaga, com o staff_necessario ATUAL (se baixou, não pede mais gente) e
+        // sem candidatos cuja agenda choque com a hora da tarefa (sem sobreposições).
+        const v = await planearVaga({
+          empresaId, tarefa, propriedade: tarefa.propriedade_id, excluirExtra: [String(utilizadorId)],
+        });
+        precisa = v.precisa;
+        novos = v.novos;
+        if (precisa === 0) {
+          // Vaga já não existe (necessidade desceu): limpa o contador antigo.
+          await Tarefa.updateOne({ _id: tarefa._id }, { $set: { pessoas_em_falta: 0 } });
+          continue;
+        }
+        if (v.conflitos > 0 && novos.length === 0) {
+          conflitosAgenda.push({ propriedade: nomeProp, faltam: precisa });
+        }
+      } else {
+        // O ausente e quem já está na tarefa nunca entram (sem repetir membros).
+        // O load balancer filtra ainda ausências, folgas e lotação.
+        const r = await determinarEquipaAtribuida(
+          empresaId, range, coordenadas, tempoNovaTarefa, propriedadeId, precisa, staffExcluidos
+        );
+        novos = (r?.equipa || []).map((m) => m.utilizadorId);
+      }
 
       if (novos.length > 0) {
         const eq = normalizarEquipa(membrosAtuais[0] || novos[0], [...membrosAtuais, ...novos]);
@@ -837,6 +858,7 @@ async function reatribuirTarefasPeriodo(empresaId, utilizadorId, inicio, fim) {
         await Tarefa.updateOne({ _id: tarefa._id }, { $set: set });
 
         reatribuidas++;
+        if (parcial) avisarColegasDoSubstituto(membrosAtuais, novos, nomeProp);
         for (const id of novos) {
           const idStr = String(id);
           const ant = recebidas.get(idStr) || [];
@@ -899,7 +921,7 @@ async function reatribuirTarefasPeriodo(empresaId, utilizadorId, inicio, fim) {
       `(empresa=${empresaId}, período=${inicio.toISOString().slice(0, 10)} a ${fim.toISOString().slice(0, 10)}).`
   );
 
-  return { total: tarefas.length, reatribuidas, orfas, parciais: faltam.length, faltam };
+  return { total: tarefas.length, reatribuidas, orfas, parciais: faltam.length, faltam, conflitosAgenda };
 }
 
 /**
@@ -952,7 +974,10 @@ async function reatribuirAutomaticamente(empresaId, utilizadorId, inicio, fim) {
     await avisarGestores(
       empresaId,
       '⚠️ Equipa incompleta',
-      `Sem substituto disponível, a limpeza fica com os restantes. ${linhas}.`,
+      `Sem substituto disponível, a limpeza fica com os restantes. ${linhas}.` +
+        (resultado.conflitosAgenda && resultado.conflitosAgenda.length > 0
+          ? ' Havia pessoas livres no dia, mas com outra limpeza à mesma hora (não foram escaladas para não ficarem sobrepostas).'
+          : ''),
       '/gestor/tarefas'
     );
   }

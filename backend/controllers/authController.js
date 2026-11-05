@@ -22,6 +22,27 @@ const { comMembro } = require('../utils/equipaTarefa');
 const TOKEN_EXPIRACAO = process.env.JWT_EXPIRACAO || '7d';
 
 /**
+ * Junta `equipa_nomes` a cada tarefa: [{ _id, nome, responsavel }] (responsável
+ * primeiro). Só o nome (sem contactos): é para o staff saber com quem trabalha.
+ */
+async function juntarNomesEquipa(tarefas, meuId = null) {
+  const { idsEquipa } = require('../utils/equipaTarefa');
+  const Utilizador = require('../models/Utilizador');
+  const todos = new Set();
+  for (const t of tarefas) idsEquipa(t).forEach((i) => todos.add(i));
+  if (todos.size === 0) return tarefas.map((t) => ({ ...t, equipa_nomes: [] }));
+  const us = await Utilizador.find({ _id: { $in: [...todos] } }).select('nome').lean();
+  const nomes = new Map(us.map((u) => [String(u._id), u.nome]));
+  return tarefas.map((t) => {
+    const ids = idsEquipa(t);
+    return {
+      ...t,
+      equipa_nomes: ids.map((id, i) => ({ _id: id, nome: nomes.get(id) || 'Colega', responsavel: i === 0, eu: !!meuId && String(meuId) === id })),
+    };
+  });
+}
+
+/**
  * POST /api/auth/login
  *
  * Body: { email, password }
@@ -190,7 +211,7 @@ exports.meuCalendario = async (req, res) => {
       .sort({ data_inicio: 1 })
       .lean();
 
-    return res.status(200).json({ tarefas, ausencias });
+    return res.status(200).json({ tarefas: await juntarNomesEquipa(tarefas, utilizadorId), ausencias });
   } catch (err) {
     console.error('❌ meuCalendario:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
@@ -257,7 +278,7 @@ exports.minhasTarefas = async (req, res) => {
       return { ...t, tempo_viagem_minutos: 0 };
     });
 
-    return res.status(200).json({ tarefas: tarefasComViagem });
+    return res.status(200).json({ tarefas: await juntarNomesEquipa(tarefasComViagem, req.user.id) });
   } catch (err) {
     console.error('❌ minhasTarefas:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
@@ -357,7 +378,8 @@ exports.minhaTarefaDetalhe = async (req, res) => {
       }
     }
 
-    return res.status(200).json({ tarefa });
+    const [comEquipa] = await juntarNomesEquipa([tarefa], req.user.id);
+    return res.status(200).json({ tarefa: comEquipa });
   } catch (err) {
     console.error('❌ minhaTarefaDetalhe:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
@@ -395,17 +417,23 @@ exports.concluirMinhaTarefa = async (req, res) => {
     if (tarefa.estado === 'concluida') {
       return res.status(400).json({ erro: 'Tarefa já concluída.' });
     }
-
-    // Atualiza estado e guarda observações.
-    tarefa.estado = 'concluida';
-    tarefa.concluida_em = new Date();
-    if (req.body?.observacoes !== undefined) {
-      tarefa.observacoes = String(req.body.observacoes || '');
+    if (tarefa.estado === 'cancelada') {
+      return res.status(400).json({ erro: 'Não podes concluir uma tarefa cancelada.' });
     }
 
-    await tarefa.save();
+    // Atómico: conclusão simultânea dá 400 "já concluída" em vez de 500.
+    const set = { estado: 'concluida', concluida_em: new Date() };
+    if (req.body?.observacoes !== undefined) set.observacoes = String(req.body.observacoes || '');
+    const atualizada = await Tarefa.findOneAndUpdate(
+      comMembro({ _id: id, estado: { $nin: ['concluida', 'cancelada'] } }, req.user.id),
+      { $set: set },
+      { new: true }
+    );
+    if (!atualizada) {
+      return res.status(400).json({ erro: 'Tarefa já concluída (ou entretanto cancelada).' });
+    }
 
-    const resp = tarefa.toObject();
+    const resp = atualizada.toObject();
     delete resp.password_hash;
 
     return res.status(200).json({ tarefa: resp });

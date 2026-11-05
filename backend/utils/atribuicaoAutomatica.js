@@ -15,6 +15,8 @@ const {
   determinarEquipaAtribuida,
 } = require('./loadBalancer');
 const { calcularInicioTarefaUtilizador, obterRangeDia } = require('./scheduler');
+const Tarefa = require('../models/Tarefa');
+const { idsEquipa, comMembro, normalizarEquipa } = require('./equipaTarefa');
 
 const MOTIVO_SEM_EQUIPA = 'Sem equipa ativa';
 const MOTIVO_INDISPONIVEL = 'Toda a equipa ausente, de folga ou fora da equipa exclusiva neste dia';
@@ -121,7 +123,108 @@ async function planearAtribuicao({ empresaId, propriedade, dia, tempoLimpeza }) 
   return plano;
 }
 
+/**
+ * A pessoa já tem outra limpeza que se sobrepõe a [data, data + duração]?
+ * (usa tempo de limpeza + viagem de cada tarefa; ignora canceladas/concluídas
+ * e a própria tarefa).
+ */
+async function temSobreposicao(utilizadorId, data, duracaoMin, excluirTarefaId = null) {
+  const range = obterRangeDia(data);
+  const filtro = {
+    data: { $gte: range.start, $lt: range.end },
+    estado: { $nin: ['cancelada', 'concluida'] },
+  };
+  if (excluirTarefaId) filtro._id = { $ne: excluirTarefaId };
+  const outras = await Tarefa.find(comMembro(filtro, utilizadorId))
+    .select('data tempo_limpeza_minutos tempo_viagem_minutos')
+    .lean();
+  const ini = new Date(data).getTime();
+  const fim = ini + (Number(duracaoMin) || 45) * 60000;
+  return outras.some((o) => {
+    const oi = new Date(o.data).getTime() - (Number(o.tempo_viagem_minutos) || 0) * 60000;
+    const of = new Date(o.data).getTime() + (Number(o.tempo_limpeza_minutos) || 45) * 60000;
+    return oi < fim && of > ini;
+  });
+}
+
+/**
+ * Procura quem preencha SÓ a(s) vaga(s) de uma tarefa com equipa incompleta.
+ * Não mexe na hora: candidatos cuja agenda choca com a hora da tarefa são
+ * excluídos (nunca ficam com limpezas sobrepostas). A necessidade usa o
+ * `staff_necessario` ATUAL da propriedade (se baixou, não pede mais pessoas).
+ *
+ * @returns {Promise<{ membros: string[], precisa: number, novos: any[], conflitos: number, faltam: number, staffNecessario: number }>}
+ */
+async function planearVaga({ empresaId, tarefa, propriedade, excluirExtra = [] }) {
+  const membros = idsEquipa(tarefa);
+  const staffNecessario = Math.max(1, Number(propriedade && propriedade.staff_necessario) || 1);
+  const precisa = Math.min(Number(tarefa.pessoas_em_falta) || 0, Math.max(0, staffNecessario - membros.length));
+  const out = { membros, precisa, novos: [], conflitos: 0, faltam: precisa, staffNecessario };
+  if (precisa === 0) return out;
+
+  const range = obterRangeDia(tarefa.data);
+  const tempo = Number(tarefa.tempo_limpeza_minutos) || 45;
+  const excl = new Set([...membros, ...excluirExtra.map(String)]);
+  for (let tentativa = 0; tentativa < 6 && out.novos.length < precisa; tentativa++) {
+    const r = await determinarEquipaAtribuida(
+      empresaId, range, propriedade.coordenadas, tempo, propriedade._id, precisa - out.novos.length, new Set(excl)
+    );
+    const cand = (r?.equipa || []).map((m) => m.utilizadorId);
+    if (cand.length === 0) break;
+    for (const id of cand) {
+      excl.add(String(id));
+      if (await temSobreposicao(id, tarefa.data, tempo, tarefa._id)) out.conflitos++;
+      else out.novos.push(id);
+    }
+  }
+  out.faltam = precisa - out.novos.length;
+  return out;
+}
+
+/**
+ * Preenche (e grava) a vaga de uma tarefa 'atribuida' com equipa incompleta.
+ * Só acrescenta pessoas; mantém responsável e hora. Atualiza sempre
+ * `pessoas_em_falta` para o valor real (limpa contadores antigos).
+ * @returns {Promise<{ novos: any[], faltam: number, conflitos: number }>}
+ */
+async function preencherVagaTarefa({ empresaId, tarefa, propriedade, excluirExtra = [] }) {
+  const v = await planearVaga({ empresaId, tarefa, propriedade, excluirExtra });
+  const faltam = v.faltam;
+  if (v.novos.length > 0) {
+    const eq = normalizarEquipa(v.membros[0] || v.novos[0], [...v.membros, ...v.novos]);
+    await Tarefa.updateOne(
+      { _id: tarefa._id, estado: 'atribuida' },
+      { $set: { utilizador_id: eq.utilizador_id, equipa_atribuida: eq.equipa_atribuida, pessoas_em_falta: faltam } }
+    );
+  } else if (faltam !== (Number(tarefa.pessoas_em_falta) || 0)) {
+    await Tarefa.updateOne({ _id: tarefa._id, estado: 'atribuida' }, { $set: { pessoas_em_falta: faltam } });
+  }
+  if (v.novos.length > 0) avisarColegasDoSubstituto(v.membros, v.novos, propriedade && propriedade.nome);
+  return { novos: v.novos, faltam, conflitos: v.conflitos };
+}
+
+/** Quando entra um substituto, os colegas que já estavam na limpeza são avisados (push). */
+function avisarColegasDoSubstituto(colegas, novos, nomeProp) {
+  try {
+    const { notificarUtilizador } = require('./notificar');
+    for (const id of colegas || []) {
+      notificarUtilizador(
+        String(id),
+        '👥 Novo colega na limpeza',
+        `${novos.length === 1 ? 'Entrou um colega' : 'Entraram colegas'} na limpeza de ${nomeProp || 'uma propriedade'}. Vê a equipa no detalhe.`,
+        '/staff'
+      );
+    }
+  } catch (e) {
+    // fire-and-forget
+  }
+}
+
 module.exports = {
+  avisarColegasDoSubstituto,
+  preencherVagaTarefa,
+  temSobreposicao,
+  planearVaga,
   diagnosticarFaltaDeStaff,
   planearAtribuicao,
   MOTIVO_SEM_EQUIPA,

@@ -18,6 +18,8 @@ const Tarefa = require('../models/Tarefa');
 const Propriedade = require('../models/Propriedade');
 const ReservaManual = require('../models/ReservaManual');
 const { planearAtribuicao } = require('../utils/atribuicaoAutomatica');
+const { verificarTamanhoXlsx } = require('../utils/xlsxLimites');
+const { obterLock, libertarLock } = require('../utils/lockEmpresa');
 const { notificarUtilizador, avisarGestores } = require('../utils/notificar');
 
 const MIME_XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -119,6 +121,13 @@ async function lerLinhasExcel(req) {
   }
   if (body.length < 4 || body[0] !== 0x50 || body[1] !== 0x4b) {
     return { status: 400, erro: 'Ficheiro inválido: não é um .xlsx.' };
+  }
+  // Antes de descomprimir: um xlsx pequeno pode ocultar centenas de milhares de linhas.
+  const tam = verificarTamanhoXlsx(body);
+  if (!tam.ok) {
+    return tam.motivo === 'grande'
+      ? { status: 400, erro: `O ficheiro é demasiado grande (o limite é de ${MAX_LINHAS_IMPORT} linhas). Divide-o em ficheiros mais pequenos.` }
+      : { status: 400, erro: 'Ficheiro inválido: não foi possível ler o .xlsx.' };
   }
   let ws;
   try {
@@ -293,6 +302,21 @@ async function atribuirLote(itens, empresaId) {
  *  - Fallback de hóspedes para a capacidade da propriedade.
  *  - Idempotente: ignora se já existe limpeza na mesma casa e data.
  */
+/** "Ana, Bruno": responsável primeiro, sem repetidos. */
+function nomesDaEquipa(t) {
+  if (!t.utilizador_id) return '';
+  const vistos = new Set();
+  const nomes = [];
+  for (const m of [t.utilizador_id, ...(t.equipa_atribuida || [])]) {
+    if (!m || !m.nome || vistos.has(String(m._id))) continue;
+    vistos.add(String(m._id));
+    nomes.push(m.nome);
+  }
+  return nomes.join(', ');
+}
+
+const TEMPO_ESPERA_LOCK_MS = Number(process.env.IMPORT_LOCK_ESPERA_MS) || 30000;
+
 async function importarLinhas({
   linhas,
   mapaProps,
@@ -308,6 +332,17 @@ async function importarLinhas({
   const chavesVistas = new Set();
   const porAtribuirLista = [];
 
+  // Lock por empresa (com expiração) só durante a CRIAÇÃO: duas importações
+  // simultâneas esperam uma pela outra, e a 2.ª já vê as limpezas da 1.ª
+  // (fica tudo "ignorado" em vez de duplicado). A atribuição corre fora do lock.
+  const chaveLock = `import:${empresaId}`;
+  const donoLock = await obterLock(chaveLock, { ttlMs: 120000, esperaMs: TEMPO_ESPERA_LOCK_MS });
+  if (!donoLock) {
+    const e = new Error('Há outra importação em curso para esta empresa. Tenta outra vez dentro de instantes.');
+    e.status = 409;
+    throw e;
+  }
+  try {
   for (let i = 0; i < linhas.length; i++) {
     const linha = linhas[i];
     const nLinha = i + 2;
@@ -435,6 +470,10 @@ async function importarLinhas({
     }
   }
 
+  } finally {
+    await libertarLock(chaveLock, donoLock);
+  }
+
   // Atribuição automática (mesmo motor dos outros caminhos).
   const atrib = await atribuirLote(porAtribuirLista, empresaId);
   const porAtribuir = criadas - atrib.atribuidas;
@@ -478,6 +517,7 @@ exports.exportarExcel = async (req, res) => {
     })
       .populate({ path: 'propriedade_id', select: 'nome morada capacidade_hospedes' })
       .populate({ path: 'utilizador_id', select: 'nome' })
+      .populate({ path: 'equipa_atribuida', select: 'nome' })
       .sort({ data: 1 })
       .lean();
 
@@ -489,7 +529,8 @@ exports.exportarExcel = async (req, res) => {
       'Parceiro': t.origem_parceiro ? 'Sim' : 'Não',
       'Tipo': t.tipo ?? '',
       'Estado': t.estado ?? '',
-      'Equipa': t.utilizador_id?.nome ?? '',
+      // Todos os membros (responsável primeiro, sem repetidos); sem responsável = sem equipa.
+      'Equipa': nomesDaEquipa(t),
       'Check-in': t.detalhes_reserva?.checkin ?? '',
       'Check-out': t.detalhes_reserva?.checkout ?? '',
       'Nome Hóspede': t.detalhes_reserva?.nome_hospede ?? '',
@@ -528,6 +569,7 @@ exports.importarExcel = async (req, res) => {
     return res.status(200).json(resultado);
   } catch (err) {
     console.error('❌ excel.importarExcel:', err.message);
+    if (err.status === 409) return res.status(409).json({ erro: err.message });
     return res.status(500).json({ erro: 'Erro ao importar Excel.' });
   }
 };
@@ -617,6 +659,7 @@ exports.importarExcelParceiro = async (req, res) => {
     return res.status(200).json(resultado);
   } catch (err) {
     console.error('❌ excel.importarExcelParceiro:', err.message);
+    if (err.status === 409) return res.status(409).json({ erro: err.message });
     return res.status(500).json({ erro: 'Erro ao importar Excel.' });
   }
 };

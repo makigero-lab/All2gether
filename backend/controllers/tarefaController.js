@@ -101,7 +101,7 @@ async function verificarDistanciaTarefasDia(utilizadorId, dataTarefa, propriedad
 }
 // F0 — Load balancer extraído para utils/loadBalancer.js (antes em webhookController).
 const { determinarUtilizadorAtribuido } = require('../utils/loadBalancer');
-const { diagnosticarFaltaDeStaff, planearAtribuicao } = require('../utils/atribuicaoAutomatica');
+const { diagnosticarFaltaDeStaff, planearAtribuicao, preencherVagaTarefa } = require('../utils/atribuicaoAutomatica');
 const { comMembro, idsEquipa, normalizarEquipa, retirarMembroDoc } = require('../utils/equipaTarefa');
 
 /**
@@ -884,7 +884,7 @@ exports.reatribuirTarefa = async (req, res) => {
 
     // 5. Carrega a propriedade para obter coordenadas.
     const propriedade = await Propriedade.findById(tarefa.propriedade_id)
-      .select('coordenadas nome')
+      .select('coordenadas nome staff_necessario')
       .lean();
     if (!propriedade) {
       return res.status(404).json({ erro: 'Propriedade não encontrada.' });
@@ -894,17 +894,29 @@ exports.reatribuirTarefa = async (req, res) => {
     //    scheduler não a contar. Guarda a equipa para a repor depois.
     const equipaAntes = idsEquipa(tarefa);
     const antigoResp = tarefa.utilizador_id ? String(tarefa.utilizador_id) : null;
+    const estadoAntes = {
+      utilizador_id: tarefa.utilizador_id,
+      equipa_atribuida: [...(tarefa.equipa_atribuida || [])],
+      pessoas_em_falta: tarefa.pessoas_em_falta,
+    };
     tarefa.utilizador_id = null;
     tarefa.equipa_atribuida = [];
     await tarefa.save();
 
-    // 7. Calcula o novo início (scheduler sequencial + almoço).
-    const resultadoScheduler = await calcularInicioTarefaUtilizador(
-      utilizador_id,
-      tarefa.data,
-      propriedade.coordenadas,
-      tarefa.tempo_limpeza_minutos || 45
-    );
+    // 7. Calcula o novo início (scheduler sequencial + almoço). Se o scheduler
+    //    falhar, repõe a equipa anterior: nunca fica a tarefa sem ninguém.
+    let resultadoScheduler;
+    try {
+      resultadoScheduler = await calcularInicioTarefaUtilizador(
+        utilizador_id,
+        tarefa.data,
+        propriedade.coordenadas,
+        tarefa.tempo_limpeza_minutos || 45
+      );
+    } catch (errSched) {
+      await Tarefa.updateOne({ _id: tarefa._id }, { $set: estadoAntes });
+      throw errSched;
+    }
 
     // 8. Guarda a tarefa com o novo utilizador + nova data.
     // Prompt 138 (136 V2) — guarda o tempo de viagem calculado pelo scheduler.
@@ -916,6 +928,9 @@ exports.reatribuirTarefa = async (req, res) => {
     tarefa.estado = 'atribuida';
     tarefa.motivo_nao_atribuicao = null;
     tarefa.tempo_viagem_minutos = Number(resultadoScheduler.tempoViagem) || 0;
+    // Recalcula as vagas com o staff_necessario atual (a equipa pode ter encolhido,
+    // p.ex. se o novo responsável já era membro).
+    tarefa.pessoas_em_falta = Math.max(0, (Number(propriedade.staff_necessario) || 1) - eq.equipa_atribuida.length);
     await tarefa.save();
 
     console.log(
@@ -1115,7 +1130,11 @@ exports.autoAtribuirTarefas = async (req, res) => {
       empresa_id: empresaId,
       data: { $gte: hojeInicio },
       // 'nao_atribuida' também: antes ficavam presas para sempre mesmo havendo staff novo/disponível.
-      estado: { $in: ['por_atribuir', 'nao_atribuida'] },
+      // E as 'atribuida' com equipa incompleta (só se preenche a vaga).
+      $or: [
+        { estado: { $in: ['por_atribuir', 'nao_atribuida'] } },
+        { estado: 'atribuida', pessoas_em_falta: { $gt: 0 } },
+      ],
     })
       .populate({ path: 'propriedade_id', select: 'nome coordenadas staff_necessario tempo_limpeza_minutos' })
       .sort({ data: 1 })
@@ -1138,6 +1157,34 @@ exports.autoAtribuirTarefas = async (req, res) => {
     const porPessoa = new Map();
     for (const tarefa of tarefasOrfas) {
       try {
+        // Equipa incompleta: preenche só a vaga (mantém responsável e hora).
+        if (tarefa.estado === 'atribuida') {
+          const v = await preencherVagaTarefa({ empresaId, tarefa, propriedade: tarefa.propriedade_id || {} });
+          if (v.novos.length > 0) {
+            reatribuidas++;
+            detalhe.push({
+              tarefa_id: String(tarefa._id),
+              propriedade: tarefa.propriedade_id?.nome ?? '—',
+              status: 'vaga_preenchida',
+              preenchidas: v.novos.length,
+              ...(v.faltam > 0 ? { faltam: v.faltam } : {}),
+            });
+            for (const id of v.novos) {
+              const k = String(id);
+              if (!porPessoa.has(k)) porPessoa.set(k, []);
+              porPessoa.get(k).push(tarefa.propriedade_id?.nome ?? 'Propriedade');
+            }
+          } else {
+            orfas++;
+            detalhe.push({
+              tarefa_id: String(tarefa._id),
+              propriedade: tarefa.propriedade_id?.nome ?? '—',
+              status: 'vaga_por_preencher',
+              faltam: v.faltam,
+            });
+          }
+          continue;
+        }
         // Motor partilhado: respeita staff_necessario, scheduler e diagnóstico do motivo.
         const propriedade = tarefa.propriedade_id || {};
         const plano = await planearAtribuicao({
