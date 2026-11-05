@@ -269,14 +269,17 @@ describe('Ausências e estados', () => {
     expect(r2.status).toBe(400);
   });
 
-  test('baixa desatribui também tarefas em curso', async () => {
+  test('baixa NÃO desatribui tarefas em curso (ficam com a pessoa e a resposta avisa)', async () => {
     const { e, mk, mkP, login } = await cenario();
     const b = await mk('b', 'staff');
     const g = await mk('g', 'gestor');
     const p = await mkP();
     const t = await Tarefa.create({ empresa_id: e._id, propriedade_id: p._id, utilizador_id: b._id, data: new Date('2031-10-10T10:00:00Z'), estado: 'em_curso' });
-    await request(app).post(`/api/gestor/equipa/${b._id}/baixa`).set('Authorization', 'Bearer ' + (await login(g))).send({ data_inicio: '2031-10-10', data_fim: '2031-10-10', tipo: 'doenca' });
-    expect((await Tarefa.findById(t._id)).utilizador_id).toBeNull();
+    const r = await request(app).post(`/api/gestor/equipa/${b._id}/baixa`).set('Authorization', 'Bearer ' + (await login(g))).send({ data_inicio: '2031-10-10', data_fim: '2031-10-10', tipo: 'doenca' });
+    const depois = await Tarefa.findById(t._id);
+    expect(String(depois.utilizador_id)).toBe(String(b._id));
+    expect(depois.estado).toBe('em_curso');
+    expect(r.body.em_curso_mantidas).toBe(1);
   });
 
   test('auto-atribuir volta a tentar tarefas nao_atribuida', async () => {

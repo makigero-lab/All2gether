@@ -237,3 +237,41 @@ export function escaparHtml(valor: unknown): string {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 }
+
+/** Resposta de redistribuição devolvida ao aprovar/confirmar uma ausência. */
+export type RedistribuicaoDTO = {
+  total: number;
+  desatribuidas: number;
+  reatribuicao?: { total?: number; reatribuidas?: number; orfas?: number; erro?: string } | null;
+  aviso?: string;
+};
+
+/**
+ * Texto verdadeiro sobre o que aconteceu às tarefas depois de aprovar uma
+ * ausência: reatribuídas automaticamente vs. por atribuir. Se a reatribuição
+ * falhou ou os números não batem com as desatribuídas, assume tudo por atribuir.
+ */
+export function textoRedistribuicao(
+  prefixo: string,
+  r: RedistribuicaoDTO | null | undefined,
+  semTarefas: string
+): string {
+  if (!r || !(r.desatribuidas > 0)) return `${prefixo} ${semTarefas}`;
+  const re = r.reatribuicao;
+  let reatribuidas = 0;
+  let porAtribuir = r.desatribuidas;
+  if (
+    re &&
+    !re.erro &&
+    typeof re.reatribuidas === "number" &&
+    typeof re.orfas === "number" &&
+    re.reatribuidas + re.orfas === r.desatribuidas
+  ) {
+    reatribuidas = re.reatribuidas;
+    porAtribuir = re.orfas;
+  }
+  const partes: string[] = [];
+  if (reatribuidas > 0) partes.push(`${reatribuidas} tarefa(s) reatribuída(s) automaticamente`);
+  if (porAtribuir > 0) partes.push(`${porAtribuir} por atribuir`);
+  return `${prefixo} ${partes.join("; ")}.`;
+}

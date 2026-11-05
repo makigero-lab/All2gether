@@ -2146,12 +2146,14 @@ exports.alternarEstadoMembro = async (req, res) => {
             Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth(), hoje.getUTCDate())
           );
           // Desatribui tarefas desde hoje até 1 ano no futuro (cobre todas
-          // as tarefas futuras — o helper filtra por estado 'atribuida'/'em_curso').
+          // as tarefas futuras — o helper recebe incluirEmCurso: quem fica inativo não consegue autenticar-se,
+          // por isso uma 'em_curso' ficaria presa).
           const futuro = new Date(inicio.getTime() + 365 * 24 * 60 * 60 * 1000);
           const resultado = await desatribuirTarefasPeriodo(
             utilizador._id,
             inicio,
-            futuro
+            futuro,
+            { incluirEmCurso: true }
           );
           tarefasDesatribuidas = resultado.desatribuidas;
         } catch (err) {
@@ -2356,15 +2358,25 @@ exports.reportarFaltaSubita = async (req, res) => {
     const tarefas = await Tarefa.find({
       utilizador_id: id,
       data: { $gte: hojeInicio, $lt: amanhaInicio },
-      estado: { $in: ['atribuida', 'em_curso', 'por_atribuir'] },
+      estado: { $in: ['atribuida', 'por_atribuir'] },
     }).populate({ path: 'propriedade_id', select: 'nome' });
+
+    // Limpezas 'em_curso' NÃO são desatribuídas: ficam com a pessoa e o
+    // gestor é avisado (resposta + sino/push a todos os gestores).
+    const { listarEmCurso, textoEmCurso, avisarGestoresEmCurso } = require('./ausenciaController');
+    const emCurso = await listarEmCurso(id, hojeInicio, amanhaInicio);
+    const infoEmCurso = { em_curso_mantidas: emCurso.length, em_curso: emCurso };
+    if (emCurso.length > 0) await avisarGestoresEmCurso(empresaId, utilizador.nome, infoEmCurso);
+    const avisoEmCurso = textoEmCurso(infoEmCurso, utilizador.nome);
 
     if (tarefas.length === 0) {
       return res.status(200).json({
-        mensagem: 'Sem tarefas para desatribuir hoje.',
+        mensagem: 'Sem tarefas para desatribuir hoje.' + (avisoEmCurso ? ` ${avisoEmCurso}` : ''),
         desatribuidas: 0,
         total: 0,
         detalhes: [],
+        ...infoEmCurso,
+        aviso: avisoEmCurso || undefined,
       });
     }
 
@@ -2399,10 +2411,14 @@ exports.reportarFaltaSubita = async (req, res) => {
     });
 
     return res.status(200).json({
-      mensagem: `Falta súbita processada: ${desatribuidas} tarefa(s) desatribuída(s) (por atribuir).`,
+      mensagem:
+        `Falta súbita processada: ${desatribuidas} tarefa(s) desatribuída(s) (por atribuir).` +
+        (avisoEmCurso ? ` ${avisoEmCurso}` : ''),
       desatribuidas,
       total: tarefas.length,
       detalhes,
+      ...infoEmCurso,
+      aviso: avisoEmCurso || undefined,
     });
   } catch (err) {
     console.error('❌ reportarFaltaSubita:', err.message);
@@ -2516,15 +2532,25 @@ exports.registarBaixaProlongada = async (req, res) => {
     const tarefas = await Tarefa.find({
       utilizador_id: id,
       data: { $gte: inicio, $lt: fimDia },
-      estado: { $in: ['atribuida', 'em_curso'] },
+      estado: 'atribuida',
     }).populate({ path: 'propriedade_id', select: 'nome' });
+
+    // Limpezas 'em_curso' NÃO são desatribuídas: ficam com a pessoa e o
+    // gestor é avisado (resposta + sino/push a todos os gestores).
+    const { listarEmCurso, textoEmCurso, avisarGestoresEmCurso } = require('./ausenciaController');
+    const emCurso = await listarEmCurso(id, inicio, fimDia);
+    const infoEmCurso = { em_curso_mantidas: emCurso.length, em_curso: emCurso };
+    if (emCurso.length > 0) await avisarGestoresEmCurso(empresaId, utilizador.nome, infoEmCurso);
+    const avisoEmCurso = textoEmCurso(infoEmCurso, utilizador.nome);
 
     if (tarefas.length === 0) {
       return res.status(200).json({
-        mensagem: 'Sem tarefas para desatribuir no período.',
+        mensagem: 'Sem tarefas para desatribuir no período.' + (avisoEmCurso ? ` ${avisoEmCurso}` : ''),
         desatribuidas: 0,
         total: 0,
         detalhes: [],
+        ...infoEmCurso,
+        aviso: avisoEmCurso || undefined,
       });
     }
 
@@ -2560,10 +2586,14 @@ exports.registarBaixaProlongada = async (req, res) => {
     });
 
     return res.status(200).json({
-      mensagem: `Baixa processada: ${desatribuidas} tarefa(s) desatribuída(s) (por atribuir).`,
+      mensagem:
+        `Baixa processada: ${desatribuidas} tarefa(s) desatribuída(s) (por atribuir).` +
+        (avisoEmCurso ? ` ${avisoEmCurso}` : ''),
       desatribuidas,
       total: tarefas.length,
       detalhes,
+      ...infoEmCurso,
+      aviso: avisoEmCurso || undefined,
     });
   } catch (err) {
     console.error('❌ registarBaixaProlongada:', err.message);

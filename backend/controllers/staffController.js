@@ -391,9 +391,15 @@ exports.faltaHoje = async (req, res) => {
     // O faltoso fica logo indisponível: desatribui as tarefas de hoje .
     let redistribuicao = null;
     try {
-      const { desatribuirTarefasPeriodo } = require('./ausenciaController');
+      const { desatribuirTarefasPeriodo, textoEmCurso, avisarGestoresEmCurso } = require('./ausenciaController');
       // Só desatribui (o gestor reatribui manualmente: decisão do Prompt 97, sem disparos automáticos).
+      // Limpezas 'em_curso' ficam com a pessoa e os gestores são avisados.
       redistribuicao = await desatribuirTarefasPeriodo(utilizadorId, hoje, hoje);
+      if (redistribuicao.em_curso_mantidas > 0) {
+        const alvo = await Utilizador.findById(utilizadorId).select('nome').lean();
+        await avisarGestoresEmCurso(empresaId, alvo?.nome, redistribuicao);
+        redistribuicao.aviso = textoEmCurso(redistribuicao, alvo?.nome);
+      }
     } catch (e) {
       console.error('⚠️  redistribuir tarefas (faltaHoje):', e.message);
     }

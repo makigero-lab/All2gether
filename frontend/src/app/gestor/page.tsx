@@ -28,7 +28,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { adminGet, adminPatch } from "@/lib/api";
 import { PushNotificationSetup } from "@/components/gestor/push-notification-setup";
-import { formatarDataSegura } from "@/lib/utils";
+import { formatarDataSegura, textoRedistribuicao, type RedistribuicaoDTO } from "@/lib/utils";
 
 interface DashboardData {
   totalPropriedades: number;
@@ -99,7 +99,7 @@ export default function AdminDashboardPage() {
   // Auto-esconde o toast após 6s.
   useEffect(() => {
     if (!toast) return;
-    const t = setTimeout(() => setToast(null), 6000);
+    const t = setTimeout(() => setToast(null), toast.msg.includes("em curso") ? 20000 : 6000);
     return () => clearTimeout(t);
   }, [toast]);
 
@@ -108,15 +108,12 @@ export default function AdminDashboardPage() {
     setAprovandoEmergencia(em._id);
     try {
       const res = await adminPatch<{
-        redistribuicao: { total: number; reatribuidas: number; orfas: number } | null;
+        redistribuicao: RedistribuicaoDTO | null;
       }>(`/api/gestor/ausencias/${em._id}/estado`, { estado: "aprovada" });
 
       const r = res.redistribuicao;
-      const msg =
-        r && r.total > 0
-          ? `Falta confirmada. ${r.reatribuidas} tarefa(s) redistribuída(s)${r.orfas > 0 ? `, ${r.orfas} órfã(s)` : ""}.`
-          : "Falta confirmada. Sem tarefas para redistribuir hoje.";
-      setToast({ tipo: "sucesso", msg });
+      const msg = textoRedistribuicao("Falta confirmada.", r, "Sem tarefas para desatribuir hoje.");
+      setToast({ tipo: "sucesso", msg: r?.aviso ? `${msg} ${r.aviso}` : msg });
 
       // Remove a emergência da lista (já foi confirmada).
       setEmergencias((prev) => prev.filter((e) => e._id !== em._id));

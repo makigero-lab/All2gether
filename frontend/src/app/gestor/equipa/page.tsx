@@ -25,6 +25,7 @@ import {
   Eye,
   EyeOff,
   Lock,
+  AlertTriangle,
 } from "lucide-react";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -66,7 +67,7 @@ import {
 } from "@/lib/api";
 import { PaginationBar } from "@/components/admin/pagination-bar";
 import { Switch } from "@/components/ui/switch";
-import { formatarDataSegura, parsearDataSegura } from "@/lib/utils";
+import { formatarDataSegura, parsearDataSegura, textoRedistribuicao, type RedistribuicaoDTO } from "@/lib/utils";
 
 /**
  * Página de Equipa — Painel de Administração.
@@ -336,6 +337,9 @@ function EquipaPage() {
   // Nº de tarefas ficadas por atribuir após falta/baixa (>0 mostra o botão de reatribuir).
   const [faltaDesatribuidas, setFaltaDesatribuidas] = useState(0);
   const [baixaDesatribuidas, setBaixaDesatribuidas] = useState(0);
+  // Aviso de limpezas em curso que continuam com a pessoa (não são desatribuídas).
+  const [faltaAviso, setFaltaAviso] = useState<string | null>(null);
+  const [baixaAviso, setBaixaAviso] = useState<string | null>(null);
   // Reatribuição automática opcional (só corre com clique do gestor).
   const [autoAtribuindo, setAutoAtribuindo] = useState(false);
   const [autoResultado, setAutoResultado] = useState<string | null>(null);
@@ -372,6 +376,19 @@ function EquipaPage() {
     } finally {
       setAutoAtribuindo(false);
     }
+  }
+
+  /** Aviso bem visível: limpeza(s) em curso continuam com a pessoa ausente. */
+  function avisoEmCurso(texto: string) {
+    return (
+      <div
+        role="alert"
+        className="flex items-start gap-2 rounded-md border border-amber-500/60 bg-amber-50 p-3 text-sm font-medium text-amber-900 dark:bg-amber-950/30 dark:text-amber-100"
+      >
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+        <span>{texto}</span>
+      </div>
+    );
   }
 
   /** Bloco com o botão de reatribuição opcional (falta súbita e baixa). */
@@ -706,15 +723,17 @@ function EquipaPage() {
     setFaltaSubmitting(true);
     setFaltaResultado(null);
     setFaltaDesatribuidas(0);
+    setFaltaAviso(null);
     setAutoResultado(null);
     setAutoErro(null);
     try {
-      const res = await adminPost<{ desatribuidas: number; total: number }>(
+      const res = await adminPost<{ desatribuidas: number; total: number; aviso?: string }>(
         `/api/gestor/equipa/${faltaSubita._id}/falta-subita`,
         {}
       );
       const n = res.desatribuidas ?? 0;
       setFaltaDesatribuidas(n);
+      setFaltaAviso(res.aviso ?? null);
       setFaltaResultado(
         n > 0
           ? `Falta registada. ${n} tarefa(s) ficaram por atribuir.`
@@ -769,15 +788,12 @@ function EquipaPage() {
     try {
       const res = await adminPatch<{
         mensagem: string;
-        redistribuicao: { total: number; reatribuidas: number; orfas: number } | null;
+        redistribuicao: RedistribuicaoDTO | null;
       }>(`/api/gestor/ausencias/${a._id}/estado`, { estado: "aprovada" });
 
       const r = res.redistribuicao;
-      const msg =
-        r && r.total > 0
-          ? `Férias aprovadas. As tarefas deste funcionário foram redistribuídas com sucesso! (${r.reatribuidas} reatribuída(s)${r.orfas > 0 ? `, ${r.orfas} órfã(s)` : ""})`
-          : "Férias aprovadas. Sem tarefas para redistribuir no período.";
-      setAprToast({ tipo: "sucesso", msg });
+      const msg = textoRedistribuicao("Férias aprovadas.", r, "Sem tarefas para desatribuir no período.");
+      setAprToast({ tipo: "sucesso", msg: r?.aviso ? `${msg} ${r.aviso}` : msg });
 
       // Remove da lista de pendentes (já foi decidido).
       setAprPendentes((prev) => prev.filter((p) => p._id !== a._id));
@@ -839,7 +855,7 @@ function EquipaPage() {
   // Auto-esconde o toast após 6s.
   useEffect(() => {
     if (!aprToast) return;
-    const t = setTimeout(() => setAprToast(null), 6000);
+    const t = setTimeout(() => setAprToast(null), aprToast.msg.includes("em curso") ? 20000 : 6000);
     return () => clearTimeout(t);
   }, [aprToast]);
 
@@ -1997,6 +2013,7 @@ function EquipaPage() {
                   {faltaResultado}
                 </div>
               )}
+              {faltaResultado && faltaAviso && avisoEmCurso(faltaAviso)}
               {faltaResultado &&
                 renderReatribuir(faltaDesatribuidas, () => setFaltaSubita(null))}
             </DialogContent>
@@ -2095,6 +2112,7 @@ function EquipaPage() {
                   <div className="rounded-md bg-blue-50 dark:bg-blue-950/20 p-3 text-sm text-blue-800 dark:text-blue-200">
                     {baixaResultado}
                   </div>
+                  {baixaAviso && avisoEmCurso(baixaAviso)}
                   {renderReatribuir(baixaDesatribuidas, () => setBaixaModal(null))}
                 </>
               )}
@@ -2121,12 +2139,14 @@ function EquipaPage() {
                     if (!baixaModal) return;
                     setBaixaSubmitting(true);
                     setBaixaDesatribuidas(0);
+                    setBaixaAviso(null);
                     setAutoResultado(null);
                     setAutoErro(null);
                     try {
                       const res = await adminPost<{
                         desatribuidas: number;
                         total: number;
+                        aviso?: string;
                       }>(`/api/gestor/equipa/${baixaModal._id}/baixa`, {
                         data_inicio: baixaForm.data_inicio,
                         data_fim: baixaForm.data_fim,
@@ -2134,6 +2154,7 @@ function EquipaPage() {
                       });
                       const n = res.desatribuidas ?? 0;
                       setBaixaDesatribuidas(n);
+                      setBaixaAviso(res.aviso ?? null);
                       setBaixaResultado(
                         n > 0
                           ? `Baixa registada. ${n} tarefa(s) ficaram por atribuir.`

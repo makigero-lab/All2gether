@@ -215,6 +215,11 @@ exports.registarAusencia = async (req, res) => {
     // balancer): passam a utilizador_id = null + estado = 'por_atribuir'.
     // O recálculo fica a cargo do Gestor (manual) ou do Fail-Safe noturno.
     const desatribuicao = await desatribuirTarefasPeriodo(utilizador_id, inicio, fim);
+    if (desatribuicao.em_curso_mantidas > 0) {
+      const alvo = await Utilizador.findById(utilizador_id).select('nome').lean();
+      await avisarGestoresEmCurso(empresaId, alvo?.nome, desatribuicao);
+      desatribuicao.aviso = textoEmCurso(desatribuicao, alvo?.nome);
+    }
     if (desatribuicao.desatribuidas > 0) {
       console.log(
         `📤 [registarAusencia] ${desatribuicao.desatribuidas} tarefa(s) desatribuída(s) ` +
@@ -399,6 +404,10 @@ exports.aprovarRejeitarAusencia = async (req, res) => {
 
     // Auditoria.
     const utilizador = await Utilizador.findById(ausencia.utilizador_id).select('nome').lean();
+    if (redistribuicao && redistribuicao.em_curso_mantidas > 0) {
+      await avisarGestoresEmCurso(empresaId, utilizador?.nome, redistribuicao);
+      redistribuicao.aviso = textoEmCurso(redistribuicao, utilizador?.nome);
+    }
     registarAuditoria({
       utilizador_id: req.user.id,
       utilizador_nome: req.user.nome || 'Admin',
@@ -450,7 +459,8 @@ exports.aprovarRejeitarAusencia = async (req, res) => {
                 (redistribuicao.reatribuicao.orfas > 0
                   ? `; ${redistribuicao.reatribuicao.orfas} permanece(m) por atribuir.`
                   : '.')
-              : '.')
+              : '.') +
+            (redistribuicao.aviso ? ` ${redistribuicao.aviso}` : '')
           : 'Ausência rejeitada.',
       ausencia,
       redistribuicao,
@@ -611,8 +621,33 @@ exports.cancelarAusencia = async (req, res) => {
 /* ------------------------------------------------------------------ */
 
 /**
- * Desatribui as tarefas atribuídas de um utilizador num período
+ * Lista (só leitura) as tarefas 'em_curso' de um utilizador em [inicio, fimDia[.
+ * @returns {Promise<Array<{ tarefa_id, propriedade, data }>>}
+ */
+async function listarEmCurso(utilizadorId, inicio, fimDia) {
+  const docs = await Tarefa.find({
+    utilizador_id: utilizadorId,
+    data: { $gte: inicio, $lt: fimDia },
+    estado: 'em_curso',
+  })
+    .populate({ path: 'propriedade_id', select: 'nome' })
+    .select('data propriedade_id')
+    .lean();
+  return docs.map((t) => ({
+    tarefa_id: String(t._id),
+    propriedade: t.propriedade_id?.nome ?? null,
+    data: t.data,
+  }));
+}
+
+/**
+ * Desatribui as tarefas ATRIBUÍDAS de um utilizador num período
  * [inicio, fim]: passa utilizador_id = null + estado = 'por_atribuir'.
+ *
+ * Tarefas 'em_curso' (a pessoa já começou a limpeza) NÃO são desatribuídas:
+ * ficam intactas (mesma pessoa, mesmo estado) e são devolvidas em
+ * `em_curso_mantidas`/`em_curso` para o gestor ser avisado e decidir se a
+ * pessoa termina ou se trata dela. NUNCA mexe em 'concluida' nem 'cancelada'.
  *
  * Prompt 97 — NÃO chama o load balancer (evita disparos automáticos e spam
  * de notificações). O recálculo/atribuição fica a cargo do Gestor (manual,
@@ -621,31 +656,27 @@ exports.cancelarAusencia = async (req, res) => {
  * @param {ObjectId} utilizadorId
  * @param {Date} inicio
  * @param {Date} fim
- * @returns {Promise<{ total, desatribuidas }>}
+ * @param {{ incluirEmCurso?: boolean }} [opts] — `incluirEmCurso: true` desatribui também
+ *   as 'em_curso' (só para inativação de membro: quem fica inativo não consegue
+ *   autenticar-se, por isso a tarefa ficaria presa). Default false.
+ * @returns {Promise<{ total, desatribuidas, em_curso_mantidas,
+ *   em_curso: Array<{ tarefa_id, propriedade, data }> }>}
  */
-async function desatribuirTarefasPeriodo(utilizadorId, inicio, fim) {
+async function desatribuirTarefasPeriodo(utilizadorId, inicio, fim, opts = {}) {
+  const incluirEmCurso = opts.incluirEmCurso === true;
   // fim do dia = meia-noite do dia seguinte (para query <).
   const fimDia = new Date(fim.getTime() + 24 * 60 * 60 * 1000);
 
-  // Procura tarefas atribuídas no período.
-  // HF26 — Antes só desatribuía 'atribuida'. Agora desatribui também
-  // 'em_curso' (caso raro em que o staff começou mas ficou de férias a meio
-  // — o gestor deve poder reatribuir). NUNCA mexe em 'concluida' nem
-  // 'cancelada' (histórico preservado).
+  const filtroBase = { utilizador_id: utilizadorId, data: { $gte: inicio, $lt: fimDia } };
+
+  // Só 'atribuida' é desatribuída (decisão do gestor: 'em_curso' mantém-se).
   const tarefas = await Tarefa.find({
-    utilizador_id: utilizadorId,
-    data: { $gte: inicio, $lt: fimDia },
-    estado: { $in: ['atribuida', 'em_curso'] },
+    ...filtroBase,
+    estado: incluirEmCurso ? { $in: ['atribuida', 'em_curso'] } : 'atribuida',
   });
 
-  if (tarefas.length === 0) {
-    console.log(
-      `ℹ️ [desatribuirTarefasPeriodo] 0 tarefas para desatribuir ` +
-        `(utilizador=${utilizadorId}, período=${inicio.toISOString().slice(0, 10)} ` +
-        `a ${fim.toISOString().slice(0, 10)}).`
-    );
-    return { total: 0, desatribuidas: 0 };
-  }
+  // Tarefas em curso que ficam com a pessoa (só leitura).
+  const em_curso = incluirEmCurso ? [] : await listarEmCurso(utilizadorId, inicio, fimDia);
 
   let desatribuidas = 0;
   for (const tarefa of tarefas) {
@@ -657,12 +688,56 @@ async function desatribuirTarefasPeriodo(utilizadorId, inicio, fim) {
   }
 
   console.log(
-    `📤 [desatribuirTarefasPeriodo] ${desatribuidas} tarefa(s) desatribuída(s) ` +
+    `📤 [desatribuirTarefasPeriodo] ${desatribuidas} tarefa(s) desatribuída(s), ` +
+      `${em_curso.length} em curso mantida(s) ` +
       `(utilizador=${utilizadorId}, período=${inicio.toISOString().slice(0, 10)} ` +
       `a ${fim.toISOString().slice(0, 10)}).`
   );
 
-  return { total: tarefas.length, desatribuidas };
+  return { total: tarefas.length, desatribuidas, em_curso_mantidas: em_curso.length, em_curso };
+}
+
+/**
+ * Frase para o gestor sobre limpezas em curso mantidas (ou '' se não houver).
+ */
+function textoEmCurso(resultado, nomeStaff) {
+  const n = resultado?.em_curso_mantidas || 0;
+  if (n === 0) return '';
+  const quem = nomeStaff || 'o funcionário';
+  const props = (resultado.em_curso || []).map((t) => t.propriedade).filter(Boolean);
+  const onde = props.length ? ` (${props.join(', ')})` : '';
+  return n === 1
+    ? `1 limpeza em curso${onde} continua com ${quem}: confirma se termina ou trata dela.`
+    : `${n} limpezas em curso${onde} continuam com ${quem}: confirma se terminam ou trata delas.`;
+}
+
+/**
+ * Avisa os gestores/admins da empresa (push + sino in-app) das limpezas em
+ * curso que ficaram com a pessoa ausente. Assim o aviso não depende de quem
+ * fez a ação estar a ver o ecrã. Best-effort: nunca lança.
+ */
+async function avisarGestoresEmCurso(empresaId, nomeStaff, resultado) {
+  try {
+    const texto = textoEmCurso(resultado, nomeStaff);
+    if (!texto) return;
+    const { notificarUtilizador } = require('../utils/notificar');
+    const gestores = await Utilizador.find({
+      empresa_id: empresaId,
+      role: { $in: ['gestor', 'admin'] },
+      ativo: true,
+      eliminado_em: null,
+    })
+      .select('_id')
+      .lean();
+    for (const g of gestores) {
+      await notificarUtilizador(String(g._id), '⚠️ Limpeza em curso', texto, '/gestor/calendario', {
+        criarInApp: true,
+        tipo: 'aviso',
+      });
+    }
+  } catch (e) {
+    console.error('⚠️  avisarGestoresEmCurso:', e.message);
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -869,6 +944,10 @@ exports.reaplicarAusencia = async (req, res) => {
     redistribuicao.reatribuicao = reatribuicao;
 
     const utilizador = await Utilizador.findById(ausencia.utilizador_id).select('nome').lean();
+    if (redistribuicao.em_curso_mantidas > 0) {
+      await avisarGestoresEmCurso(empresaId, utilizador?.nome, redistribuicao);
+      redistribuicao.aviso = textoEmCurso(redistribuicao, utilizador?.nome);
+    }
 
     registarAuditoria({
       utilizador_id: req.user.id,
@@ -887,7 +966,7 @@ exports.reaplicarAusencia = async (req, res) => {
     });
 
     return res.status(200).json({
-      mensagem:
+      mensagem: (
         redistribuicao.desatribuidas > 0
           ? `Ausência reaplicada. ${redistribuicao.desatribuidas} tarefa(s) desatribuída(s)` +
             (redistribuicao.reatribuicao
@@ -896,7 +975,8 @@ exports.reaplicarAusencia = async (req, res) => {
                   ? `; ${redistribuicao.reatribuicao.orfas} permanece(m) por atribuir.`
                   : '.')
               : '.')
-          : 'Ausência reaplicada. Não havia tarefas atribuídas no período (já estavam corretas).',
+          : 'Ausência reaplicada. Não havia tarefas atribuídas no período (já estavam corretas).') +
+        (redistribuicao.aviso ? ` ${redistribuicao.aviso}` : ''),
       redistribuicao,
       ausencia,
     });
@@ -1053,4 +1133,7 @@ exports.diagnosticoAusencia = async (req, res) => {
 
 // Exporta o helper para reutilização (registarBaixaProlongada, falta súbita).
 exports.desatribuirTarefasPeriodo = desatribuirTarefasPeriodo;
+exports.textoEmCurso = textoEmCurso;
+exports.listarEmCurso = listarEmCurso;
+exports.avisarGestoresEmCurso = avisarGestoresEmCurso;
 exports.reatribuirTarefasPeriodo = reatribuirTarefasPeriodo;
