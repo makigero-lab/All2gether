@@ -16,7 +16,7 @@ import { pt } from "date-fns/locale";
 
 import { cn, parsearDataSegura, googleMapsUrl } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -71,6 +71,12 @@ function horaInicio(dataISO?: string): string {
  *
  * v1.56.0 (Prompt 78): o cartão inteiro é clicável e leva a /staff/tarefas/[id].
  * Mesmo as tarefas por atribuir são clicáveis (para ver detalhe/morada).
+ *
+ * Sem links aninhados (HTML inválido): o <Link> da tarefa está no título e a
+ * sua área de toque é expandida a todo o cartão com um pseudo-elemento
+ * (`after:absolute after:inset-0`, o cartão é `relative`). A ligação do Google
+ * Maps fica por cima (`relative z-10`), por isso não abre a tarefa. O "botão"
+ * "Ver detalhes" é só visual (div): o clique cai no overlay do link.
  */
 export function TaskCard({ tarefa }: { tarefa: TarefaMock }) {
   const Icon = tipoIcon[tarefa.tipo];
@@ -82,10 +88,10 @@ export function TaskCard({ tarefa }: { tarefa: TarefaMock }) {
   const tempoViagem = Number(tarefa.tempo_viagem_minutos) || 0;
 
   return (
-    <Link href={`/staff/tarefas/${tarefa.id}`} prefetch className="block">
+    <div className="block">
       <Card
         className={cn(
-          "cursor-pointer overflow-hidden transition-all hover:shadow-md hover:border-primary/40 active:scale-[0.99]",
+          "relative cursor-pointer overflow-hidden transition-all hover:shadow-md hover:border-primary/40 active:scale-[0.99]",
           porAtribuir && "border-amber-300/70"
         )}
       >
@@ -103,7 +109,14 @@ export function TaskCard({ tarefa }: { tarefa: TarefaMock }) {
             </div>
             <div className="min-w-0">
               <CardTitle className="truncate text-base">
-                {tarefa.propriedade_nome}
+                <Link
+                  href={`/staff/tarefas/${tarefa.id}`}
+                  prefetch
+                  className="after:absolute after:inset-0 after:content-[''] focus-visible:outline-none focus-visible:after:rounded-lg focus-visible:after:ring-2 focus-visible:after:ring-ring"
+                >
+                  {tarefa.propriedade_nome}
+                  <span className="sr-only"> — {tipoLabel[tarefa.tipo]}, abrir tarefa</span>
+                </Link>
               </CardTitle>
               <p className="mt-0.5 text-xs text-muted-foreground">
                 {tipoLabel[tarefa.tipo]}
@@ -154,7 +167,7 @@ export function TaskCard({ tarefa }: { tarefa: TarefaMock }) {
                     href={url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex shrink-0 items-center gap-0.5 rounded text-primary hover:underline"
+                    className="relative z-10 -my-3.5 -mr-3 inline-flex h-11 w-11 shrink-0 items-center justify-center self-center rounded text-primary hover:underline"
                     title="Abrir no Google Maps"
                     aria-label="Abrir no Google Maps"
                   >
@@ -187,12 +200,14 @@ export function TaskCard({ tarefa }: { tarefa: TarefaMock }) {
             </p>
           )}
 
-          <Button size="touch"
-            variant={porAtribuir ? "outline" : "default"}
-            className="w-full"
-            disabled={porAtribuir}
-            // O Link envolve o Card, o botão é visual (não há onClick).
-            // Mesmo por atribuir, mostra "Ver detalhes" para inspecionar a morada.
+          {/* Visual apenas: o clique é tratado pelo link do título (overlay). */}
+          <div
+            aria-hidden="true"
+            className={cn(
+              buttonVariants({ size: "touch", variant: porAtribuir ? "outline" : "default" }),
+              "w-full",
+              porAtribuir && "opacity-50"
+            )}
           >
             {porAtribuir ? (
               "Aguarda atribuição"
@@ -202,9 +217,9 @@ export function TaskCard({ tarefa }: { tarefa: TarefaMock }) {
                 <ChevronRight className="h-4 w-4" />
               </>
             )}
-          </Button>
+          </div>
         </CardContent>
       </Card>
-    </Link>
+    </div>
   );
 }

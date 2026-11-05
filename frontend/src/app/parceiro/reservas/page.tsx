@@ -31,6 +31,7 @@ import {
   adminDelete,
   type PropriedadeDTO,
 } from "@/lib/api";
+import { mensagemErro } from "@/lib/rascunho-staff";
 
 interface ReservaDTO {
   _id: string;
@@ -78,6 +79,8 @@ function noites(ci: string, co: string): number {
 /**
  * Célula editável estilo Excel: mostra sempre um input discreto; guarda ao
  * sair da célula (blur) ou com Enter; Esc repõe o valor anterior.
+ * Se a gravação falhar, o valor escrito NÃO se perde: fica na célula com uma
+ * mensagem e um botão para tentar de novo (Enter/blur também voltam a tentar).
  */
 function Celula({
   value,
@@ -100,24 +103,38 @@ function Celula({
   onCommit: (novo: string) => Promise<void> | void;
 }) {
   const [v, setV] = useState(value);
-  const [erro, setErro] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+  const aGuardar = useRef(false);
+  // Esc cancela: o blur seguinte (síncrono, com o `v` antigo) não pode gravar.
+  const cancelar = useRef(false);
   const ref = useRef<HTMLInputElement & HTMLSelectElement>(null);
 
-  useEffect(() => setV(value), [value]);
+  useEffect(() => {
+    setV(value);
+    setErro(null);
+  }, [value]);
 
   async function guardar(novo: string) {
-    if (novo === value) return;
+    if (aGuardar.current) return;
+    if (novo === value) {
+      setErro(null);
+      return;
+    }
     // Datas não podem ficar vazias: repõe o valor anterior.
     if (novo === "" && type === "date") {
       setV(value);
+      setErro(null);
       return;
     }
+    aGuardar.current = true;
     try {
-      setErro(false);
+      setErro(null);
       await onCommit(novo);
-    } catch {
-      setErro(true);
-      setV(value);
+    } catch (e) {
+      // Mantém o que a pessoa escreveu (v) e explica o que aconteceu.
+      setErro(mensagemErro(e, "Não foi possível guardar."));
+    } finally {
+      aGuardar.current = false;
     }
   }
 
@@ -125,8 +142,8 @@ function Celula({
     ref,
     disabled,
     "aria-label": rotulo,
-    "aria-invalid": erro || undefined,
-    title: erro ? "Não foi possível guardar" : undefined,
+    "aria-invalid": erro ? true : undefined,
+    title: erro ?? undefined,
     className: `${CELULA} ${align === "right" ? "text-right" : ""} ${erro ? "ring-2 ring-inset ring-destructive" : ""}`,
   };
 
@@ -138,6 +155,7 @@ function Celula({
         value={v}
         onChange={(e) => {
           setV(e.target.value);
+          setErro(null);
           guardar(e.target.value);
         }}
       >
@@ -146,7 +164,7 @@ function Celula({
           <option key={o} value={o}>{o}</option>
         ))}
       </select>
-      {erro && <AvisoCelula />}
+      {erro && <AvisoCelula mensagem={erro} onRepetir={() => guardar(v)} />}
       </div>
     );
   }
@@ -158,29 +176,49 @@ function Celula({
       min={type === "number" ? 0 : undefined}
       placeholder={placeholder}
       value={v}
-      onChange={(e) => setV(e.target.value)}
-      onBlur={() => guardar(v)}
+      onChange={(e) => {
+        setV(e.target.value);
+        setErro(null);
+      }}
+      onBlur={() => {
+        if (cancelar.current) {
+          cancelar.current = false;
+          return;
+        }
+        guardar(v);
+      }}
       onKeyDown={(e) => {
         if (e.key === "Enter") ref.current?.blur();
         if (e.key === "Escape") {
+          cancelar.current = true;
           setV(value);
+          setErro(null);
           ref.current?.blur();
         }
       }}
     />
-    {erro && <AvisoCelula />}
+    {erro && <AvisoCelula mensagem={erro} onRepetir={() => guardar(v)} />}
     </div>
   );
 }
 
 /** Aviso visível (texto, não só tooltip) quando a gravação de uma célula falha. */
-function AvisoCelula() {
+function AvisoCelula({ mensagem, onRepetir }: { mensagem: string; onRepetir: () => void }) {
   return (
     <span
       role="alert"
-      className="pointer-events-none absolute left-1 top-full z-10 whitespace-nowrap rounded bg-destructive px-1.5 py-0.5 text-[11px] text-white shadow"
+      className="absolute left-1 top-full z-10 flex items-center gap-2 rounded bg-destructive px-1.5 py-0.5 text-[11px] text-white shadow"
     >
-      Não foi possível guardar
+      <span className="max-w-[16rem] whitespace-normal">{mensagem}</span>
+      <button
+        type="button"
+        // Evita o blur do campo (que já repetiria a gravação) antes do clique.
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={onRepetir}
+        className="shrink-0 whitespace-nowrap rounded bg-white/20 px-1.5 py-0.5 font-medium underline hover:bg-white/30"
+      >
+        Tentar de novo
+      </button>
     </span>
   );
 }
@@ -231,7 +269,7 @@ export default function ParceiroReservasPage() {
       // Com uma só propriedade, a linha nova já vem preenchida.
       setNova((n) => (n.propriedade_id || props.length !== 1 ? n : { ...n, propriedade_id: props[0]._id }));
     } catch (e) {
-      setErro(e instanceof Error ? e.message : "Erro ao carregar.");
+      setErro(mensagemErro(e, "Erro ao carregar."));
     } finally {
       setLoading(false);
     }
@@ -248,8 +286,10 @@ export default function ParceiroReservasPage() {
       setReservas((rs) => rs.map((r) => (r._id === id ? res.reserva : r)));
       setErro(null);
     } catch (e) {
-      setErro(e instanceof Error ? e.message : "Erro ao guardar.");
-      throw e;
+      const msg = mensagemErro(e, "Erro ao guardar.");
+      setErro(msg);
+      // Relança com a mensagem já traduzida para a célula a mostrar.
+      throw new Error(msg);
     }
   }
 
@@ -273,7 +313,7 @@ export default function ParceiroReservasPage() {
       setNova({ ...NOVA_VAZIA, propriedade_id: nova.propriedade_id });
       await carregar();
     } catch (e) {
-      setNovaErro(e instanceof Error ? e.message : "Erro ao criar reserva.");
+      setNovaErro(mensagemErro(e, "Erro ao criar reserva."));
     } finally {
       setCriando(false);
     }
@@ -287,7 +327,7 @@ export default function ParceiroReservasPage() {
       setReservas((rs) => rs.filter((r) => r._id !== eliminar._id));
       setEliminar(null);
     } catch (e) {
-      setErro(e instanceof Error ? e.message : "Erro ao eliminar reserva.");
+      setErro(mensagemErro(e, "Erro ao eliminar reserva."));
       setEliminar(null);
     } finally {
       setEliminando(false);
@@ -324,7 +364,7 @@ export default function ParceiroReservasPage() {
       document.body.removeChild(a);
       window.URL.revokeObjectURL(url);
     } catch (e) {
-      setErro(e instanceof Error ? e.message : "Erro ao exportar Excel.");
+      setErro(mensagemErro(e, "Erro ao exportar Excel."));
     }
   }
 
@@ -348,7 +388,7 @@ export default function ParceiroReservasPage() {
       setImportResult(data.message || `${data.criadas} criadas, ${data.ignoradas} ignoradas, ${data.erros} erros.`);
       await carregar();
     } catch (e) {
-      setImportResult(e instanceof Error ? e.message : "Erro ao importar Excel.");
+      setImportResult(mensagemErro(e, "Erro ao importar Excel."));
     } finally {
       setImportLoading(false);
     }
