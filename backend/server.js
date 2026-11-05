@@ -164,8 +164,22 @@ app.use((err, req, res, next) => {
   if (process.env.NODE_ENV !== 'production') {
     console.error(err.stack);
   }
-  return res.status(err.status || 500).json({
-    erro: err.status ? err.message : 'Erro interno do servidor.',
+  // Corpo demasiado grande (express.raw do Excel: 5 MB; express.json: 10 MB).
+  if (err.status === 413 || err.type === 'entity.too.large') {
+    const excel = /importar-excel/.test(req.originalUrl || '');
+    return res.status(413).json({
+      erro: excel
+        ? 'O ficheiro Excel é demasiado grande (o limite é de 5 MB). Guarda-o sem imagens nem formatação a mais, ou divide-o em ficheiros mais pequenos, e tenta outra vez.'
+        : 'O pedido é demasiado grande. Tenta com menos dados.',
+    });
+  }
+  if (err.type === 'entity.parse.failed') {
+    return res.status(400).json({ erro: 'Pedido inválido.' });
+  }
+  // Só mensagens pensadas para o cliente (err.expose, 4xx); o resto fica no log.
+  const status = err.status || 500;
+  return res.status(status).json({
+    erro: err.status && err.expose === true ? err.message : (status >= 500 ? 'Erro interno do servidor.' : 'Pedido inválido.'),
   });
 });
 

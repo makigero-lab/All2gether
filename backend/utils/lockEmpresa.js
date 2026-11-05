@@ -57,4 +57,20 @@ async function libertarLock(chave, dono) {
   }
 }
 
-module.exports = { obterLock, libertarLock, LockEmpresa };
+/**
+ * Renova a expiração do lock (heartbeat) enquanto o dono ainda o tem. Devolve
+ * false se o lock já não é deste dono (expirou e foi tomado por outro).
+ */
+async function renovarLock(chave, dono, ttlMs = 120000) {
+  try {
+    const r = await LockEmpresa.updateOne(
+      { _id: chave, dono },
+      { $set: { expira_em: new Date(Date.now() + ttlMs) } }
+    );
+    return r.matchedCount === 1;
+  } catch {
+    return false;
+  }
+}
+
+module.exports = { obterLock, libertarLock, renovarLock, LockEmpresa };

@@ -24,7 +24,7 @@ async function zipBomba(mb) {
 test('B9 zip que descomprime para 40 MB é recusado sem carregar o ExcelJS (rápido e sem memória)', async () => {
   const buf = await zipBomba(40);
   expect(buf.length).toBeLessThan(200 * 1024);
-  expect(verificarTamanhoXlsx(buf)).toEqual({ ok: false, motivo: 'grande' });
+  expect(verificarTamanhoXlsx(buf)).toMatchObject({ ok: false, motivo: 'grande', causa: 'linhas' });
   const c = await cenario(app);
   const mem0 = process.memoryUsage().rss;
   const t0 = Date.now();
@@ -42,4 +42,34 @@ test('B9 um xlsx normal continua a ser aceite', async () => {
   ws.addRow(['Propriedade', 'Check-out']); for (let i = 0; i < 1500; i++) ws.addRow(['X' + i, '10/06/2036']);
   const buf = Buffer.from(await wb.xlsx.writeBuffer());
   expect(verificarTamanhoXlsx(buf).ok).toBe(true);
+});
+
+async function zipComEntrada(nome, mb) {
+  const z = new JSZip();
+  z.file('[Content_Types].xml', '<Types/>');
+  z.file(nome, Buffer.alloc(mb * 1024 * 1024, 0x61));
+  return z.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+}
+
+test('item 7: styles.xml enorme e total acima de 30 MB têm mensagem própria (formatação)', async () => {
+  const c = await cenario(app);
+  const buf = await zipComEntrada('xl/styles.xml', 25);
+  expect(verificarTamanhoXlsx(buf)).toMatchObject({ ok: false, causa: 'formatacao' });
+  const r = await request(app).post('/api/gestor/reservas/importar-excel').set(auth(c.token)).set('Content-Type', MIME).send(buf);
+  expect(r.status).toBe(400);
+  expect(r.body.erro).toMatch(/demasiada formatação/);
+  const z = new JSZip();
+  z.file('[Content_Types].xml', '<Types/>');
+  z.file('xl/styles.xml', Buffer.alloc(15 * 1024 * 1024, 0x61));
+  z.file('xl/worksheets/sheet1.xml', Buffer.alloc(18 * 1024 * 1024, 0x61));
+  const total = await z.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+  expect(verificarTamanhoXlsx(total)).toMatchObject({ ok: false, causa: 'total' });
+});
+
+test('item 7: ficheiro acima de 5 MB devolve 413 em português com o limite e o que fazer', async () => {
+  const c = await cenario(app);
+  const r = await request(app).post('/api/gestor/reservas/importar-excel').set(auth(c.token)).set('Content-Type', MIME).send(Buffer.alloc(6 * 1024 * 1024, 0x50));
+  expect(r.status).toBe(413);
+  expect(r.body.erro).toMatch(/5 MB/);
+  expect(r.body.erro).not.toMatch(/entity/i);
 });

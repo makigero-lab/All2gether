@@ -8,12 +8,19 @@
  * o limite de 5 MB no body (e o limite de linhas depois) mantêm o dano contido.
  */
 
-// 2000 linhas ocupam ~0,3 a 1 MB de XML; estes limites dão folga larga.
-const MAX_DESCOMPRIMIDO_TOTAL = 12 * 1024 * 1024;
-const MAX_DESCOMPRIMIDO_ENTRADA = 8 * 1024 * 1024;
+// 2000 linhas ocupam ~0,3 a 1 MB de XML; mas ficheiros muito formatados (um estilo
+// por célula) levam o styles.xml a ~3-5 MB. Medido: ~77 MB descomprimidos demoram
+// ~3 s e ~90 MB de RSS a carregar, por isso 30 MB (~1 s) é um teto seguro e largo.
+// O limite por entrada é mais baixo que o total, para ser coerente com ele.
+const MAX_DESCOMPRIMIDO_TOTAL = 30 * 1024 * 1024;
+const MAX_DESCOMPRIMIDO_ENTRADA = 20 * 1024 * 1024;
 const MAX_ENTRADAS = 200;
 
-/** Devolve { ok: true } ou { ok: false, motivo }. */
+/**
+ * Devolve { ok: true } ou { ok: false, motivo, causa? }. `causa` (só com motivo
+ * 'grande'): 'linhas' (a folha é enorme), 'formatacao' (estilos/imagens enormes)
+ * ou 'total'.
+ */
 function verificarTamanhoXlsx(buf) {
   if (!Buffer.isBuffer(buf) || buf.length < 22) return { ok: false, motivo: 'invalido' };
   // Fim do diretório central (EOCD): procura a assinatura nos últimos 64 KB + 22.
@@ -31,9 +38,13 @@ function verificarTamanhoXlsx(buf) {
   for (let n = 0; n < total; n++) {
     if (pos + 46 > buf.length || buf.readUInt32LE(pos) !== 0x02014b50) return { ok: false, motivo: 'invalido' };
     const descomprimido = buf.readUInt32LE(pos + 24);
-    if (descomprimido === 0xffffffff || descomprimido > MAX_DESCOMPRIMIDO_ENTRADA) return { ok: false, motivo: 'grande' };
+    const nomeLen = buf.readUInt16LE(pos + 28);
+    const nome = buf.toString('utf8', pos + 46, Math.min(buf.length, pos + 46 + nomeLen));
+    if (descomprimido === 0xffffffff || descomprimido > MAX_DESCOMPRIMIDO_ENTRADA) {
+      return { ok: false, motivo: 'grande', causa: /^xl\/worksheets\//.test(nome) ? 'linhas' : 'formatacao' };
+    }
     soma += descomprimido;
-    if (soma > MAX_DESCOMPRIMIDO_TOTAL) return { ok: false, motivo: 'grande' };
+    if (soma > MAX_DESCOMPRIMIDO_TOTAL) return { ok: false, motivo: 'grande', causa: 'total' };
     pos += 46 + buf.readUInt16LE(pos + 28) + buf.readUInt16LE(pos + 30) + buf.readUInt16LE(pos + 32);
   }
   return { ok: true, descomprimido: soma };

@@ -44,6 +44,9 @@ const { membrosPopulados } = require('../utils/equipaTarefa');
  * @returns {Promise<{encontradas: number, atribuidas: number, orfas: number}>}
  */
 async function autoAtribuicaoEmergencia() {
+  const {
+    planearAtribuicao, preencherVagaTarefa, FILTRO_SEM_PESSOA, semPessoa, recuperavelSemPessoa,
+  } = require('../utils/atribuicaoAutomatica');
   // 1) Calcula o intervalo do dia SEGUINTE (meia-noite UTC).
   const agora = new Date();
   const amanhaInicio = new Date(
@@ -60,6 +63,7 @@ async function autoAtribuicaoEmergencia() {
     $or: [
       { estado: 'por_atribuir', utilizador_id: null },
       { estado: 'atribuida', pessoas_em_falta: { $gt: 0 } },
+      FILTRO_SEM_PESSOA,
     ],
   })
     .populate({
@@ -75,11 +79,12 @@ async function autoAtribuicaoEmergencia() {
 
   // 3) Motor partilhado (respeita staff_necessario, scheduler e motivo real).
   //    require lazy para testes (spyOn).
-  const { planearAtribuicao, preencherVagaTarefa } = require('../utils/atribuicaoAutomatica');
+
   const { notificarUtilizador } = require('../utils/notificar');
 
   let atribuidas = 0;
   let orfas = 0;
+  const semResponsavelEmCurso = [];
   const avisar = (ids, propNome) => {
     for (const id of ids) {
       try {
@@ -95,7 +100,15 @@ async function autoAtribuicaoEmergencia() {
       const propriedade = tarefa.propriedade_id || {};
       const propNome = propriedade.nome ?? 'Propriedade';
 
-      if (tarefa.estado === 'atribuida') {
+      const fantasma = semPessoa(tarefa);
+      if (fantasma && !recuperavelSemPessoa(tarefa)) {
+        // 'em_curso' sem ninguém mas já com trabalho feito: não se mexe, o gestor decide.
+        orfas++;
+        semResponsavelEmCurso.push(propNome);
+        continue;
+      }
+
+      if (tarefa.estado === 'atribuida' && !fantasma) {
         // Vaga numa equipa incompleta.
         const v = await preencherVagaTarefa({ empresaId: tarefa.empresa_id, tarefa, propriedade });
         if (v.novos.length > 0) {
@@ -115,8 +128,12 @@ async function autoAtribuicaoEmergencia() {
       });
 
       if (plano.estado === 'atribuida') {
-        await Tarefa.updateOne(
-          { _id: tarefa._id, estado: 'por_atribuir' },
+        // Só conta e avisa se esta execução foi mesmo a que gravou (duas execuções
+        // em simultâneo não duplicam a contagem nem as notificações).
+        const r = await Tarefa.updateOne(
+          fantasma
+            ? { _id: tarefa._id, estado: tarefa.estado, utilizador_id: null }
+            : { _id: tarefa._id, estado: 'por_atribuir' },
           {
             $set: {
               utilizador_id: plano.utilizador_id,
@@ -129,13 +146,15 @@ async function autoAtribuicaoEmergencia() {
             },
           }
         );
-        atribuidas++;
-        avisar(plano.equipa_atribuida, propNome);
+        if (r.modifiedCount === 1) {
+          atribuidas++;
+          avisar(plano.equipa_atribuida, propNome);
+        }
       } else {
         // Causa real: lotação -> 'nao_atribuida'; ausência/folga/sem equipa ->
         // continua 'por_atribuir'. O motivo gravado é sempre o verdadeiro.
         await Tarefa.updateOne(
-          { _id: tarefa._id },
+          { _id: tarefa._id, utilizador_id: null, estado: tarefa.estado },
           { $set: { estado: plano.estado, motivo_nao_atribuicao: plano.motivo_nao_atribuicao } }
         );
         orfas++;
@@ -152,13 +171,15 @@ async function autoAtribuicaoEmergencia() {
 
   console.log(
     `🤖 [Cão de Guarda / Fail-Safe] ${tarefasOrfas.length} tarefa(s) órfã(s)/incompleta(s) de amanhã: ` +
-      `${atribuidas} atribuída(s), ${orfas} continuam por atribuir.`
+      `${atribuidas} atribuída(s), ${orfas} continuam por atribuir.` +
+      (semResponsavelEmCurso.length ? ` Em curso sem responsável e com trabalho feito (não mexidas): ${semResponsavelEmCurso.join(', ')}.` : '')
   );
 
   return {
     encontradas: tarefasOrfas.length,
     atribuidas,
     orfas,
+    emCursoSemResponsavel: semResponsavelEmCurso.length,
   };
 }
 
@@ -169,7 +190,7 @@ async function autoAtribuicaoEmergencia() {
  * Passados `minutos` sem alteração, volta a correr o motor; sem staff, o motivo
  * passa a ser o real.
  */
-async function retomarAtribuicoesPresas(minutos = 15) {
+async function retomarAtribuicoesPresas(minutos = 45) {
   const limite = new Date(Date.now() - minutos * 60000);
   const presas = await Tarefa.find({
     estado: 'por_atribuir',
@@ -375,7 +396,7 @@ function iniciarCaoGuarda() {
   );
 
   // B13 — 2 min depois do arranque e de 30 em 30 minutos: retoma tarefas presas em
-  // «Atribuição automática em curso» há mais de 15 min.
+  // «Atribuição automática em curso» há mais de 45 min (a importação grande pode demorar).
   const tentar = () => retomarAtribuicoesPresas().catch((e) => console.error('⚠️  retomarAtribuicoesPresas:', e.message));
   const t0 = setTimeout(tentar, 2 * 60 * 1000);
   const t1 = setInterval(tentar, 30 * 60 * 1000);

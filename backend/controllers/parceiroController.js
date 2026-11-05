@@ -25,6 +25,7 @@ const { obterCoordenadas } = require('../utils/geocoding');
 const { planearAtribuicao } = require('../utils/atribuicaoAutomatica');
 const { idsEquipa } = require('../utils/equipaTarefa');
 const { agregarNotificacao } = require('../utils/notificarAgregado');
+const { avisarGestores } = require('../utils/notificar');
 
 const fmtDia = (d) => new Date(d).toISOString().slice(0, 10).split('-').reverse().join('/');
 
@@ -304,6 +305,43 @@ function validarDatas(check_in, check_out) {
 }
 
 /**
+ * Limpezas (não canceladas) de uma casa num dia de check-out, separadas entre as
+ * de reservas do parceiro (ReservaManual) e as de outra origem (rotina, Smoobu,
+ * tarefa manual do gestor). `excluirTarefaId` deixa de fora a própria tarefa.
+ */
+async function limpezasDoDia({ empresaId, propriedadeId, inicioDia, excluirTarefaId = null }) {
+  const filtro = {
+    empresa_id: empresaId,
+    propriedade_id: propriedadeId,
+    tipo: 'limpeza',
+    estado: { $ne: 'cancelada' },
+    data: { $gte: inicioDia, $lt: new Date(inicioDia.getTime() + 86400000) },
+  };
+  if (excluirTarefaId) filtro._id = { $ne: excluirTarefaId };
+  const tarefas = await Tarefa.find(filtro).select('_id').lean();
+  if (tarefas.length === 0) return { doParceiro: false, deOutraOrigem: false };
+  const ids = tarefas.map((t) => t._id);
+  const doParceiroIds = new Set(
+    (await ReservaManual.find({ tarefa_gerada_id: { $in: ids } }).select('tarefa_gerada_id').lean())
+      .map((r) => String(r.tarefa_gerada_id))
+  );
+  return {
+    doParceiro: doParceiroIds.size > 0,
+    deOutraOrigem: ids.some((id) => !doParceiroIds.has(String(id))),
+  };
+}
+
+/** Gestor decide: há outra limpeza (outra origem) no mesmo dia e casa. */
+function avisarGestorDuasLimpezas(empresaId, propriedade, inicioDia) {
+  return avisarGestores(
+    empresaId,
+    '⚠️ Duas limpezas no mesmo dia',
+    `"${propriedade.nome}" tem agora duas limpezas a ${fmtDia(inicioDia)} (uma de uma reserva de proprietário e outra de outra origem). Vê se é a mesma e elimina uma.`,
+    '/gestor/tarefas'
+  );
+}
+
+/**
  * Gera a Tarefa de Limpeza (com auto-atribuição) para o check-out de uma reserva.
  * Partilhado por criarReserva e atualizarReserva (quando as datas mudam).
  * `detalhesExtra` é fundido em tarefa.detalhes_reserva (nome, hora, preferência…).
@@ -422,16 +460,12 @@ async function criarReserva(req, res) {
     // dia de check-out) e passam. Casas diferentes no mesmo dia também.
     const inicioDiaSaida = new Date(check_out);
     inicioDiaSaida.setUTCHours(0, 0, 0, 0);
-    const duplicada = await Tarefa.exists({
-      empresa_id: empresaId,
-      propriedade_id: propriedade._id,
-      tipo: 'limpeza',
-      estado: { $ne: 'cancelada' },
-      data: { $gte: inicioDiaSaida, $lt: new Date(inicioDiaSaida.getTime() + 86400000) },
+    const { doParceiro, deOutraOrigem } = await limpezasDoDia({
+      empresaId, propriedadeId: propriedade._id, inicioDia: inicioDiaSaida,
     });
-    if (duplicada) {
+    if (doParceiro) {
       return res.status(409).json({
-        erro: `Já existe uma limpeza para "${propriedade.nome}" com check-out a ${inicioDiaSaida.toISOString().slice(0, 10)}. Se é a mesma reserva, já está registada: tira esta linha das alterações por gravar.`,
+        erro: `Já existe uma limpeza para "${propriedade.nome}" com check-out a ${fmtDia(inicioDiaSaida)}. Se é a mesma reserva, já está registada: tira esta linha das alterações por gravar.`,
         codigo: 'RESERVA_DUPLICADA',
       });
     }
@@ -491,6 +525,7 @@ async function criarReserva(req, res) {
 
     // Avisa a equipa atribuída (uma notificação por pessoa e gravação).
     avisarEquipaNova(novaTarefa, propriedade);
+    if (deOutraOrigem) await avisarGestorDuasLimpezas(empresaId, propriedade, inicioDiaSaida);
 
     console.log(
       `📅 [Parceiro] reserva criada por parceiro ${parceiroId} para "${propriedade.nome}" ` +
@@ -580,6 +615,27 @@ async function atualizarReserva(req, res) {
       numHospedes = prop?.capacidade_hospedes ?? null;
     }
 
+    // Mudar o check-out para um dia que já tem outra limpeza do parceiro na mesma casa:
+    // recusa (a antiga fica intacta). A própria tarefa fica de fora.
+    let deOutraOrigem = false;
+    let inicioNovoDia = null;
+    if (tarefa && checkOutMudou) {
+      inicioNovoDia = new Date(novoCheckOut);
+      inicioNovoDia.setUTCHours(0, 0, 0, 0);
+      const r = await limpezasDoDia({
+        empresaId: reserva.empresa_id, propriedadeId: reserva.propriedade_id,
+        inicioDia: inicioNovoDia, excluirTarefaId: tarefa._id,
+      });
+      if (r.doParceiro) {
+        const p = await Propriedade.findById(reserva.propriedade_id).select('nome').lean();
+        return res.status(409).json({
+          erro: `Já existe outra limpeza para "${p?.nome || 'esta casa'}" com check-out a ${fmtDia(inicioNovoDia)}. Escolhe outro dia ou elimina a outra reserva primeiro.`,
+          codigo: 'RESERVA_DUPLICADA',
+        });
+      }
+      deOutraOrigem = r.deOutraOrigem;
+    }
+
     reserva.check_in = new Date(novoCheckIn);
     reserva.check_out = new Date(novoCheckOut);
     reserva.hospedes = numHospedes;
@@ -617,6 +673,7 @@ async function atualizarReserva(req, res) {
       // (mesmo quem volta a ser escalado na nova) e a da nova é avisada da nova.
       avisarEquipaSaiu(equipaAntes, propriedade, dataAntiga, 'foi cancelada (a reserva mudou de datas).');
       avisarEquipaNova(nova, propriedade);
+      if (deOutraOrigem) await avisarGestorDuasLimpezas(reserva.empresa_id, propriedade, inicioNovoDia);
     } else if (tarefa) {
       tarefa.hospedes = numHospedes;
       tarefa.observacoes = reserva.observacoes;

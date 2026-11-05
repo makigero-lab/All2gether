@@ -20,6 +20,7 @@ const WebhookLog = require('../models/WebhookLog');
 const { obterCoordenadas } = require('../utils/geocoding');
 const { registarAuditoria } = require('../utils/auditoria');
 const { comMembro, filtroMembro, retirarMembroDoc, membrosPopulados, EXPR_MEMBROS } = require('../utils/equipaTarefa');
+const { FILTRO_SEM_PESSOA } = require('../utils/atribuicaoAutomatica');
 
 /* ------------------------------------------------------------------ */
 /* Helper — obter empresa_id do JWT (req.user)                        */
@@ -106,8 +107,12 @@ exports.getDashboard = async (req, res) => {
       Tarefa.countDocuments({
         empresa_id: empresaId,
         data: { $gte: hojeInicio, $lt: amanhaInicio },
-        // 'nao_atribuida' (nenhuma pessoa coube) também precisa de atenção do gestor.
-        estado: { $in: ['por_atribuir', 'nao_atribuida'] },
+        // 'nao_atribuida' (nenhuma pessoa coube) também precisa de atenção do gestor,
+        // tal como as 'atribuida'/'em_curso' sem ninguém (estado incoerente).
+        $or: [
+          { estado: { $in: ['por_atribuir', 'nao_atribuida'] } },
+          FILTRO_SEM_PESSOA,
+        ],
       }),
       Tarefa.countDocuments({
         empresa_id: empresaId,
@@ -2433,6 +2438,7 @@ exports.reportarFaltaSubita = async (req, res) => {
 
     // 4) Desatribui cada tarefa; a reatribuição vem logo a seguir.
     let desatribuidas = 0;
+    let parciais = 0;
     const detalhes = [];
 
     for (const tarefa of tarefas) {
@@ -2441,6 +2447,7 @@ exports.reportarFaltaSubita = async (req, res) => {
       const vazia = retirarMembroDoc(tarefa, id);
       await tarefa.save();
       if (vazia) desatribuidas++;
+      else parciais++;
       detalhes.push({
         tarefa_id: String(tarefa._id),
         propriedade: tarefa.propriedade_id?.nome ?? '?',
@@ -2468,6 +2475,7 @@ exports.reportarFaltaSubita = async (req, res) => {
         `Falta súbita processada: ${desatribuidas} tarefa(s) desatribuída(s). ${textoReatribuicao(reatribuicao)}` +
         (avisoEmCurso ? ` ${avisoEmCurso}` : ''),
       desatribuidas,
+      parciais,
       total: tarefas.length,
       detalhes,
       reatribuicao,
@@ -2615,12 +2623,14 @@ exports.registarBaixaProlongada = async (req, res) => {
 
     // 3) Desatribui cada tarefa; a reatribuição vem logo a seguir.
     let desatribuidas = 0;
+    let parciais = 0;
     const detalhes = [];
 
     for (const tarefa of tarefas) {
       const vazia = retirarMembroDoc(tarefa, id);
       await tarefa.save();
       if (vazia) desatribuidas++;
+      else parciais++;
       detalhes.push({
         tarefa_id: String(tarefa._id),
         ...(vazia ? {} : { parcial: true }),
@@ -2649,6 +2659,7 @@ exports.registarBaixaProlongada = async (req, res) => {
         `Baixa processada: ${desatribuidas} tarefa(s) desatribuída(s). ${textoReatribuicao(reatribuicao)}` +
         (avisoEmCurso ? ` ${avisoEmCurso}` : ''),
       desatribuidas,
+      parciais,
       total: tarefas.length,
       detalhes,
       reatribuicao,

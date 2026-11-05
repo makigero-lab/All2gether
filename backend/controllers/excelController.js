@@ -19,11 +19,12 @@ const Propriedade = require('../models/Propriedade');
 const ReservaManual = require('../models/ReservaManual');
 const { planearAtribuicao } = require('../utils/atribuicaoAutomatica');
 const { verificarTamanhoXlsx } = require('../utils/xlsxLimites');
-const { obterLock, libertarLock } = require('../utils/lockEmpresa');
+const { obterLock, libertarLock, renovarLock } = require('../utils/lockEmpresa');
 const { notificarUtilizador, avisarGestores } = require('../utils/notificar');
 
 const MIME_XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const MAX_LINHAS_IMPORT = 2000;
+const LINHAS_POR_HEARTBEAT = 50;
 // Tempo máximo que o pedido espera pela atribuição automática. O que não couber
 // continua em segundo plano e o resultado diz quantas ficaram a atribuir.
 const orcamentoAtribuicaoMs = () => Number(process.env.IMPORT_ORCAMENTO_ATRIBUICAO_MS) || 20000;
@@ -125,9 +126,14 @@ async function lerLinhasExcel(req) {
   // Antes de descomprimir: um xlsx pequeno pode ocultar centenas de milhares de linhas.
   const tam = verificarTamanhoXlsx(body);
   if (!tam.ok) {
-    return tam.motivo === 'grande'
-      ? { status: 400, erro: `O ficheiro é demasiado grande (o limite é de ${MAX_LINHAS_IMPORT} linhas). Divide-o em ficheiros mais pequenos.` }
-      : { status: 400, erro: 'Ficheiro inválido: não foi possível ler o .xlsx.' };
+    if (tam.motivo !== 'grande') return { status: 400, erro: 'Ficheiro inválido: não foi possível ler o .xlsx.' };
+    if (tam.causa === 'formatacao' || tam.causa === 'total') {
+      return {
+        status: 400,
+        erro: 'O ficheiro tem demasiada formatação, estilos ou imagens para ser lido. Copia só os dados (sem cores, imagens nem formatação) para um ficheiro novo e tenta outra vez.',
+      };
+    }
+    return { status: 400, erro: `O ficheiro é demasiado grande (o limite é de ${MAX_LINHAS_IMPORT} linhas). Divide-o em ficheiros mais pequenos.` };
   }
   let ws;
   try {
@@ -344,6 +350,9 @@ async function importarLinhas({
   }
   try {
   for (let i = 0; i < linhas.length; i++) {
+    // Heartbeat: a criação pode demorar mais que o TTL (120 s); renova a cada 50 linhas
+    // para outra importação não tomar o lock a meio e duplicar.
+    if (i > 0 && i % LINHAS_POR_HEARTBEAT === 0) await renovarLock(chaveLock, donoLock, 120000);
     const linha = linhas[i];
     const nLinha = i + 2;
     try {

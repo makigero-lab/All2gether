@@ -101,7 +101,10 @@ async function verificarDistanciaTarefasDia(utilizadorId, dataTarefa, propriedad
 }
 // F0 — Load balancer extraído para utils/loadBalancer.js (antes em webhookController).
 const { determinarUtilizadorAtribuido } = require('../utils/loadBalancer');
-const { diagnosticarFaltaDeStaff, planearAtribuicao, preencherVagaTarefa } = require('../utils/atribuicaoAutomatica');
+const {
+  diagnosticarFaltaDeStaff, planearAtribuicao, preencherVagaTarefa,
+  FILTRO_SEM_PESSOA, semPessoa, recuperavelSemPessoa,
+} = require('../utils/atribuicaoAutomatica');
 const { comMembro, idsEquipa, normalizarEquipa, retirarMembroDoc } = require('../utils/equipaTarefa');
 
 /**
@@ -890,33 +893,18 @@ exports.reatribuirTarefa = async (req, res) => {
       return res.status(404).json({ erro: 'Propriedade não encontrada.' });
     }
 
-    // 6. Temporariamente desatribui a tarefa (responsável e equipa) para o
-    //    scheduler não a contar. Guarda a equipa para a repor depois.
+    // 6. Calcula o novo início primeiro (scheduler sequencial + almoço), ignorando a
+    //    própria tarefa. Nada é gravado até estar tudo calculado: se falhar, a equipa
+    //    anterior fica intacta e a tarefa nunca fica com o responsável a null.
     const equipaAntes = idsEquipa(tarefa);
     const antigoResp = tarefa.utilizador_id ? String(tarefa.utilizador_id) : null;
-    const estadoAntes = {
-      utilizador_id: tarefa.utilizador_id,
-      equipa_atribuida: [...(tarefa.equipa_atribuida || [])],
-      pessoas_em_falta: tarefa.pessoas_em_falta,
-    };
-    tarefa.utilizador_id = null;
-    tarefa.equipa_atribuida = [];
-    await tarefa.save();
-
-    // 7. Calcula o novo início (scheduler sequencial + almoço). Se o scheduler
-    //    falhar, repõe a equipa anterior: nunca fica a tarefa sem ninguém.
-    let resultadoScheduler;
-    try {
-      resultadoScheduler = await calcularInicioTarefaUtilizador(
-        utilizador_id,
-        tarefa.data,
-        propriedade.coordenadas,
-        tarefa.tempo_limpeza_minutos || 45
-      );
-    } catch (errSched) {
-      await Tarefa.updateOne({ _id: tarefa._id }, { $set: estadoAntes });
-      throw errSched;
-    }
+    const resultadoScheduler = await calcularInicioTarefaUtilizador(
+      utilizador_id,
+      tarefa.data,
+      propriedade.coordenadas,
+      tarefa.tempo_limpeza_minutos || 45,
+      tarefa._id
+    );
 
     // 8. Guarda a tarefa com o novo utilizador + nova data.
     // Prompt 138 (136 V2) — guarda o tempo de viagem calculado pelo scheduler.
@@ -1134,6 +1122,8 @@ exports.autoAtribuirTarefas = async (req, res) => {
       $or: [
         { estado: { $in: ['por_atribuir', 'nao_atribuida'] } },
         { estado: 'atribuida', pessoas_em_falta: { $gt: 0 } },
+        // 'atribuida'/'em_curso' sem ninguém (estado incoerente): tratadas como por atribuir.
+        FILTRO_SEM_PESSOA,
       ],
     })
       .populate({ path: 'propriedade_id', select: 'nome coordenadas staff_necessario tempo_limpeza_minutos' })
@@ -1155,10 +1145,23 @@ exports.autoAtribuirTarefas = async (req, res) => {
     const detalhe = [];
 
     const porPessoa = new Map();
+    const emCursoSemResponsavel = [];
     for (const tarefa of tarefasOrfas) {
       try {
+        const fantasma = semPessoa(tarefa);
+        if (fantasma && !recuperavelSemPessoa(tarefa)) {
+          // 'em_curso' sem responsável mas com trabalho já feito: não se mexe; o gestor decide.
+          orfas++;
+          emCursoSemResponsavel.push(tarefa.propriedade_id?.nome ?? '—');
+          detalhe.push({
+            tarefa_id: String(tarefa._id),
+            propriedade: tarefa.propriedade_id?.nome ?? '—',
+            status: 'em_curso_sem_responsavel',
+          });
+          continue;
+        }
         // Equipa incompleta: preenche só a vaga (mantém responsável e hora).
-        if (tarefa.estado === 'atribuida') {
+        if (tarefa.estado === 'atribuida' && !fantasma) {
           const v = await preencherVagaTarefa({ empresaId, tarefa, propriedade: tarefa.propriedade_id || {} });
           if (v.novos.length > 0) {
             reatribuidas++;
@@ -1196,7 +1199,7 @@ exports.autoAtribuirTarefas = async (req, res) => {
 
         if (plano.estado === 'atribuida') {
           await Tarefa.updateOne(
-            { _id: tarefa._id },
+            fantasma ? { _id: tarefa._id, estado: tarefa.estado, utilizador_id: null } : { _id: tarefa._id },
             {
               $set: {
                 utilizador_id: plano.utilizador_id,
@@ -1279,6 +1282,7 @@ exports.autoAtribuirTarefas = async (req, res) => {
       processadas: tarefasOrfas.length,
       reatribuidas,
       orfas,
+      ...(emCursoSemResponsavel.length ? { em_curso_sem_responsavel: emCursoSemResponsavel.length } : {}),
       detalhe,
     });
   } catch (err) {

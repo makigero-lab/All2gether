@@ -220,7 +220,45 @@ function avisarColegasDoSubstituto(colegas, novos, nomeProp) {
   }
 }
 
+/**
+ * Tarefas 'atribuida'/'em_curso' SEM ninguém (utilizador_id null e equipa vazia):
+ * estado incoerente (ex.: pessoa eliminada). Filtro Mongo reutilizável.
+ */
+const FILTRO_SEM_PESSOA = {
+  estado: { $in: ['atribuida', 'em_curso'] },
+  utilizador_id: null,
+  $or: [{ equipa_atribuida: { $exists: false } }, { equipa_atribuida: { $size: 0 } }],
+};
+
+/** Versão em JS do FILTRO_SEM_PESSOA (para documentos já carregados). */
+function semPessoa(t) {
+  return !!t && ['atribuida', 'em_curso'].includes(t.estado) && !t.utilizador_id && idsEquipa(t).length === 0;
+}
+
+/**
+ * Há sinais de que a limpeza já foi feita em parte (item da checklist marcado,
+ * fotos, avarias, notas do staff ou sacos de roupa)? Decisão: se sim, uma
+ * 'em_curso' sem pessoa NÃO é mexida automaticamente (o gestor decide).
+ */
+function temProgresso(t) {
+  const checklist = (t.checklist_dinamica || []).some((g) => (g.items || []).some((i) => i.concluido));
+  return checklist
+    || (t.fotos_conclusao || []).length > 0
+    || (t.avarias || []).length > 0
+    || !!(t.observacoes_staff && String(t.observacoes_staff).trim())
+    || (Number(t.sacos_roupa_suja) || 0) > 0;
+}
+
+/** Uma tarefa sem pessoa que pode voltar a ser atribuída do zero (nada foi feito). */
+function recuperavelSemPessoa(t) {
+  return semPessoa(t) && (t.estado === 'atribuida' || !temProgresso(t));
+}
+
 module.exports = {
+  FILTRO_SEM_PESSOA,
+  semPessoa,
+  temProgresso,
+  recuperavelSemPessoa,
   avisarColegasDoSubstituto,
   preencherVagaTarefa,
   temSobreposicao,
