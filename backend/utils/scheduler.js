@@ -171,14 +171,20 @@ async function calcularInicioTarefaUtilizador(utilizadorId, dataBase, coordNovaP
   // Nota: o caller deve passar já sem a tarefa atual na BD, ou usar
   // excluirTarefaId. Aqui mantemos simples: quem reatribui deve primeiro
   // desatribuir (utilizador_id = null) e depois chamar este cálculo.
-  const ultimaTarefa = await Tarefa.findOne({
+  // Tarefas exatamente a 00:00 UTC são placeholders sem hora real (ex.: manutenção
+  // criada sem horário): não contam como "última tarefa", senão empurravam a nova
+  // limpeza para as 01:xx UTC.
+  const candidatas = await Tarefa.find({
     utilizador_id: utilizadorId,
     data: { $gte: start, $lt: end },
     estado: { $nin: ['cancelada'] },
   })
     .populate({ path: 'propriedade_id', select: 'coordenadas nome' })
     .sort({ data: -1 })
+    .limit(20)
     .lean();
+  const ultimaTarefa =
+    candidatas.find((t) => new Date(t.data).getTime() !== start.getTime()) || null;
 
   if (ultimaTarefa && ultimaTarefa.propriedade_id) {
     const fimAnterior = new Date(ultimaTarefa.data);

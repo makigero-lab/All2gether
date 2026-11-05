@@ -82,7 +82,7 @@ export function DetalhesReservaCard({
     <Card className="border-primary/30 bg-primary/5">
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-base">
-          <CalendarDays className="h-5 w-5 text-primary" />
+          <CalendarDays className="h-5 w-5 text-gold-text" />
           Detalhes da Reserva
         </CardTitle>
       </CardHeader>
@@ -113,7 +113,7 @@ export function DetalhesReservaCard({
             </div>
           </div>
           <div className="flex items-start gap-2 rounded-md bg-background/60 p-2.5">
-            <Users className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+            <Users className="mt-0.5 h-4 w-4 shrink-0 text-gold-text" />
             <div className="min-w-0">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Hóspedes
@@ -122,7 +122,7 @@ export function DetalhesReservaCard({
             </div>
           </div>
           <div className="flex items-start gap-2 rounded-md bg-background/60 p-2.5">
-            <User className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+            <User className="mt-0.5 h-4 w-4 shrink-0 text-gold-text" />
             <div className="min-w-0">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Hóspede
@@ -159,13 +159,13 @@ export function DetalhesReservaCard({
             </p>
             {contacto.email && (
               <p className="flex items-center gap-2 break-all">
-                <Mail className="h-4 w-4 shrink-0 text-primary" />
+                <Mail className="h-4 w-4 shrink-0 text-gold-text" />
                 <a href={`mailto:${contacto.email}`} className="hover:underline">{contacto.email}</a>
               </p>
             )}
             {contacto.telefone && (
               <p className="flex items-center gap-2">
-                <Phone className="h-4 w-4 shrink-0 text-primary" />
+                <Phone className="h-4 w-4 shrink-0 text-gold-text" />
                 <a href={`tel:${contacto.telefone}`} className="hover:underline">{contacto.telefone}</a>
               </p>
             )}

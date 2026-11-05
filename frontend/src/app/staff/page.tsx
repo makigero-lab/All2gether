@@ -344,13 +344,13 @@ export default function StaffPage() {
                 Anterior
               </Button>
               <div className="flex flex-col items-center">
-                <span className={`text-sm font-bold capitalize ${offsetDia === 0 ? "text-primary" : "text-foreground"}`}>
+                <span className={`text-sm font-bold capitalize ${offsetDia === 0 ? "text-gold-text" : "text-foreground"}`}>
                   {diaLabel}
                 </span>
                 {offsetDia !== 0 && (
                   <button
                     onClick={() => setOffsetDia(0)}
-                    className="px-2 py-2 text-xs font-medium text-primary hover:underline"
+                    className="px-2 py-2 text-xs font-medium text-gold-text hover:underline"
                   >
                     Voltar a Hoje
                   </button>
@@ -456,7 +456,7 @@ export default function StaffPage() {
             )}
           </DialogContent>
           <DialogFooter>
-            <Button
+            <Button size="touch"
               type="button"
               variant="outline"
               onClick={() => setMostrarDialogFalta(false)}
@@ -464,7 +464,7 @@ export default function StaffPage() {
             >
               Cancelar
             </Button>
-            <Button
+            <Button size="touch"
               type="submit"
               variant="destructive"
               disabled={submetendoFalta}

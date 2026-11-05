@@ -256,7 +256,7 @@ export default function StaffAusenciasPage() {
               Voltar
             </Link>
             <div className="flex items-center gap-2">
-              <CalendarOff className="h-5 w-5 text-primary" />
+              <CalendarOff className="h-5 w-5 text-gold-text" />
               <h1 className="text-xl font-semibold tracking-tight">
                 Pedidos de Ausência
               </h1>
@@ -308,7 +308,7 @@ export default function StaffAusenciasPage() {
               <span>{erro}</span>
               <Button
                 variant="outline"
-                size="sm"
+                size="touch"
                 onClick={carregar}
                 className="ml-auto"
               >
@@ -319,7 +319,7 @@ export default function StaffAusenciasPage() {
         )}
 
         {/* Botão Novo Pedido */}
-        <Button
+        <Button size="touch"
           onClick={() => {
             setMostrarForm(true);
             setFormErro(null);
@@ -372,7 +372,7 @@ export default function StaffAusenciasPage() {
                             {a.notas}
                           </p>
                         )}
-                        <p className="mt-1 text-xs text-muted-foreground/70">
+                        <p className="mt-1 text-xs text-muted-foreground">
                           Pedido em {formatarData(a.createdAt)}
                         </p>
                       </div>
@@ -482,7 +482,7 @@ export default function StaffAusenciasPage() {
             )}
           </DialogContent>
           <DialogFooter>
-            <Button
+            <Button size="touch"
               type="button"
               variant="outline"
               onClick={() => setMostrarForm(false)}
@@ -490,7 +490,7 @@ export default function StaffAusenciasPage() {
             >
               Cancelar
             </Button>
-            <Button type="submit" disabled={submitting}>
+            <Button size="touch" type="submit" disabled={submitting}>
               {submitting ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -514,7 +514,7 @@ export default function StaffAusenciasPage() {
       <Dialog open={mostrarConfirmacao} onOpenChange={setMostrarConfirmacao}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <CheckCircle2 className="h-5 w-5 text-primary" />
+            <CheckCircle2 className="h-5 w-5 text-gold-text" />
             Confirmar Pedido de Ausência
           </DialogTitle>
           <DialogDescription>
@@ -554,7 +554,7 @@ export default function StaffAusenciasPage() {
           )}
         </DialogContent>
         <DialogFooter>
-          <Button
+          <Button size="touch"
             type="button"
             variant="outline"
             onClick={() => setMostrarConfirmacao(false)}
@@ -562,7 +562,7 @@ export default function StaffAusenciasPage() {
           >
             Cancelar
           </Button>
-          <Button
+          <Button size="touch"
             type="button"
             onClick={handleConfirmarEnvio}
             disabled={submitting}
@@ -635,7 +635,7 @@ export default function StaffAusenciasPage() {
           )}
         </DialogContent>
         <DialogFooter>
-          <Button
+          <Button size="touch"
             type="button"
             variant="outline"
             onClick={() => setACancelar(null)}
@@ -643,7 +643,7 @@ export default function StaffAusenciasPage() {
           >
             Voltar
           </Button>
-          <Button
+          <Button size="touch"
             type="button"
             variant="destructive"
             onClick={handleCancelar}

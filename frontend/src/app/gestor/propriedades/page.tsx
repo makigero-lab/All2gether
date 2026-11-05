@@ -778,7 +778,7 @@ export default function PropriedadesPage() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
-              <Building2 className="h-5 w-5 text-primary" />
+              <Building2 className="h-5 w-5 text-gold-text" />
               Nova Propriedade
             </CardTitle>
           </CardHeader>
@@ -1125,7 +1125,7 @@ export default function PropriedadesPage() {
                                   href={gmapsUrl}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-0.5 text-primary hover:underline"
+                                  className="inline-flex items-center gap-0.5 text-gold-text hover:underline"
                                   title="Abrir no Google Maps"
                                 >
                                   <Navigation className="h-3 w-3" />
@@ -1202,7 +1202,7 @@ export default function PropriedadesPage() {
         <DialogHeader>
           <div>
             <DialogTitle className="flex items-center gap-2">
-              <Building2 className="h-5 w-5 text-primary" />
+              <Building2 className="h-5 w-5 text-gold-text" />
               Adicionar Propriedade Manual
             </DialogTitle>
             <DialogDescription>
@@ -1453,7 +1453,7 @@ export default function PropriedadesPage() {
                       key={dia}
                       className={`flex cursor-pointer items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm transition-colors ${
                         checked
-                          ? "border-primary bg-primary/10 text-primary"
+                          ? "border-primary bg-primary/10 text-gold-text"
                           : "border-input text-muted-foreground hover:bg-muted/50"
                       }`}
                     >
@@ -1806,7 +1806,7 @@ export default function PropriedadesPage() {
                             key={s._id}
                             className={`flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm transition-colors ${
                               checked
-                                ? "border-primary bg-primary/10 text-primary"
+                                ? "border-primary bg-primary/10 text-gold-text"
                                 : "border-input text-muted-foreground hover:bg-muted/50"
                             }`}
                           >

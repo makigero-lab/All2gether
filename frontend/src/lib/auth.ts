@@ -34,6 +34,8 @@
  *   login page (após cookie definido) e pelo logout (após cookie limpo).
  */
 
+import { limparTodosRascunhos } from "@/lib/rascunho-staff";
+
 export type Role = "admin" | "gestor" | "staff" | "parceiro" | "fornecedor";
 
 export interface UtilizadorAuth {
@@ -162,6 +164,7 @@ export async function estaAutenticado(): Promise<boolean> {
  */
 export async function fazerLogout(): Promise<void> {
   limparCacheAuth();
+  limparTodosRascunhos();
   try {
     await fetch("/api/auth/logout", { method: "POST" });
   } catch {

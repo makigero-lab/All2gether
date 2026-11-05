@@ -105,7 +105,8 @@ exports.getDashboard = async (req, res) => {
       Tarefa.countDocuments({
         empresa_id: empresaId,
         data: { $gte: hojeInicio, $lt: amanhaInicio },
-        estado: 'por_atribuir',
+        // 'nao_atribuida' (nenhuma pessoa coube) também precisa de atenção do gestor.
+        estado: { $in: ['por_atribuir', 'nao_atribuida'] },
       }),
       Tarefa.countDocuments({
         empresa_id: empresaId,
@@ -155,7 +156,7 @@ exports.getDashboard = async (req, res) => {
     const tarefasRiscoRaw = await Tarefa.find({
       empresa_id: empresaId,
       data: { $gte: agora, $lte: limiteRisco48h },
-      estado: 'por_atribuir',
+      estado: { $in: ['por_atribuir', 'nao_atribuida'] },
     })
       .populate({ path: 'propriedade_id', select: 'nome' })
       .select('data estado propriedade_id tempo_limpeza_minutos')
@@ -1888,6 +1889,18 @@ exports.atualizarMembroEquipa = async (req, res) => {
           erro: 'Role inválido. Valores permitidos via edição: gestor, staff, parceiro, fornecedor.',
         });
       }
+      if (utilizador.role === 'fornecedor' && role !== 'fornecedor') {
+        await Propriedade.updateMany(
+          { fornecedor_id: utilizador._id, empresa_id: empresaId },
+          { $set: { fornecedor_id: null } }
+        );
+      }
+      if (utilizador.role === 'parceiro' && role !== 'parceiro') {
+        await Propriedade.updateMany(
+          { parceiro_id: utilizador._id, empresa_id: empresaId },
+          { $set: { parceiro_id: null } }
+        );
+      }
       utilizador.role = role;
     }
 
@@ -2134,12 +2147,14 @@ exports.alternarEstadoMembro = async (req, res) => {
             Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth(), hoje.getUTCDate())
           );
           // Desatribui tarefas desde hoje até 1 ano no futuro (cobre todas
-          // as tarefas futuras — o helper filtra por estado 'atribuida'/'em_curso').
+          // as tarefas futuras — o helper recebe incluirEmCurso: quem fica inativo não consegue autenticar-se,
+          // por isso uma 'em_curso' ficaria presa).
           const futuro = new Date(inicio.getTime() + 365 * 24 * 60 * 60 * 1000);
           const resultado = await desatribuirTarefasPeriodo(
             utilizador._id,
             inicio,
-            futuro
+            futuro,
+            { incluirEmCurso: true }
           );
           tarefasDesatribuidas = resultado.desatribuidas;
         } catch (err) {
@@ -2217,6 +2232,35 @@ exports.eliminarMembroEquipa = async (req, res) => {
     utilizador.ativo = false; // garante que não consegue fazer login
     await utilizador.save();
 
+    // Limpa dependências: tarefas futuras não iniciadas voltam ao pool e as propriedades
+    // deixam de apontar para o utilizador eliminado (equipa/preferencial/lavandaria/proprietário).
+    try {
+      const hojeUTC = new Date();
+      hojeUTC.setUTCHours(0, 0, 0, 0);
+      await Tarefa.updateMany(
+        { utilizador_id: utilizador._id, data: { $gte: hojeUTC }, estado: 'atribuida' },
+        { $set: { utilizador_id: null, equipa_atribuida: [], estado: 'por_atribuir' } }
+      );
+      await Propriedade.updateMany(
+        { empresa_id: empresaId },
+        { $pull: { equipa_preferencial: utilizador._id } }
+      );
+      await Propriedade.updateMany(
+        { empresa_id: empresaId, funcionario_preferencial_id: utilizador._id },
+        { $set: { funcionario_preferencial_id: null } }
+      );
+      await Propriedade.updateMany(
+        { empresa_id: empresaId, fornecedor_id: utilizador._id },
+        { $set: { fornecedor_id: null } }
+      );
+      await Propriedade.updateMany(
+        { empresa_id: empresaId, parceiro_id: utilizador._id },
+        { $set: { parceiro_id: null } }
+      );
+    } catch (e) {
+      console.error('⚠️  limpeza de dependências (eliminar membro):', e.message);
+    }
+
     // Auditoria.
     registarAuditoria({
       utilizador_id: req.user.id,
@@ -2243,19 +2287,44 @@ exports.eliminarMembroEquipa = async (req, res) => {
 /* ------------------------------------------------------------------ */
 
 /**
+ * Cria a ausência SÓ se o período ainda não estiver coberto por outra ativa
+ * (pendente, pendente_emergencia ou aprovada) da mesma pessoa. Evita
+ * duplicados ao repetir a falta súbita/baixa. Devolve true se criou.
+ * Lança o erro original da BD (exceto duplicado 11000, que conta como já existente).
+ */
+async function criarAusenciaSeNaoCoberta(dados) {
+  const jaCoberta = await Ausencia.findOne({
+    utilizador_id: dados.utilizador_id,
+    data_inicio: { $lte: dados.data_inicio },
+    data_fim: { $gte: dados.data_fim },
+    estado: { $in: ['pendente', 'pendente_emergencia', 'aprovada'] },
+  }).select('_id').lean();
+  if (jaCoberta) return false;
+  try {
+    await Ausencia.create(dados);
+    return true;
+  } catch (err) {
+    if (err.code === 11000) return false;
+    throw err;
+  }
+}
+
+/**
  * POST /api/admin/equipa/:id/falta-subita
  *
- * Regista uma ausência de hoje para o utilizador e desatribui as suas
- * tarefas de hoje (passam a 'por_atribuir').
+ * Regista uma ausência de hoje para o utilizador, desatribui as suas tarefas
+ * de hoje e reatribui-as logo a outro staff disponível (sem clique).
  *
- * Lógica (Prompt 97 — "Desligar a Histeria Automática"):
+ * Lógica:
  *   1. Valida utilizador (pertence à empresa, não é admin, não é si próprio).
  *   2. Regista Ausencia para hoje (ignora duplicado).
  *   3. Desatribui as tarefas de hoje do utilizador (utilizador_id = null +
- *      estado = 'por_atribuir') — NÃO chama o load balancer. O recálculo
- *      fica a cargo do Gestor (manual) ou do Fail-Safe noturno.
+ *      estado = 'por_atribuir'); 'em_curso' fica com a pessoa (gestores avisados).
+ *   4. Reatribui automaticamente (best-effort). Sem ninguém disponível, ficam
+ *      'por_atribuir' e os gestores são avisados.
  *
- * Resposta 200: { desatribuidas, total, detalhes: [...] }
+ * Resposta 200: { desatribuidas, total, detalhes, reatribuicao: { total,
+ *   reatribuidas, orfas, erro? }, ... }
  */
 exports.reportarFaltaSubita = async (req, res) => {
   try {
@@ -2293,8 +2362,9 @@ exports.reportarFaltaSubita = async (req, res) => {
 
     // 2) Registra Ausencia para hoje (ignora erro de duplicado).
     // v1.24.0: falta súbita é uma ação do admin → estado 'aprovada'.
+    // Repetir a falta no mesmo dia não duplica a ausência (o resto da operação segue).
     try {
-      await Ausencia.create({
+      await criarAusenciaSeNaoCoberta({
         utilizador_id: id,
         empresa_id: empresaId,
         data_inicio: hojeInicio,
@@ -2304,10 +2374,8 @@ exports.reportarFaltaSubita = async (req, res) => {
         notas: 'Falta súbita reportada pelo admin',
       });
     } catch (err) {
-      if (err.code !== 11000) {
-        console.error('⚠️  Erro ao criar ausência de falta súbita:', err.message);
-      }
-      // Se duplicado, não é problema — o utilizador já tem ausência hoje.
+      console.error('⚠️  Erro ao criar ausência de falta súbita:', err.message);
+      return res.status(500).json({ erro: 'Não foi possível registar a falta. Nada foi alterado.' });
     }
 
     // 3) Procura tarefas de hoje do utilizador (atribuida ou por_atribuir).
@@ -2317,31 +2385,50 @@ exports.reportarFaltaSubita = async (req, res) => {
       estado: { $in: ['atribuida', 'por_atribuir'] },
     }).populate({ path: 'propriedade_id', select: 'nome' });
 
+    // Limpezas 'em_curso' NÃO são desatribuídas: ficam com a pessoa e o
+    // gestor é avisado (resposta + sino/push a todos os gestores).
+    const { listarEmCurso, textoEmCurso, avisarGestoresEmCurso, reatribuirAutomaticamente, textoReatribuicao } = require('./ausenciaController');
+    const emCurso = await listarEmCurso(id, hojeInicio, amanhaInicio);
+    const infoEmCurso = { em_curso_mantidas: emCurso.length, em_curso: emCurso };
+    if (emCurso.length > 0) await avisarGestoresEmCurso(empresaId, utilizador.nome, infoEmCurso);
+    const avisoEmCurso = textoEmCurso(infoEmCurso, utilizador.nome);
+
     if (tarefas.length === 0) {
+      // Mesmo sem tarefas dela, outras por atribuir de hoje podem ser cobertas.
+      const reatribuicao = await reatribuirAutomaticamente(empresaId, id, hojeInicio, hojeInicio);
+      const txtRe = textoReatribuicao(reatribuicao);
       return res.status(200).json({
-        mensagem: 'Sem tarefas para desatribuir hoje.',
+        mensagem:
+          'Sem tarefas para desatribuir hoje.' +
+          (txtRe ? ` ${txtRe}` : '') +
+          (avisoEmCurso ? ` ${avisoEmCurso}` : ''),
         desatribuidas: 0,
         total: 0,
         detalhes: [],
+        reatribuicao,
+        ...infoEmCurso,
+        aviso: avisoEmCurso || undefined,
       });
     }
 
-    // 4) Desatribui cada tarefa (SEM load balancer — Prompt 97).
+    // 4) Desatribui cada tarefa; a reatribuição vem logo a seguir.
     let desatribuidas = 0;
     const detalhes = [];
 
     for (const tarefa of tarefas) {
       tarefa.utilizador_id = null;
+      tarefa.equipa_atribuida = [];
       tarefa.estado = 'por_atribuir';
       await tarefa.save();
       desatribuidas++;
       detalhes.push({
         tarefa_id: String(tarefa._id),
         propriedade: tarefa.propriedade_id?.nome ?? '?',
-        novo_utilizador_id: null,
-        reatribuida: false,
       });
     }
+
+    // 5) Reatribuição automática (best-effort; nunca lança).
+    const reatribuicao = await reatribuirAutomaticamente(empresaId, id, hojeInicio, hojeInicio);
 
     // Auditoria.
     registarAuditoria({
@@ -2351,15 +2438,20 @@ exports.reportarFaltaSubita = async (req, res) => {
       acao: 'falta_subita',
       recurso: 'utilizador',
       recurso_id: id,
-      descricao: `Falta súbita reportada para "${utilizador.nome}": ${desatribuidas} tarefa(s) desatribuída(s)`,
-      detalhes: { desatribuidas, total: tarefas.length },
+      descricao: `Falta súbita reportada para "${utilizador.nome}": ${desatribuidas} tarefa(s) desatribuída(s), ${reatribuicao.reatribuidas} reatribuída(s), ${reatribuicao.orfas} por atribuir`,
+      detalhes: { desatribuidas, total: tarefas.length, reatribuicao },
     });
 
     return res.status(200).json({
-      mensagem: `Falta súbita processada: ${desatribuidas} tarefa(s) desatribuída(s) (por atribuir).`,
+      mensagem:
+        `Falta súbita processada: ${desatribuidas} tarefa(s) desatribuída(s). ${textoReatribuicao(reatribuicao)}` +
+        (avisoEmCurso ? ` ${avisoEmCurso}` : ''),
       desatribuidas,
       total: tarefas.length,
       detalhes,
+      reatribuicao,
+      ...infoEmCurso,
+      aviso: avisoEmCurso || undefined,
     });
   } catch (err) {
     console.error('❌ reportarFaltaSubita:', err.message);
@@ -2379,15 +2471,17 @@ exports.reportarFaltaSubita = async (req, res) => {
  *
  * Body: { data_inicio, data_fim, tipo?, notas? }
  *
- * Lógica (Prompt 97 — "Desligar a Histeria Automática"):
+ * Lógica:
  *   1. Valida utilizador (empresa, não admin, não eliminado).
  *   2. Cria Ausencia (ignora duplicado).
  *   3. Desatribui as tarefas atribuídas no período [data_inicio, data_fim]
- *      (utilizador_id = null + estado = 'por_atribuir') — NÃO chama o load
- *      balancer. O recálculo fica a cargo do Gestor (manual) ou do
- *      Fail-Safe noturno.
+ *      (utilizador_id = null + estado = 'por_atribuir'); 'em_curso' fica com
+ *      a pessoa (gestores avisados).
+ *   4. Reatribui automaticamente (best-effort). Sem ninguém disponível, ficam
+ *      'por_atribuir' e os gestores são avisados.
  *
- * Resposta 200: { desatribuidas, total, detalhes: [...] }
+ * Resposta 200: { desatribuidas, total, detalhes, reatribuicao: { total,
+ *   reatribuidas, orfas, erro? }, ... }
  */
 exports.registarBaixaProlongada = async (req, res) => {
   try {
@@ -2441,23 +2535,29 @@ exports.registarBaixaProlongada = async (req, res) => {
       });
     }
 
+    const tipoBaixa = tipo || 'ferias';
+    if (!['ferias', 'doenca', 'outro'].includes(tipoBaixa)) {
+      return res.status(400).json({
+        erro: 'tipo inválido. Valores permitidos: ferias, doenca, outro.',
+      });
+    }
+
     // 1) Cria a Ausencia (ignora duplicado).
     // v1.24.0: baixa prolongada é uma ação do admin → estado 'aprovada'.
     try {
-      await Ausencia.create({
+      await criarAusenciaSeNaoCoberta({
         utilizador_id: id,
         empresa_id: empresaId,
         data_inicio: inicio,
         data_fim: fim,
-        tipo: tipo || 'ferias',
+        tipo: tipoBaixa,
         estado: 'aprovada',
         notas: notas ? String(notas).trim() : '',
       });
     } catch (err) {
-      if (err.code !== 11000) {
-        console.error('⚠️  Erro ao criar ausência de baixa:', err.message);
-      }
-      // Se duplicado, não é problema.
+      // Antes o erro era engolido: desatribuía as tarefas mas sem ausência, e o LB voltava a dar-lhe trabalho.
+      console.error('⚠️  Erro ao criar ausência de baixa:', err.message);
+      return res.status(500).json({ erro: 'Não foi possível registar a ausência. Nada foi alterado.' });
     }
 
     // 2) Procura tarefas atribuídas no período.
@@ -2467,21 +2567,39 @@ exports.registarBaixaProlongada = async (req, res) => {
       estado: 'atribuida',
     }).populate({ path: 'propriedade_id', select: 'nome' });
 
+    // Limpezas 'em_curso' NÃO são desatribuídas: ficam com a pessoa e o
+    // gestor é avisado (resposta + sino/push a todos os gestores).
+    const { listarEmCurso, textoEmCurso, avisarGestoresEmCurso, reatribuirAutomaticamente, textoReatribuicao } = require('./ausenciaController');
+    const emCurso = await listarEmCurso(id, inicio, fimDia);
+    const infoEmCurso = { em_curso_mantidas: emCurso.length, em_curso: emCurso };
+    if (emCurso.length > 0) await avisarGestoresEmCurso(empresaId, utilizador.nome, infoEmCurso);
+    const avisoEmCurso = textoEmCurso(infoEmCurso, utilizador.nome);
+
     if (tarefas.length === 0) {
+      // Mesmo sem tarefas dela, outras por atribuir no período podem ser cobertas.
+      const reatribuicao = await reatribuirAutomaticamente(empresaId, id, inicio, fim);
+      const txtRe = textoReatribuicao(reatribuicao);
       return res.status(200).json({
-        mensagem: 'Sem tarefas para desatribuir no período.',
+        mensagem:
+          'Sem tarefas para desatribuir no período.' +
+          (txtRe ? ` ${txtRe}` : '') +
+          (avisoEmCurso ? ` ${avisoEmCurso}` : ''),
         desatribuidas: 0,
         total: 0,
         detalhes: [],
+        reatribuicao,
+        ...infoEmCurso,
+        aviso: avisoEmCurso || undefined,
       });
     }
 
-    // 3) Desatribui cada tarefa (SEM load balancer — Prompt 97).
+    // 3) Desatribui cada tarefa; a reatribuição vem logo a seguir.
     let desatribuidas = 0;
     const detalhes = [];
 
     for (const tarefa of tarefas) {
       tarefa.utilizador_id = null;
+      tarefa.equipa_atribuida = [];
       tarefa.estado = 'por_atribuir';
       await tarefa.save();
       desatribuidas++;
@@ -2489,10 +2607,11 @@ exports.registarBaixaProlongada = async (req, res) => {
         tarefa_id: String(tarefa._id),
         data: tarefa.data,
         propriedade: tarefa.propriedade_id?.nome ?? '?',
-        novo_utilizador_id: null,
-        reatribuida: false,
       });
     }
+
+    // 4) Reatribuição automática (best-effort; nunca lança).
+    const reatribuicao = await reatribuirAutomaticamente(empresaId, id, inicio, fim);
 
     // Auditoria.
     registarAuditoria({
@@ -2502,15 +2621,20 @@ exports.registarBaixaProlongada = async (req, res) => {
       acao: 'baixa_prolongada',
       recurso: 'utilizador',
       recurso_id: id,
-      descricao: `Baixa/férias registadas para "${utilizador.nome}": ${desatribuidas} tarefa(s) desatribuída(s)`,
-      detalhes: { data_inicio: inicio, data_fim: fim, desatribuidas, total: tarefas.length },
+      descricao: `Baixa/férias registadas para "${utilizador.nome}": ${desatribuidas} tarefa(s) desatribuída(s), ${reatribuicao.reatribuidas} reatribuída(s), ${reatribuicao.orfas} por atribuir`,
+      detalhes: { data_inicio: inicio, data_fim: fim, desatribuidas, total: tarefas.length, reatribuicao },
     });
 
     return res.status(200).json({
-      mensagem: `Baixa processada: ${desatribuidas} tarefa(s) desatribuída(s) (por atribuir).`,
+      mensagem:
+        `Baixa processada: ${desatribuidas} tarefa(s) desatribuída(s). ${textoReatribuicao(reatribuicao)}` +
+        (avisoEmCurso ? ` ${avisoEmCurso}` : ''),
       desatribuidas,
       total: tarefas.length,
       detalhes,
+      reatribuicao,
+      ...infoEmCurso,
+      aviso: avisoEmCurso || undefined,
     });
   } catch (err) {
     console.error('❌ registarBaixaProlongada:', err.message);

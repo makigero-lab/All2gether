@@ -292,8 +292,10 @@ exports.cancelarAusencia = async (req, res) => {
  * POST /api/staff/falta-hoje
  *
  * Cria um pedido de falta de emergência para o dia atual (doença súbita).
- * O pedido fica com estado 'pendente_emergencia' — o admin é notificado e,
- * ao aprovar, dispara a redistribuição imediata das tarefas do dia.
+ * O pedido fica com estado 'pendente_emergencia' — o admin é notificado. As
+ * tarefas de hoje da pessoa são desatribuídas e reatribuídas logo (sem esperar
+ * pela aprovação); sem ninguém disponível ficam por atribuir e os gestores
+ * são avisados.
  *
  * Body: { justificacao?: string }
  *
@@ -321,7 +323,7 @@ exports.faltaHoje = async (req, res) => {
       utilizador_id: utilizadorId,
       data_inicio: { $lte: hoje },
       data_fim: { $gte: hoje },
-      estado: { $ne: 'rejeitada' },
+      estado: { $in: ['pendente', 'pendente_emergencia', 'aprovada'] },
     });
     if (sobreposta) {
       console.log(`[faltaHoje] Conflito detetado: ausência ${sobreposta._id} estado=${sobreposta.estado}`);
@@ -388,7 +390,27 @@ exports.faltaHoje = async (req, res) => {
       console.error('⚠️  notificar gestores (faltaHoje):', e.message);
     }
 
-    return res.status(201).json({ ausencia: nova });
+    // O faltoso fica logo indisponível: desatribui as tarefas de hoje e
+    // reatribui-as de imediato a quem estiver disponível (sem clique do
+    // gestor). A ausência 'pendente_emergencia' já conta como indisponível no
+    // load balancer, e a pessoa é excluída do pool explicitamente.
+    // Limpezas 'em_curso' ficam com a pessoa e os gestores são avisados.
+    let redistribuicao = null;
+    try {
+      const { desatribuirTarefasPeriodo, textoEmCurso, avisarGestoresEmCurso, reatribuirAutomaticamente } = require('./ausenciaController');
+      redistribuicao = await desatribuirTarefasPeriodo(utilizadorId, hoje, hoje);
+      if (redistribuicao.em_curso_mantidas > 0) {
+        const alvo = await Utilizador.findById(utilizadorId).select('nome').lean();
+        await avisarGestoresEmCurso(empresaId, alvo?.nome, redistribuicao);
+        redistribuicao.aviso = textoEmCurso(redistribuicao, alvo?.nome);
+      }
+      // Best-effort: nunca lança; se falhar, `reatribuicao.erro` vem preenchido.
+      redistribuicao.reatribuicao = await reatribuirAutomaticamente(empresaId, utilizadorId, hoje, hoje);
+    } catch (e) {
+      console.error('⚠️  redistribuir tarefas (faltaHoje):', e.message);
+    }
+
+    return res.status(201).json({ ausencia: nova, redistribuicao });
   } catch (err) {
     console.error('❌ faltaHoje:', err.message);
     // Prompt 131 — Tratamento do erro 11000 (índice único antigo).
@@ -614,7 +636,8 @@ exports.reportarAvaria = async (req, res) => {
     // Prompt 125 — usa meia-noite LOCAL (00:00 no fuso do servidor) e não
     // UTC midnight, que em Lisboa (UTC+1) apareceria como 01:00.
     const hoje = new Date();
-    const hojeMeiaNoite = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
+    // 10:00 UTC do dia (antes 00:00 local: placeholder que contaminava o scheduler).
+    const hojeMeiaNoite = new Date(Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth(), hoje.getUTCDate(), 10));
 
     const novaTarefaManutencao = await Tarefa.create({
       empresa_id: tarefa.empresa_id,

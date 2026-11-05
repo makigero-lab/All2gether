@@ -11,9 +11,11 @@
  *   - Background: branco puro (#fff).
  *   - Foreground: azul/cinza muito escuro (texto principal).
  *   - Primary: tom Dourado/Areia elegante (43 74% 49%) — luxo, sofisticado.
+ *     Texto SEMPRE escuro sobre dourado (branco só dava 2,25:1); para texto,
+ *     links e anel de foco sobre fundo claro usa-se --gold-text (dourado escuro).
  *   - Muted/Secondary: cinza super suave (210 40% 96%) para fundos secundários.
  *   - Border/Input: hairline discreto (214.3 31.8% 91.4%).
- *   - Radius: 0.25rem — bordas "afiadas" e corporativas.
+ *   - Radius: 0.5rem (opção aprovada "Dourado refinado").
  *   - Sombras: shadow-sm (flat), sem elevação pesada.
  */
 
@@ -31,27 +33,47 @@
 
     /* Primary — Dourado/Areia elegante */
     --primary: 43 74% 49%;
-    --primary-foreground: 0 0% 100%;      /* texto branco sobre dourado */
+    --primary-foreground: 222 47% 11%;    /* texto escuro sobre dourado (7,96:1) */
 
     /* Secondary / muted / accent — cinza super suave */
     --secondary: 210 40% 96%;
     --secondary-foreground: 222 47% 11%;
     --muted: 210 40% 96%;                 /* fundos secundários */
-    --muted-foreground: 215 16% 47%;      /* texto secundário */
+    --muted-foreground: 215 19% 38%;      /* texto secundário (6,6:1 sobre branco) */
     --accent: 210 40% 96%;
     --accent-foreground: 222 47% 11%;
 
     /* Destructive (vermelho) */
-    --destructive: 0 72% 51%;
+    --destructive: 0 70% 42%;
     --destructive-foreground: 0 0% 98%;
 
     /* Borders hairline */
     --border: 214.3 31.8% 91.4%;
     --input: 214.3 31.8% 91.4%;
-    --ring: 43 74% 49%;                   /* igual ao primary (dourado) */
+    --ring: 40 90% 25%;                   /* dourado escuro: o dourado da marca dava 2,25:1 sobre branco */
 
-    /* Radius "afiado" / corporativo */
-    --radius: 0.25rem;
+    --radius: 0.5rem;
+
+    /* Dourado para texto/links/realces (o --primary é para fundos) */
+    --gold-text: 40 90% 25%;
+    --gold-soft: 43 80% 94%;
+    --gold-border: 44 69% 76%;
+
+    /*
+     * Estados da tarefa — UMA SÓ fonte de verdade (cor forte + fundo suave).
+     * Usar via classes Tailwind `text-status-*` / `bg-status-*-bg` ou via
+     * <EstadoTarefaBadge/> / variantes do <Badge/>. Nunca com cores à mão.
+     *   porAtribuir  = ainda ninguém (espera normal, p. ex. libertada por uma ausência)
+     *   naoAtribuida = tentou-se e falhou (equipa sem folga/lotada): exige ação do gestor
+     */
+    --status-porat: 30 90% 28%;   --status-porat-bg: 38 95% 92%;
+    --status-naoat: 0 70% 38%;    --status-naoat-bg: 0 90% 96%;
+    --status-atrib: 215 70% 38%;  --status-atrib-bg: 213 77% 95%;
+    --status-curso: 262 55% 40%;  --status-curso-bg: 263 69% 95%;
+    --status-conc: 150 59% 25%;   --status-conc-bg: 150 50% 93%;
+    --status-canc: 213 14% 38%;   --status-canc-bg: 210 17% 93%;
+    /* Texto sobre fundo sólido --status-* (botões): branco no claro (≥5,0:1), escuro no tema escuro (≥8,3:1; hover ≥7,0:1) */
+    --status-foreground: 0 0% 100%;
   }
 
   .dark {
@@ -78,6 +100,20 @@
     --border: 215 28% 20%;
     --input: 215 28% 20%;
     --ring: 43 74% 55%;
+
+    /* Dourado para texto sobre fundo escuro */
+    --gold-text: 43 74% 60%;
+    --gold-soft: 43 30% 18%;
+    --gold-border: 43 35% 32%;
+
+    /* Estados: texto claro sobre fundo escuro tingido */
+    --status-porat: 38 92% 70%;   --status-porat-bg: 30 60% 16%;
+    --status-naoat: 0 90% 78%;    --status-naoat-bg: 0 50% 18%;
+    --status-atrib: 213 90% 76%;  --status-atrib-bg: 215 55% 20%;
+    --status-curso: 262 85% 82%;  --status-curso-bg: 262 40% 22%;
+    --status-conc: 150 55% 66%;   --status-conc-bg: 150 40% 15%;
+    --status-canc: 213 15% 72%;   --status-canc-bg: 215 14% 20%;
+    --status-foreground: 222 47% 11%;
   }
 }
 
@@ -131,6 +167,8 @@
 .fc .fc-button-primary:not(:disabled).fc-button-active {
   background-color: hsl(var(--primary) / 0.85);
   border-color: hsl(var(--primary) / 0.85);
+  /* O FullCalendar põe texto branco no botão ativo: 1,98:1 no claro. Mantém o token. */
+  color: hsl(var(--primary-foreground));
 }
 
 /* Cabeçalho dos dias */
@@ -247,7 +285,6 @@
   flex: 0 0 auto;
   font-variant-numeric: tabular-nums;
   font-weight: 600;
-  opacity: 0.85;
   font-size: 0.6875rem;
 }
 
@@ -288,7 +325,6 @@
   align-items: center;
   gap: 0.25rem;
   font-size: 0.625rem;
-  opacity: 0.85;
 }
 
 .fc-evt-block__dot {
@@ -323,7 +359,6 @@
   align-items: center;
   gap: 0.2rem;
   font-size: 0.625rem;
-  opacity: 0.8;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -336,7 +371,8 @@
 }
 
 .fc-evt-block__unassigned {
-  color: hsl(var(--destructive));
+  /* Sobre o fundo --status-naoat-bg do bloco de alerta (6,6:1 claro / 7,0:1 escuro). */
+  color: hsl(var(--status-naoat));
   font-weight: 600;
 }
 
@@ -368,12 +404,12 @@
   width: 100%;
   overflow: hidden;
   white-space: nowrap;
-  background-color: #fee2e2 !important;
-  border-left: 3px solid #ef4444 !important;
+  background-color: hsl(var(--status-naoat-bg)) !important;
+  border-left: 3px solid hsl(var(--status-naoat)) !important;
   padding: 1px 4px !important;
   border-radius: calc(var(--radius) - 1px);
   font-weight: 600;
-  color: #991b1b !important;
+  color: hsl(var(--status-naoat)) !important;
 }
 
 .fc-evt-month--alert .fc-evt-month__alert-icon {
@@ -389,7 +425,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 700;
-  color: #991b1b;
+  color: hsl(var(--status-naoat));
 }
 
 .fc-evt-month--alert .fc-evt-month__alert-tag {
@@ -398,8 +434,8 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  background-color: #ef4444;
-  color: #ffffff;
+  background-color: hsl(var(--status-naoat));
+  color: hsl(var(--status-naoat-bg));
   padding: 1px 4px;
   border-radius: 3px;
   line-height: 1.2;
@@ -414,8 +450,9 @@
 
 /* Variante alerta nas vistas semanal/diária — borda vermelha mais forte. */
 .fc-evt-block--alert {
-  border-left: 3px solid #ef4444 !important;
-  background-color: #fef2f2 !important;
+  border-left: 3px solid hsl(var(--status-naoat)) !important;
+  background-color: hsl(var(--status-naoat-bg)) !important;
+  color: hsl(var(--status-naoat));
 }
 
 /* --------------------------------------------------------------------------
@@ -583,7 +620,6 @@
   /* Borda tracejada + fundo cinzento claro + opacidade reduzida. */
   border: 1px dashed #94a3b8 !important;
   background-color: #f1f5f9 !important;
-  opacity: 0.85;
 }
 
 .fc-evt-viagem:hover {
@@ -605,7 +641,7 @@
   border-radius: calc(var(--radius) - 1px);
   font-style: italic;
   font-weight: 500;
-  color: #64748b !important;
+  color: #475569 !important;
 }
 
 .fc-evt-month--viagem .fc-evt-month__title {
@@ -615,7 +651,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 0.7rem;
-  color: #64748b;
+  color: #475569;
 }
 
 /* Variante viagem nas vistas semanal/diária — bloco com borda tracejada. */
@@ -634,12 +670,12 @@
 }
 
 .fc-evt-block--viagem .fc-evt-block__time {
-  color: #94a3b8;
+  color: #475569;
   font-size: 0.65rem;
 }
 
 .fc-evt-block--viagem .fc-evt-block__subtitle {
-  color: #94a3b8;
+  color: #475569;
   font-size: 0.6rem;
 }
 
@@ -743,6 +779,6 @@
 }
 
 .fc-evt-block--folga .fc-evt-block__subtitle {
-  color: #64748b;
+  color: #475569;
 }
 

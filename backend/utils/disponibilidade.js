@@ -68,7 +68,7 @@ async function verificarDisponibilidadeUtilizador(utilizadorId, dataTarefa) {
 
   const candidatos = await Ausencia.find({
     utilizador_id: utilizadorId,
-    estado: 'aprovada',
+    estado: { $in: ['aprovada', 'pendente_emergencia'] },
     data_inicio: { $lte: diaFim },
     data_fim: { $gte: diaInicio },
   })

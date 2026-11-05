@@ -568,9 +568,18 @@ exports.atribuirTarefa = async (req, res) => {
 
     const { utilizador_id } = req.body || {};
 
+    // Tarefas concluídas/canceladas são histórico: não se atribuem (antes eram "ressuscitadas").
+    if (tarefa.estado === 'concluida' || tarefa.estado === 'cancelada') {
+      return res.status(409).json({
+        erro: `Não é possível atribuir uma tarefa ${tarefa.estado}.`,
+        codigo: 'ESTADO_INVALIDO',
+      });
+    }
+
     if (!utilizador_id) {
       // Remove atribuição.
       tarefa.utilizador_id = null;
+      tarefa.equipa_atribuida = [];
       tarefa.estado = 'por_atribuir';
     } else {
       if (!mongoose.isValidObjectId(utilizador_id)) {
@@ -600,6 +609,7 @@ exports.atribuirTarefa = async (req, res) => {
 
       tarefa.utilizador_id = user._id;
       tarefa.estado = 'atribuida';
+      tarefa.motivo_nao_atribuicao = null;
     }
 
     await tarefa.save();
@@ -676,12 +686,28 @@ exports.atualizarEstadoTarefa = async (req, res) => {
       return res.status(404).json({ erro: 'Tarefa não encontrada.' });
     }
 
+    // Coerência: 'atribuida'/'em_curso' exigem staff; sair de 'concluida' limpa os campos de conclusão.
+    if ((estado === 'atribuida' || estado === 'em_curso') && !tarefa.utilizador_id) {
+      return res.status(400).json({
+        erro: `Não é possível marcar como "${estado}" uma tarefa sem staff. Atribui primeiro.`,
+      });
+    }
+    if (tarefa.estado === 'concluida' && estado !== 'concluida') {
+      tarefa.concluida_em = null;
+      tarefa.data_conclusao = null;
+      tarefa.hora_conclusao = null;
+    }
     tarefa.estado = estado;
-    if (estado === 'concluida') tarefa.concluida_em = new Date();
-    // FIX (por atribuir manual) — Se o estado for 'por_atribuir', desatribui
-    // o utilizador (utilizador_id = null) para que a tarefa volte ao pool.
-    if (estado === 'por_atribuir') {
+    if (estado === 'concluida') {
+      const agoraConclusao = new Date();
+      tarefa.concluida_em = tarefa.concluida_em || agoraConclusao;
+      tarefa.data_conclusao = tarefa.data_conclusao || agoraConclusao; // usado pelo job limpezaFotos
+      tarefa.hora_conclusao = tarefa.hora_conclusao || agoraConclusao;
+    }
+    // Volta ao pool (ou cancelada): liberta o staff e a equipa.
+    if (estado === 'por_atribuir' || estado === 'nao_atribuida' || estado === 'cancelada') {
       tarefa.utilizador_id = null;
+      tarefa.equipa_atribuida = [];
     }
     await tarefa.save();
 
@@ -834,6 +860,7 @@ exports.reatribuirTarefa = async (req, res) => {
     tarefa.utilizador_id = novoUser._id;
     tarefa.data = resultadoScheduler.data;
     tarefa.estado = 'atribuida';
+    tarefa.motivo_nao_atribuicao = null;
     tarefa.tempo_viagem_minutos = Number(resultadoScheduler.tempoViagem) || 0;
     await tarefa.save();
 
@@ -1031,7 +1058,8 @@ exports.autoAtribuirTarefas = async (req, res) => {
     const tarefasOrfas = await Tarefa.find({
       empresa_id: empresaId,
       data: { $gte: hojeInicio },
-      estado: 'por_atribuir',
+      // 'nao_atribuida' também: antes ficavam presas para sempre mesmo havendo staff novo/disponível.
+      estado: { $in: ['por_atribuir', 'nao_atribuida'] },
     })
       .populate({ path: 'propriedade_id', select: 'nome coordenadas' })
       .sort({ data: 1 })
@@ -1113,6 +1141,7 @@ exports.autoAtribuirTarefas = async (req, res) => {
                 estado: 'atribuida',
                 data: novaData,
                 tempo_viagem_minutos: tempoViagemFinal,
+                motivo_nao_atribuicao: null,
               },
             }
           );
@@ -1149,19 +1178,22 @@ exports.autoAtribuirTarefas = async (req, res) => {
           let slaExcedido = false;
           let motivoFalha = 'Sem equipa disponível';
           try {
-            const Utilizador = require('../models/Utilizador');
-            const temStaffAtivo = await Utilizador.exists({
-              empresa_id: empresaId,
-              role: 'staff',
-              ativo: true,
-              eliminado_em: null,
-            });
-            // Se há staff ativo mas o load balancer não atribuiu → SLA excedido.
-            slaExcedido = !!temStaffAtivo;
-            if (slaExcedido) {
-              motivoFalha = 'Lotação máxima excedida (toda a equipa > 8h/dia)';
+            // Distingue a causa real: sem equipa ativa, ninguém disponível
+            // (ausência/folga/equipa exclusiva) ou lotação (todos > 8h/dia).
+            const { obterStaffDisponivel } = require('../utils/loadBalancer');
+            const { staff, disponiveis } = await obterStaffDisponivel(
+              empresaId,
+              range,
+              propriedadeId
+            );
+            if (staff.length === 0) {
+              motivoFalha = 'Sem equipa ativa';
+            } else if (disponiveis.length === 0) {
+              motivoFalha = 'Toda a equipa ausente, de folga ou fora da equipa exclusiva neste dia';
             } else {
-              motivoFalha = 'Toda a equipa de folga/férias ou sem equipa ativa';
+              // Há quem esteja disponível mas ninguém cabe no limite diário.
+              slaExcedido = true;
+              motivoFalha = 'Lotação máxima excedida (toda a equipa > 8h/dia)';
             }
           } catch (e) {
             // Se falha a verificação, mantém por_atribuir (seguro).

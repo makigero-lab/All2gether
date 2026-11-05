@@ -311,7 +311,7 @@ export default function ConfiguracoesPage() {
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
       <div className="flex items-center gap-3">
-        <Settings className="h-6 w-6 text-primary" />
+        <Settings className="h-6 w-6 text-gold-text" />
         <h1 className="text-2xl font-bold tracking-tight">Configurações</h1>
       </div>
 
@@ -330,7 +330,7 @@ export default function ConfiguracoesPage() {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
-              <Building2 className="h-5 w-5 text-primary" />
+              <Building2 className="h-5 w-5 text-gold-text" />
               Dados da Empresa
             </CardTitle>
           </CardHeader>
@@ -404,7 +404,7 @@ export default function ConfiguracoesPage() {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
-              <Webhook className="h-5 w-5 text-primary" />
+              <Webhook className="h-5 w-5 text-gold-text" />
               Ações Smoobu
             </CardTitle>
           </CardHeader>
@@ -430,7 +430,7 @@ export default function ConfiguracoesPage() {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
-              <Clock className="h-5 w-5 text-primary" />
+              <Clock className="h-5 w-5 text-gold-text" />
               Testes Manuais (Cron Jobs)
             </CardTitle>
           </CardHeader>
@@ -565,7 +565,7 @@ export default function ConfiguracoesPage() {
             Eliminar Limpezas Futuras
           </DialogTitle>
           <DialogDescription>
-            Isto vai apagar todas as tarefas não concluídas de hoje para a frente.
+            Isto vai eliminar todas as tarefas não concluídas de hoje para a frente.
             As concluídas e canceladas serão preservadas. Queres continuar?
           </DialogDescription>
           <DialogClose onClick={() => setConfirmarLimpar(false)} />
@@ -611,7 +611,7 @@ export default function ConfiguracoesPage() {
         <DialogHeader>
           <div>
             <DialogTitle className="flex items-center gap-2">
-              <ScrollText className="h-5 w-5 text-primary" />
+              <ScrollText className="h-5 w-5 text-gold-text" />
               Logs de Sincronização Smoobu
             </DialogTitle>
             <DialogDescription>

@@ -34,6 +34,8 @@ import type { DatesSetArg, EventClickArg, EventContentArg, EventInput } from "@f
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { EstadoTarefaBadge } from "@/components/ui/estado-tarefa-badge";
+import { ESTADOS_TAREFA, infoEstadoTarefa } from "@/lib/estados";
 import { cn, temHoraReal } from "@/lib/utils";
 import {
   Dialog,
@@ -94,11 +96,7 @@ interface PeriodoState {
 
 const ESTADO_OPTS = [
   { value: "", label: "Todos os estados" },
-  { value: "por_atribuir", label: "Por atribuir" },
-  { value: "atribuida", label: "Atribuída" },
-  { value: "em_curso", label: "Em curso" },
-  { value: "concluida", label: "Concluída" },
-  { value: "cancelada", label: "Cancelada" },
+  ...Object.entries(ESTADOS_TAREFA).map(([value, info]) => ({ value, label: info.label })),
 ];
 
 const TIPO_LABEL: Record<string, string> = {
@@ -127,26 +125,14 @@ interface PaletaEvento {
 }
 
 function paletaPorEstado(estado: string): PaletaEvento {
-  switch (estado) {
-    case "concluida":
-      // Verde suave
-      return { bg: "#dcfce7", border: "#86efac", text: "#166534", dot: "#22c55e" };
-    case "atribuida":
-    case "em_curso":
-      // Amarelo suave (pendente/em curso)
-      return { bg: "#fef9c3", border: "#fde047", text: "#854d0e", dot: "#eab308" };
-    case "por_atribuir":
-      // Vermelho suave
-      return { bg: "#fee2e2", border: "#fca5a5", text: "#991b1b", dot: "#ef4444" };
-    case "nao_atribuida":
-      // Prompt 138 (136 V2) — vermelho escuro (SLA excedido, mais urgente).
-      return { bg: "#fecaca", border: "#f87171", text: "#7f1d1d", dot: "#dc2626" };
-    case "cancelada":
-      // Cinza suave
-      return { bg: "#f1f5f9", border: "#cbd5e1", text: "#475569", dot: "#94a3b8" };
-    default:
-      return { bg: "#f1f5f9", border: "#cbd5e1", text: "#475569", dot: "#94a3b8" };
-  }
+  // Cores vêm dos tokens --status-* (uma só fonte de verdade: @/lib/estados).
+  const token = infoEstadoTarefa(estado).token;
+  return {
+    bg: `hsl(var(--status-${token}-bg))`,
+    border: `hsl(var(--status-${token}) / 0.45)`,
+    text: `hsl(var(--status-${token}))`,
+    dot: `hsl(var(--status-${token}))`,
+  };
 }
 
 /** Emoji por tipo de tarefa (Prompt 74, ponto 4). */
@@ -198,29 +184,6 @@ function horaFimTarefa(dataISO: string, minutos: number): string {
 /* ------------------------------------------------------------------ */
 /* Helpers da Vista Tabela (Prompt 99)                                 */
 /* ------------------------------------------------------------------ */
-
-const ESTADO_LABEL_TAB: Record<string, string> = {
-  por_atribuir: "Por Atribuir",
-  atribuida: "Atribuída",
-  em_curso: "Em Curso",
-  concluida: "Concluída",
-  cancelada: "Cancelada",
-  // Prompt 138 (136 V2) — SLA excedido.
-  nao_atribuida: "Não Atribuída (SLA)",
-};
-
-const ESTADO_VARIANT_TAB: Record<
-  string,
-  "default" | "secondary" | "success" | "warning" | "destructive" | "outline"
-> = {
-  por_atribuir: "destructive",
-  atribuida: "default",
-  em_curso: "warning",
-  concluida: "success",
-  cancelada: "outline",
-  // Prompt 138 (136 V2) — vermelho (mais urgente que por_atribuir).
-  nao_atribuida: "destructive",
-};
 
 /**
  * Formata uma data ISO (ou YYYY-MM-DD) para DD/MM/YYYY.
@@ -603,7 +566,9 @@ export default function CalendarioOperacionalPage() {
     const isAusencia = t.tipo === "ausencia";
     // HF25 — ausência pendente (pedido por aprovar).
     const isAusenciaPendente = t.tipo === "ausencia_pendente";
-    const isPorAtribuir = t.estado === "por_atribuir";
+    // por_atribuir e nao_atribuida têm o mesmo destaque; o rótulo vem de @/lib/estados.
+    const isPorAtribuir = t.estado === "por_atribuir" || t.estado === "nao_atribuida";
+    const rotuloEstado = infoEstadoTarefa(t.estado).label;
     const isViagem = !!t._isViagem;
 
     // --- Bloco de Viagem (Prompt 137) — cinzento + tracejado + ícone 🚗 ---
@@ -722,12 +687,12 @@ export default function CalendarioOperacionalPage() {
       // Prompt 80, ponto 1 — destaque forte para por_atribuir na vista mensal.
       if (isPorAtribuir) {
         return (
-          <div className="fc-evt-month fc-evt-month--alert" title={`⚠️ Por atribuir — ${titulo}`}>
+          <div className="fc-evt-month fc-evt-month--alert" title={`⚠️ ${rotuloEstado} — ${titulo}`}>
             <span className="fc-evt-month__alert-icon" aria-hidden>⚠️</span>
             <span className="fc-evt-month__title">
               {emoji} {titulo}
             </span>
-            <span className="fc-evt-month__alert-tag">Por Atribuir</span>
+            <span className="fc-evt-month__alert-tag">{rotuloEstado}</span>
           </div>
         );
       }
@@ -779,7 +744,7 @@ export default function CalendarioOperacionalPage() {
               <span>{primeiroNome(staff)}</span>
             </>
           ) : (
-            <span className="fc-evt-block__unassigned">⚠️ Por Atribuir</span>
+            <span className="fc-evt-block__unassigned">⚠️ {rotuloEstado}</span>
           )}
         </div>
       </div>
@@ -1112,7 +1077,7 @@ export default function CalendarioOperacionalPage() {
         Reserva: formatarReservaExcel(t.detalhes_reserva),
         Funcionário: t.utilizador_id?.nome ?? "Por Atribuir",
         Horário: formatarHorario(t) === "—" ? "" : formatarHorario(t),
-        Estado: ESTADO_LABEL_TAB[t.estado] ?? t.estado,
+        Estado: infoEstadoTarefa(t.estado).label,
       }));
 
       const ws = XLSX.utils.json_to_sheet(linhas, {
@@ -1171,7 +1136,7 @@ export default function CalendarioOperacionalPage() {
           <Button
             onClick={() => setConfirmarAutoAtribuir(true)}
             disabled={autoAtribuindo || loading}
-            title="Corre o load balancer para atribuir automaticamente todas as tarefas futuras sem funcionário."
+            title="Atribui automaticamente todas as tarefas futuras sem funcionário."
             className="gap-2"
           >
             {autoAtribuindo ? (
@@ -1473,9 +1438,7 @@ export default function CalendarioOperacionalPage() {
                         {formatarHorario(t)}
                       </td>
                       <td className="px-4 py-3">
-                        <Badge variant={ESTADO_VARIANT_TAB[t.estado] ?? "secondary"}>
-                          {ESTADO_LABEL_TAB[t.estado] ?? t.estado}
-                        </Badge>
+                        <EstadoTarefaBadge estado={t.estado} />
                       </td>
                     </tr>
                   ))}
@@ -1506,34 +1469,18 @@ export default function CalendarioOperacionalPage() {
       {/* Legenda */}
       <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
         <span className="font-medium">Legenda:</span>
-        <span className="flex items-center gap-1.5">
-          <span
-            className="h-3 w-3 rounded border"
-            style={{ backgroundColor: "#fee2e2", borderColor: "#fca5a5" }}
-          />
-          Por atribuir
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span
-            className="h-3 w-3 rounded border"
-            style={{ backgroundColor: "#fef9c3", borderColor: "#fde047" }}
-          />
-          Atribuída / Em curso
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span
-            className="h-3 w-3 rounded border"
-            style={{ backgroundColor: "#dcfce7", borderColor: "#86efac" }}
-          />
-          Concluída
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span
-            className="h-3 w-3 rounded border"
-            style={{ backgroundColor: "#f1f5f9", borderColor: "#cbd5e1" }}
-          />
-          Cancelada
-        </span>
+        {Object.values(ESTADOS_TAREFA).map((info) => (
+          <span key={info.token} className="flex items-center gap-1.5">
+            <span
+              className="h-3 w-3 rounded border"
+              style={{
+                backgroundColor: `hsl(var(--status-${info.token}-bg))`,
+                borderColor: `hsl(var(--status-${info.token}) / 0.45)`,
+              }}
+            />
+            {info.label}
+          </span>
+        ))}
         <span className="flex items-center gap-1.5">
           <span
             className="h-3 w-3 rounded border"
@@ -1557,20 +1504,7 @@ export default function CalendarioOperacionalPage() {
           <DialogContent className="space-y-4">
             {/* Estado + tipo + propriedade */}
             <div className="flex flex-wrap items-center gap-2">
-              <Badge
-                variant={
-                  tarefaSelecionada.estado === "concluida"
-                    ? "default"
-                    : tarefaSelecionada.estado === "cancelada"
-                    ? "secondary"
-                    : tarefaSelecionada.estado === "por_atribuir"
-                    ? "destructive"
-                    : "outline"
-                }
-              >
-                {ESTADO_OPTS.find((o) => o.value === tarefaSelecionada.estado)?.label ??
-                  tarefaSelecionada.estado}
-              </Badge>
+              <EstadoTarefaBadge estado={tarefaSelecionada.estado} />
               {/* v1.58.0 (Prompt 80, ponto 4) — Badge de tipo para deixar claro
                   que manutenções também podem ser atribuídas/reatribuídas. */}
               {tarefaSelecionada.tipo && TIPO_LABEL[tarefaSelecionada.tipo] && (
@@ -1617,7 +1551,7 @@ export default function CalendarioOperacionalPage() {
                   {tarefaSelecionada.utilizador_id ? (
                     <Link
                       href={`/gestor/equipa?editar=${tarefaSelecionada.utilizador_id._id}`}
-                      className="text-primary underline-offset-2 hover:underline font-medium"
+                      className="text-gold-text underline-offset-2 hover:underline font-medium"
                       title="Editar funcionário"
                     >
                       {tarefaSelecionada.utilizador_id.nome}
@@ -1777,7 +1711,7 @@ export default function CalendarioOperacionalPage() {
       <Dialog open={confirmarAutoAtribuir} onOpenChange={setConfirmarAutoAtribuir}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Sparkles className="h-5 w-5 text-primary" />
+            <Sparkles className="h-5 w-5 text-gold-text" />
             Auto-Atribuir Pendentes
           </DialogTitle>
           <DialogDescription>
@@ -1788,7 +1722,7 @@ export default function CalendarioOperacionalPage() {
         </DialogHeader>
         <DialogContent className="space-y-2">
           <p className="text-sm text-muted-foreground">
-            O load balancer vai procurar o staff com menor carga para cada
+            O sistema vai procurar o funcionário com menor carga para cada
             tarefa, respeitando férias, folgas fixas, tempo de viagem e hora
             de almoço (13h-14h). As tarefas que não conseguirem ser atribuídas
             (sem staff disponível) continuam por atribuir.
@@ -1827,7 +1761,7 @@ export default function CalendarioOperacionalPage() {
       <Dialog open={mostrarNovaTarefa} onOpenChange={setMostrarNovaTarefa}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Plus className="h-5 w-5 text-primary" />
+            <Plus className="h-5 w-5 text-gold-text" />
             Nova Limpeza
           </DialogTitle>
           <DialogDescription>

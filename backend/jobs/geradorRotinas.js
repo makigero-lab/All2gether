@@ -24,7 +24,7 @@ const cron = require('node-cron');
 const mongoose = require('mongoose');
 const Propriedade = require('../models/Propriedade');
 const Tarefa = require('../models/Tarefa');
-const { obterRangeDia } = require('../utils/scheduler');
+const { obterRangeDia, calcularInicioTarefaUtilizador } = require('../utils/scheduler');
 const { determinarUtilizadorAtribuido, determinarEquipaAtribuida } = require('../utils/loadBalancer');
 
 const DIAS_SEMANA = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
@@ -112,6 +112,7 @@ async function executarGeradorRotinas() {
         tipo: 'limpeza',
         estado: 'por_atribuir',
         observacoes: 'Tarefa automática (rotina de limpeza fixa)',
+        rotina_dia: rangeAmanha.start.toISOString().slice(0, 10),
         checklist: propriedade.checklist || [],
       });
 
@@ -170,6 +171,16 @@ async function executarGeradorRotinas() {
           if (resultadoLB) {
             novaTarefa.utilizador_id = resultadoLB.utilizadorId;
             novaTarefa.equipa_atribuida = [resultadoLB.utilizadorId];
+            try {
+              // Hora sequencial (antes todas as rotinas do mesmo staff ficavam às 10:00 UTC).
+              const ini = await calcularInicioTarefaUtilizador(
+                resultadoLB.utilizadorId, rangeAmanha.start, propriedade.coordenadas, tempoLimpeza
+              );
+              if (ini?.data) {
+                novaTarefa.data = ini.data;
+                if (ini.tempoViagem) novaTarefa.tempo_viagem_minutos = Number(ini.tempoViagem) || 0;
+              }
+            } catch (e) { /* mantém 10:00 UTC */ }
             novaTarefa.estado = 'atribuida';
             novaTarefa.tempo_viagem_minutos = Number(resultadoLB.tempoViagem) || 0;
             await novaTarefa.save();
@@ -190,6 +201,11 @@ async function executarGeradorRotinas() {
         // A tarefa já foi criada — fica por_atribuir.
       }
     } catch (err) {
+      if (err && err.code === 11000) {
+        // Outra instância/execução já criou a rotina deste dia: não é erro.
+        console.log(`⏭️  [GeradorRotinas] "${propriedade.nome}" já criada por outra execução — skip.`);
+        continue;
+      }
       erros++;
       console.error(
         `❌ [GeradorRotinas] erro ao processar propriedade ${propriedade._id}:`,

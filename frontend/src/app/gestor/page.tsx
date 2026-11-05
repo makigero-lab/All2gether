@@ -28,7 +28,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { adminGet, adminPatch } from "@/lib/api";
 import { PushNotificationSetup } from "@/components/gestor/push-notification-setup";
-import { formatarDataSegura } from "@/lib/utils";
+import { formatarDataSegura, textoRedistribuicao, type RedistribuicaoDTO } from "@/lib/utils";
 
 interface DashboardData {
   totalPropriedades: number;
@@ -99,7 +99,7 @@ export default function AdminDashboardPage() {
   // Auto-esconde o toast após 6s.
   useEffect(() => {
     if (!toast) return;
-    const t = setTimeout(() => setToast(null), 6000);
+    const t = setTimeout(() => setToast(null), toast.msg.includes("em curso") ? 20000 : 6000);
     return () => clearTimeout(t);
   }, [toast]);
 
@@ -108,15 +108,12 @@ export default function AdminDashboardPage() {
     setAprovandoEmergencia(em._id);
     try {
       const res = await adminPatch<{
-        redistribuicao: { total: number; reatribuidas: number; orfas: number } | null;
+        redistribuicao: RedistribuicaoDTO | null;
       }>(`/api/gestor/ausencias/${em._id}/estado`, { estado: "aprovada" });
 
       const r = res.redistribuicao;
-      const msg =
-        r && r.total > 0
-          ? `Falta confirmada. ${r.reatribuidas} tarefa(s) redistribuída(s)${r.orfas > 0 ? `, ${r.orfas} órfã(s)` : ""}.`
-          : "Falta confirmada. Sem tarefas para redistribuir hoje.";
-      setToast({ tipo: "sucesso", msg });
+      const msg = textoRedistribuicao("Falta confirmada.", r, "Sem tarefas para desatribuir hoje.");
+      setToast({ tipo: "sucesso", msg: r?.aviso ? `${msg} ${r.aviso}` : msg });
 
       // Remove a emergência da lista (já foi confirmada).
       setEmergencias((prev) => prev.filter((e) => e._id !== em._id));
@@ -164,7 +161,7 @@ export default function AdminDashboardPage() {
         <div className="rounded-lg border-2 border-orange-500/60 bg-orange-50 p-4 shadow-lg dark:bg-orange-950/30">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-orange-500 text-white">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-status-porat text-status-foreground">
                 <TriangleAlert className="h-5 w-5" />
               </div>
               <div className="flex-1">
@@ -202,7 +199,7 @@ export default function AdminDashboardPage() {
             </div>
             <Link
               href="/gestor/calendario"
-              className="inline-flex h-8 shrink-0 items-center gap-2 rounded-md bg-orange-600 px-3 text-xs font-medium text-white transition-colors hover:bg-orange-700"
+              className="inline-flex h-8 shrink-0 items-center gap-2 rounded-md bg-status-porat px-3 text-xs font-medium text-status-foreground transition-colors hover:bg-status-porat/90"
             >
               Resolver agora
               <ArrowRight className="h-4 w-4" />
@@ -318,7 +315,7 @@ export default function AdminDashboardPage() {
               return (
                 <Card key={s.label}>
                   <CardContent className="flex items-center gap-4 p-5">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10 text-gold-text">
                       <Icon className="h-6 w-6" />
                     </div>
                     <div className="flex flex-col">

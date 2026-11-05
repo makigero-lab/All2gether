@@ -152,7 +152,7 @@ export default function StaffNotificacoesPage() {
               Voltar
             </Link>
             <div className="flex items-center gap-2">
-              <Bell className="h-5 w-5 text-primary" />
+              <Bell className="h-5 w-5 text-gold-text" />
               <h1 className="text-xl font-semibold tracking-tight">Notificações</h1>
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
@@ -180,7 +180,7 @@ export default function StaffNotificacoesPage() {
         {/* Ações */}
         <div className="flex flex-wrap items-center gap-2">
           {naoLidas > 0 && (
-            <Button
+            <Button size="touch"
               onClick={handleMarcarTodas}
               disabled={marcando}
               className="flex-1 justify-center gap-2"
@@ -212,7 +212,7 @@ export default function StaffNotificacoesPage() {
               <span>{erro}</span>
               <Button
                 variant="outline"
-                size="sm"
+                size="touch"
                 onClick={carregar}
                 className="ml-auto"
               >
@@ -264,7 +264,7 @@ export default function StaffNotificacoesPage() {
                           </Badge>
                         )}
                       </div>
-                      <span className="text-xs text-muted-foreground/70 tabular-nums whitespace-nowrap">
+                      <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
                         {formatarData(n.data)}
                       </span>
                     </div>
@@ -280,7 +280,7 @@ export default function StaffNotificacoesPage() {
             <Card className="hidden sm:block">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <Bell className="h-5 w-5 text-primary" />
+                  <Bell className="h-5 w-5 text-gold-text" />
                   Notificações
                 </CardTitle>
                 <CardDescription>

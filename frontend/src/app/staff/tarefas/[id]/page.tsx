@@ -2,7 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { notFound } from "next/navigation";
-import { Loader2 } from "lucide-react";
+import { Loader2, WifiOff } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import { MSG_SEM_LIGACAO } from "@/lib/rascunho-staff";
 
 import { DetalheTarefaClient } from "@/components/staff/detalhe-tarefa-client";
 
@@ -21,30 +24,55 @@ export default function DetalheTarefaPage({
 }) {
   const [tarefa, setTarefa] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  // true quando falhou a rede / servidor (distinto de "tarefa não existe").
+  const [semRede, setSemRede] = useState(false);
+  const [tentativa, setTentativa] = useState(0);
 
   useEffect(() => {
+    let cancelado = false;
+    setLoading(true);
+    setSemRede(false);
     (async () => {
       try {
         const res = await fetch(`/api/auth/me/tarefas/${params.id}`, {
           credentials: "include",
           cache: "no-store",
         });
+        if (cancelado) return;
         if (res.ok) {
           const data = await res.json();
           setTarefa(data.tarefa);
+        } else if (res.status >= 500) {
+          setSemRede(true);
         }
+        // 404/403/401: tarefa inexistente ou sem acesso -> notFound abaixo.
       } catch {
-        // silencioso
+        if (!cancelado) setSemRede(true);
       } finally {
-        setLoading(false);
+        if (!cancelado) setLoading(false);
       }
     })();
-  }, [params.id]);
+    return () => {
+      cancelado = true;
+    };
+  }, [params.id, tentativa]);
 
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (!tarefa && semRede) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 p-6 text-center">
+        <WifiOff className="h-8 w-8 text-muted-foreground" />
+        <p className="text-sm text-muted-foreground">{MSG_SEM_LIGACAO}</p>
+        <Button size="touch" onClick={() => setTentativa((t) => t + 1)}>
+          Tentar de novo
+        </Button>
       </div>
     );
   }

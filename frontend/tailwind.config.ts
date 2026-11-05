@@ -50,6 +50,27 @@ const config: Config = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        gold: {
+          text: "hsl(var(--gold-text))",
+          soft: "hsl(var(--gold-soft))",
+          border: "hsl(var(--gold-border))",
+        },
+        // Estados da tarefa (ver globals.css): `text-status-porat bg-status-porat-bg`.
+        status: {
+          porat: "hsl(var(--status-porat))",
+          "porat-bg": "hsl(var(--status-porat-bg))",
+          naoat: "hsl(var(--status-naoat))",
+          "naoat-bg": "hsl(var(--status-naoat-bg))",
+          atrib: "hsl(var(--status-atrib))",
+          "atrib-bg": "hsl(var(--status-atrib-bg))",
+          curso: "hsl(var(--status-curso))",
+          "curso-bg": "hsl(var(--status-curso-bg))",
+          conc: "hsl(var(--status-conc))",
+          "conc-bg": "hsl(var(--status-conc-bg))",
+          canc: "hsl(var(--status-canc))",
+          "canc-bg": "hsl(var(--status-canc-bg))",
+          foreground: "hsl(var(--status-foreground))",
+        },
       },
       borderRadius: {
         lg: "var(--radius)",

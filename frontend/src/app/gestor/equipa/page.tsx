@@ -25,6 +25,7 @@ import {
   Eye,
   EyeOff,
   Lock,
+  AlertTriangle,
 } from "lucide-react";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -66,7 +67,7 @@ import {
 } from "@/lib/api";
 import { PaginationBar } from "@/components/admin/pagination-bar";
 import { Switch } from "@/components/ui/switch";
-import { formatarDataSegura, parsearDataSegura } from "@/lib/utils";
+import { parsearDataSegura, tarefasPorAtribuir, textoRedistribuicao, type RedistribuicaoDTO } from "@/lib/utils";
 
 /**
  * Página de Equipa — Painel de Administração.
@@ -114,49 +115,6 @@ const DIAS_SEMANA = [
   { valor: 5, label: "Sex" },
   { valor: 6, label: "Sáb" },
 ];
-
-/* ------------------------------------------------------------------ */
-/* Constantes & tipos — Aprovações                                     */
-/* ------------------------------------------------------------------ */
-
-interface AusenciaDTO {
-  _id: string;
-  utilizador_id: string;
-  utilizador: {
-    _id: string;
-    nome: string;
-    email: string;
-    role: Role;
-  } | null;
-  data_inicio: string;
-  data_fim: string;
-  tipo: string;
-  estado: string;
-  justificacao?: string;
-  notas?: string;
-  createdAt: string;
-}
-
-const TIPO_LABEL: Record<string, string> = {
-  ferias: "Férias",
-  doenca: "Doença",
-  outro: "Outro",
-};
-
-const TIPO_VARIANT: Record<string, "default" | "secondary" | "outline"> = {
-  ferias: "default",
-  doenca: "secondary",
-  outro: "outline",
-};
-
-/** Formata uma data ISO (yyyy-MM-dd) para "d MMM yyyy" em PT. */
-function formatarData(iso: string): string {
-  return formatarDataSegura(
-    iso,
-    (d) => format(d, "d MMM yyyy", { locale: pt }),
-    iso
-  );
-}
 
 /* ------------------------------------------------------------------ */
 /* Sub-componente — Folgas Semanais                                    */
@@ -333,6 +291,116 @@ function EquipaPage() {
   const [baixaForm, setBaixaForm] = useState({ data_inicio: "", data_fim: "" });
   const [baixaSubmitting, setBaixaSubmitting] = useState(false);
   const [baixaResultado, setBaixaResultado] = useState<string | null>(null);
+  // Nº de tarefas que SOBRARAM por atribuir depois da reatribuição automática
+  // (>0 mostra o botão de nova tentativa).
+  const [faltaPorAtribuir, setFaltaPorAtribuir] = useState(0);
+  const [baixaPorAtribuir, setBaixaPorAtribuir] = useState(0);
+  // Aviso de limpezas em curso que continuam com a pessoa (não são desatribuídas).
+  const [faltaAviso, setFaltaAviso] = useState<string | null>(null);
+  const [baixaAviso, setBaixaAviso] = useState<string | null>(null);
+  // Nova tentativa de reatribuição (com clique), para as tarefas que sobraram por atribuir.
+  const [autoAtribuindo, setAutoAtribuindo] = useState(false);
+  const [autoTentou, setAutoTentou] = useState(false);
+  const [autoErro, setAutoErro] = useState<string | null>(null);
+
+  /**
+   * Nova tentativa: reatribui automaticamente TODAS as tarefas por atribuir a partir de hoje.
+   * O resultado inicial do diálogo é SUBSTITUÍDO pelo novo (sem mensagens contraditórias) e,
+   * se ainda sobrarem tarefas, o botão mantém-se como "Tentar de novo".
+   */
+  async function handleReatribuirAuto(fluxo: "falta" | "baixa") {
+    const prefixo = fluxo === "falta" ? "Falta registada." : "Baixa registada.";
+    const setResultado = fluxo === "falta" ? setFaltaResultado : setBaixaResultado;
+    const setPorAtribuir = fluxo === "falta" ? setFaltaPorAtribuir : setBaixaPorAtribuir;
+    setAutoAtribuindo(true);
+    setAutoErro(null);
+    try {
+      const res = await adminPost<{
+        sucesso: boolean;
+        processadas: number;
+        reatribuidas: number;
+        orfas: number;
+        mensagem?: string;
+      }>("/api/gestor/tarefas/auto-atribuir", {});
+      setAutoTentou(true);
+      setPorAtribuir(res.orfas ?? 0);
+      setResultado(
+        `${prefixo} ` +
+          (res.processadas === 0
+            ? res.mensagem ?? "Não há tarefas por atribuir a partir de hoje."
+            : `Foram reatribuídas ${res.reatribuidas} tarefa(s). ` +
+              (res.orfas > 0
+                ? `${res.orfas} continuam por atribuir (sem staff disponível).`
+                : "Nenhuma ficou por atribuir."))
+      );
+      await carregar();
+    } catch (e) {
+      // Mantém o botão (porAtribuir não muda) para nova tentativa.
+      setAutoErro(
+        e instanceof Error
+          ? `Reatribuição falhou: ${e.message}`
+          : "Erro ao reatribuir tarefas."
+      );
+    } finally {
+      setAutoAtribuindo(false);
+    }
+  }
+
+  /** Aviso bem visível: limpeza(s) em curso continuam com a pessoa ausente. */
+  function avisoEmCurso(texto: string) {
+    return (
+      <div
+        role="alert"
+        className="flex items-start gap-2 rounded-md border border-amber-500/60 bg-amber-50 p-3 text-sm font-medium text-amber-900 dark:bg-amber-950/30 dark:text-amber-100"
+      >
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+        <span>{texto}</span>
+      </div>
+    );
+  }
+
+  /**
+   * Bloco de nova tentativa (falta súbita e baixa). A reatribuição já correu
+   * sozinha; este bloco só aparece se SOBRARAM tarefas por atribuir.
+   */
+  function renderReatribuir(porAtribuir: number, fluxo: "falta" | "baixa") {
+    if (porAtribuir <= 0) return null;
+    return (
+      <div className="space-y-2 rounded-md border p-3">
+        {(
+          <>
+            <p className="text-xs text-muted-foreground">
+              Sobraram {porAtribuir} tarefa(s) por atribuir (ninguém estava
+              disponível ou a reatribuição falhou). Pode tentar de novo: o
+              sistema distribui por colegas disponíveis TODAS as tarefas por
+              atribuir a partir de hoje (não só as desta pessoa). Quem está
+              ausente não recebe tarefas.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => handleReatribuirAuto(fluxo)}
+                disabled={autoAtribuindo}
+              >
+                {autoAtribuindo ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    A reatribuir…
+                  </>
+                ) : autoTentou || autoErro ? (
+                  "Tentar de novo"
+                ) : (
+                  "Reatribuir automaticamente"
+                )}
+              </Button>
+            </div>
+          </>
+        )}
+        {autoErro && <p className="text-sm text-red-600">{autoErro}</p>}
+      </div>
+    );
+  }
 
   // Utilizadores que podem ser responsáveis (só gestor — admin não aparece).
   const responsaveisPossiveis = utilizadores.filter(
@@ -616,13 +684,19 @@ function EquipaPage() {
     if (!faltaSubita) return;
     setFaltaSubmitting(true);
     setFaltaResultado(null);
+    setFaltaPorAtribuir(0);
+    setFaltaAviso(null);
+    setAutoTentou(false);
+    setAutoErro(null);
     try {
-      const res = await adminPost<{ reatribuidas: number; orfas: number; total: number }>(
+      const res = await adminPost<RedistribuicaoDTO>(
         `/api/gestor/equipa/${faltaSubita._id}/falta-subita`,
         {}
       );
+      setFaltaPorAtribuir(tarefasPorAtribuir(res));
+      setFaltaAviso(res.aviso ?? null);
       setFaltaResultado(
-        `${res.reatribuidas} tarefa(s) reatribuída(s) aos colegas, ${res.orfas} tarefa(s) ficou(aram) por atribuir.`
+        textoRedistribuicao("Falta registada.", res, "Não havia tarefas para hoje.")
       );
       await carregar();
     } catch (e) {
@@ -633,119 +707,6 @@ function EquipaPage() {
       setFaltaSubmitting(false);
     }
   }
-
-  // ===== Estado — Aprovações (prefix apr_) =====
-  const [aprPendentes, setAprPendentes] = useState<AusenciaDTO[]>([]);
-  const [aprLoading, setAprLoading] = useState(true);
-  const [aprErro, setAprErro] = useState<string | null>(null);
-  const [aprToast, setAprToast] = useState<{
-    tipo: "sucesso" | "erro";
-    msg: string;
-  } | null>(null);
-  const [aprProcessando, setAprProcessando] = useState<string | null>(null);
-  // v1.62.0 (Prompt 85) — Alvo do dialog de eliminação de ausência.
-  const [aprEliminarAlvo, setAprEliminarAlvo] = useState<AusenciaDTO | null>(null);
-
-  /** Carrega as ausências pendentes da empresa. */
-  const aprCarregar = useCallback(async () => {
-    setAprLoading(true);
-    setAprErro(null);
-    try {
-      const res = await adminGet<{ ausencias: AusenciaDTO[] }>(
-        "/api/gestor/ausencias?estado=pendente,pendente_emergencia"
-      );
-      setAprPendentes(res.ausencias ?? []);
-    } catch (e) {
-      setAprErro(e instanceof Error ? e.message : "Erro ao carregar pedidos.");
-    } finally {
-      setAprLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    aprCarregar();
-  }, [aprCarregar]);
-
-  /** Aprova um pedido e mostra toast com o resultado da redistribuição. */
-  async function aprAprovar(a: AusenciaDTO) {
-    setAprProcessando(`aprovar-${a._id}`);
-    setAprErro(null);
-    try {
-      const res = await adminPatch<{
-        mensagem: string;
-        redistribuicao: { total: number; reatribuidas: number; orfas: number } | null;
-      }>(`/api/gestor/ausencias/${a._id}/estado`, { estado: "aprovada" });
-
-      const r = res.redistribuicao;
-      const msg =
-        r && r.total > 0
-          ? `Férias aprovadas. As tarefas deste funcionário foram redistribuídas com sucesso! (${r.reatribuidas} reatribuída(s)${r.orfas > 0 ? `, ${r.orfas} órfã(s)` : ""})`
-          : "Férias aprovadas. Sem tarefas para redistribuir no período.";
-      setAprToast({ tipo: "sucesso", msg });
-
-      // Remove da lista de pendentes (já foi decidido).
-      setAprPendentes((prev) => prev.filter((p) => p._id !== a._id));
-    } catch (e) {
-      setAprToast({
-        tipo: "erro",
-        msg: e instanceof Error ? `Erro ao aprovar: ${e.message}` : "Erro ao aprovar pedido.",
-      });
-    } finally {
-      setAprProcessando(null);
-    }
-  }
-
-  /** Rejeita um pedido. */
-  async function aprRejeitar(a: AusenciaDTO) {
-    setAprProcessando(`rejeitar-${a._id}`);
-    setAprErro(null);
-    try {
-      await adminPatch(`/api/gestor/ausencias/${a._id}/estado`, {
-        estado: "rejeitada",
-      });
-      setAprToast({ tipo: "sucesso", msg: "Pedido rejeitado." });
-      setAprPendentes((prev) => prev.filter((p) => p._id !== a._id));
-    } catch (e) {
-      setAprToast({
-        tipo: "erro",
-        msg: e instanceof Error ? `Erro ao rejeitar: ${e.message}` : "Erro ao rejeitar pedido.",
-      });
-    } finally {
-      setAprProcessando(null);
-    }
-  }
-
-  /**
-   * v1.62.0 (Prompt 85) — Elimina definitivamente uma ausência.
-   * Chamado após confirmação no Dialog. Faz DELETE /api/gestor/ausencias/:id.
-   */
-  async function aprEliminar() {
-    if (!aprEliminarAlvo) return;
-    const alvo = aprEliminarAlvo;
-    setAprProcessando(`eliminar-${alvo._id}`);
-    setAprErro(null);
-    try {
-      await adminDelete(`/api/gestor/ausencias/${alvo._id}`);
-      setAprToast({ tipo: "sucesso", msg: "Ausência eliminada com sucesso." });
-      // Remove da lista de pendentes.
-      setAprPendentes((prev) => prev.filter((p) => p._id !== alvo._id));
-      setAprEliminarAlvo(null);
-    } catch (e) {
-      setAprToast({
-        tipo: "erro",
-        msg: e instanceof Error ? `Erro ao eliminar: ${e.message}` : "Erro ao eliminar ausência.",
-      });
-    } finally {
-      setAprProcessando(null);
-    }
-  }
-
-  // Auto-esconde o toast após 6s.
-  useEffect(() => {
-    if (!aprToast) return;
-    const t = setTimeout(() => setAprToast(null), 6000);
-    return () => clearTimeout(t);
-  }, [aprToast]);
 
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
@@ -815,7 +776,7 @@ function EquipaPage() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-base">
-                  <Users className="h-5 w-5 text-primary" />
+                  <Users className="h-5 w-5 text-gold-text" />
                   Novo Funcionário
                 </CardTitle>
               </CardHeader>
@@ -998,7 +959,7 @@ function EquipaPage() {
                                 key={p._id}
                                 className={`flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm transition-colors ${
                                   checked
-                                    ? "border-primary bg-primary/10 text-primary"
+                                    ? "border-primary bg-primary/10 text-gold-text"
                                     : "border-input text-muted-foreground hover:bg-muted/50"
                                 }`}
                               >
@@ -1078,7 +1039,7 @@ function EquipaPage() {
                                 key={p._id}
                                 className={`flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm transition-colors ${
                                   checked
-                                    ? "border-primary bg-primary/10 text-primary"
+                                    ? "border-primary bg-primary/10 text-gold-text"
                                     : "border-input text-muted-foreground hover:bg-muted/50"
                                 }`}
                               >
@@ -1509,7 +1470,7 @@ function EquipaPage() {
                 {editForm.role !== "parceiro" && (
                 <div className="space-y-3 rounded-md border p-3">
                   <div className="flex items-center gap-2">
-                    <Calendar className="h-4 w-4 text-primary" />
+                    <Calendar className="h-4 w-4 text-gold-text" />
                     <h4 className="text-sm font-medium leading-none">
                       Folgas Específicas / Rotativas
                     </h4>
@@ -1668,7 +1629,7 @@ function EquipaPage() {
                               key={p._id}
                               className={`flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm transition-colors ${
                                 checked
-                                  ? "border-primary bg-primary/10 text-primary"
+                                  ? "border-primary bg-primary/10 text-gold-text"
                                   : "border-input text-muted-foreground hover:bg-muted/50"
                               }`}
                             >
@@ -1746,7 +1707,7 @@ function EquipaPage() {
                               key={p._id}
                               className={`flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm transition-colors ${
                                 checked
-                                  ? "border-primary bg-primary/10 text-primary"
+                                  ? "border-primary bg-primary/10 text-gold-text"
                                   : "border-input text-muted-foreground hover:bg-muted/50"
                               }`}
                             >
@@ -1881,7 +1842,7 @@ function EquipaPage() {
                   Reportar Falta Súbita
                 </DialogTitle>
                 <DialogDescription>
-                  As tarefas de hoje serão redistribuídas pelos colegas disponíveis.
+                  As tarefas de hoje são reatribuídas automaticamente a colegas disponíveis.
                 </DialogDescription>
               </div>
               <DialogClose onClick={() => setFaltaSubita(null)} />
@@ -1892,15 +1853,18 @@ function EquipaPage() {
                 <span className="font-semibold">{faltaSubita?.nome}</span>?
               </p>
               <p className="text-xs text-muted-foreground">
-                As tarefas de hoje deste funcionário serão redistribuídas pelos
-                colegas disponíveis, usando o sistema de load balancing com
-                tempo de viagem. Tarefas sem ninguém disponível ficarão por atribuir.
+                As tarefas de hoje deste funcionário são reatribuídas logo aos
+                colegas disponíveis. As que ninguém puder fazer ficam por
+                atribuir e os gestores são avisados.
               </p>
               {faltaResultado && (
                 <div className="rounded-md bg-amber-50 dark:bg-amber-950/20 p-3 text-sm text-amber-800 dark:text-amber-200">
                   {faltaResultado}
                 </div>
               )}
+              {faltaResultado && faltaAviso && avisoEmCurso(faltaAviso)}
+              {faltaResultado &&
+                renderReatribuir(faltaPorAtribuir, "falta")}
             </DialogContent>
             <DialogFooter>
               <Button
@@ -1914,7 +1878,7 @@ function EquipaPage() {
               {!faltaResultado && (
                 <Button
                   type="button"
-                  className="bg-amber-500 text-white hover:bg-amber-600"
+                  className="bg-status-porat text-status-foreground hover:bg-status-porat/90"
                   onClick={handleFaltaSubita}
                   disabled={faltaSubmitting}
                 >
@@ -1946,7 +1910,7 @@ function EquipaPage() {
                   Registar Baixa ou Férias
                 </DialogTitle>
                 <DialogDescription>
-                  As tarefas futuras serão redistribuídas pelos colegas disponíveis.
+                  As tarefas do período são reatribuídas automaticamente a colegas disponíveis.
                 </DialogDescription>
               </div>
               <DialogClose onClick={() => setBaixaModal(null)} />
@@ -1987,15 +1951,19 @@ function EquipaPage() {
                     </div>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Todas as tarefas atribuídas a este funcionário no período serão
-                    reatribuídas usando o sistema de load balancing. As que não
-                    tiverem ninguém disponível ficarão por atribuir.
+                    As tarefas atribuídas a este funcionário no período são
+                    reatribuídas logo aos colegas disponíveis. As que ninguém
+                    puder fazer ficam por atribuir e os gestores são avisados.
                   </p>
                 </>
               ) : (
-                <div className="rounded-md bg-blue-50 dark:bg-blue-950/20 p-3 text-sm text-blue-800 dark:text-blue-200">
-                  {baixaResultado}
-                </div>
+                <>
+                  <div className="rounded-md bg-blue-50 dark:bg-blue-950/20 p-3 text-sm text-blue-800 dark:text-blue-200">
+                    {baixaResultado}
+                  </div>
+                  {baixaAviso && avisoEmCurso(baixaAviso)}
+                  {renderReatribuir(baixaPorAtribuir, "baixa")}
+                </>
               )}
             </DialogContent>
             <DialogFooter>
@@ -2010,7 +1978,7 @@ function EquipaPage() {
               {!baixaResultado && (
                 <Button
                   type="button"
-                  className="bg-blue-500 text-white hover:bg-blue-600"
+                  className="bg-status-atrib text-status-foreground hover:bg-status-atrib/90"
                   disabled={
                     !baixaForm.data_inicio ||
                     !baixaForm.data_fim ||
@@ -2019,18 +1987,20 @@ function EquipaPage() {
                   onClick={async () => {
                     if (!baixaModal) return;
                     setBaixaSubmitting(true);
+                    setBaixaPorAtribuir(0);
+                    setBaixaAviso(null);
+                    setAutoTentou(false);
+                    setAutoErro(null);
                     try {
-                      const res = await adminPost<{
-                        reatribuidas: number;
-                        orfas: number;
-                        total: number;
-                      }>(`/api/gestor/equipa/${baixaModal._id}/baixa`, {
+                      const res = await adminPost<RedistribuicaoDTO>(`/api/gestor/equipa/${baixaModal._id}/baixa`, {
                         data_inicio: baixaForm.data_inicio,
                         data_fim: baixaForm.data_fim,
                         tipo: "ferias",
                       });
+                      setBaixaPorAtribuir(tarefasPorAtribuir(res));
+                      setBaixaAviso(res.aviso ?? null);
                       setBaixaResultado(
-                        `Baixa registada. ${res.reatribuidas} tarefa(s) reatribuída(s) aos colegas, ${res.orfas} ficou(aram) por atribuir.`
+                        textoRedistribuicao("Baixa registada.", res, "Não havia tarefas no período.")
                       );
                       await carregar();
                     } catch (e) {
@@ -2059,80 +2029,6 @@ function EquipaPage() {
           </Dialog>
         </div>
       </div>
-
-      {/* Dialog de confirmação de eliminação de ausência (mantido para o
-          botão de eliminar da lista de staff, se aplicável) */}
-      <Dialog
-        open={aprEliminarAlvo !== null}
-        onOpenChange={(o) => !o && setAprEliminarAlvo(null)}
-      >
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Trash2 className="h-5 w-5 text-destructive" />
-            Eliminar Ausência
-          </DialogTitle>
-          <DialogDescription>
-            Tens a certeza que queres eliminar esta ausência? Esta ação é
-            definitiva e não pode ser desfeita.
-          </DialogDescription>
-          <DialogClose onClick={() => setAprEliminarAlvo(null)} />
-        </DialogHeader>
-        <DialogContent className="space-y-3">
-          {aprEliminarAlvo && (
-            <div className="rounded-lg border bg-muted/30 p-4 space-y-2 text-sm">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-muted-foreground">Equipa</span>
-                <span className="font-medium">
-                  {aprEliminarAlvo.utilizador?.nome ?? "—"}
-                </span>
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-muted-foreground">Tipo</span>
-                <span className="font-medium">
-                  {TIPO_LABEL[aprEliminarAlvo.tipo] ?? aprEliminarAlvo.tipo}
-                </span>
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-muted-foreground">Período</span>
-                <span className="font-medium tabular-nums">
-                  {formatarData(aprEliminarAlvo.data_inicio)}
-                  {aprEliminarAlvo.data_inicio !== aprEliminarAlvo.data_fim && (
-                    <> → {formatarData(aprEliminarAlvo.data_fim)}</>
-                  )}
-                </span>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setAprEliminarAlvo(null)}
-            disabled={aprProcessando !== null}
-          >
-            Cancelar
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            onClick={aprEliminar}
-            disabled={aprProcessando !== null}
-          >
-            {aprProcessando !== null ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                A eliminar…
-              </>
-            ) : (
-              <>
-                <Trash2 className="mr-2 h-4 w-4" />
-                Eliminar Definitivamente
-              </>
-            )}
-          </Button>
-        </DialogFooter>
-      </Dialog>
     </div>
   );
 }

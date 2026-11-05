@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { corEstadoTarefa, infoEstadoTarefa } from "@/lib/estados";
 import {
   BarChart3,
   Loader2,
@@ -41,6 +42,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { adminGet, adminPost } from "@/lib/api";
+import { escaparHtml } from "@/lib/utils";
 
 /* ------------------------------------------------------------------ */
 /* Tipos                                                               */
@@ -106,25 +108,24 @@ const CORES = {
   muted: "hsl(220, 14%, 55%)",
 };
 
-const ESTADO_LABEL: Record<string, string> = {
-  por_atribuir: "Por atribuir",
-  atribuida: "Atribuída",
-  em_curso: "Em curso",
-  concluida: "Concluída",
-  cancelada: "Cancelada",
-  // Prompt 138 (136 V2) — SLA excedido.
-  nao_atribuida: "Não atribuída (SLA)",
+// Cor do TEXTO (≥ 4,5:1 nos dois temas) para cada cor de série: as cores de série
+// servem só para ícones e gráficos (não chegam a 4,5:1 como texto).
+const TEXTO_POR_COR: Record<string, string> = {
+  [CORES.dourado]: "hsl(var(--gold-text))",
+  [CORES.verde]: "hsl(var(--status-conc))",
+  [CORES.vermelho]: "hsl(var(--status-naoat))",
+  [CORES.amber]: "hsl(var(--status-porat))",
+  [CORES.muted]: "hsl(var(--muted-foreground))",
 };
 
-const ESTADO_COR: Record<string, string> = {
-  concluida: CORES.verde,
-  atribuida: CORES.dourado,
-  em_curso: CORES.amber,
-  por_atribuir: CORES.muted,
-  cancelada: CORES.vermelho,
-  // Prompt 138 (136 V2) — vermelho (urgente).
-  nao_atribuida: CORES.vermelho,
-};
+// Eixos e legendas em cores do tema (o Recharts usa #666 e a cor da série por defeito).
+const TICK = { fontSize: 12, fill: "hsl(var(--muted-foreground))" };
+const legendaTexto = (value: string) => (
+  <span style={{ color: "hsl(var(--foreground))" }}>{value}</span>
+);
+
+// Rótulos e cores dos estados vêm de @/lib/estados (tokens --status-*).
+const ESTADO_LABEL = (estado: string): string => infoEstadoTarefa(estado).label;
 
 const PRESETS = [
   { id: "7", label: "7 dias", dias: 7 },
@@ -264,7 +265,7 @@ export default function RelatoriosPage() {
           data.porStaff.map(s => {
             const pct = Math.round(s.taxaConclusao * 100);
             const largura = Math.round((s.total / maxStaff) * 100);
-            return '<tr><td>' + s.nome + '</td><td>' + s.total + '</td><td>' + s.concluidas + '</td><td>' + pct + '%</td><td>' + s.carga_minutos + '</td><td><div class="barra-container"><div class="barra" style="width:' + largura + '%"></div></div></td></tr>';
+            return '<tr><td>' + escaparHtml(s.nome) + '</td><td>' + s.total + '</td><td>' + s.concluidas + '</td><td>' + pct + '%</td><td>' + s.carga_minutos + '</td><td><div class="barra-container"><div class="barra" style="width:' + largura + '%"></div></div></td></tr>';
           }).join('') + '</tbody></table>'
         : '';
 
@@ -273,7 +274,7 @@ export default function RelatoriosPage() {
         ? '<h2>Limpezas por Propriedade</h2><table><thead><tr><th>Propriedade</th><th>Total</th><th>Concluidas</th><th>Volume</th></tr></thead><tbody>' +
           data.porPropriedade.slice(0, 15).map(p => {
             const largura = Math.round((p.total / maxProp) * 100);
-            return '<tr><td>' + p.nome + '</td><td>' + p.total + '</td><td>—</td><td><div class="barra-container"><div class="barra" style="width:' + largura + '%"></div></div></td></tr>';
+            return '<tr><td>' + escaparHtml(p.nome) + '</td><td>' + p.total + '</td><td>—</td><td><div class="barra-container"><div class="barra" style="width:' + largura + '%"></div></div></td></tr>';
           }).join('') + '</tbody></table>'
         : '';
 
@@ -282,17 +283,17 @@ export default function RelatoriosPage() {
         ? '<h2>Distribuicao por Estado</h2><table><thead><tr><th>Estado</th><th>Total</th><th>%</th></tr></thead><tbody>' +
           data.porEstado.map(e => {
             const pct = Math.round((e.total / totalTarefas) * 100);
-            return '<tr><td>' + e.estado + '</td><td>' + e.total + '</td><td>' + pct + '%</td></tr>';
+            return '<tr><td>' + escaparHtml(e.estado) + '</td><td>' + e.total + '</td><td>' + pct + '%</td></tr>';
           }).join('') + '</tbody></table>'
         : '';
 
       const iaHtml = aiResumo
-        ? '<h2>Resumo Executivo IA</h2><div class="ia-box">' + aiResumo.replace(/</g, '&lt;') + '</div>'
+        ? '<h2>Resumo Executivo IA</h2><div class="ia-box">' + escaparHtml(aiResumo) + '</div>'
         : '';
 
       const html = [
         '<!DOCTYPE html><html lang="pt-PT"><head><meta charset="utf-8">',
-        '<title>Relatorio All2gether - ' + periodo + '</title>',
+        '<title>Relatorio All2gether - ' + escaparHtml(periodo) + '</title>',
         '<style>',
         '* { box-sizing: border-box; margin: 0; padding: 0; }',
         'body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color: #0f172a; font-size: 12px; line-height: 1.5; padding: 20px; }',
@@ -313,8 +314,8 @@ export default function RelatoriosPage() {
         '@media print { body { padding: 0; } }',
         '</style></head><body>',
         '<div class="header"><h1>Relatorio de Produtividade - All2gether</h1>',
-        '<div style="font-size:12px;color:#475569;margin-top:2px;">Periodo: ' + periodo + '</div>',
-        '<div style="font-size:11px;color:#64748b;margin-top:2px;">Gerado em ' + geradoEm + '</div></div>',
+        '<div style="font-size:12px;color:#475569;margin-top:2px;">Periodo: ' + escaparHtml(periodo) + '</div>',
+        '<div style="font-size:11px;color:#64748b;margin-top:2px;">Gerado em ' + escaparHtml(geradoEm) + '</div></div>',
         iaHtml,
         '<h2>KPIs</h2><div class="kpis">' + kpisHtml + '</div>',
         staffHtml,
@@ -558,7 +559,7 @@ export default function RelatoriosPage() {
                       <span className="text-2xl font-bold leading-none">{s.value}</span>
                       <span className="mt-1 text-sm text-muted-foreground">{s.label}</span>
                       {s.sub && (
-                        <span className="text-xs font-medium" style={{ color: s.cor }}>
+                        <span className="text-xs font-medium" style={{ color: TEXTO_POR_COR[s.cor] ?? "hsl(var(--foreground))" }}>
                           {s.sub}
                         </span>
                       )}
@@ -573,7 +574,7 @@ export default function RelatoriosPage() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <TrendingUp className="h-5 w-5 text-primary" />
+                <TrendingUp className="h-5 w-5 text-gold-text" />
                 Evolução diária
               </CardTitle>
               <CardDescription>
@@ -593,15 +594,15 @@ export default function RelatoriosPage() {
                       <XAxis
                         dataKey="data"
                         tickFormatter={formatarDataCurta}
-                        tick={{ fontSize: 12 }}
+                        tick={TICK}
                         className="fill-muted-foreground"
                       />
-                      <YAxis allowDecimals={false} tick={{ fontSize: 12 }} className="fill-muted-foreground" />
+                      <YAxis allowDecimals={false} tick={TICK} className="fill-muted-foreground" />
                       <Tooltip
                         labelFormatter={(l) => formatarDataCurta(String(l))}
                         contentStyle={{ borderRadius: 8, fontSize: 12 }}
                       />
-                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      <Legend wrapperStyle={{ fontSize: 12 }} formatter={legendaTexto} />
                       <Line
                         type="monotone"
                         dataKey="total"
@@ -630,7 +631,7 @@ export default function RelatoriosPage() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <BarChart3 className="h-5 w-5 text-primary" />
+                  <BarChart3 className="h-5 w-5 text-gold-text" />
                   Produtividade por funcionário
                 </CardTitle>
                 <CardDescription>Concluídas vs. total de tarefas atribuídas.</CardDescription>
@@ -649,16 +650,16 @@ export default function RelatoriosPage() {
                         margin={{ top: 5, right: 10, left: 10, bottom: 0 }}
                       >
                         <CartesianGrid strokeDasharray="3 3" className="stroke-muted/40" horizontal={false} />
-                        <XAxis type="number" allowDecimals={false} tick={{ fontSize: 12 }} className="fill-muted-foreground" />
+                        <XAxis type="number" allowDecimals={false} tick={TICK} className="fill-muted-foreground" />
                         <YAxis
                           type="category"
                           dataKey="nome"
                           width={90}
-                          tick={{ fontSize: 12 }}
+                          tick={TICK}
                           className="fill-muted-foreground"
                         />
                         <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12 }} />
-                        <Legend wrapperStyle={{ fontSize: 12 }} />
+                        <Legend wrapperStyle={{ fontSize: 12 }} formatter={legendaTexto} />
                         <Bar dataKey="concluidas" name="Concluídas" stackId="a" fill={CORES.verde} radius={[0, 0, 0, 0]} />
                         <Bar dataKey="total" name="Total" stackId="a" fill={CORES.dourado} radius={[0, 4, 4, 0]} />
                       </BarChart>
@@ -672,7 +673,7 @@ export default function RelatoriosPage() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <BarChart3 className="h-5 w-5 text-primary" />
+                  <BarChart3 className="h-5 w-5 text-gold-text" />
                   Distribuição por estado
                 </CardTitle>
                 <CardDescription>Repartição das tarefas no período.</CardDescription>
@@ -695,18 +696,20 @@ export default function RelatoriosPage() {
                           outerRadius={90}
                           innerRadius={45}
                           paddingAngle={2}
-                          label={({ payload }: { payload?: PorEstado }) =>
-                            `${ESTADO_LABEL[payload?.estado ?? ""] ?? payload?.estado}: ${payload?.total ?? 0}`
-                          }
+                          label={({ x, y, textAnchor, payload }: { x: number; y: number; textAnchor?: "inherit" | "start" | "middle" | "end"; payload?: PorEstado }) => (
+                            <text x={x} y={y} textAnchor={textAnchor} fontSize={11} className="fill-foreground">
+                              {`${ESTADO_LABEL(payload?.estado ?? "")}: ${payload?.total ?? 0}`}
+                            </text>
+                          )}
                           labelLine={false}
                           style={{ fontSize: 11 }}
                         >
                           {data.porEstado.map((e) => (
-                            <Cell key={e.estado} fill={ESTADO_COR[e.estado] ?? CORES.muted} />
+                            <Cell key={e.estado} fill={corEstadoTarefa(e.estado)} />
                           ))}
                         </Pie>
                         <Tooltip
-                          formatter={(v, n) => [v, ESTADO_LABEL[String(n)] ?? n]}
+                          formatter={(v, n) => [v, ESTADO_LABEL(String(n))]}
                           contentStyle={{ borderRadius: 8, fontSize: 12 }}
                         />
                       </PieChart>
@@ -780,7 +783,7 @@ export default function RelatoriosPage() {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="space-y-1">
                   <CardTitle className="flex items-center gap-2">
-                    <Sparkles className="h-5 w-5 text-primary" />
+                    <Sparkles className="h-5 w-5 text-gold-text" />
                     Resumo Executivo IA
                   </CardTitle>
                   <CardDescription>
@@ -875,7 +878,7 @@ function ResumoIATexto({ texto }: { texto: string }) {
       blocos.push(
         <h3
           key={`h-${idx}`}
-          className="mt-4 mb-1 text-sm font-semibold text-primary first:mt-0"
+          className="mt-4 mb-1 text-sm font-semibold text-gold-text first:mt-0"
         >
           {t.slice(3).trim()}
         </h3>

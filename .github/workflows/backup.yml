@@ -1,0 +1,87 @@
+# Backup diário do MongoDB Atlas (grátis): mongodump -> cifra AES-256 -> artifact (14 dias).
+#
+# Secrets necessários (Settings > Secrets and variables > Actions):
+#   MONGODB_URI        URI de ligação com utilizador só de leitura (ideal) à base de dados
+#   BACKUP_PASSPHRASE  palavra-passe longa para cifrar o backup (guardá-la fora do GitHub!)
+# Nunca são impressos: passam por variáveis de ambiente e ficheiros temporários (modo 600).
+# O agendamento só corre depois deste ficheiro chegar à branch principal (main).
+# Ver docs/OPERACOES.md (como restaurar).
+
+name: Backup MongoDB
+
+on:
+  schedule:
+    - cron: '17 3 * * *' # 03:17 UTC, todos os dias
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: backup-mongodb
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    name: mongodump + cifra
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    env:
+      MONGODB_URI: ${{ secrets.MONGODB_URI }}
+      BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+      TOOLS_VERSION: '100.10.0'
+    steps:
+      - name: Verificar secrets
+        run: |
+          set -euo pipefail
+          if [ -z "${MONGODB_URI}" ] || [ -z "${BACKUP_PASSPHRASE}" ]; then
+            echo "::error::Faltam os secrets MONGODB_URI e/ou BACKUP_PASSPHRASE."
+            exit 1
+          fi
+
+      - name: Instalar MongoDB Database Tools
+        run: |
+          set -euo pipefail
+          curl -fsSL -o tools.tgz "https://fastdl.mongodb.org/tools/db/mongodb-database-tools-ubuntu2204-x86_64-${TOOLS_VERSION}.tgz"
+          tar -xzf tools.tgz
+          echo "$PWD/mongodb-database-tools-ubuntu2204-x86_64-${TOOLS_VERSION}/bin" >> "$GITHUB_PATH"
+
+      - name: Dump, cifra e valida
+        run: |
+          set -euo pipefail
+          umask 077
+          STAMP="$(date -u +%Y-%m-%dT%H%M%SZ)"
+          # URI e passphrase em ficheiros (nunca na linha de comandos nem no output).
+          printf 'uri: %s\n' "${MONGODB_URI}" > "${RUNNER_TEMP}/mongo.yml"
+          printf '%s' "${BACKUP_PASSPHRASE}" > "${RUNNER_TEMP}/pass.txt"
+
+          mongodump --config="${RUNNER_TEMP}/mongo.yml" --archive="dump.archive.gz" --gzip --quiet
+
+          # Falha visível se o dump vier vazio/minúsculo.
+          SIZE="$(stat -c %s dump.archive.gz)"
+          if [ "${SIZE}" -lt 2048 ]; then
+            echo "::error::O dump está vazio ou suspeitamente pequeno (${SIZE} bytes). Backup falhado."
+            exit 1
+          fi
+
+          gpg --batch --yes --pinentry-mode loopback \
+            --passphrase-file "${RUNNER_TEMP}/pass.txt" \
+            --symmetric --cipher-algo AES256 \
+            --output "all2gether-${STAMP}.archive.gz.gpg" dump.archive.gz
+
+          # Valida que o ficheiro cifrado existe e que decifra (sem escrever o conteúdo).
+          test -s "all2gether-${STAMP}.archive.gz.gpg"
+          gpg --batch --pinentry-mode loopback --passphrase-file "${RUNNER_TEMP}/pass.txt" \
+            --output /dev/null --decrypt "all2gether-${STAMP}.archive.gz.gpg"
+
+          # Apaga tudo o que está em claro antes de sair (o artifact leva só o .gpg).
+          shred -u dump.archive.gz "${RUNNER_TEMP}/mongo.yml" "${RUNNER_TEMP}/pass.txt" || rm -f dump.archive.gz
+          echo "BACKUP_FILE=all2gether-${STAMP}.archive.gz.gpg" >> "$GITHUB_ENV"
+          echo "Backup cifrado criado (${SIZE} bytes antes de cifrar)."
+
+      - name: Publicar artifact (14 dias)
+        uses: actions/upload-artifact@v4
+        with:
+          name: mongodb-backup
+          path: ${{ env.BACKUP_FILE }}
+          retention-days: 14
+          if-no-files-found: error

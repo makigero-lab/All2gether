@@ -315,7 +315,7 @@ export default function ParceirosPage() {
       <Dialog open={criarOpen} onOpenChange={setCriarOpen}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Handshake className="h-5 w-5 text-primary" />
+            <Handshake className="h-5 w-5 text-gold-text" />
             Novo Parceiro
           </DialogTitle>
           <DialogDescription>
@@ -432,7 +432,7 @@ export default function ParceirosPage() {
       <Dialog open={editando !== null} onOpenChange={(o) => !o && setEditando(null)}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Pencil className="h-5 w-5 text-primary" />
+            <Pencil className="h-5 w-5 text-gold-text" />
             Editar Parceiro
           </DialogTitle>
           <DialogDescription>{editando?.email}</DialogDescription>

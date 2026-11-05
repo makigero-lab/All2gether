@@ -44,7 +44,8 @@ import {
   type AusenciaDTO,
   type UtilizadorDTO,
 } from "@/lib/api";
-import { parsearDataSegura } from "@/lib/utils";
+import { parsearDataSegura, textoRedistribuicao, type RedistribuicaoDTO } from "@/lib/utils";
+import { mensagemErro } from "@/lib/rascunho-staff";
 
 /**
  * /gestor/ausencias — Ecrã de Férias/Ausências (Prompt 95 / Fase 1.5).
@@ -155,6 +156,8 @@ export default function AusenciasPage() {
   const [ausencias, setAusencias] = useState<AusenciaAmp[]>([]);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
+  // Resultado de aprovar/rejeitar (texto da redistribuição + aviso de limpezas em curso).
+  const [resultado, setResultado] = useState<{ texto: string; aviso: string | null } | null>(null);
 
   // FIX (filtros) — Filtros de Estado e Mês (aplicados client-side).
   const [filtroEstado, setFiltroEstado] = useState<string>("todos");
@@ -295,18 +298,39 @@ export default function AusenciasPage() {
     }
   }
 
+  // O resultado fica visível 20 s (30 s se houver aviso de limpeza em curso) ou até ser fechado.
+  useEffect(() => {
+    if (!resultado) return;
+    const t = setTimeout(() => setResultado(null), resultado.aviso ? 30000 : 20000);
+    return () => clearTimeout(t);
+  }, [resultado]);
+
   /** Aprovar / Rejeitar ausência pendente (PATCH .../estado). */
   async function handleMudarEstado(a: AusenciaAmp, novoEstado: "aprovada" | "rejeitada") {
     // Otimismo: atualiza a UI imediatamente.
     setAusencias((prev) =>
       prev.map((x) => (x._id === a._id ? { ...x, estado: novoEstado } : x))
     );
+    setErro(null);
+    setResultado(null);
     try {
-      await adminPatch(`/api/gestor/ausencias/${a._id}/estado`, { estado: novoEstado });
+      const res = await adminPatch<{ redistribuicao?: RedistribuicaoDTO | null }>(
+        `/api/gestor/ausencias/${a._id}/estado`,
+        { estado: novoEstado }
+      );
+      if (novoEstado === "aprovada") {
+        const rd = res?.redistribuicao ?? null;
+        setResultado({
+          texto: textoRedistribuicao("Ausência aprovada.", rd, "Sem tarefas para desatribuir no período."),
+          aviso: rd?.aviso ?? null,
+        });
+      } else {
+        setResultado({ texto: "Pedido rejeitado.", aviso: null });
+      }
     } catch (e) {
       // Reverte em caso de erro.
       await carregar();
-      setErro(e instanceof Error ? e.message : `Erro ao ${novoEstado === "aprovada" ? "aprovar" : "rejeitar"} ausência.`);
+      setErro(mensagemErro(e, `Erro ao ${novoEstado === "aprovada" ? "aprovar" : "rejeitar"} ausência.`));
     }
   }
 
@@ -400,7 +424,7 @@ export default function AusenciasPage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-col gap-1">
           <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-            <CalendarOff className="h-6 w-6 text-primary" />
+            <CalendarOff className="h-6 w-6 text-gold-text" />
             Ausências / Férias
           </h1>
           <p className="text-sm text-muted-foreground">
@@ -423,6 +447,30 @@ export default function AusenciasPage() {
           </Button>
         </div>
       </div>
+
+      {resultado && (
+        <div className="flex flex-col gap-2" role="status">
+          <div className="flex items-start gap-2 rounded-md border border-emerald-600/40 bg-emerald-50 p-3 text-sm font-medium text-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-100">
+            <span className="flex-1">{resultado.texto}</span>
+            <button
+              type="button"
+              onClick={() => setResultado(null)}
+              className="shrink-0 underline underline-offset-2"
+            >
+              Fechar
+            </button>
+          </div>
+          {resultado.aviso && (
+            <div
+              role="alert"
+              className="flex items-start gap-2 rounded-md border border-amber-500/60 bg-amber-50 p-3 text-sm font-medium text-amber-900 dark:bg-amber-950/30 dark:text-amber-100"
+            >
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{resultado.aviso}</span>
+            </div>
+          )}
+        </div>
+      )}
 
       {erro && (
         <Card className="border-destructive/50">
@@ -482,7 +530,7 @@ export default function AusenciasPage() {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base flex items-center gap-2">
-            <CalendarOff className="h-4 w-4 text-primary" />
+            <CalendarOff className="h-4 w-4 text-gold-text" />
             Ausências Registadas ({ausenciasFiltradas.length})
           </CardTitle>
         </CardHeader>
@@ -559,7 +607,7 @@ export default function AusenciasPage() {
                               {a.notas}
                             </span>
                           ) : (
-                            <span className="text-muted-foreground/50">—</span>
+                            <span className="text-muted-foreground">—</span>
                           )}
                         </td>
                         <td className="px-4 py-3">
@@ -631,7 +679,7 @@ export default function AusenciasPage() {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base">
-            <CalendarX className="h-5 w-5 text-primary" />
+            <CalendarX className="h-5 w-5 text-gold-text" />
             Folgas Fixas da Equipa
           </CardTitle>
         </CardHeader>
@@ -639,7 +687,7 @@ export default function AusenciasPage() {
           <p className="text-sm text-muted-foreground mb-4">
             Funcionários ativos (staff) e os respetivos dias de folga fixos
             semanais. Para editar, vai à página{" "}
-            <a href="/gestor/equipa" className="text-primary underline">
+            <a href="/gestor/equipa" className="text-gold-text underline">
               Equipa
             </a>
             .
@@ -676,7 +724,7 @@ export default function AusenciasPage() {
                         <td className="px-4 py-3 font-medium">
                           <Link
                             href={`/gestor/equipa?editar=${staff._id}`}
-                            className="text-primary underline-offset-2 hover:underline"
+                            className="text-gold-text underline-offset-2 hover:underline"
                             title={`Editar ${staff.nome}`}
                           >
                             {staff.nome}
@@ -866,7 +914,7 @@ export default function AusenciasPage() {
         <DialogHeader>
           <div>
             <DialogTitle className="flex items-center gap-2">
-              <Plus className="h-5 w-5 text-primary" />
+              <Plus className="h-5 w-5 text-gold-text" />
               Nova Ausência
             </DialogTitle>
             <DialogDescription>

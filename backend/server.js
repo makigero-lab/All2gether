@@ -22,6 +22,7 @@
 require('dotenv').config();
 
 const express = require('express');
+const { criarLimiteGlobal } = require('./utils/limiteGlobal');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
@@ -74,22 +75,15 @@ app.use(
 // de ficheiros Excel (.xlsx) na rota /api/gestor/reservas/importar-excel.
 app.use(express.json({ limit: '10mb' }));
 
-// Rate limiting global: 100 pedidos por IP a cada 15 minutos.
-// Em ambiente de teste (Jest) o limite é desativado para não bloquear
-// os testes de integração que fazem centenas de pedidos seguidos.
-// EXCEÇÃO: /api/smoobu — webhooks M2M do Smoobu chegam de um IP único e
-// podem burstar (várias reservas em poucos minutos). A autenticação via
-// SMOOBU_API_KEY substitui a proteção anti-abuso do rate limiter nessa rota.
-const globalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: process.env.NODE_ENV === 'test' ? Infinity : 100,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { erro: 'Muitos pedidos. Tente novamente mais tarde.' },
-  // req.originalUrl (e não req.path): dentro de app.use('/api/', ...) o req.path é
-  // relativo ao ponto de montagem ('/smoobu/webhook') e nunca coincidia.
-  skip: (req) => req.originalUrl.startsWith('/api/smoobu'),
-});
+// Rate limiting global de /api/ (ver utils/limiteGlobal.js):
+//   - pedidos com JWT VÁLIDO contam por utilizador (1000 / 15 min);
+//   - pedidos sem JWT válido contam por IP (100 / 15 min).
+// Os proxies Next da Vercel não reencaminham o IP do cliente, por isso o IP
+// sozinho seria partilhado por todos os utilizadores.
+// Em ambiente de teste (Jest) o limite é desativado (salvo `forcar` nos testes).
+// EXCEÇÕES: /api/smoobu (webhooks M2M, com limitador e autenticação próprios)
+// e POST /api/auth/login (tem loginLimiter e loginAccountLimiter próprios).
+const globalLimiter = criarLimiteGlobal();
 app.use('/api/', globalLimiter);
 
 // Rate-limit generoso só para o webhook Smoobu (anti-flood/DoS de armazenamento
@@ -260,14 +254,12 @@ if (require.main === module) {
       // move tarefas concluídas/canceladas com mais de 3 meses para o arquivo.
       iniciarArquivista();
 
-      // HF8 — Cron job "Sincronização Smoobu" DESATIVADO.
-      // O sistema é 100% reativo a webhooks (o Smoobu envia eventos que são
-      // processados automaticamente). A sincronização ativa (pull da REST API
-      // do Smoobu) foi removida do fluxo de produção porque causava 502s e não
-      // faz parte do fluxo original. A função `iniciarSincronizacaoSmoobu`
-      // mantém-se exportada para uso manual via API direta se necessário no
-      // futuro, mas NÃO é agendada.
-      // iniciarSincronizacaoSmoobu();
+      // Reconciliação Smoobu (rede de segurança dos webhooks) + retoma de webhooks presos.
+      // HF8 tinha desligado a sincronização por causar 502 (pedidos em massa a pedido do
+      // utilizador). Agora é opt-in por empresa (`rotinas.sincronizacao_automatica`, desligado
+      // por defeito), com intervalo mínimo de 1 hora, sem sobreposição, só reservas futuras e
+      // pedidos espaçados; nunca reativa tarefas canceladas. Ver docs/BACKEND.md.
+      iniciarSincronizacaoSmoobu();
 
       // HF19 — Cron job "Limpeza de Fotos": todos os dias às 03:00,
       // esvazia fotos_conclusao e avarias[*].fotos de tarefas concluídas

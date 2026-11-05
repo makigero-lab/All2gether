@@ -223,3 +223,83 @@ export function googleMapsUrl(
   if (!morada) return null;
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(morada)}`;
 }
+
+/**
+ * Escapa um valor para o inserir de forma segura em HTML construído por
+ * concatenação (ex.: janela de impressão com document.write).
+ * Aceita qualquer valor; null/undefined viram texto vazio.
+ */
+export function escaparHtml(valor: unknown): string {
+  return String(valor ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/** Resposta de redistribuição devolvida ao aprovar/confirmar uma ausência. */
+export type RedistribuicaoDTO = {
+  total: number;
+  desatribuidas: number;
+  reatribuicao?: { total?: number; reatribuidas?: number; orfas?: number; erro?: string } | null;
+  aviso?: string;
+};
+
+/** Resultado da reatribuição só é fiável se não houve erro e os números existem. */
+function reatribuicaoFiavel(
+  r: RedistribuicaoDTO | null | undefined
+): { reatribuidas: number; orfas: number } | null {
+  const re = r?.reatribuicao;
+  if (re && !re.erro && typeof re.reatribuidas === "number" && typeof re.orfas === "number") {
+    return { reatribuidas: re.reatribuidas, orfas: re.orfas };
+  }
+  return null;
+}
+
+/**
+ * Quantas tarefas ficaram por atribuir depois da ausência. Com reatribuição
+ * fiável são as órfãs reais (podem incluir tarefas que já estavam por atribuir
+ * no período); se a reatribuição falhou, são as que acabaram de ser desatribuídas.
+ */
+export function tarefasPorAtribuir(r: RedistribuicaoDTO | null | undefined): number {
+  const re = reatribuicaoFiavel(r);
+  if (re) return re.orfas;
+  return Math.max(0, r?.desatribuidas ?? 0);
+}
+
+/**
+ * Texto verdadeiro sobre o que aconteceu às tarefas depois de uma ausência:
+ * reatribuídas automaticamente vs. por atribuir.
+ *
+ * A reatribuição processa TODAS as tarefas por atribuir da empresa no período,
+ * não só as da pessoa ausente: por isso usa os números reais (`reatribuidas` e
+ * `orfas`) e avisa quando excedem as desatribuídas. Se a reatribuição falhou
+ * (`erro`) ou não veio na resposta, diz que ficaram por atribuir.
+ */
+export function textoRedistribuicao(
+  prefixo: string,
+  r: RedistribuicaoDTO | null | undefined,
+  semTarefas: string
+): string {
+  const desatribuidas = r?.desatribuidas ?? 0;
+  const re = reatribuicaoFiavel(r);
+  if (re) {
+    const partes: string[] = [];
+    if (re.reatribuidas > 0) partes.push(`${re.reatribuidas} tarefa(s) reatribuída(s) automaticamente`);
+    if (re.orfas > 0) partes.push(`${re.orfas} por atribuir (ninguém disponível)`);
+    if (partes.length === 0) return `${prefixo} ${semTarefas}`;
+    const extra =
+      re.reatribuidas + re.orfas > desatribuidas
+        ? " Inclui outras tarefas do período que já estavam por atribuir."
+        : "";
+    return `${prefixo} ${partes.join("; ")}.${extra}`;
+  }
+  if (r?.reatribuicao?.erro) {
+    return desatribuidas > 0
+      ? `${prefixo} Não foi possível reatribuir automaticamente: ${desatribuidas} tarefa(s) por atribuir.`
+      : `${prefixo} Não foi possível reatribuir automaticamente.`;
+  }
+  if (!(desatribuidas > 0)) return `${prefixo} ${semTarefas}`;
+  return `${prefixo} ${desatribuidas} tarefa(s) por atribuir.`;
+}

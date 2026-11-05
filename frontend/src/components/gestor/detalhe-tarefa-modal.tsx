@@ -31,6 +31,7 @@ import {
   DialogContent,
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import { EstadoTarefaBadge } from "@/components/ui/estado-tarefa-badge";
 import {
   Card,
   CardContent,
@@ -117,29 +118,6 @@ const tipoLabel: Record<string, string> = {
   outro: "Outro",
 };
 
-const ESTADO_LABEL: Record<string, string> = {
-  por_atribuir: "Por atribuir",
-  atribuida: "Atribuída",
-  em_curso: "Em curso",
-  concluida: "Concluída",
-  cancelada: "Cancelada",
-  // Prompt 138 (136 V2) — SLA excedido.
-  nao_atribuida: "Não atribuída (SLA)",
-};
-
-const ESTADO_VARIANT: Record<
-  string,
-  "default" | "secondary" | "success" | "warning" | "outline" | "destructive"
-> = {
-  por_atribuir: "warning",
-  atribuida: "default",
-  em_curso: "secondary",
-  concluida: "success",
-  cancelada: "outline",
-  // Prompt 138 (136 V2) — vermelho para destacar que requer intervenção.
-  nao_atribuida: "destructive",
-};
-
 function formatarDataHora(iso: string): string {
   // Prompt Extra — parsearDataSegura para compatibilidade Safari/iOS.
   const d = parsearDataSegura(iso);
@@ -215,7 +193,7 @@ export function DetalheTarefaModal({
       <DialogHeader>
         <div>
           <DialogTitle className="flex items-center gap-2">
-            {tarefa && <Icon className="h-5 w-5 text-primary" />}
+            {tarefa && <Icon className="h-5 w-5 text-gold-text" />}
             Detalhe da Limpeza
           </DialogTitle>
           <DialogDescription>
@@ -233,9 +211,7 @@ export function DetalheTarefaModal({
                 {tarefa.propriedade_id?.nome ?? "Propriedade"}
               </h3>
               <Badge variant="outline">{tipoLabel[tarefa.tipo] ?? tarefa.tipo}</Badge>
-              <Badge variant={ESTADO_VARIANT[tarefa.estado] ?? "secondary"}>
-                {ESTADO_LABEL[tarefa.estado] ?? tarefa.estado}
-              </Badge>
+              <EstadoTarefaBadge estado={tarefa.estado} />
             </div>
 
             {/* Metadados rápidos */}
@@ -296,7 +272,7 @@ export function DetalheTarefaModal({
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="flex items-center gap-2 text-sm">
-                    <StickyNote className="h-4 w-4 text-primary" />
+                    <StickyNote className="h-4 w-4 text-gold-text" />
                     Observações
                   </CardTitle>
                 </CardHeader>

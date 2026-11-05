@@ -15,10 +15,17 @@ const badgeVariants = cva(
         destructive:
           "border-transparent bg-destructive text-destructive-foreground shadow hover:bg-destructive/80",
         outline: "text-foreground",
-        success:
-          "border-transparent bg-emerald-100 text-emerald-800 hover:bg-emerald-100/80",
-        warning:
-          "border-transparent bg-amber-100 text-amber-800 hover:bg-amber-100/80",
+        // Estados (cor forte + fundo suave, tokens --status-* em globals.css).
+        // Usar sempre com ícone + texto (ver <EstadoTarefaBadge/>): a cor nunca é o único sinal.
+        porAtribuir: "border-current bg-status-porat-bg text-status-porat",
+        naoAtribuida: "border-current bg-status-naoat-bg text-status-naoat",
+        atribuida: "border-current bg-status-atrib-bg text-status-atrib",
+        emCurso: "border-current bg-status-curso-bg text-status-curso",
+        concluida: "border-current bg-status-conc-bg text-status-conc",
+        cancelada: "border-current border-dashed bg-status-canc-bg text-status-canc",
+        // Aliases genéricos (mesmas cores): sucesso = concluída, aviso = por atribuir.
+        success: "border-current bg-status-conc-bg text-status-conc",
+        warning: "border-current bg-status-porat-bg text-status-porat",
       },
     },
     defaultVariants: {

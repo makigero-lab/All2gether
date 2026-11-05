@@ -158,45 +158,10 @@ async function limpouPropriedadeOntem(utilizadorId, propriedadeId, dataReferenci
 }
 
 /**
- * Determina o utilizador (Staff) a quem atribuir a tarefa.
- *
- * HF16 — Score com 4 fatores (ordem de prioridade):
- *   1. Agrupamento Diário (bónus de 120 min se já está na propriedade)
- *   2. Início Mais Cedo (minutos de atraso vs. mais cedo possível)
- *   3. Rotatividade/Equidade (penaliza quem tem + horas semanais / limpou ontem)
- *   4. Distância/Tempo de Viagem (Google Maps ou Haversine)
- *
- * FIX (folgas/férias) — Filtros de indisponibilidade reforçados:
- *   a) Folgas fixas semanais (Utilizador.dias_folga): compara o dia da
- *      semana da tarefa contra o array [0=Dom ... 6=Sáb] de cada staff.
- *      O dia da semana é calculado a partir de range.start (meia-noite UTC
- *      do dia da tarefa, devolvido por obterRangeDia).
- *   b) Ausências (coleção Ausencia): query por interseção de intervalos
- *      (data_inicio < range.end AND data_fim >= range.start) que englobe
- *      qualquer parte do dia da tarefa. Inclui estado 'aprovada' (férias/
- *      doença confirmadas) E 'pendente_emergencia' (falta súbita do próprio
- *      funcionário para o dia atual — ausência ativa mesmo sem aprovação).
- *      Exclui 'pendente' (pedido normal não confirmado), 'rejeitada' e
- *      'cancelada'.
- *   c) Exclusão explícita via excluirStaffIds (Set) — usado pela versão de
- *      equipas (determinarEquipaAtribuida) para não repetir o mesmo staff.
- *
- * @param {import('mongoose').Types.ObjectId} empresaId
- * @param {{start: Date, end: Date}} range - intervalo do dia (start=meia-noite UTC, end=meia-noite do dia seguinte)
- * @param {{ lat: number, lng: number } | null} coordenadasNovaPropriedade
- * @param {number} tempoNovaTarefa - tempo_limpeza_minutos da nova tarefa
- * @param {import('mongoose').Types.ObjectId|null} [propriedadeId=null]
- * @param {Set<string>|null} [excluirStaffIds=null] - IDs (string) a excluir do pool (usado pela versão de equipas)
- * @returns {Promise<{ utilizadorId, tempoViagem } | null>}
+ * Staff elegível (ativo, sem ausência/folga, equipa exclusiva) para o dia.
+ * Partilhado pelo load balancer e pelo diagnóstico do motivo de falha.
  */
-async function determinarUtilizadorAtribuido(
-  empresaId,
-  range,
-  coordenadasNovaPropriedade,
-  tempoNovaTarefa,
-  propriedadeId = null,
-  excluirStaffIds = null
-) {
+async function obterStaffDisponivel(empresaId, range, propriedadeId = null, excluirStaffIds = null) {
   // Procurar todos os Staff ativos da empresa.
   const staff = await Utilizador.find({
     empresa_id: empresaId,
@@ -205,7 +170,7 @@ async function determinarUtilizadorAtribuido(
     eliminado_em: null,
   }).lean();
 
-  if (staff.length === 0) return null;
+  if (staff.length === 0) return { staff, disponiveis: [], setAusentes: new Set(), setExcluidos: null, diaSemana: range.start.getDay() };
 
   // ------------------------------------------------------------------
   // FIX (folgas/férias) — Filtro de Ausências (interseção de intervalos).
@@ -272,6 +237,15 @@ async function determinarUtilizadorAtribuido(
     ) {
       return false;
     }
+    // Folgas rotativas (datas avulsas): antes só o ramo VIP do Smoobu as respeitava.
+    if (
+      Array.isArray(s.folgas_rotativas) &&
+      s.folgas_rotativas.some(
+        (fr) => fr && fr.data && new Date(fr.data) >= range.start && new Date(fr.data) < range.end
+      )
+    ) {
+      return false;
+    }
     // FIX (equipas preferenciais) — Se o staff tem exclusivo_preferenciais: true,
     // só é elegível se a propriedade estiver nas suas propriedades_alocadas OU
     // se o seu ID constar na equipa_preferencial da propriedade.
@@ -289,6 +263,57 @@ async function determinarUtilizadorAtribuido(
     }
     return true;
   });
+
+  return { staff, disponiveis, setAusentes, setExcluidos, diaSemana };
+}
+
+/**
+ * Determina o utilizador (Staff) a quem atribuir a tarefa.
+ *
+ * HF16 — Score com 4 fatores (ordem de prioridade):
+ *   1. Agrupamento Diário (bónus de 120 min se já está na propriedade)
+ *   2. Início Mais Cedo (minutos de atraso vs. mais cedo possível)
+ *   3. Rotatividade/Equidade (penaliza quem tem + horas semanais / limpou ontem)
+ *   4. Distância/Tempo de Viagem (Google Maps ou Haversine)
+ *
+ * FIX (folgas/férias) — Filtros de indisponibilidade reforçados:
+ *   a) Folgas fixas semanais (Utilizador.dias_folga): compara o dia da
+ *      semana da tarefa contra o array [0=Dom ... 6=Sáb] de cada staff.
+ *      O dia da semana é calculado a partir de range.start (meia-noite UTC
+ *      do dia da tarefa, devolvido por obterRangeDia).
+ *   b) Ausências (coleção Ausencia): query por interseção de intervalos
+ *      (data_inicio < range.end AND data_fim >= range.start) que englobe
+ *      qualquer parte do dia da tarefa. Inclui estado 'aprovada' (férias/
+ *      doença confirmadas) E 'pendente_emergencia' (falta súbita do próprio
+ *      funcionário para o dia atual — ausência ativa mesmo sem aprovação).
+ *      Exclui 'pendente' (pedido normal não confirmado), 'rejeitada' e
+ *      'cancelada'.
+ *   c) Exclusão explícita via excluirStaffIds (Set) — usado pela versão de
+ *      equipas (determinarEquipaAtribuida) para não repetir o mesmo staff.
+ *
+ * @param {import('mongoose').Types.ObjectId} empresaId
+ * @param {{start: Date, end: Date}} range - intervalo do dia (start=meia-noite UTC, end=meia-noite do dia seguinte)
+ * @param {{ lat: number, lng: number } | null} coordenadasNovaPropriedade
+ * @param {number} tempoNovaTarefa - tempo_limpeza_minutos da nova tarefa
+ * @param {import('mongoose').Types.ObjectId|null} [propriedadeId=null]
+ * @param {Set<string>|null} [excluirStaffIds=null] - IDs (string) a excluir do pool (usado pela versão de equipas)
+ * @returns {Promise<{ utilizadorId, tempoViagem } | null>}
+ */
+async function determinarUtilizadorAtribuido(
+  empresaId,
+  range,
+  coordenadasNovaPropriedade,
+  tempoNovaTarefa,
+  propriedadeId = null,
+  excluirStaffIds = null
+) {
+  const { staff, disponiveis, setAusentes, setExcluidos, diaSemana } = await obterStaffDisponivel(
+    empresaId,
+    range,
+    propriedadeId,
+    excluirStaffIds
+  );
+  if (staff.length === 0) return null;
 
   if (disponiveis.length === 0) {
     console.log(
@@ -339,8 +364,10 @@ async function determinarUtilizadorAtribuido(
             const tarefaParaLibertar = await Tarefa.findOne({
               utilizador_id: vip._id,
               empresa_id: empresaId,
-              data: { $gte: range.start },
-              estado: { $in: ['atribuida', 'em_curso'] },
+              // Só liberta uma tarefa do MESMO dia e ainda não iniciada: libertar outro
+              // dia não reduz a carga deste e libertar 'em_curso' tira trabalho a quem já está a fazê-lo.
+              data: { $gte: range.start, $lt: range.end },
+              estado: 'atribuida',
             }).sort({ data: -1 }).lean();
 
             if (tarefaParaLibertar) {
@@ -659,6 +686,7 @@ module.exports = {
   calcularCargaLimpezaDia,
   determinarUtilizadorAtribuido,
   determinarEquipaAtribuida,
+  obterStaffDisponivel,
   // Exportados para testes:
   temTarefaNaMesmaPropriedade,
   calcularCargaSemanal,
