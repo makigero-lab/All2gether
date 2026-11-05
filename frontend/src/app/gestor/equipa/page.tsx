@@ -300,14 +300,20 @@ function EquipaPage() {
   const [baixaAviso, setBaixaAviso] = useState<string | null>(null);
   // Nova tentativa de reatribuição (com clique), para as tarefas que sobraram por atribuir.
   const [autoAtribuindo, setAutoAtribuindo] = useState(false);
-  const [autoResultado, setAutoResultado] = useState<string | null>(null);
+  const [autoTentou, setAutoTentou] = useState(false);
   const [autoErro, setAutoErro] = useState<string | null>(null);
 
-  /** Nova tentativa: reatribui automaticamente TODAS as tarefas por atribuir a partir de hoje. */
-  async function handleReatribuirAuto() {
+  /**
+   * Nova tentativa: reatribui automaticamente TODAS as tarefas por atribuir a partir de hoje.
+   * O resultado inicial do diálogo é SUBSTITUÍDO pelo novo (sem mensagens contraditórias) e,
+   * se ainda sobrarem tarefas, o botão mantém-se como "Tentar de novo".
+   */
+  async function handleReatribuirAuto(fluxo: "falta" | "baixa") {
+    const prefixo = fluxo === "falta" ? "Falta registada." : "Baixa registada.";
+    const setResultado = fluxo === "falta" ? setFaltaResultado : setBaixaResultado;
+    const setPorAtribuir = fluxo === "falta" ? setFaltaPorAtribuir : setBaixaPorAtribuir;
     setAutoAtribuindo(true);
     setAutoErro(null);
-    setAutoResultado(null);
     try {
       const res = await adminPost<{
         sucesso: boolean;
@@ -316,16 +322,20 @@ function EquipaPage() {
         orfas: number;
         mensagem?: string;
       }>("/api/gestor/tarefas/auto-atribuir", {});
-      setAutoResultado(
-        res.processadas === 0
-          ? res.mensagem ?? "Não há tarefas por atribuir a partir de hoje."
-          : `Foram reatribuídas ${res.reatribuidas} tarefa(s). ` +
+      setAutoTentou(true);
+      setPorAtribuir(res.orfas ?? 0);
+      setResultado(
+        `${prefixo} ` +
+          (res.processadas === 0
+            ? res.mensagem ?? "Não há tarefas por atribuir a partir de hoje."
+            : `Foram reatribuídas ${res.reatribuidas} tarefa(s). ` +
               (res.orfas > 0
                 ? `${res.orfas} continuam por atribuir (sem staff disponível).`
-                : "Nenhuma ficou por atribuir.")
+                : "Nenhuma ficou por atribuir."))
       );
       await carregar();
     } catch (e) {
+      // Mantém o botão (porAtribuir não muda) para nova tentativa.
       setAutoErro(
         e instanceof Error
           ? `Reatribuição falhou: ${e.message}`
@@ -353,11 +363,11 @@ function EquipaPage() {
    * Bloco de nova tentativa (falta súbita e baixa). A reatribuição já correu
    * sozinha; este bloco só aparece se SOBRARAM tarefas por atribuir.
    */
-  function renderReatribuir(porAtribuir: number) {
+  function renderReatribuir(porAtribuir: number, fluxo: "falta" | "baixa") {
     if (porAtribuir <= 0) return null;
     return (
       <div className="space-y-2 rounded-md border p-3">
-        {!autoResultado && (
+        {(
           <>
             <p className="text-xs text-muted-foreground">
               Sobraram {porAtribuir} tarefa(s) por atribuir (ninguém estava
@@ -370,7 +380,7 @@ function EquipaPage() {
               <Button
                 type="button"
                 size="sm"
-                onClick={handleReatribuirAuto}
+                onClick={() => handleReatribuirAuto(fluxo)}
                 disabled={autoAtribuindo}
               >
                 {autoAtribuindo ? (
@@ -378,15 +388,14 @@ function EquipaPage() {
                     <Loader2 className="h-4 w-4 animate-spin" />
                     A reatribuir…
                   </>
+                ) : autoTentou || autoErro ? (
+                  "Tentar de novo"
                 ) : (
                   "Reatribuir automaticamente"
                 )}
               </Button>
             </div>
           </>
-        )}
-        {autoResultado && (
-          <p className="text-sm text-green-700 dark:text-green-300">{autoResultado}</p>
         )}
         {autoErro && <p className="text-sm text-red-600">{autoErro}</p>}
       </div>
@@ -677,7 +686,7 @@ function EquipaPage() {
     setFaltaResultado(null);
     setFaltaPorAtribuir(0);
     setFaltaAviso(null);
-    setAutoResultado(null);
+    setAutoTentou(false);
     setAutoErro(null);
     try {
       const res = await adminPost<RedistribuicaoDTO>(
@@ -1855,7 +1864,7 @@ function EquipaPage() {
               )}
               {faltaResultado && faltaAviso && avisoEmCurso(faltaAviso)}
               {faltaResultado &&
-                renderReatribuir(faltaPorAtribuir)}
+                renderReatribuir(faltaPorAtribuir, "falta")}
             </DialogContent>
             <DialogFooter>
               <Button
@@ -1869,7 +1878,7 @@ function EquipaPage() {
               {!faltaResultado && (
                 <Button
                   type="button"
-                  className="bg-status-porat text-white hover:bg-status-porat/90"
+                  className="bg-status-porat text-status-foreground hover:bg-status-porat/90"
                   onClick={handleFaltaSubita}
                   disabled={faltaSubmitting}
                 >
@@ -1953,7 +1962,7 @@ function EquipaPage() {
                     {baixaResultado}
                   </div>
                   {baixaAviso && avisoEmCurso(baixaAviso)}
-                  {renderReatribuir(baixaPorAtribuir)}
+                  {renderReatribuir(baixaPorAtribuir, "baixa")}
                 </>
               )}
             </DialogContent>
@@ -1969,7 +1978,7 @@ function EquipaPage() {
               {!baixaResultado && (
                 <Button
                   type="button"
-                  className="bg-status-atrib text-white hover:bg-status-atrib/90"
+                  className="bg-status-atrib text-status-foreground hover:bg-status-atrib/90"
                   disabled={
                     !baixaForm.data_inicio ||
                     !baixaForm.data_fim ||
@@ -1980,7 +1989,7 @@ function EquipaPage() {
                     setBaixaSubmitting(true);
                     setBaixaPorAtribuir(0);
                     setBaixaAviso(null);
-                    setAutoResultado(null);
+                    setAutoTentou(false);
                     setAutoErro(null);
                     try {
                       const res = await adminPost<RedistribuicaoDTO>(`/api/gestor/equipa/${baixaModal._id}/baixa`, {

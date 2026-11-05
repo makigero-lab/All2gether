@@ -72,6 +72,8 @@
     --status-curso: 262 55% 40%;  --status-curso-bg: 263 69% 95%;
     --status-conc: 150 59% 25%;   --status-conc-bg: 150 50% 93%;
     --status-canc: 213 14% 38%;   --status-canc-bg: 210 17% 93%;
+    /* Texto sobre fundo sólido --status-* (botões): branco no claro (≥5,0:1), escuro no tema escuro (≥8,3:1; hover ≥7,0:1) */
+    --status-foreground: 0 0% 100%;
   }
 
   .dark {
@@ -111,6 +113,7 @@
     --status-curso: 262 85% 82%;  --status-curso-bg: 262 40% 22%;
     --status-conc: 150 55% 66%;   --status-conc-bg: 150 40% 15%;
     --status-canc: 213 15% 72%;   --status-canc-bg: 215 14% 20%;
+    --status-foreground: 222 47% 11%;
   }
 }
 

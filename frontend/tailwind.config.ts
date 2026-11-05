@@ -69,6 +69,7 @@ const config: Config = {
           "conc-bg": "hsl(var(--status-conc-bg))",
           canc: "hsl(var(--status-canc))",
           "canc-bg": "hsl(var(--status-canc-bg))",
+          foreground: "hsl(var(--status-foreground))",
         },
       },
       borderRadius: {

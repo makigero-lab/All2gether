@@ -173,9 +173,9 @@ export function DialogClose({
     <button
       type="button"
       onClick={onClick}
-      aria-label="Fechar"
+      aria-label="Fechar diálogo"
       className={cn(
-        "absolute right-3 top-3 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground",
+        "absolute right-2 top-2 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground",
         className
       )}
     >

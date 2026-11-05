@@ -2287,6 +2287,29 @@ exports.eliminarMembroEquipa = async (req, res) => {
 /* ------------------------------------------------------------------ */
 
 /**
+ * Cria a ausência SÓ se o período ainda não estiver coberto por outra ativa
+ * (pendente, pendente_emergencia ou aprovada) da mesma pessoa. Evita
+ * duplicados ao repetir a falta súbita/baixa. Devolve true se criou.
+ * Lança o erro original da BD (exceto duplicado 11000, que conta como já existente).
+ */
+async function criarAusenciaSeNaoCoberta(dados) {
+  const jaCoberta = await Ausencia.findOne({
+    utilizador_id: dados.utilizador_id,
+    data_inicio: { $lte: dados.data_inicio },
+    data_fim: { $gte: dados.data_fim },
+    estado: { $in: ['pendente', 'pendente_emergencia', 'aprovada'] },
+  }).select('_id').lean();
+  if (jaCoberta) return false;
+  try {
+    await Ausencia.create(dados);
+    return true;
+  } catch (err) {
+    if (err.code === 11000) return false;
+    throw err;
+  }
+}
+
+/**
  * POST /api/admin/equipa/:id/falta-subita
  *
  * Regista uma ausência de hoje para o utilizador, desatribui as suas tarefas
@@ -2339,8 +2362,9 @@ exports.reportarFaltaSubita = async (req, res) => {
 
     // 2) Registra Ausencia para hoje (ignora erro de duplicado).
     // v1.24.0: falta súbita é uma ação do admin → estado 'aprovada'.
+    // Repetir a falta no mesmo dia não duplica a ausência (o resto da operação segue).
     try {
-      await Ausencia.create({
+      await criarAusenciaSeNaoCoberta({
         utilizador_id: id,
         empresa_id: empresaId,
         data_inicio: hojeInicio,
@@ -2350,11 +2374,8 @@ exports.reportarFaltaSubita = async (req, res) => {
         notas: 'Falta súbita reportada pelo admin',
       });
     } catch (err) {
-      if (err.code !== 11000) {
-        console.error('⚠️  Erro ao criar ausência de falta súbita:', err.message);
-        return res.status(500).json({ erro: 'Não foi possível registar a falta. Nada foi alterado.' });
-      }
-      // Se duplicado, não é problema — o utilizador já tem ausência hoje.
+      console.error('⚠️  Erro ao criar ausência de falta súbita:', err.message);
+      return res.status(500).json({ erro: 'Não foi possível registar a falta. Nada foi alterado.' });
     }
 
     // 3) Procura tarefas de hoje do utilizador (atribuida ou por_atribuir).
@@ -2524,7 +2545,7 @@ exports.registarBaixaProlongada = async (req, res) => {
     // 1) Cria a Ausencia (ignora duplicado).
     // v1.24.0: baixa prolongada é uma ação do admin → estado 'aprovada'.
     try {
-      await Ausencia.create({
+      await criarAusenciaSeNaoCoberta({
         utilizador_id: id,
         empresa_id: empresaId,
         data_inicio: inicio,
@@ -2534,12 +2555,9 @@ exports.registarBaixaProlongada = async (req, res) => {
         notas: notas ? String(notas).trim() : '',
       });
     } catch (err) {
-      if (err.code !== 11000) {
-        // Antes o erro era engolido: desatribuía as tarefas mas sem ausência, e o LB voltava a dar-lhe trabalho.
-        console.error('⚠️  Erro ao criar ausência de baixa:', err.message);
-        return res.status(500).json({ erro: 'Não foi possível registar a ausência. Nada foi alterado.' });
-      }
-      // Se duplicado, não é problema.
+      // Antes o erro era engolido: desatribuía as tarefas mas sem ausência, e o LB voltava a dar-lhe trabalho.
+      console.error('⚠️  Erro ao criar ausência de baixa:', err.message);
+      return res.status(500).json({ erro: 'Não foi possível registar a ausência. Nada foi alterado.' });
     }
 
     // 2) Procura tarefas atribuídas no período.

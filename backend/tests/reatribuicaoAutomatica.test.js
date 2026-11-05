@@ -172,4 +172,27 @@ describe('reatribuição automática após ausência', () => {
     expect(String((await Tarefa.findById(ta._id)).utilizador_id)).toBe(String(bia._id));
     expect(await Notificacao.countDocuments({ utilizador_id: g._id, mensagem: /em curso/ })).toBe(1);
   });
+
+  test('repetir a falta súbita no mesmo dia não duplica a ausência nem dá erro', async () => {
+    const hoje = new Date().toISOString().slice(0, 10);
+    const { ana, token, tarefa } = await cenario();
+    await tarefa(hoje, '09:00');
+    const r1 = await request(app).post(`/api/gestor/equipa/${ana._id}/falta-subita`).set(auth(token)).send({});
+    const r2 = await request(app).post(`/api/gestor/equipa/${ana._id}/falta-subita`).set(auth(token)).send({});
+    expect(r1.status).toBe(200);
+    expect(r2.status).toBe(200);
+    expect(r2.body.desatribuidas).toBe(0);
+    expect(await Ausencia.countDocuments({ utilizador_id: ana._id })).toBe(1);
+  });
+
+  test('repetir a mesma baixa não duplica a ausência', async () => {
+    const { ana, token, tarefa } = await cenario();
+    await tarefa('2032-06-10', '10:00');
+    const corpo = { data_inicio: '2032-06-10', data_fim: '2032-06-12', tipo: 'doenca' };
+    const r1 = await request(app).post(`/api/gestor/equipa/${ana._id}/baixa`).set(auth(token)).send(corpo);
+    const r2 = await request(app).post(`/api/gestor/equipa/${ana._id}/baixa`).set(auth(token)).send(corpo);
+    expect(r1.status).toBe(200);
+    expect(r2.status).toBe(200);
+    expect(await Ausencia.countDocuments({ utilizador_id: ana._id })).toBe(1);
+  });
 });

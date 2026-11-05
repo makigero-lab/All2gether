@@ -161,7 +161,7 @@ export default function AdminDashboardPage() {
         <div className="rounded-lg border-2 border-orange-500/60 bg-orange-50 p-4 shadow-lg dark:bg-orange-950/30">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-status-porat text-white">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-status-porat text-status-foreground">
                 <TriangleAlert className="h-5 w-5" />
               </div>
               <div className="flex-1">
@@ -199,7 +199,7 @@ export default function AdminDashboardPage() {
             </div>
             <Link
               href="/gestor/calendario"
-              className="inline-flex h-8 shrink-0 items-center gap-2 rounded-md bg-status-porat px-3 text-xs font-medium text-white transition-colors hover:bg-status-porat/90"
+              className="inline-flex h-8 shrink-0 items-center gap-2 rounded-md bg-status-porat px-3 text-xs font-medium text-status-foreground transition-colors hover:bg-status-porat/90"
             >
               Resolver agora
               <ArrowRight className="h-4 w-4" />

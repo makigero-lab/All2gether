@@ -319,7 +319,7 @@ function BotaoEntregue({
       onClick={() => onToggle(t)}
       aria-label={t.roupa_entregue ? `Roupa entregue em ${nome}: desmarcar` : `Marcar roupa entregue em ${nome}`}
       aria-pressed={!!t.roupa_entregue}
-      className={`h-11 min-w-[44px] gap-1.5 px-4 ${t.roupa_entregue ? "bg-status-conc text-white hover:bg-status-conc/90" : ""} ${className ?? ""}`}
+      className={`h-11 min-w-[44px] gap-1.5 px-4 ${t.roupa_entregue ? "bg-status-conc text-status-foreground hover:bg-status-conc/90" : ""} ${className ?? ""}`}
     >
       {togglingId === t._id ? (
         <Loader2 className="h-4 w-4 animate-spin" />

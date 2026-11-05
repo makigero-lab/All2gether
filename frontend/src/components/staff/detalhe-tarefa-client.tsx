@@ -701,7 +701,7 @@ export function DetalheTarefaClient({
 
         {/* Mensagem de sucesso verde vibrante */}
         {concluida && (
-          <div className="flex items-center justify-center gap-2 rounded-lg bg-status-conc p-3 text-center text-white">
+          <div className="flex items-center justify-center gap-2 rounded-lg bg-status-conc p-3 text-center text-status-foreground">
             <CheckCircle2 className="h-5 w-5" />
             <span className="font-semibold">Limpeza Concluída!</span>
           </div>
@@ -744,7 +744,7 @@ export function DetalheTarefaClient({
             className={cn(
               "w-full",
               todasMarcadas
-                ? "bg-status-conc text-white hover:bg-status-conc/90"
+                ? "bg-status-conc text-status-foreground hover:bg-status-conc/90"
                 : // Incompleto: cinzento tracejado com texto legível (não só "mais pálido").
                   "border border-dashed border-border bg-muted text-muted-foreground disabled:opacity-100"
             )}
@@ -801,7 +801,7 @@ export function DetalheTarefaClient({
                     onClick={() => setMinutosAtraso(min)}
                     className={`rounded-md border px-4 py-3 text-sm font-medium transition-colors ${
                       minutosAtraso === min
-                        ? "border-status-porat bg-status-porat text-white"
+                        ? "border-status-porat bg-status-porat text-status-foreground"
                         : "border-input bg-background hover:bg-accent"
                     }`}
                   >
@@ -828,7 +828,7 @@ export function DetalheTarefaClient({
           {!atrasoResultado && (
             <Button size="touch"
               type="button"
-              className="bg-status-porat text-white hover:bg-status-porat/90"
+              className="bg-status-porat text-status-foreground hover:bg-status-porat/90"
               disabled={minutosAtraso === null || atrasoSubmitting}
               onClick={handleReportarAtraso}
             >
@@ -1110,7 +1110,7 @@ export function DetalheTarefaClient({
             type="button"
             disabled={concluirFotos.length === 0 || concluindo}
             onClick={handleConfirmarConclusao}
-            className="bg-status-conc text-white hover:bg-status-conc/90"
+            className="bg-status-conc text-status-foreground hover:bg-status-conc/90"
           >
             {concluindo ? (
               <>
