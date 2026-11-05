@@ -69,7 +69,8 @@ describe('em_curso nunca é desatribuída', () => {
     expect(String(e.utilizador_id)).toBe(String(s._id));
 
     // aviso persistente ao gestor (não depende do ecrã de quem fez a ação)
-    const notif = await Notificacao.find({ utilizador_id: g._id, tipo: 'aviso' });
+    // (a reatribuição automática pode gerar outro aviso ao gestor: filtra pelo texto)
+    const notif = await Notificacao.find({ utilizador_id: g._id, tipo: 'aviso', mensagem: /em curso/ });
     expect(notif.length).toBe(1);
     expect(notif[0].mensagem).toMatch(/em curso/);
   });
@@ -83,7 +84,9 @@ describe('em_curso nunca é desatribuída', () => {
       .send({ utilizador_id: String(s._id), data_inicio: '2032-03-10', data_fim: '2032-03-10', tipo: 'ferias' });
     expect(r.body.desatribuicao.em_curso_mantidas).toBe(0);
     expect(r.body.desatribuicao.aviso).toBeUndefined();
-    expect(await Notificacao.countDocuments({ utilizador_id: g._id })).toBe(0);
+    // Sem em_curso não há aviso de "em curso". (Como a Ana é a única staff, a tarefa
+    // fica por atribuir e o gestor recebe o aviso das por atribuir: ver reatribuicaoAutomatica.test.js.)
+    expect(await Notificacao.countDocuments({ utilizador_id: g._id, mensagem: /em curso/ })).toBe(0);
   });
 
   test('aprovar pedido e reaplicar: mensagem menciona a em_curso e a reatribuição não lhe toca', async () => {

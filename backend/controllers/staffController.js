@@ -292,8 +292,10 @@ exports.cancelarAusencia = async (req, res) => {
  * POST /api/staff/falta-hoje
  *
  * Cria um pedido de falta de emergência para o dia atual (doença súbita).
- * O pedido fica com estado 'pendente_emergencia' — o admin é notificado e,
- * ao aprovar, dispara a redistribuição imediata das tarefas do dia.
+ * O pedido fica com estado 'pendente_emergencia' — o admin é notificado. As
+ * tarefas de hoje da pessoa são desatribuídas e reatribuídas logo (sem esperar
+ * pela aprovação); sem ninguém disponível ficam por atribuir e os gestores
+ * são avisados.
  *
  * Body: { justificacao?: string }
  *
@@ -388,18 +390,22 @@ exports.faltaHoje = async (req, res) => {
       console.error('⚠️  notificar gestores (faltaHoje):', e.message);
     }
 
-    // O faltoso fica logo indisponível: desatribui as tarefas de hoje .
+    // O faltoso fica logo indisponível: desatribui as tarefas de hoje e
+    // reatribui-as de imediato a quem estiver disponível (sem clique do
+    // gestor). A ausência 'pendente_emergencia' já conta como indisponível no
+    // load balancer, e a pessoa é excluída do pool explicitamente.
+    // Limpezas 'em_curso' ficam com a pessoa e os gestores são avisados.
     let redistribuicao = null;
     try {
-      const { desatribuirTarefasPeriodo, textoEmCurso, avisarGestoresEmCurso } = require('./ausenciaController');
-      // Só desatribui (o gestor reatribui manualmente: decisão do Prompt 97, sem disparos automáticos).
-      // Limpezas 'em_curso' ficam com a pessoa e os gestores são avisados.
+      const { desatribuirTarefasPeriodo, textoEmCurso, avisarGestoresEmCurso, reatribuirAutomaticamente } = require('./ausenciaController');
       redistribuicao = await desatribuirTarefasPeriodo(utilizadorId, hoje, hoje);
       if (redistribuicao.em_curso_mantidas > 0) {
         const alvo = await Utilizador.findById(utilizadorId).select('nome').lean();
         await avisarGestoresEmCurso(empresaId, alvo?.nome, redistribuicao);
         redistribuicao.aviso = textoEmCurso(redistribuicao, alvo?.nome);
       }
+      // Best-effort: nunca lança; se falhar, `reatribuicao.erro` vem preenchido.
+      redistribuicao.reatribuicao = await reatribuirAutomaticamente(empresaId, utilizadorId, hoje, hoje);
     } catch (e) {
       console.error('⚠️  redistribuir tarefas (faltaHoje):', e.message);
     }

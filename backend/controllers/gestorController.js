@@ -2288,17 +2288,19 @@ exports.eliminarMembroEquipa = async (req, res) => {
 /**
  * POST /api/admin/equipa/:id/falta-subita
  *
- * Regista uma ausência de hoje para o utilizador e desatribui as suas
- * tarefas de hoje (passam a 'por_atribuir').
+ * Regista uma ausência de hoje para o utilizador, desatribui as suas tarefas
+ * de hoje e reatribui-as logo a outro staff disponível (sem clique).
  *
- * Lógica (Prompt 97 — "Desligar a Histeria Automática"):
+ * Lógica:
  *   1. Valida utilizador (pertence à empresa, não é admin, não é si próprio).
  *   2. Regista Ausencia para hoje (ignora duplicado).
  *   3. Desatribui as tarefas de hoje do utilizador (utilizador_id = null +
- *      estado = 'por_atribuir') — NÃO chama o load balancer. O recálculo
- *      fica a cargo do Gestor (manual) ou do Fail-Safe noturno.
+ *      estado = 'por_atribuir'); 'em_curso' fica com a pessoa (gestores avisados).
+ *   4. Reatribui automaticamente (best-effort). Sem ninguém disponível, ficam
+ *      'por_atribuir' e os gestores são avisados.
  *
- * Resposta 200: { desatribuidas, total, detalhes: [...] }
+ * Resposta 200: { desatribuidas, total, detalhes, reatribuicao: { total,
+ *   reatribuidas, orfas, erro? }, ... }
  */
 exports.reportarFaltaSubita = async (req, res) => {
   try {
@@ -2363,24 +2365,31 @@ exports.reportarFaltaSubita = async (req, res) => {
 
     // Limpezas 'em_curso' NÃO são desatribuídas: ficam com a pessoa e o
     // gestor é avisado (resposta + sino/push a todos os gestores).
-    const { listarEmCurso, textoEmCurso, avisarGestoresEmCurso } = require('./ausenciaController');
+    const { listarEmCurso, textoEmCurso, avisarGestoresEmCurso, reatribuirAutomaticamente, textoReatribuicao } = require('./ausenciaController');
     const emCurso = await listarEmCurso(id, hojeInicio, amanhaInicio);
     const infoEmCurso = { em_curso_mantidas: emCurso.length, em_curso: emCurso };
     if (emCurso.length > 0) await avisarGestoresEmCurso(empresaId, utilizador.nome, infoEmCurso);
     const avisoEmCurso = textoEmCurso(infoEmCurso, utilizador.nome);
 
     if (tarefas.length === 0) {
+      // Mesmo sem tarefas dela, outras por atribuir de hoje podem ser cobertas.
+      const reatribuicao = await reatribuirAutomaticamente(empresaId, id, hojeInicio, hojeInicio);
+      const txtRe = textoReatribuicao(reatribuicao);
       return res.status(200).json({
-        mensagem: 'Sem tarefas para desatribuir hoje.' + (avisoEmCurso ? ` ${avisoEmCurso}` : ''),
+        mensagem:
+          'Sem tarefas para desatribuir hoje.' +
+          (txtRe ? ` ${txtRe}` : '') +
+          (avisoEmCurso ? ` ${avisoEmCurso}` : ''),
         desatribuidas: 0,
         total: 0,
         detalhes: [],
+        reatribuicao,
         ...infoEmCurso,
         aviso: avisoEmCurso || undefined,
       });
     }
 
-    // 4) Desatribui cada tarefa (SEM load balancer — Prompt 97).
+    // 4) Desatribui cada tarefa; a reatribuição vem logo a seguir.
     let desatribuidas = 0;
     const detalhes = [];
 
@@ -2393,10 +2402,11 @@ exports.reportarFaltaSubita = async (req, res) => {
       detalhes.push({
         tarefa_id: String(tarefa._id),
         propriedade: tarefa.propriedade_id?.nome ?? '?',
-        novo_utilizador_id: null,
-        reatribuida: false,
       });
     }
+
+    // 5) Reatribuição automática (best-effort; nunca lança).
+    const reatribuicao = await reatribuirAutomaticamente(empresaId, id, hojeInicio, hojeInicio);
 
     // Auditoria.
     registarAuditoria({
@@ -2406,17 +2416,18 @@ exports.reportarFaltaSubita = async (req, res) => {
       acao: 'falta_subita',
       recurso: 'utilizador',
       recurso_id: id,
-      descricao: `Falta súbita reportada para "${utilizador.nome}": ${desatribuidas} tarefa(s) desatribuída(s)`,
-      detalhes: { desatribuidas, total: tarefas.length },
+      descricao: `Falta súbita reportada para "${utilizador.nome}": ${desatribuidas} tarefa(s) desatribuída(s), ${reatribuicao.reatribuidas} reatribuída(s), ${reatribuicao.orfas} por atribuir`,
+      detalhes: { desatribuidas, total: tarefas.length, reatribuicao },
     });
 
     return res.status(200).json({
       mensagem:
-        `Falta súbita processada: ${desatribuidas} tarefa(s) desatribuída(s) (por atribuir).` +
+        `Falta súbita processada: ${desatribuidas} tarefa(s) desatribuída(s). ${textoReatribuicao(reatribuicao)}` +
         (avisoEmCurso ? ` ${avisoEmCurso}` : ''),
       desatribuidas,
       total: tarefas.length,
       detalhes,
+      reatribuicao,
       ...infoEmCurso,
       aviso: avisoEmCurso || undefined,
     });
@@ -2438,15 +2449,17 @@ exports.reportarFaltaSubita = async (req, res) => {
  *
  * Body: { data_inicio, data_fim, tipo?, notas? }
  *
- * Lógica (Prompt 97 — "Desligar a Histeria Automática"):
+ * Lógica:
  *   1. Valida utilizador (empresa, não admin, não eliminado).
  *   2. Cria Ausencia (ignora duplicado).
  *   3. Desatribui as tarefas atribuídas no período [data_inicio, data_fim]
- *      (utilizador_id = null + estado = 'por_atribuir') — NÃO chama o load
- *      balancer. O recálculo fica a cargo do Gestor (manual) ou do
- *      Fail-Safe noturno.
+ *      (utilizador_id = null + estado = 'por_atribuir'); 'em_curso' fica com
+ *      a pessoa (gestores avisados).
+ *   4. Reatribui automaticamente (best-effort). Sem ninguém disponível, ficam
+ *      'por_atribuir' e os gestores são avisados.
  *
- * Resposta 200: { desatribuidas, total, detalhes: [...] }
+ * Resposta 200: { desatribuidas, total, detalhes, reatribuicao: { total,
+ *   reatribuidas, orfas, erro? }, ... }
  */
 exports.registarBaixaProlongada = async (req, res) => {
   try {
@@ -2537,24 +2550,31 @@ exports.registarBaixaProlongada = async (req, res) => {
 
     // Limpezas 'em_curso' NÃO são desatribuídas: ficam com a pessoa e o
     // gestor é avisado (resposta + sino/push a todos os gestores).
-    const { listarEmCurso, textoEmCurso, avisarGestoresEmCurso } = require('./ausenciaController');
+    const { listarEmCurso, textoEmCurso, avisarGestoresEmCurso, reatribuirAutomaticamente, textoReatribuicao } = require('./ausenciaController');
     const emCurso = await listarEmCurso(id, inicio, fimDia);
     const infoEmCurso = { em_curso_mantidas: emCurso.length, em_curso: emCurso };
     if (emCurso.length > 0) await avisarGestoresEmCurso(empresaId, utilizador.nome, infoEmCurso);
     const avisoEmCurso = textoEmCurso(infoEmCurso, utilizador.nome);
 
     if (tarefas.length === 0) {
+      // Mesmo sem tarefas dela, outras por atribuir no período podem ser cobertas.
+      const reatribuicao = await reatribuirAutomaticamente(empresaId, id, inicio, fim);
+      const txtRe = textoReatribuicao(reatribuicao);
       return res.status(200).json({
-        mensagem: 'Sem tarefas para desatribuir no período.' + (avisoEmCurso ? ` ${avisoEmCurso}` : ''),
+        mensagem:
+          'Sem tarefas para desatribuir no período.' +
+          (txtRe ? ` ${txtRe}` : '') +
+          (avisoEmCurso ? ` ${avisoEmCurso}` : ''),
         desatribuidas: 0,
         total: 0,
         detalhes: [],
+        reatribuicao,
         ...infoEmCurso,
         aviso: avisoEmCurso || undefined,
       });
     }
 
-    // 3) Desatribui cada tarefa (SEM load balancer — Prompt 97).
+    // 3) Desatribui cada tarefa; a reatribuição vem logo a seguir.
     let desatribuidas = 0;
     const detalhes = [];
 
@@ -2568,10 +2588,11 @@ exports.registarBaixaProlongada = async (req, res) => {
         tarefa_id: String(tarefa._id),
         data: tarefa.data,
         propriedade: tarefa.propriedade_id?.nome ?? '?',
-        novo_utilizador_id: null,
-        reatribuida: false,
       });
     }
+
+    // 4) Reatribuição automática (best-effort; nunca lança).
+    const reatribuicao = await reatribuirAutomaticamente(empresaId, id, inicio, fim);
 
     // Auditoria.
     registarAuditoria({
@@ -2581,17 +2602,18 @@ exports.registarBaixaProlongada = async (req, res) => {
       acao: 'baixa_prolongada',
       recurso: 'utilizador',
       recurso_id: id,
-      descricao: `Baixa/férias registadas para "${utilizador.nome}": ${desatribuidas} tarefa(s) desatribuída(s)`,
-      detalhes: { data_inicio: inicio, data_fim: fim, desatribuidas, total: tarefas.length },
+      descricao: `Baixa/férias registadas para "${utilizador.nome}": ${desatribuidas} tarefa(s) desatribuída(s), ${reatribuicao.reatribuidas} reatribuída(s), ${reatribuicao.orfas} por atribuir`,
+      detalhes: { data_inicio: inicio, data_fim: fim, desatribuidas, total: tarefas.length, reatribuicao },
     });
 
     return res.status(200).json({
       mensagem:
-        `Baixa processada: ${desatribuidas} tarefa(s) desatribuída(s) (por atribuir).` +
+        `Baixa processada: ${desatribuidas} tarefa(s) desatribuída(s). ${textoReatribuicao(reatribuicao)}` +
         (avisoEmCurso ? ` ${avisoEmCurso}` : ''),
       desatribuidas,
       total: tarefas.length,
       detalhes,
+      reatribuicao,
       ...infoEmCurso,
       aviso: avisoEmCurso || undefined,
     });

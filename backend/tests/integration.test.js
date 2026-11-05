@@ -1979,7 +1979,7 @@ describe('Prompt 97 — Desligar a Histeria Automática', () => {
     expect(depois.estado).toBe('por_atribuir');
   });
 
-  it('falta súbita → desatribui tarefas de hoje (não reatribui via load balancer)', async () => {
+  it('falta súbita → desatribui tarefas de hoje e reatribui-as a outro staff (sem clique)', async () => {
     // Cria um staff e uma tarefa atribuída para hoje.
     const hash = await bcrypt.hash(PASSWORD, 10);
     const staff = await Utilizador.create({
@@ -2027,18 +2027,18 @@ describe('Prompt 97 — Desligar a Histeria Automática', () => {
       {}
     );
     expect(res.status).toBe(200);
-    // Prompt 97 — devolve desatribuidas (não reatribuidas/orfas).
     expect(res.body.desatribuidas).toBeGreaterThanOrEqual(1);
+    expect(res.body.reatribuicao.reatribuidas).toBeGreaterThanOrEqual(1);
+    expect(res.body.reatribuicao.erro).toBeUndefined();
 
-    // A tarefa foi DESATRIBUÍDA (não reatribuída ao outro staff).
+    // A tarefa foi reatribuída automaticamente a outro staff; nunca ao faltoso.
     const depois = await Tarefa.findById(tarefa._id);
-    expect(depois.utilizador_id).toBeNull();
-    expect(depois.estado).toBe('por_atribuir');
-    // Garante que NÃO foi atribuída ao outro staff (sem load balancer).
-    expect(String(depois.utilizador_id ?? '')).not.toBe(String(outro._id));
+    expect(depois.utilizador_id).not.toBeNull();
+    expect(String(depois.utilizador_id)).not.toBe(String(staff._id));
+    expect(depois.estado).toBe('atribuida');
   });
 
-  it('baixa prolongada → desatribui tarefas do período (não reatribui)', async () => {
+  it('baixa prolongada → desatribui tarefas do período e reatribui-as a outro staff (sem clique)', async () => {
     const hash = await bcrypt.hash(PASSWORD, 10);
     const staff = await Utilizador.create({
       nome: 'Staff Baixa P97',
@@ -2092,12 +2092,13 @@ describe('Prompt 97 — Desligar a Histeria Automática', () => {
     });
     expect(res.status).toBe(200);
     expect(res.body.desatribuidas).toBeGreaterThanOrEqual(1);
+    expect(res.body.reatribuicao.reatribuidas).toBeGreaterThanOrEqual(1);
 
-    // A tarefa foi desatribuída (não reatribuída ao outro staff).
+    // A tarefa foi reatribuída automaticamente a outro staff; nunca ao que está de baixa.
     const depois = await Tarefa.findById(tarefa._id);
-    expect(depois.utilizador_id).toBeNull();
-    expect(depois.estado).toBe('por_atribuir');
-    expect(String(depois.utilizador_id ?? '')).not.toBe(String(outro._id));
+    expect(depois.utilizador_id).not.toBeNull();
+    expect(String(depois.utilizador_id)).not.toBe(String(staff._id));
+    expect(depois.estado).toBe('atribuida');
   });
 });
 

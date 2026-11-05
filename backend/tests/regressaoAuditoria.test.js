@@ -203,7 +203,7 @@ describe('Arquivista', () => {
 });
 
 describe('Ausências e estados', () => {
-  test('falta de hoje desatribui as tarefas de hoje e passa a aceitar após ausência cancelada', async () => {
+  test('falta de hoje reatribui as tarefas de hoje a quem está disponível e passa a aceitar após ausência cancelada', async () => {
     const { e, mk, mkP, login } = await cenario();
     const a = await mk('a', 'staff');
     const b = await mk('b', 'staff');
@@ -213,9 +213,10 @@ describe('Ausências e estados', () => {
     const t = await Tarefa.create({ empresa_id: e._id, propriedade_id: p._id, utilizador_id: a._id, data: new Date(hoje.getTime() + 10 * 3600000), estado: 'atribuida' });
     const r = await request(app).post('/api/staff/falta-hoje').set('Authorization', 'Bearer ' + (await login(a))).send({});
     expect(r.status).toBe(201);
+    // Reatribuição automática: a faltosa nunca fica com a tarefa; vai para b (única staff disponível).
     const depois = await Tarefa.findById(t._id);
-    expect(depois.utilizador_id).toBeNull();
-    expect(depois.estado).toBe('por_atribuir');
+    expect(String(depois.utilizador_id)).toBe(String(b._id));
+    expect(depois.estado).toBe('atribuida');
     await Ausencia.create({ utilizador_id: b._id, empresa_id: e._id, data_inicio: hoje, data_fim: hoje, tipo: 'ferias', estado: 'cancelada' });
     const r2 = await request(app).post('/api/staff/falta-hoje').set('Authorization', 'Bearer ' + (await login(b))).send({});
     expect(r2.status).toBe(201);
