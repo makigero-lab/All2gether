@@ -919,15 +919,15 @@ export default function ParceiroReservasPage() {
 
       {erro && (
         <Card className="sticky top-2 z-20 border-destructive/50 bg-background" role="alert">
-          <CardContent className="flex items-center gap-2 p-4 text-sm text-destructive">
+          <CardContent className="flex flex-wrap items-center gap-2 p-4 text-sm text-destructive">
             <AlertCircle className="h-4 w-4 shrink-0" />
-            <span className="flex-1">{erro}</span>
+            <span className="min-w-0 flex-1 basis-48">{erro}</span>
             {sessaoTerminou && (
               <a
                 href="/login"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex min-h-[44px] shrink-0 items-center rounded-md border border-destructive/50 px-3 font-medium underline"
+                className="inline-flex min-h-[44px] w-full items-center justify-center rounded-md text-center sm:w-auto border border-destructive/50 px-3 font-medium underline"
               >
                 Iniciar sessão (abre noutro separador)
               </a>
