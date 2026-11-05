@@ -16,6 +16,7 @@ const Tarefa = require('../models/Tarefa');
 const Ausencia = require('../models/Ausencia');
 const Propriedade = require('../models/Propriedade');
 const { JWT_SECRET } = require('../middleware/auth');
+const { comMembro } = require('../utils/equipaTarefa');
 
 // Tempo de expiração do token (pode ser overridden por env).
 const TOKEN_EXPIRACAO = process.env.JWT_EXPIRACAO || '7d';
@@ -173,11 +174,10 @@ exports.meuCalendario = async (req, res) => {
     );
 
     // Tarefas do utilizador a partir de hoje (não canceladas).
-    const tarefas = await Tarefa.find({
-      utilizador_id: utilizadorId,
+    const tarefas = await Tarefa.find(comMembro({
       data: { $gte: hoje },
       estado: { $ne: 'cancelada' },
-    })
+    }, utilizadorId))
       .populate({ path: 'propriedade_id', select: 'nome' })
       .sort({ data: 1 })
       .lean();
@@ -220,11 +220,10 @@ exports.minhasTarefas = async (req, res) => {
     // poder navegar para dias anteriores e rever tarefas concluídas.
     const limitePassado = new Date(hoje.getTime() - 30 * 24 * 60 * 60 * 1000);
 
-    const tarefas = await Tarefa.find({
-      utilizador_id: req.user.id,
+    const tarefas = await Tarefa.find(comMembro({
       data: { $gte: limitePassado },
       estado: { $ne: 'cancelada' },
-    })
+    }, req.user.id))
       .populate({ path: 'propriedade_id', select: 'nome morada coordenadas checklist capacidade_hospedes observacoes' })
       .sort({ data: 1 })
       .lean();
@@ -244,7 +243,7 @@ exports.minhasTarefas = async (req, res) => {
       const tarefaAnterior = tarefas.find((outra) => {
         if (String(outra._id) === String(t._id)) return false;
         if (!outra.utilizador_id || !outra.propriedade_id) return false;
-        if (String(outra.utilizador_id) !== String(t.utilizador_id)) return false;
+        // (todas as tarefas desta lista são do próprio utilizador, responsável ou não)
         const diaOutra = new Date(outra.data).toISOString().slice(0, 10);
         return diaOutra === diaStr && new Date(outra.data).getTime() < diaTarefa.getTime();
       });
@@ -285,10 +284,7 @@ exports.minhaTarefaDetalhe = async (req, res) => {
       return res.status(400).json({ erro: 'ID inválido.' });
     }
 
-    const tarefa = await Tarefa.findOne({
-      _id: id,
-      utilizador_id: req.user.id,
-    })
+    const tarefa = await Tarefa.findOne(comMembro({ _id: id }, req.user.id))
       // Prompt 114 — Inclui capacidade_hospedes para destaque no detalhe.
       // Prompt 133 — Inclui modelo_checklist_id e observacoes.
       .populate({ path: 'propriedade_id', select: 'nome morada coordenadas checklist capacidade_hospedes observacoes modelo_checklist_id' })
@@ -340,11 +336,10 @@ exports.minhaTarefaDetalhe = async (req, res) => {
       try {
         const { calcularTempoViagem, obterRangeDia } = require('../utils/scheduler');
         const range = obterRangeDia(new Date(tarefa.data));
-        const tarefaAnterior = await Tarefa.findOne({
-          utilizador_id: tarefa.utilizador_id,
+        const tarefaAnterior = await Tarefa.findOne(comMembro({
           data: { $gte: range.start, $lt: tarefa.data },
           estado: { $nin: ['cancelada'] },
-        })
+        }, req.user.id))
           .populate({ path: 'propriedade_id', select: 'coordenadas' })
           .sort({ data: -1 })
           .lean();
@@ -391,10 +386,7 @@ exports.concluirMinhaTarefa = async (req, res) => {
       return res.status(400).json({ erro: 'ID inválido.' });
     }
 
-    const tarefa = await Tarefa.findOne({
-      _id: id,
-      utilizador_id: req.user.id,
-    });
+    const tarefa = await Tarefa.findOne(comMembro({ _id: id }, req.user.id));
 
     if (!tarefa) {
       return res.status(404).json({ erro: 'Tarefa não encontrada.' });

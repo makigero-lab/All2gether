@@ -15,6 +15,7 @@ const Utilizador = require('../models/Utilizador');
 const Tarefa = require('../models/Tarefa');
 const Propriedade = require('../models/Propriedade');
 const { notificarUtilizador } = require('../utils/notificar');
+const { comMembro, retirarMembroDoc } = require('../utils/equipaTarefa');
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -485,10 +486,7 @@ exports.concluirTarefa = async (req, res) => {
     }
 
     // Verifica se a tarefa pertence ao utilizador logado.
-    const tarefa = await Tarefa.findOne({
-      _id: id,
-      utilizador_id: utilizadorId,
-    });
+    const tarefa = await Tarefa.findOne(comMembro({ _id: id }, utilizadorId));
 
     if (!tarefa) {
       return res.status(404).json({
@@ -603,10 +601,7 @@ exports.reportarAvaria = async (req, res) => {
         .map((f) => f.trim());
     }
 
-    const tarefa = await Tarefa.findOne({
-      _id: id,
-      utilizador_id: utilizadorId,
-    });
+    const tarefa = await Tarefa.findOne(comMembro({ _id: id }, utilizadorId));
 
     if (!tarefa) {
       return res.status(404).json({
@@ -753,10 +748,7 @@ exports.reportarAtraso = async (req, res) => {
     // --- Validação de pertença (Prompt 77, ponto 3) ---
     // A tarefa tem de pertencer ao req.user.id.findOne com utilizador_id
     // garante que staff só mexe nas suas tarefas (404 se não for dele).
-    const tarefa = await Tarefa.findOne({
-      _id: id,
-      utilizador_id: utilizadorId,
-    });
+    const tarefa = await Tarefa.findOne(comMembro({ _id: id }, utilizadorId));
     if (!tarefa) {
       return res.status(404).json({
         erro: 'Tarefa não encontrada (ou não te está atribuída).',
@@ -780,11 +772,10 @@ exports.reportarAtraso = async (req, res) => {
     );
     const fimDia = new Date(inicioDia.getTime() + 24 * 60 * 60 * 1000);
 
-    const tarefasDoDia = await Tarefa.find({
-      utilizador_id: utilizadorId,
+    const tarefasDoDia = await Tarefa.find(comMembro({
       data: { $gte: inicioDia, $lt: fimDia },
       estado: { $nin: ['cancelada', 'concluida'] },
-    }).lean();
+    }, utilizadorId)).lean();
 
     const cargaTotal = tarefasDoDia.reduce(
       (acc, t) => acc + t.tempo_limpeza_minutos,
@@ -796,16 +787,16 @@ exports.reportarAtraso = async (req, res) => {
     let tarefaDesatribuidaId = null;
 
     if (cargaTotal > CAPACIDADE_ATRASO_MINUTOS) {
-      const ultimaTarefa = await Tarefa.findOne({
-        utilizador_id: utilizadorId,
+      // Só 'atribuida' (nunca 'em_curso') e só sai quem atrasou: os restantes
+      // membros da equipa ficam na tarefa.
+      const ultimaTarefa = await Tarefa.findOne(comMembro({
         data: { $gte: inicioDia, $lt: fimDia },
-        estado: { $nin: ['cancelada', 'concluida'] },
+        estado: 'atribuida',
         _id: { $ne: tarefa._id },
-      }).sort({ createdAt: -1 });
+      }, utilizadorId)).sort({ createdAt: -1 });
 
       if (ultimaTarefa) {
-        ultimaTarefa.utilizador_id = null;
-        ultimaTarefa.estado = 'por_atribuir';
+        retirarMembroDoc(ultimaTarefa, utilizadorId);
         await ultimaTarefa.save();
         cascataDesatribuida = true;
         tarefaDesatribuidaId = String(ultimaTarefa._id);
@@ -862,10 +853,7 @@ exports.toggleChecklistItem = async (req, res) => {
     }
 
     // Busca a tarefa — só do próprio utilizador.
-    const tarefa = await Tarefa.findOne({
-      _id: id,
-      utilizador_id: utilizadorId,
-    });
+    const tarefa = await Tarefa.findOne(comMembro({ _id: id }, utilizadorId));
 
     if (!tarefa) {
       return res.status(404).json({ erro: 'Tarefa não encontrada.' });

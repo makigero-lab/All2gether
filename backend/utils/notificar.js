@@ -117,7 +117,33 @@ async function notificarUtilizador(utilizadorId, title, body, url = '/staff', op
   }
 }
 
+/**
+ * Push + sino in-app a todos os gestores/admins ativos da empresa.
+ * Best-effort: nunca lança.
+ */
+async function avisarGestores(empresaId, titulo, texto, url = '/gestor/calendario') {
+  try {
+    const gestores = await Utilizador.find({
+      empresa_id: empresaId,
+      role: { $in: ['gestor', 'admin'] },
+      ativo: true,
+      eliminado_em: null,
+    })
+      .select('_id')
+      .lean();
+    for (const g of gestores) {
+      await notificarUtilizador(String(g._id), titulo, texto, url, {
+        criarInApp: true,
+        tipo: 'aviso',
+      });
+    }
+  } catch (e) {
+    console.error('⚠️  avisarGestores:', e.message);
+  }
+}
+
 module.exports = {
+  avisarGestores,
   notificarUtilizador,
   criarNotificacaoInApp,
 };

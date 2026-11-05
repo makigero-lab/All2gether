@@ -14,6 +14,7 @@
  */
 
 const Tarefa = require('../models/Tarefa');
+const { comMembro } = require('./equipaTarefa');
 
 /**
  * Capacidade máxima diária por utilizador (8 horas = 480 minutos).
@@ -174,11 +175,10 @@ async function calcularInicioTarefaUtilizador(utilizadorId, dataBase, coordNovaP
   // Tarefas exatamente a 00:00 UTC são placeholders sem hora real (ex.: manutenção
   // criada sem horário): não contam como "última tarefa", senão empurravam a nova
   // limpeza para as 01:xx UTC.
-  const candidatas = await Tarefa.find({
-    utilizador_id: utilizadorId,
+  const candidatas = await Tarefa.find(comMembro({
     data: { $gte: start, $lt: end },
     estado: { $nin: ['cancelada'] },
-  })
+  }, utilizadorId))
     .populate({ path: 'propriedade_id', select: 'coordenadas nome' })
     .sort({ data: -1 })
     .limit(20)
@@ -224,11 +224,11 @@ async function calcularInicioTarefaUtilizador(utilizadorId, dataBase, coordNovaP
 async function calcularCargaDiaUtilizador(utilizadorId, dataBase, excluirTarefaId = null) {
   const { start, end } = obterRangeDia(dataBase);
 
-  const filtro = {
-    utilizador_id: utilizadorId,
+  // A carga conta para cada membro da equipa, não só para o responsável.
+  const filtro = comMembro({
     data: { $gte: start, $lt: end },
     estado: { $nin: ['cancelada', 'concluida'] },
-  };
+  }, utilizadorId);
   if (excluirTarefaId) {
     filtro._id = { $ne: excluirTarefaId };
   }

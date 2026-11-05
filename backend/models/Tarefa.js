@@ -56,11 +56,20 @@ const tarefaSchema = new mongoose.Schema(
     // na propriedade, o LB devolve Top N e este array é preenchido.
     // utilizador_id mantém-se como o vencedor #1 (retrocompatibilidade).
     // Se equipa_atribuida estiver vazia, a tarefa tem 1 staff (utilizador_id).
+    // Regra: equipa_atribuida é a equipa COMPLETA e utilizador_id é o
+    // RESPONSÁVEL (sempre membro). Ver utils/equipaTarefa.js.
     equipa_atribuida: {
       type: [mongoose.Schema.Types.ObjectId],
       ref: 'Utilizador',
       default: [],
       index: true,
+    },
+    // Pessoas que faltam para completar a equipa (staff_necessario - membros).
+    // > 0 quando houve ausência e não foi encontrado substituto.
+    pessoas_em_falta: {
+      type: Number,
+      default: 0,
+      min: 0,
     },
     data: {
       type: Date,
@@ -248,6 +257,28 @@ const tarefaSchema = new mongoose.Schema(
 // duas instâncias do cron (ou duas execuções simultâneas) não duplicam. Índice parcial: só
 // afeta documentos com `rotina_dia` preenchido.
 tarefaSchema.add({ rotina_dia: { type: String, default: undefined } });
+// O responsável (utilizador_id) é sempre membro da equipa quando esta existe.
+// Tarefas antigas com equipa vazia ficam como estão (equivalem a equipa de 1).
+tarefaSchema.pre('validate', function normalizarEquipaDoResponsavel() {
+  // Sem responsável e fora do circuito de trabalho: a equipa é libertada
+  // (evita "membros fantasma" que continuariam a ver a tarefa).
+  if (!this.utilizador_id && ['por_atribuir', 'nao_atribuida', 'cancelada'].includes(this.estado)) {
+    if ((this.equipa_atribuida || []).length > 0) this.equipa_atribuida = [];
+    if (this.pessoas_em_falta) this.pessoas_em_falta = 0;
+  }
+  const equipa = this.equipa_atribuida || [];
+  if (this.utilizador_id && equipa.length > 0) {
+    const resp = String(this.utilizador_id);
+    const lista = [];
+    for (const m of [this.utilizador_id, ...equipa]) {
+      if (!lista.some((x) => String(x) === String(m))) lista.push(m);
+    }
+    if (lista.length !== equipa.length || String(equipa[0]) !== resp) {
+      this.equipa_atribuida = lista;
+    }
+  }
+});
+
 tarefaSchema.index(
   { propriedade_id: 1, rotina_dia: 1 },
   { unique: true, partialFilterExpression: { rotina_dia: { $type: 'string' } } }

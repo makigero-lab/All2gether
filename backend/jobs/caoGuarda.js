@@ -29,6 +29,7 @@
 const cron = require('node-cron');
 const Tarefa = require('../models/Tarefa');
 const { calcularInicioTarefaUtilizador } = require('../utils/scheduler');
+const { membrosPopulados } = require('../utils/equipaTarefa');
 // Nota: notificarUtilizador e determinarUtilizadorAtribuido são carregados
 // via require lazy dentro das funções (e não no topo) para permitir que os
 // testes façam jest.spyOn / require reInject. Se fossem importados no topo,
@@ -157,22 +158,15 @@ async function autoAtribuicaoEmergencia() {
           // Fire-and-forget: não bloqueia.
         }
       } else {
-        // Prompt 138 (136 V2) — Se há staff ativo mas não atribuiu, é SLA.
-        // Marca 'nao_atribuida' para o gestor ver no painel.
+        // Causa real: lotação -> 'nao_atribuida'; ausência/folga/sem equipa ->
+        // continua 'por_atribuir'. O motivo gravado é sempre o verdadeiro.
         try {
-          const Utilizador = require('../models/Utilizador');
-          const temStaffAtivo = await Utilizador.exists({
-            empresa_id: empresaId,
-            role: 'staff',
-            ativo: true,
-            eliminado_em: null,
-          });
-          if (temStaffAtivo) {
-            await Tarefa.updateOne(
-              { _id: tarefa._id },
-              { $set: { estado: 'nao_atribuida' } }
-            );
-          }
+          const { diagnosticarFaltaDeStaff } = require('../utils/atribuicaoAutomatica');
+          const diag = await diagnosticarFaltaDeStaff(empresaId, range, propriedadeId);
+          await Tarefa.updateOne(
+            { _id: tarefa._id },
+            { $set: { estado: diag.estado, motivo_nao_atribuicao: diag.motivo } }
+          );
         } catch (e) {
           // Best-effort: se falhar, mantém por_atribuir.
         }
@@ -231,6 +225,10 @@ async function alertasTarefasIncompletas() {
       path: 'utilizador_id',
       select: 'ativo eliminado_em',
     })
+    .populate({
+      path: 'equipa_atribuida',
+      select: 'ativo eliminado_em',
+    })
     .lean();
 
   if (tarefas.length === 0) {
@@ -251,20 +249,22 @@ async function alertasTarefasIncompletas() {
   const tarefasIdsNotificadas = [];
 
   for (const t of tarefas) {
-    const u = t.utilizador_id;
-    // Ignora tarefas cujo staff foi entretanto desativado/eliminado.
-    if (!u || u.eliminado_em || !u.ativo) continue;
+    // Ignora membros entretanto desativados/eliminados; todos os outros são avisados.
+    const membros = membrosPopulados(t).filter((u) => !u.eliminado_em && u.ativo);
+    if (membros.length === 0) continue;
 
     const nomePropriedade = t.propriedade_id?.nome ?? 'propriedade';
-    notificarUtilizador(
-      String(u._id),
-      '⚠️ Tarefa Incompleta',
-      `Ainda não marcaste a limpeza da ${nomePropriedade} como concluída. Por favor, atualiza a app!`,
-      '/staff',
-      // Prompt 115 — Alerta de tarefa incompleta é "principal" → cria in-app.
-      { criarInApp: true, tipo: 'aviso' }
-    );
-    notificadas++;
+    for (const u of membros) {
+      notificarUtilizador(
+        String(u._id),
+        '⚠️ Tarefa Incompleta',
+        `Ainda não marcaste a limpeza da ${nomePropriedade} como concluída. Por favor, atualiza a app!`,
+        '/staff',
+        // Prompt 115 — Alerta de tarefa incompleta é "principal" → cria in-app.
+        { criarInApp: true, tipo: 'aviso' }
+      );
+      notificadas++;
+    }
     tarefasIdsNotificadas.push(String(t._id));
   }
 

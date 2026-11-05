@@ -22,8 +22,7 @@ const Tarefa = require('../models/Tarefa');
 const { obterCoordenadas } = require('../utils/geocoding');
 // FIX (sync parceiros) — Load balancer + scheduler para auto-atribuir a tarefa
 // gerada pela reserva do parceiro (igual ao webhook do Smoobu).
-const { determinarUtilizadorAtribuido, determinarEquipaAtribuida } = require('../utils/loadBalancer');
-const { calcularInicioTarefaUtilizador } = require('../utils/scheduler');
+const { planearAtribuicao } = require('../utils/atribuicaoAutomatica');
 
 /**
  * POST /api/parceiro/propriedades
@@ -294,76 +293,19 @@ function validarDatas(check_in, check_out) {
 async function gerarTarefaLimpezaReserva({
   propriedade, empresaId, check_in, check_out, numHospedes, observacoes, detalhesExtra = {},
 }) {
-  // Gera a Tarefa de Limpeza para o dia de check-out.
   const dataCheckOut = new Date(check_out);
-  // Normaliza para meia-noite UTC.
-  const dataTarefa = new Date(
-    Date.UTC(dataCheckOut.getUTCFullYear(), dataCheckOut.getUTCMonth(), dataCheckOut.getUTCDate())
-  );
-  dataTarefa.setUTCHours(10, 0, 0, 0); // 10:00 UTC default
-
-  // FIX (auto-atribuição) — Tenta alocar a tarefa a um funcionário via load
-  // balancer (igual ao webhook do Smoobu). Se não encontrar staff disponível,
-  // a tarefa fica 'por_atribuir' para o gestor resolver.
   const tempoNovaTarefa = propriedade.tempo_limpeza_minutos || 45;
-  const staffNecessario = Math.max(1, Number(propriedade.staff_necessario) || 1);
 
-  // Range do dia (meia-noite UTC a meia-noite do dia seguinte).
-  const rangeStart = new Date(
-    Date.UTC(dataCheckOut.getUTCFullYear(), dataCheckOut.getUTCMonth(), dataCheckOut.getUTCDate())
-  );
-  const rangeEnd = new Date(rangeStart.getTime() + 24 * 60 * 60 * 1000);
-  const range = { start: rangeStart, end: rangeEnd };
-
-  let utilizadorAtribuido = null;
-  let equipaIds = [];
-  let dataAgendada = dataTarefa;
-  let tempoViagemFinal = 0;
-  let estadoInicial = 'por_atribuir';
-  let motivoNaoAtribuicao = null;
-
-  try {
-    if (staffNecessario > 1) {
-      const resultadoEquipa = await determinarEquipaAtribuida(
-        empresaId, range, propriedade.coordenadas, tempoNovaTarefa, propriedade._id, staffNecessario
-      );
-      if (resultadoEquipa && resultadoEquipa.equipa && resultadoEquipa.equipa.length > 0) {
-        equipaIds = resultadoEquipa.equipa.map((m) => m.utilizadorId);
-        utilizadorAtribuido = equipaIds[0]; // vencedor #1
-      }
-    } else {
-      const resultadoLB = await determinarUtilizadorAtribuido(
-        empresaId, range, propriedade.coordenadas, tempoNovaTarefa, propriedade._id
-      );
-      utilizadorAtribuido = resultadoLB?.utilizadorId ?? null;
-      tempoViagemFinal = Number(resultadoLB?.tempoViagem) || 0;
-    }
-
-    if (utilizadorAtribuido) {
-      // Scheduler sequencial: recalcula a hora de início com base nas
-      // tarefas existentes do staff + tempo de viagem + almoço 13h-14h.
-      try {
-        const resultadoScheduler = await calcularInicioTarefaUtilizador(
-          utilizadorAtribuido, rangeStart, propriedade.coordenadas, tempoNovaTarefa
-        );
-        if (resultadoScheduler?.data) {
-          dataAgendada = resultadoScheduler.data;
-        }
-        if (resultadoScheduler?.tempoViagem) {
-          tempoViagemFinal = Number(resultadoScheduler.tempoViagem) || tempoViagemFinal;
-        }
-      } catch (errScheduler) {
-        console.warn('⚠️  [Parceiro] scheduler falhou (mantém 10:00 UTC):', errScheduler.message);
-      }
-      estadoInicial = 'atribuida';
-    } else {
-      // LB não encontrou ninguém — distingue SLA excedido vs sem staff ativo.
-      motivoNaoAtribuicao = 'Sem equipa disponível (folga/férias ou lotação excedida)';
-    }
-  } catch (errAtribuicao) {
-    console.warn('⚠️  [Parceiro] auto-atribuição falhou (tarefa fica por atribuir):', errAtribuicao.message);
-    motivoNaoAtribuicao = 'Erro na auto-atribuição';
-  }
+  // Auto-atribuição com o motor partilhado (staff_necessario, scheduler, motivo real).
+  const plano = await planearAtribuicao({
+    empresaId, propriedade, dia: dataCheckOut, tempoLimpeza: tempoNovaTarefa,
+  });
+  const utilizadorAtribuido = plano.utilizador_id;
+  const equipaIds = plano.equipa_atribuida;
+  const dataAgendada = plano.data;
+  const tempoViagemFinal = plano.tempo_viagem_minutos;
+  const estadoInicial = plano.estado;
+  const motivoNaoAtribuicao = plano.motivo_nao_atribuicao;
 
   return Tarefa.create({
     empresa_id: empresaId,
@@ -378,6 +320,7 @@ async function gerarTarefaLimpezaReserva({
     tipo: 'limpeza',
     estado: estadoInicial,
     motivo_nao_atribuicao: motivoNaoAtribuicao,
+    pessoas_em_falta: plano.faltam,
     observacoes: observacoes ? String(observacoes).trim() : '',
     hospedes: numHospedes, // FIX (fallback estrito) — pax ou capacidade_hospedes
     // FIX (sync parceiros) — Marca a tarefa como originária de uma reserva

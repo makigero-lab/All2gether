@@ -20,6 +20,7 @@
 const cron = require('node-cron');
 const mongoose = require('mongoose');
 const Tarefa = require('../models/Tarefa');
+const { membrosPopulados } = require('../utils/equipaTarefa');
 const Utilizador = require('../models/Utilizador');
 const { notificarUtilizador } = require('../utils/notificar');
 
@@ -89,6 +90,10 @@ async function executarBriefing() {
         path: 'utilizador_id',
         select: 'nome telefone ativo eliminado_em',
       })
+      .populate({
+        path: 'equipa_atribuida',
+        select: 'nome telefone ativo eliminado_em',
+      })
       .lean();
 
     if (tarefas.length === 0) {
@@ -99,16 +104,18 @@ async function executarBriefing() {
     // 3) Agrupa por utilizador_id (ignora tarefas sem utilizador atribuído).
     const porUtilizador = new Map();
 
+    // Todos os membros da equipa (não só o responsável) recebem o briefing.
     for (const t of tarefas) {
-      const u = t.utilizador_id;
-      // Ignora tarefas sem utilizador, utilizadores eliminados ou inativos.
-      if (!u || u.eliminado_em || !u.ativo) continue;
+      for (const u of membrosPopulados(t)) {
+        // Ignora utilizadores eliminados ou inativos.
+        if (u.eliminado_em || !u.ativo) continue;
 
-      const key = String(u._id);
-      if (!porUtilizador.has(key)) {
-        porUtilizador.set(key, { utilizador: u, tarefas: [] });
+        const key = String(u._id);
+        if (!porUtilizador.has(key)) {
+          porUtilizador.set(key, { utilizador: u, tarefas: [] });
+        }
+        porUtilizador.get(key).tarefas.push(t);
       }
-      porUtilizador.get(key).tarefas.push(t);
     }
 
     if (porUtilizador.size === 0) {

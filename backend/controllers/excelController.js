@@ -17,9 +17,16 @@ const ExcelJS = require('exceljs');
 const Tarefa = require('../models/Tarefa');
 const Propriedade = require('../models/Propriedade');
 const ReservaManual = require('../models/ReservaManual');
+const { planearAtribuicao } = require('../utils/atribuicaoAutomatica');
+const { notificarUtilizador, avisarGestores } = require('../utils/notificar');
 
 const MIME_XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const MAX_LINHAS_IMPORT = 2000;
+// Tempo máximo que o pedido espera pela atribuição automática. O que não couber
+// continua em segundo plano e o resultado diz quantas ficaram a atribuir.
+const orcamentoAtribuicaoMs = () => Number(process.env.IMPORT_ORCAMENTO_ATRIBUICAO_MS) || 20000;
+const MOTIVO_A_ATRIBUIR = 'Atribuição automática em curso';
+const MAX_DETALHE_NAO_ATRIBUIDAS = 50;
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                              */
@@ -171,6 +178,116 @@ async function enviarXlsx(res, linhas, nomeFicheiro) {
 }
 
 /**
+ * Atribui, uma a uma (a carga de cada uma conta para a seguinte), as tarefas
+ * acabadas de criar. Espera no máximo orcamentoAtribuicaoMs(); o resto continua
+ * em segundo plano. No fim avisa cada pessoa UMA vez e os gestores UMA vez.
+ * Nunca lança.
+ */
+async function atribuirLote(itens, empresaId) {
+  const resultado = { atribuidas: 0, emSegundoPlano: 0, detalheNaoAtribuidas: [] };
+  if (itens.length === 0) return resultado;
+
+  const porPessoa = new Map(); // idStr -> [rotulos]
+  let naoAtribuidas = 0;
+  const livre = (item) => ({ _id: item.tarefa._id, estado: 'por_atribuir', utilizador_id: null });
+
+  const processar = async (item, ctx) => {
+    try {
+      const plano = await planearAtribuicao({
+        empresaId,
+        propriedade: item.propriedade,
+        dia: item.tarefa.data,
+        tempoLimpeza: item.tarefa.tempo_limpeza_minutos,
+      });
+      if (plano.estado === 'atribuida') {
+        // Só grava se ninguém mexeu na tarefa entretanto (ex.: gestor a atribuir à mão).
+        const r = await Tarefa.updateOne(livre(item), {
+          $set: {
+            utilizador_id: plano.utilizador_id,
+            equipa_atribuida: plano.equipa_atribuida,
+            data: plano.data,
+            tempo_viagem_minutos: plano.tempo_viagem_minutos,
+            estado: 'atribuida',
+            motivo_nao_atribuicao: null,
+            pessoas_em_falta: plano.faltam,
+          },
+        });
+        if (r.modifiedCount === 1) {
+          ctx.atribuidas++;
+          for (const id of plano.equipa_atribuida) {
+            const k = String(id);
+            if (!porPessoa.has(k)) porPessoa.set(k, []);
+            porPessoa.get(k).push(item.rotulo);
+          }
+        }
+        return;
+      }
+      await Tarefa.updateOne(livre(item), {
+        $set: { estado: plano.estado, motivo_nao_atribuicao: plano.motivo_nao_atribuicao },
+      });
+      naoAtribuidas++;
+      ctx.detalhe.push(`Linha ${item.linha}: ${item.rotulo}: ${plano.motivo_nao_atribuicao || 'por atribuir'}`);
+    } catch (err) {
+      console.error('⚠️  excel.atribuirLote:', err.message);
+      await Tarefa.updateOne(livre(item), {
+        $set: { motivo_nao_atribuicao: 'Erro na auto-atribuição' },
+      }).catch(() => {});
+      naoAtribuidas++;
+      ctx.detalhe.push(`Linha ${item.linha}: ${item.rotulo}: Erro na auto-atribuição`);
+    }
+  };
+
+  const finalizar = async () => {
+    try {
+      for (const [idStr, rotulos] of porPessoa) {
+        await notificarUtilizador(
+          idStr,
+          '🧹 Novas limpezas atribuídas',
+          rotulos.length === 1
+            ? `Foste escalado para limpar a ${rotulos[0]}.`
+            : `Foste escalado para ${rotulos.length} limpezas (importação de Excel). Vê a tua agenda.`,
+          '/staff',
+          { tipo: 'tarefa_atribuida', empresa_id: String(empresaId), criarInApp: true }
+        );
+      }
+      if (naoAtribuidas > 0) {
+        await avisarGestores(
+          empresaId,
+          '⚠️ Limpezas por atribuir',
+          `A importação de Excel deixou ${naoAtribuidas} limpeza(s) por atribuir (sem equipa disponível). Vê o motivo em cada tarefa.`,
+          '/gestor/tarefas'
+        );
+      }
+    } catch (e) {
+      console.error('⚠️  excel.finalizar:', e.message);
+    }
+  };
+
+  const ctx = { atribuidas: 0, detalhe: resultado.detalheNaoAtribuidas };
+  const limite = Date.now() + orcamentoAtribuicaoMs();
+  let i = 0;
+  for (; i < itens.length; i++) {
+    if (Date.now() > limite) break;
+    await processar(itens[i], ctx);
+  }
+  resultado.atribuidas = ctx.atribuidas;
+
+  if (i < itens.length) {
+    // Continua em segundo plano: o pedido responde já.
+    const restantes = itens.slice(i);
+    resultado.emSegundoPlano = restantes.length;
+    setImmediate(async () => {
+      const ctxBg = { atribuidas: 0, detalhe: [] };
+      for (const item of restantes) await processar(item, ctxBg);
+      await finalizar();
+    });
+  } else {
+    await finalizar();
+  }
+  return resultado;
+}
+
+/**
  * Núcleo comum da importação (gestor e parceiro).
  *  - Match de propriedade por nome (case-insensitive) via `mapaProps`.
  *  - Fallback de hóspedes para a capacidade da propriedade.
@@ -188,6 +305,8 @@ async function importarLinhas({
   let ignoradas = 0;
   let erros = 0;
   const detalheErros = [];
+  const chavesVistas = new Set();
+  const porAtribuirLista = [];
 
   for (let i = 0; i < linhas.length; i++) {
     const linha = linhas[i];
@@ -243,18 +362,28 @@ async function importarLinhas({
         numHospedes = prop.capacidade_hospedes ?? null;
       }
 
-      // Idempotência: já existe limpeza para a mesma propriedade + data?
-      const existente = await Tarefa.findOne({
+      // Chave natural (idempotência): empresa + propriedade + DIA do check-out +
+      // tipo limpeza + não cancelada. Compara o dia (não a hora): depois de
+      // atribuída, a hora de início muda, e reimportar duplicava.
+      const chave = `${prop._id}|${checkOutISO}`;
+      if (chavesVistas.has(chave)) {
+        ignoradas++;
+        continue;
+      }
+      const inicioDia = new Date(dataTarefa);
+      inicioDia.setUTCHours(0, 0, 0, 0);
+      const existente = await Tarefa.exists({
         empresa_id: empresaId,
         propriedade_id: prop._id,
-        data: dataTarefa,
+        data: { $gte: inicioDia, $lt: new Date(inicioDia.getTime() + 86400000) },
         tipo: 'limpeza',
         estado: { $ne: 'cancelada' },
-      }).lean();
+      });
       if (existente) {
         ignoradas++;
         continue;
       }
+      chavesVistas.add(chave);
 
       const novaReserva = await ReservaManual.create({
         propriedade_id: prop._id,
@@ -277,6 +406,7 @@ async function importarLinhas({
         tempo_limpeza_minutos: prop.tempo_limpeza_minutos || 45,
         tipo: 'limpeza',
         estado: 'por_atribuir',
+        motivo_nao_atribuicao: MOTIVO_A_ATRIBUIR,
         observacoes,
         hospedes: numHospedes,
         origem_parceiro: origemParceiro,
@@ -292,6 +422,12 @@ async function importarLinhas({
       novaReserva.tarefa_gerada_id = novaTarefa._id;
       await novaReserva.save();
       criadas++;
+      porAtribuirLista.push({
+        linha: nLinha,
+        tarefa: novaTarefa,
+        propriedade: prop,
+        rotulo: `${prop.nome} (${formatarDataPT(dataTarefa)})`,
+      });
     } catch (errLinha) {
       console.error(`❌ excel.importar linha ${nLinha}:`, errLinha.message);
       detalheErros.push(`Linha ${nLinha}: erro ao processar a linha.`);
@@ -299,7 +435,15 @@ async function importarLinhas({
     }
   }
 
+  // Atribuição automática (mesmo motor dos outros caminhos).
+  const atrib = await atribuirLote(porAtribuirLista, empresaId);
+  const porAtribuir = criadas - atrib.atribuidas;
+
   let message = `${criadas} reserva(s) criada(s)`;
+  if (criadas > 0) {
+    message += ` (${atrib.atribuidas} atribuída(s), ${porAtribuir} por atribuir`;
+    message += atrib.emSegundoPlano > 0 ? `, ${atrib.emSegundoPlano} a atribuir em segundo plano)` : ')';
+  }
   if (ignoradas > 0) message += `, ${ignoradas} já existiam (ignoradas)`;
   if (erros > 0) message += `, ${erros} com erro`;
   message += ` (de ${linhas.length} linhas).`;
@@ -308,7 +452,11 @@ async function importarLinhas({
     criadas,
     ignoradas,
     erros,
+    atribuidas: atrib.atribuidas,
+    porAtribuir,
+    emSegundoPlano: atrib.emSegundoPlano,
     detalheErros: detalheErros.slice(0, 20),
+    detalheNaoAtribuidas: atrib.detalheNaoAtribuidas.slice(0, MAX_DETALHE_NAO_ATRIBUIDAS),
     totalLinhas: linhas.length,
     message,
   };
@@ -464,6 +612,8 @@ exports.importarExcelParceiro = async (req, res) => {
       origemParceiro: true,
       msgNaoEncontrada: 'não encontrada (ou não te pertence).',
     });
+    // O motivo de não atribuição é informação interna da operação: o parceiro não a vê.
+    delete resultado.detalheNaoAtribuidas;
     return res.status(200).json(resultado);
   } catch (err) {
     console.error('❌ excel.importarExcelParceiro:', err.message);
