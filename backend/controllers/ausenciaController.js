@@ -850,6 +850,7 @@ async function reatribuirTarefasPeriodo(empresaId, utilizadorId, inicio, fim) {
               estado: 'atribuida',
               data: novaData,
               tempo_viagem_minutos: tempoViagemScheduler,
+              motivo_nao_atribuicao: null,
             },
           }
         );

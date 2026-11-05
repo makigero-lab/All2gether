@@ -609,6 +609,7 @@ exports.atribuirTarefa = async (req, res) => {
 
       tarefa.utilizador_id = user._id;
       tarefa.estado = 'atribuida';
+      tarefa.motivo_nao_atribuicao = null;
     }
 
     await tarefa.save();
@@ -859,6 +860,7 @@ exports.reatribuirTarefa = async (req, res) => {
     tarefa.utilizador_id = novoUser._id;
     tarefa.data = resultadoScheduler.data;
     tarefa.estado = 'atribuida';
+    tarefa.motivo_nao_atribuicao = null;
     tarefa.tempo_viagem_minutos = Number(resultadoScheduler.tempoViagem) || 0;
     await tarefa.save();
 
@@ -1139,6 +1141,7 @@ exports.autoAtribuirTarefas = async (req, res) => {
                 estado: 'atribuida',
                 data: novaData,
                 tempo_viagem_minutos: tempoViagemFinal,
+                motivo_nao_atribuicao: null,
               },
             }
           );
@@ -1175,19 +1178,22 @@ exports.autoAtribuirTarefas = async (req, res) => {
           let slaExcedido = false;
           let motivoFalha = 'Sem equipa disponível';
           try {
-            const Utilizador = require('../models/Utilizador');
-            const temStaffAtivo = await Utilizador.exists({
-              empresa_id: empresaId,
-              role: 'staff',
-              ativo: true,
-              eliminado_em: null,
-            });
-            // Se há staff ativo mas o load balancer não atribuiu → SLA excedido.
-            slaExcedido = !!temStaffAtivo;
-            if (slaExcedido) {
-              motivoFalha = 'Lotação máxima excedida (toda a equipa > 8h/dia)';
+            // Distingue a causa real: sem equipa ativa, ninguém disponível
+            // (ausência/folga/equipa exclusiva) ou lotação (todos > 8h/dia).
+            const { obterStaffDisponivel } = require('../utils/loadBalancer');
+            const { staff, disponiveis } = await obterStaffDisponivel(
+              empresaId,
+              range,
+              propriedadeId
+            );
+            if (staff.length === 0) {
+              motivoFalha = 'Sem equipa ativa';
+            } else if (disponiveis.length === 0) {
+              motivoFalha = 'Toda a equipa ausente, de folga ou fora da equipa exclusiva neste dia';
             } else {
-              motivoFalha = 'Toda a equipa de folga/férias ou sem equipa ativa';
+              // Há quem esteja disponível mas ninguém cabe no limite diário.
+              slaExcedido = true;
+              motivoFalha = 'Lotação máxima excedida (toda a equipa > 8h/dia)';
             }
           } catch (e) {
             // Se falha a verificação, mantém por_atribuir (seguro).

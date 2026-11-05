@@ -1192,6 +1192,7 @@ async function atualizarTarefaPorReserva(
                   estado: 'atribuida',
                   data: novaData,
                   tempo_viagem_minutos: resultadoLB.tempoViagem || 0,
+                  motivo_nao_atribuicao: null,
                 },
               }
             );

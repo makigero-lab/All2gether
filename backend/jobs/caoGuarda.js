@@ -137,6 +137,7 @@ async function autoAtribuicaoEmergencia() {
               estado: 'atribuida',
               data: novaData,
               tempo_viagem_minutos: tempoViagemFinal,
+              motivo_nao_atribuicao: null,
             },
           }
         );

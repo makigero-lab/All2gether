@@ -105,7 +105,8 @@ exports.getDashboard = async (req, res) => {
       Tarefa.countDocuments({
         empresa_id: empresaId,
         data: { $gte: hojeInicio, $lt: amanhaInicio },
-        estado: 'por_atribuir',
+        // 'nao_atribuida' (nenhuma pessoa coube) também precisa de atenção do gestor.
+        estado: { $in: ['por_atribuir', 'nao_atribuida'] },
       }),
       Tarefa.countDocuments({
         empresa_id: empresaId,
@@ -155,7 +156,7 @@ exports.getDashboard = async (req, res) => {
     const tarefasRiscoRaw = await Tarefa.find({
       empresa_id: empresaId,
       data: { $gte: agora, $lte: limiteRisco48h },
-      estado: 'por_atribuir',
+      estado: { $in: ['por_atribuir', 'nao_atribuida'] },
     })
       .populate({ path: 'propriedade_id', select: 'nome' })
       .select('data estado propriedade_id tempo_limpeza_minutos')
