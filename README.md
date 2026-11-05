@@ -179,7 +179,7 @@ Abrir http://localhost:3000 → landing page com botão 'Entrar na Plataforma' �
 
 | Variável | Descrição | Exemplo |
 |-----------|-----------|---------|
-| `NEXT_PUBLIC_API_URL` | URL base da API backend (Render). | `https://all2gether-backend.onrender.com` |
+| `NEXT_PUBLIC_API_URL` | URL base da API backend (Render). | `https://all2gether.onrender.com` |
 
 ### Variáveis de ambiente (Backend — Render)
 

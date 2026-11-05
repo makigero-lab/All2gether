@@ -11,7 +11,7 @@ Workflow: `.github/workflows/backup.yml` (todos os dias às 03:17 UTC e manual e
    - `MONGODB_URI`: URI do Atlas. Recomendado: um utilizador de BD só com leitura (role `read` na base) criado só para o backup.
    - `BACKUP_PASSPHRASE`: frase longa e aleatória. **Guarda-a também fora do GitHub** (gestor de palavras-passe); sem ela o backup não se restaura.
 2. Atlas > *Network Access*: os runners do GitHub não têm IP fixo, por isso o Atlas tem de aceitar a ligação deles (`0.0.0.0/0` é a única opção grátis; mitiga-se com o utilizador só de leitura e palavra-passe forte). Sem isto o workflow falha na ligação.
-3. O workflow **agendado só corre depois de estar na branch `main`** (limitação do GitHub). Até lá, só o disparo manual na branch onde existir.
+3. O workflow **só aparece em *Actions* e só corre depois de estar na branch `main`** (limitação do GitHub): o agendamento e o disparo manual ficam disponíveis após o merge.
 4. Corre-o uma vez à mão e confirma que o artifact `mongodb-backup` aparece.
 
 ### Restaurar (passo a passo)
@@ -28,7 +28,7 @@ Pré-requisitos locais: `gpg` e as [MongoDB Database Tools](https://www.mongodb.
 
 O Render grátis adormece após inatividade. Usa um serviço externo, **não** o GitHub Actions (gastaria minutos).
 1. Cria conta grátis em [cron-job.org](https://cron-job.org).
-2. Novo cron job: URL `https://all2gether-backend.onrender.com/api/health`, método GET, de 10 em 10 minutos.
+2. Novo cron job: URL `https://all2gether.onrender.com/api/health`, método GET, de 10 em 10 minutos.
 3. Opcional: ativa a notificação por email em caso de falha.
 
 ## 3. Reconciliação do Smoobu (opcional)
