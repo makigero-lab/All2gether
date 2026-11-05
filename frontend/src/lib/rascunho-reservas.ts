@@ -42,7 +42,16 @@ export interface NovaReserva extends Valores {
 export interface Rascunho {
   edicoes: Record<string, Edicao>;
   novas: NovaReserva[];
+  /**
+   * Reservas marcadas para eliminar (só se eliminam ao carregar em Gravar).
+   * Guarda os valores do servidor no momento em que foram marcadas, para
+   * detetar se a reserva mudou entretanto.
+   */
+  eliminar: Record<string, Valores>;
 }
+
+/** Validade máxima do rascunho (tem nomes e notas de hóspedes): 7 dias desde a última alteração. */
+export const VALIDADE_RASCUNHO_MS = 7 * 24 * 60 * 60 * 1000;
 
 export interface ArmazemMinimo {
   getItem(k: string): string | null;
@@ -50,7 +59,7 @@ export interface ArmazemMinimo {
   removeItem(k: string): void;
 }
 
-export const RASCUNHO_VAZIO: Rascunho = { edicoes: {}, novas: [] };
+export const RASCUNHO_VAZIO: Rascunho = { edicoes: {}, novas: [], eliminar: {} };
 
 export function chaveRascunho(utilizadorId: string, empresaId: string): string {
   return `${PREFIXO_RASCUNHO}reservas_${empresaId}_${utilizadorId}`;
@@ -59,11 +68,17 @@ export function chaveRascunho(utilizadorId: string, empresaId: string): string {
 const eTexto = (v: unknown): v is string => typeof v === "string";
 
 /** Lê o rascunho; qualquer coisa inválida vira rascunho vazio. */
-export function lerRascunhoReservas(chave: string, armazem: ArmazemMinimo): Rascunho {
+export function lerRascunhoReservas(chave: string, armazem: ArmazemMinimo, agora: number = Date.now()): Rascunho {
+  const vazio = (): Rascunho => ({ edicoes: {}, novas: [], eliminar: {} });
   try {
     const bruto = armazem.getItem(chave);
-    if (!bruto) return { edicoes: {}, novas: [] };
+    if (!bruto) return vazio();
     const r = JSON.parse(bruto);
+    // Rascunho expirado (ou sem data, de versões antigas e sem prazo): apaga.
+    if (typeof r?.guardado_em === "number" && agora - r.guardado_em > VALIDADE_RASCUNHO_MS) {
+      try { armazem.removeItem(chave); } catch { /* ignora */ }
+      return vazio();
+    }
     const edicoes: Record<string, Edicao> = {};
     for (const [id, e] of Object.entries<{ campos?: Record<string, unknown>; antes?: Record<string, unknown> }>(
       r?.edicoes && typeof r.edicoes === "object" ? r.edicoes : {}
@@ -87,28 +102,92 @@ export function lerRascunhoReservas(chave: string, armazem: ArmazemMinimo): Rasc
       for (const c of CAMPOS) nova[c] = eTexto(n[c]) ? n[c].slice(0, 2000) : "";
       novas.push(nova);
     }
-    return { edicoes, novas };
+    const eliminar: Record<string, Valores> = {};
+    for (const [id, v] of Object.entries<Record<string, unknown>>(
+      r?.eliminar && typeof r.eliminar === "object" ? r.eliminar : {}
+    )) {
+      const snap = {} as Valores;
+      for (const c of CAMPOS) snap[c] = eTexto(v?.[c]) ? (v[c] as string).slice(0, 2000) : "";
+      eliminar[id] = snap;
+    }
+    return { edicoes, novas, eliminar };
   } catch {
-    return { edicoes: {}, novas: [] };
+    return vazio();
   }
 }
 
 /** Guarda (ou apaga, se vazio) o rascunho. Falhas de quota/modo privado são ignoradas. */
-export function guardarRascunhoReservas(chave: string, r: Rascunho, armazem: ArmazemMinimo): void {
+export function guardarRascunhoReservas(chave: string, r: Rascunho, armazem: ArmazemMinimo, agora: number = Date.now()): void {
   try {
-    if (Object.keys(r.edicoes).length === 0 && r.novas.length === 0) {
+    if (Object.keys(r.edicoes).length === 0 && r.novas.length === 0 && Object.keys(r.eliminar ?? {}).length === 0) {
       armazem.removeItem(chave);
       return;
     }
-    armazem.setItem(chave, JSON.stringify(r));
+    armazem.setItem(chave, JSON.stringify({ ...r, guardado_em: agora }));
   } catch {
     // ignora
   }
 }
 
-/** Número de linhas com alterações por gravar (reservas editadas + reservas novas). */
+/**
+ * Número de linhas com alterações por gravar: reservas editadas + reservas
+ * novas + reservas a eliminar. Uma edição numa linha marcada para eliminar
+ * não conta (não é enviada).
+ */
 export function contarPendentes(r: Rascunho): number {
-  return Object.keys(r.edicoes).length + r.novas.length;
+  const elim = r.eliminar ?? {};
+  const editadas = Object.keys(r.edicoes).filter((id) => !(id in elim)).length;
+  return editadas + r.novas.length + Object.keys(elim).length;
+}
+
+/** Marca a reserva para eliminar (só se elimina ao Gravar). `servidor` = valores atuais. */
+export function marcarEliminar(r: Rascunho, id: string, servidor: Valores): Rascunho {
+  return { ...r, eliminar: { ...r.eliminar, [id]: servidor } };
+}
+
+/** Anula a marca "a eliminar" (as edições pendentes dessa linha voltam a contar). */
+export function anularEliminar(r: Rascunho, id: string): Rascunho {
+  const { [id]: _x, ...resto } = r.eliminar;
+  return { ...r, eliminar: resto };
+}
+
+export interface ReconciliacaoEliminar {
+  /** Marcas que continuam válidas (reservas ainda existentes). */
+  eliminar: Record<string, Valores>;
+  /** Reservas que já não existem no servidor: a eliminação já está feita (marca removida). */
+  jaEliminadas: string[];
+  /** Reservas alteradas no servidor desde que foram marcadas: a pessoa confirma ou anula. */
+  alteradas: string[];
+}
+
+/** Compara as marcas "a eliminar" com o servidor (nunca elimina às cegas uma reserva que mudou). */
+export function reconciliarEliminacoes(
+  eliminar: Record<string, Valores>,
+  servidorPorId: Record<string, Valores>
+): ReconciliacaoEliminar {
+  const out: Record<string, Valores> = {};
+  const jaEliminadas: string[] = [];
+  const alteradas: string[] = [];
+  for (const [id, snap] of Object.entries(eliminar)) {
+    const s = servidorPorId[id];
+    if (!s) {
+      jaEliminadas.push(id);
+      continue;
+    }
+    out[id] = snap;
+    if (CAMPOS.some((c) => s[c] !== snap[c])) alteradas.push(id);
+  }
+  return { eliminar: out, jaEliminadas, alteradas };
+}
+
+/** O rascunho tem dados (para avisar no logout)? */
+export function temPendentes(r: Rascunho): boolean {
+  return contarPendentes(r) > 0;
+}
+
+/** "1 alteração por gravar" / "3 alterações por gravar". */
+export function textoPendentes(n: number): string {
+  return n === 1 ? "1 alteração por gravar" : `${n} alterações por gravar`;
 }
 
 /**

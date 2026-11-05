@@ -29,6 +29,7 @@ import {
   Navigation,
   Shirt,
 } from "lucide-react";
+import { textoEquipa } from "@/lib/equipa";
 
 import { cn, parsearDataSegura, googleMapsUrl } from "@/lib/utils";
 import {
@@ -472,6 +473,12 @@ export function DetalheTarefaClient({
             <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
               <MapPin className="h-3.5 w-3.5" />
               +{formatarMinutos(tarefa.tempo_viagem_minutos)} viagem
+            </span>
+          )}
+          {textoEquipa(tarefa.equipa_nomes) && (
+            <span className="flex items-center gap-1 font-medium text-foreground">
+              <Users className="h-3.5 w-3.5" />
+              Equipa: {textoEquipa(tarefa.equipa_nomes)}
             </span>
           )}
           {tarefa.endereco && (

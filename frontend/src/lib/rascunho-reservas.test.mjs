@@ -57,7 +57,7 @@ test("contagem de pendentes = reservas editadas + reservas novas", () => {
   const ed = L.aplicarCampo({}, "r1", "hospedes", "4", servidor);
   const r = { edicoes: ed, novas: [{ tmp: "n1" }, { tmp: "n2" }] };
   assert.equal(L.contarPendentes(r), 3);
-  assert.equal(L.contarPendentes({ edicoes: {}, novas: [] }), 0);
+  assert.equal(L.contarPendentes({ edicoes: {}, novas: [], eliminar: {} }), 0);
 });
 
 test("o rascunho sobrevive a recarregar (guardar/ler) e fica vazio quando já não há pendentes", () => {
@@ -75,9 +75,9 @@ test("o rascunho sobrevive a recarregar (guardar/ler) e fica vazio quando já n�
 test("rascunho corrompido ou com lixo não rebenta a página", () => {
   const a = new Armazem();
   a.setItem("k", "{isto não é json");
-  assert.deepEqual(L.lerRascunhoReservas("k", a), { edicoes: {}, novas: [] });
+  assert.deepEqual(L.lerRascunhoReservas("k", a), { edicoes: {}, novas: [], eliminar: {} });
   a.setItem("k", JSON.stringify({ edicoes: { x: { campos: { hospedes: 5 } } }, novas: [{ tmp: 1 }] }));
-  assert.deepEqual(L.lerRascunhoReservas("k", a), { edicoes: {}, novas: [] });
+  assert.deepEqual(L.lerRascunhoReservas("k", a), { edicoes: {}, novas: [], eliminar: {} });
 });
 
 test("validação: datas, ordem, hóspedes e propriedade (reservas novas)", () => {
@@ -119,4 +119,59 @@ test("sem conflito quando o servidor não mudou; reservas apagadas descartam o r
   assert.deepEqual(rec.conflitos, {});
   assert.deepEqual(Object.keys(rec.edicoes), ["r1"]);
   assert.deepEqual(rec.desaparecidas, ["r2"]);
+});
+
+// ---- Eliminar ao Gravar (A3), validade (C4), texto (C5) ----
+const vazio = () => ({ edicoes: {}, novas: [], eliminar: {} });
+
+test("marcar para eliminar conta como pendente e anular repõe", () => {
+  let r = L.marcarEliminar(vazio(), "r1", servidor);
+  assert.equal(L.contarPendentes(r), 1);
+  r = L.anularEliminar(r, "r1");
+  assert.equal(L.contarPendentes(r), 0);
+});
+
+test("edição numa linha a eliminar não conta nem é enviada; ao anular volta a contar", () => {
+  const ed = L.aplicarCampo({}, "r1", "hospedes", "5", servidor);
+  let r = { ...vazio(), edicoes: ed };
+  assert.equal(L.contarPendentes(r), 1);
+  r = L.marcarEliminar(r, "r1", servidor);
+  assert.equal(L.contarPendentes(r), 1); // só a eliminação
+  r = L.anularEliminar(r, "r1");
+  assert.equal(L.contarPendentes(r), 1); // a edição voltou
+  assert.equal(r.edicoes.r1.campos.hospedes, "5");
+});
+
+test("o rascunho com eliminações sobrevive a guardar e recarregar", () => {
+  const a = new Armazem();
+  const r = L.marcarEliminar(vazio(), "r1", servidor);
+  L.guardarRascunhoReservas("k", r, a, 1000);
+  const lido = L.lerRascunhoReservas("k", a, 2000);
+  assert.deepEqual(Object.keys(lido.eliminar), ["r1"]);
+  assert.equal(lido.eliminar.r1.nome_hospede, "Maria");
+});
+
+test("reconciliar eliminações: já eliminada no servidor, alterada e intacta", () => {
+  const e = { a: servidor, b: servidor, c: servidor };
+  const srv = { b: { ...servidor, hospedes: "9" }, c: servidor };
+  const rec = L.reconciliarEliminacoes(e, srv);
+  assert.deepEqual(rec.jaEliminadas, ["a"]);
+  assert.deepEqual(rec.alteradas, ["b"]);
+  assert.deepEqual(Object.keys(rec.eliminar).sort(), ["b", "c"]);
+});
+
+test("rascunho com mais de 7 dias é apagado ao ler; dentro do prazo mantém-se", () => {
+  const a = new Armazem();
+  const r = L.marcarEliminar(vazio(), "r1", servidor);
+  const t0 = 1_000_000;
+  L.guardarRascunhoReservas("k", r, a, t0);
+  const dia = 24 * 3600 * 1000;
+  assert.equal(L.contarPendentes(L.lerRascunhoReservas("k", a, t0 + 6 * dia)), 1);
+  assert.equal(L.contarPendentes(L.lerRascunhoReservas("k", a, t0 + 8 * dia)), 0);
+  assert.equal(a.getItem("k"), null);
+});
+
+test("texto singular/plural das alterações por gravar", () => {
+  assert.equal(L.textoPendentes(1), "1 alteração por gravar");
+  assert.equal(L.textoPendentes(3), "3 alterações por gravar");
 });

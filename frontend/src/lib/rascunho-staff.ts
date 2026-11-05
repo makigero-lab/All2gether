@@ -80,6 +80,20 @@ export function guardarRascunhoAvaria(tarefaId: string, texto: string): void {
   }
 }
 
+/** Quantos rascunhos há guardados neste aparelho (para avisar antes de sair). */
+export function contarRascunhos(): number {
+  try {
+    let n = 0;
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(PREFIXO)) n++;
+    }
+    return n;
+  } catch {
+    return 0;
+  }
+}
+
 /** Remove todos os rascunhos (usado no logout, para não ficarem em aparelho partilhado). */
 export function limparTodosRascunhos(): void {
   try {

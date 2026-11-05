@@ -105,6 +105,7 @@ export default function DetalheTarefaPage({
       : undefined,
     // Prompt 138 (136 V2) — Tempo de viagem (para mostrar no detalhe).
     tempo_viagem_minutos: tarefa.tempo_viagem_minutos ?? null,
+    equipa_nomes: tarefa.equipa_nomes ?? null,
   };
 
   // Usa a checklist real da propriedade (vinda do populate do backend).

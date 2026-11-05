@@ -51,6 +51,7 @@ interface TarefaReal {
   } | null;
   // Prompt 137 — tempo de viagem (para badge no cartão).
   tempo_viagem_minutos?: number | null;
+  equipa_nomes?: Array<{ _id: string; nome: string; responsavel: boolean; eu?: boolean }> | null;
 }
 
 /**
@@ -73,6 +74,7 @@ function adaptarTarefa(t: TarefaReal) {
     detalhes_reserva: t.detalhes_reserva ?? null,
     // Prompt 137 — repassa tempo_viagem_minutos para o badge no cartão.
     tempo_viagem_minutos: t.tempo_viagem_minutos ?? null,
+    equipa_nomes: t.equipa_nomes ?? null,
   };
 }
 

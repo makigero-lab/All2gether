@@ -47,6 +47,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { adminGet, adminPost, adminPatch, type PropriedadeDTO, type UtilizadorDTO } from "@/lib/api";
+import { textoEquipaGestor, textoFalta } from "@/lib/equipa";
 
 /* ------------------------------------------------------------------ */
 /* Tipos                                                               */
@@ -56,6 +57,8 @@ interface TarefaCalendario {
   _id: string;
   propriedade_id: { _id: string; nome: string; morada?: string } | null;
   utilizador_id: { _id: string; nome: string } | null;
+  equipa_atribuida?: { _id?: string; nome: string }[] | null;
+  pessoas_em_falta?: number;
   data: string;
   tempo_limpeza_minutos: number;
   tipo: string;
@@ -704,14 +707,16 @@ export default function CalendarioOperacionalPage() {
             aria-hidden
           />
           <span className="fc-evt-month__time">{arg.timeText}</span>
-          <span className="fc-evt-month__title" title={titulo}>
-            {emoji} {titulo}
+          <span className="fc-evt-month__title" title={textoFalta(t.pessoas_em_falta) ? `${titulo} · ${textoFalta(t.pessoas_em_falta)}` : titulo}>
+            {emoji} {titulo}{(t.pessoas_em_falta ?? 0) > 0 ? " ⚠" : ""}
           </span>
         </div>
       );
     }
 
     // --- Vistas semanal/diária: bloco rico com título + subtítulo ---
+    const equipaTexto = textoEquipaGestor(t.utilizador_id, t.equipa_atribuida);
+    const faltaTexto = textoFalta(t.pessoas_em_falta);
     const blockClass = t.alerta_orfao
       ? "fc-evt-block fc-evt-block--orfao"
       : isPorAtribuir
@@ -741,7 +746,8 @@ export default function CalendarioOperacionalPage() {
           ) : staff ? (
             <>
               <User className="fc-evt-block__icon" />
-              <span>{primeiroNome(staff)}</span>
+              <span title={equipaTexto ?? undefined}>{equipaTexto ?? primeiroNome(staff)}</span>
+              {faltaTexto && <span className="fc-evt-block__unassigned"> · {faltaTexto}</span>}
             </>
           ) : (
             <span className="fc-evt-block__unassigned">⚠️ {rotuloEstado}</span>
@@ -1430,8 +1436,11 @@ export default function CalendarioOperacionalPage() {
                         {formatarReserva(t.detalhes_reserva, t.data)}
                       </td>
                       <td className="px-4 py-3">
-                        {t.utilizador_id?.nome ?? (
+                        {textoEquipaGestor(t.utilizador_id, t.equipa_atribuida) ?? (
                           <span className="text-amber-600 dark:text-amber-400">Por Atribuir</span>
+                        )}
+                        {textoFalta(t.pessoas_em_falta) && (
+                          <span className="block text-xs font-medium text-amber-700 dark:text-amber-400">{textoFalta(t.pessoas_em_falta)}</span>
                         )}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">

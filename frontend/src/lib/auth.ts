@@ -34,7 +34,7 @@
  *   login page (após cookie definido) e pelo logout (após cookie limpo).
  */
 
-import { limparTodosRascunhos } from "@/lib/rascunho-staff";
+import { contarRascunhos, limparTodosRascunhos } from "@/lib/rascunho-staff";
 
 export type Role = "admin" | "gestor" | "staff" | "parceiro" | "fornecedor";
 
@@ -162,9 +162,19 @@ export async function estaAutenticado(): Promise<boolean> {
  * o estado do cliente é totalmente limpo (sem cache de dados do utilizador
  * anterior). Também limpa o cache temporal de auth.
  */
-export async function fazerLogout(): Promise<void> {
+export async function fazerLogout(opcoes: { sessaoExpirada?: boolean } = {}): Promise<void> {
+  if (!opcoes.sessaoExpirada) {
+    // Saída explícita: avisa se há alterações por gravar, que se perdem ao sair
+    // (os rascunhos têm nomes e notas de hóspedes e não ficam em aparelho partilhado).
+    if (contarRascunhos() > 0 && typeof window !== "undefined" && !window.confirm(
+      "Tens alterações por gravar neste aparelho. Se saíres agora perdem-se. Sair mesmo assim?"
+    )) {
+      return;
+    }
+    limparTodosRascunhos();
+  }
+  // Sessão expirada: mantém os rascunhos (a pessoa volta a entrar e continua; expiram aos 7 dias).
   limparCacheAuth();
-  limparTodosRascunhos();
   try {
     await fetch("/api/auth/logout", { method: "POST" });
   } catch {

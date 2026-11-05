@@ -39,7 +39,11 @@ import {
   CAMPOS,
   aplicarCampo,
   chaveRascunho,
+  anularEliminar,
   contarPendentes,
+  marcarEliminar,
+  reconciliarEliminacoes,
+  textoPendentes,
   guardarRascunhoReservas,
   lerRascunhoReservas,
   paraPayload,
@@ -259,6 +263,10 @@ interface Linha {
   pendentes: Set<Campo>;
   estado: string | null;
   bloqueada: boolean;
+  /** Marcada para eliminar (só se elimina ao Gravar). */
+  eliminada?: boolean;
+  /** Células desativadas: limpeza já começou, a eliminar ou a gravar. */
+  semEdicao?: boolean;
   erro?: string;
   conflito?: Campo[];
   reserva?: ReservaDTO;
@@ -276,9 +284,11 @@ export default function ParceiroReservasPage() {
 
   // Rascunho local (edições + reservas novas) — só vai para o servidor em "Gravar".
   const [chave, setChave] = useState<string | null>(null);
-  const [rascunho, setRascunho] = useState<Rascunho>({ edicoes: {}, novas: [] });
+  const [rascunho, setRascunho] = useState<Rascunho>({ edicoes: {}, novas: [], eliminar: {} });
   const [rascunhoPronto, setRascunhoPronto] = useState(false);
   const [conflitos, setConflitos] = useState<Record<string, Campo[]>>({});
+  /** Reservas marcadas para eliminar que mudaram no sistema: a pessoa confirma ou anula. */
+  const [elimAlteradas, setElimAlteradas] = useState<string[]>([]);
   const [errosLinha, setErrosLinha] = useState<Record<string, string>>({});
   const [gravando, setGravando] = useState(false);
   const [resumo, setResumo] = useState("");
@@ -290,7 +300,6 @@ export default function ParceiroReservasPage() {
   const contadorTmp = useRef(0);
 
   const [eliminar, setEliminar] = useState<ReservaDTO | null>(null);
-  const [eliminando, setEliminando] = useState(false);
 
   // FIX (excel parceiro) — Estado para o modal de importação de Excel.
   const [importOpen, setImportOpen] = useState(false);
@@ -343,6 +352,17 @@ export default function ParceiroReservasPage() {
     };
   }, []);
 
+  // Telemóvel: com a barra «Gravar» fixa em baixo, o campo focado não pode ficar tapado.
+  useEffect(() => {
+    if (pendentes === 0) return;
+    const el = document.documentElement;
+    const antes = el.style.scrollPaddingBottom;
+    el.style.scrollPaddingBottom = "6rem"; // altura da barra (≈68 px) + folga
+    return () => {
+      el.style.scrollPaddingBottom = antes;
+    };
+  }, [pendentes]);
+
   // Guarda o rascunho sempre que muda (nunca antes de o ter lido).
   useEffect(() => {
     if (!rascunhoPronto || !chave) return;
@@ -354,20 +374,26 @@ export default function ParceiroReservasPage() {
     if (!rascunhoPronto || !reconciliarNoProximo.current || loading) return;
     reconciliarNoProximo.current = false;
     const r = rascunhoRef.current;
-    if (Object.keys(r.edicoes).length === 0) {
-      setConflitos({});
-      return;
-    }
     const porId: Record<string, Valores> = {};
     for (const rs of reservas) porId[rs._id] = doServidor(rs);
+    const recE = reconciliarEliminacoes(r.eliminar, porId);
+    setElimAlteradas(recE.alteradas);
+    if (Object.keys(r.edicoes).length === 0) {
+      setConflitos({});
+      if (recE.jaEliminadas.length > 0) {
+        setAviso(`${recE.jaEliminadas.length} reserva(s) marcadas para eliminar já tinham sido eliminadas no sistema.`);
+        setRascunho((prev) => ({ ...prev, eliminar: recE.eliminar }));
+      }
+      return;
+    }
     const rec = reconciliar(r.edicoes, porId);
     setConflitos(rec.conflitos);
-    if (rec.desaparecidas.length > 0) {
+    if (rec.desaparecidas.length > 0 || recE.jaEliminadas.length > 0) {
       setAviso(
-        `${rec.desaparecidas.length} reserva(s) com alterações por gravar já não existem no sistema: o rascunho dessas linhas foi descartado.`
+        `${rec.desaparecidas.length + recE.jaEliminadas.length} reserva(s) com alterações por gravar já não existem no sistema: o rascunho dessas linhas foi descartado.`
       );
     }
-    setRascunho((prev) => ({ ...prev, edicoes: rec.edicoes }));
+    setRascunho((prev) => ({ ...prev, edicoes: rec.edicoes, eliminar: recE.eliminar }));
   }, [reservas, rascunhoPronto, loading]);
 
   // Aviso ao sair da página com alterações por gravar (diálogo do browser, sem alert()).
@@ -389,6 +415,8 @@ export default function ParceiroReservasPage() {
 
   /** Altera uma célula (só no rascunho local). `noites` converte-se em check-out. */
   function alterar(linha: Linha, campo: Campo | "noites", valor: string) {
+    // Nada de edições durante o Gravar (perder-se-iam) nem em linhas a eliminar.
+    if (gravando || linha.eliminada) return;
     setAviso(null);
     if (campo === "noites") {
       if (valor === "") return;
@@ -416,6 +444,7 @@ export default function ParceiroReservasPage() {
 
   /** Enter / "+": acrescenta a linha de entrada às reservas por gravar (não envia). */
   function acrescentarNova() {
+    if (gravando) return;
     const v: Valores = {
       check_in: nova.check_in,
       check_out: nova.check_out,
@@ -480,7 +509,8 @@ export default function ParceiroReservasPage() {
   }
 
   function descartarTudo() {
-    setRascunho({ edicoes: {}, novas: [] });
+    setRascunho({ edicoes: {}, novas: [], eliminar: {} });
+    setElimAlteradas([]);
     setConflitos({});
     setErrosLinha({});
     setDescartarAberto(false);
@@ -503,15 +533,18 @@ export default function ParceiroReservasPage() {
     const erros: Record<string, string> = {};
     let edicoes = { ...rascunho.edicoes };
     let novas = [...rascunho.novas];
+    const eliminar = { ...rascunho.eliminar };
     let gravadas = 0;
     let criadas = 0;
     let semRede = false;
     const conflitosRestantes = { ...conflitos };
 
-    const sincronizar = () => setRascunho({ edicoes: { ...edicoes }, novas: [...novas] });
+    const sincronizar = () => setRascunho({ edicoes: { ...edicoes }, novas: [...novas], eliminar: { ...eliminar } });
 
     for (const [id, e] of Object.entries(rascunho.edicoes)) {
       if (semRede) break;
+      // Linha a eliminar: a edição pendente não é enviada.
+      if (id in rascunho.eliminar) continue;
       const reserva = reservas.find((r) => r._id === id);
       if (!reserva) continue;
       // Campos em conflito com o sistema NÃO se enviam sem a pessoa decidir.
@@ -548,8 +581,44 @@ export default function ParceiroReservasPage() {
         }
         sincronizar();
       } catch (err) {
-        erros[id] = mensagemErro(err, "Erro ao gravar.");
-        if (eErroDeRede(err)) semRede = true;
+        if (eErroDeRede(err)) semRede = true; // uma só mensagem «Sem ligação» no ecrã
+        else erros[id] = mensagemErro(err, "Erro ao gravar.");
+      }
+    }
+
+    let eliminadas = 0;
+    for (const id of Object.keys(rascunho.eliminar)) {
+      if (semRede) break;
+      const reserva = reservas.find((r) => r._id === id);
+      if (!reserva) {
+        // Já não existe no sistema: a eliminação está feita.
+        delete eliminar[id];
+        sincronizar();
+        continue;
+      }
+      if (elimAlteradas.includes(id)) {
+        erros[id] = "Esta reserva mudou no sistema depois de a marcares. Confirma «Eliminar mesmo assim» ou «Anular».";
+        continue;
+      }
+      try {
+        await adminDelete(`/api/parceiro/reservas/${id}`);
+        eliminadas++;
+        delete eliminar[id];
+        delete edicoes[id];
+        setReservas((rs) => rs.filter((r) => r._id !== id));
+        sincronizar();
+      } catch (err) {
+        const status = (err as { status?: number })?.status;
+        if (status === 404) {
+          // Entretanto eliminada noutro sítio: o resultado pretendido já existe.
+          delete eliminar[id];
+          delete edicoes[id];
+          setReservas((rs) => rs.filter((r) => r._id !== id));
+          sincronizar();
+        } else {
+          if (eErroDeRede(err)) semRede = true; // uma só mensagem «Sem ligação» no ecrã
+          else erros[id] = mensagemErro(err, "Erro ao eliminar.");
+        }
       }
     }
 
@@ -563,6 +632,8 @@ export default function ParceiroReservasPage() {
       try {
         await adminPost("/api/parceiro/reservas", {
           propriedade_id: n.propriedade_id,
+          // Chave de idempotência: se a resposta se perder, o Gravar seguinte não duplica.
+          chave_idempotencia: n.tmp,
           ...paraPayload(n),
           hospedes: n.hospedes.trim() === "" ? undefined : Number(n.hospedes),
         });
@@ -570,8 +641,8 @@ export default function ParceiroReservasPage() {
         novas = novas.filter((x) => x.tmp !== n.tmp);
         sincronizar();
       } catch (err) {
-        erros[n.tmp] = mensagemErro(err, "Erro ao gravar.");
-        if (eErroDeRede(err)) semRede = true;
+        if (eErroDeRede(err)) semRede = true; // uma só mensagem «Sem ligação» no ecrã
+        else erros[n.tmp] = mensagemErro(err, "Erro ao gravar.");
       }
     }
 
@@ -581,39 +652,42 @@ export default function ParceiroReservasPage() {
     const partes = [];
     if (gravadas) partes.push(`${gravadas} reserva(s) atualizada(s)`);
     if (criadas) partes.push(`${criadas} reserva(s) criada(s)`);
+    if (eliminadas) partes.push(`${eliminadas} reserva(s) eliminada(s)`);
     const resultado = partes.length ? partes.join(", ") : "Nada foi gravado";
     setResumo(
       semRede
-        ? `${resultado}. Sem ligação: o resto continua por gravar, tenta outra vez quando a rede voltar.`
+        ? `${resultado}. O resto continua por gravar.`
         : comErro > 0
         ? `${resultado}. ${comErro} linha(s) com erro continuam por gravar.`
         : `${resultado}. As limpezas foram criadas/reatribuídas.`
     );
     if (semRede) setErro("Sem ligação. As alterações continuam aqui, carrega em Gravar quando a rede voltar.");
     // Recarrega a lista (as reservas novas aparecem com a sua limpeza).
-    if (criadas > 0 || gravadas > 0) await carregar(true);
+    if (criadas > 0 || gravadas > 0 || eliminadas > 0) await carregar(true);
     setGravando(false);
   }
 
-  async function handleEliminar() {
+  /** Confirmado no diálogo: só marca a linha "a eliminar"; o envio é ao Gravar. */
+  function marcarParaEliminar() {
     if (!eliminar) return;
-    setEliminando(true);
-    try {
-      await adminDelete(`/api/parceiro/reservas/${eliminar._id}`);
-      setReservas((rs) => rs.filter((r) => r._id !== eliminar._id));
-      // Eliminar é imediato: o rascunho dessa linha deixa de fazer sentido.
-      setRascunho((r) => {
-        if (!(eliminar._id in r.edicoes)) return r;
-        const { [eliminar._id]: _x, ...resto } = r.edicoes;
-        return { ...r, edicoes: resto };
-      });
-      setEliminar(null);
-    } catch (e) {
-      setErro(mensagemErro(e, "Erro ao eliminar reserva."));
-      setEliminar(null);
-    } finally {
-      setEliminando(false);
-    }
+    const servidor = servidorPorId[eliminar._id];
+    if (servidor) setRascunho((r) => marcarEliminar(r, eliminar._id, servidor));
+    setAviso(null);
+    setEliminar(null);
+  }
+
+  function anularEliminacao(id: string) {
+    setRascunho((r) => anularEliminar(r, id));
+    setElimAlteradas((a) => a.filter((x) => x !== id));
+    setErrosLinha(({ [id]: _x, ...resto }) => resto);
+  }
+
+  /** A reserva mudou no sistema mas a pessoa confirma: passa a valer o estado atual. */
+  function eliminarMesmoAssim(id: string) {
+    const servidor = servidorPorId[id];
+    if (!servidor) return;
+    setRascunho((r) => marcarEliminar(r, id, servidor));
+    setElimAlteradas((a) => a.filter((x) => x !== id));
   }
 
   function formatarData(iso: string): string {
@@ -698,6 +772,7 @@ export default function ParceiroReservasPage() {
       pendentes: new Set<Campo>(CAMPOS),
       estado: null,
       bloqueada: false,
+      semEdicao: gravando,
       erro: errosLinha[n.tmp],
     })),
     ...reservas.map<Linha>((r) => {
@@ -710,6 +785,8 @@ export default function ParceiroReservasPage() {
         pendentes: new Set<Campo>(e ? (Object.keys(e.campos) as Campo[]) : []),
         estado: r.tarefa_gerada_id?.estado ?? null,
         bloqueada: r.tarefa_gerada_id?.estado === "em_curso" || r.tarefa_gerada_id?.estado === "concluida",
+        eliminada: r._id in rascunho.eliminar,
+        semEdicao: gravando || r._id in rascunho.eliminar || r.tarefa_gerada_id?.estado === "em_curso" || r.tarefa_gerada_id?.estado === "concluida",
         erro: errosLinha[r._id],
         conflito: conflitos[r._id],
         reserva: r,
@@ -719,11 +796,25 @@ export default function ParceiroReservasPage() {
 
   /** Mensagens da linha: erro e/ou conflito com o sistema (com escolha explícita). */
   const avisosLinha = (l: Linha) => {
-    if (!l.erro && !l.conflito?.length) return null;
+    const elimMudou = l.eliminada && elimAlteradas.includes(l.key);
+    if (!l.erro && !l.conflito?.length && !elimMudou) return null;
     const servidor = servidorPorId[l.key];
     return (
       <div role="alert" className="space-y-1 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
         {l.erro && <p>{l.erro}</p>}
+        {elimMudou && (
+          <div className="space-y-1">
+            <p>Esta reserva mudou no sistema desde que a marcaste para eliminar.</p>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" size="sm" variant="outline" className="h-8" onClick={() => eliminarMesmoAssim(l.key)}>
+                Eliminar mesmo assim
+              </Button>
+              <Button type="button" size="sm" variant="outline" className="h-8" onClick={() => anularEliminacao(l.key)}>
+                Anular
+              </Button>
+            </div>
+          </div>
+        )}
         {l.conflito && l.conflito.length > 0 && servidor && (
           <div className="space-y-1">
             <p>
@@ -749,7 +840,7 @@ export default function ParceiroReservasPage() {
       onClick={gravar}
       disabled={gravando || pendentes === 0}
       className={`gap-2 ${extra}`}
-      aria-label={pendentes === 0 ? "Gravar (sem alterações por gravar)" : `Gravar ${pendentes} alteração(ões)`}
+      aria-label={pendentes === 0 ? "Gravar (sem alterações por gravar)" : `Gravar: ${textoPendentes(pendentes)}`}
     >
       {gravando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
       Gravar{pendentes > 0 ? ` (${pendentes})` : ""}
@@ -760,7 +851,7 @@ export default function ParceiroReservasPage() {
     <div className={`flex flex-col gap-6 p-4 sm:p-6 lg:p-8 ${pendentes > 0 ? "pb-28 md:pb-8" : ""}`}>
       {/* Anúncio para leitores de ecrã: pendentes e resultado da gravação. */}
       <div className="sr-only" aria-live="polite" role="status">
-        {pendentes === 0 ? "Sem alterações por gravar." : `${pendentes} alteração(ões) por gravar.`} {resumo}
+        {pendentes === 0 ? "Sem alterações por gravar." : `${textoPendentes(pendentes)}.`} {resumo}
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -836,7 +927,7 @@ export default function ParceiroReservasPage() {
         <>
           <div className="sticky top-2 z-20 hidden items-center justify-between gap-3 rounded-lg border border-amber-500/60 bg-background px-4 py-2 shadow md:flex">
             <p className="text-sm font-medium">
-              {pendentes} alteração(ões) por gravar{" "}
+              {textoPendentes(pendentes)}{" "}
               <span className="font-normal text-muted-foreground">(guardadas neste aparelho)</span>
             </p>
             <div className="flex gap-2">
@@ -957,31 +1048,31 @@ export default function ParceiroReservasPage() {
                       <tr className={`border-b last:border-0 hover:bg-muted/30 ${l.nova ? "bg-amber-50/60 dark:bg-amber-950/20" : ""}`}>
                         <td className="whitespace-nowrap px-2 py-1 font-medium">{nome}</td>
                         <td className="p-0">
-                          <Celula type="date" value={ci} pendente={p("check_in")} rotulo={`Check-in, ${nome}`} disabled={l.bloqueada} onCommit={(v) => alterar(l, "check_in", v)} />
+                          <Celula type="date" value={ci} pendente={p("check_in")} rotulo={`Check-in, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "check_in", v)} />
                         </td>
                         <td className="p-0">
-                          <Celula value={l.valores.hora_checkin} pendente={p("hora_checkin")} rotulo={`Hora de check-in, ${nome}`} disabled={l.bloqueada} onCommit={(v) => alterar(l, "hora_checkin", v)} />
+                          <Celula value={l.valores.hora_checkin} pendente={p("hora_checkin")} rotulo={`Hora de check-in, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "hora_checkin", v)} />
                         </td>
                         <td className="p-0">
-                          <Celula type="date" value={co} pendente={p("check_out")} rotulo={`Check-out, ${nome}`} disabled={l.bloqueada} onCommit={(v) => alterar(l, "check_out", v)} />
+                          <Celula type="date" value={co} pendente={p("check_out")} rotulo={`Check-out, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "check_out", v)} />
                         </td>
                         <td className="w-16 p-0">
-                          <Celula type="number" align="right" pendente={p("check_out")} rotulo={`Noites, ${nome}`} value={String(noites(ci, co))} disabled={l.bloqueada} onCommit={(v) => alterar(l, "noites", v)} />
+                          <Celula type="number" align="right" pendente={p("check_out")} rotulo={`Noites, ${nome}`} value={String(noites(ci, co))} disabled={l.semEdicao} onCommit={(v) => alterar(l, "noites", v)} />
                         </td>
                         <td className="w-16 p-0">
-                          <Celula type="number" align="right" value={l.valores.hospedes} pendente={p("hospedes")} rotulo={`Hóspedes, ${nome}`} disabled={l.bloqueada} onCommit={(v) => alterar(l, "hospedes", v)} />
+                          <Celula type="number" align="right" value={l.valores.hospedes} pendente={p("hospedes")} rotulo={`Hóspedes, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "hospedes", v)} />
                         </td>
                         <td className="p-0">
-                          <Celula value={l.valores.nome_hospede} pendente={p("nome_hospede")} rotulo={`Nome do hóspede, ${nome}`} disabled={l.bloqueada} onCommit={(v) => alterar(l, "nome_hospede", v)} />
+                          <Celula value={l.valores.nome_hospede} pendente={p("nome_hospede")} rotulo={`Nome do hóspede, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "nome_hospede", v)} />
                         </td>
                         <td className="p-0">
-                          <Celula type="select" options={PLATAFORMAS} pendente={p("plataforma")} rotulo={`Plataforma, ${nome}`} value={l.valores.plataforma} disabled={l.bloqueada} onCommit={(v) => alterar(l, "plataforma", v)} />
+                          <Celula type="select" options={PLATAFORMAS} pendente={p("plataforma")} rotulo={`Plataforma, ${nome}`} value={l.valores.plataforma} disabled={l.semEdicao} onCommit={(v) => alterar(l, "plataforma", v)} />
                         </td>
                         <td className="p-0">
-                          <Celula value={l.valores.horario_preferido} pendente={p("horario_preferido")} rotulo={`Horário preferido, ${nome}`} disabled={l.bloqueada} onCommit={(v) => alterar(l, "horario_preferido", v)} />
+                          <Celula value={l.valores.horario_preferido} pendente={p("horario_preferido")} rotulo={`Horário preferido, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "horario_preferido", v)} />
                         </td>
                         <td className="p-0">
-                          <Celula value={l.valores.observacoes} pendente={p("observacoes")} rotulo={`Observações, ${nome}`} disabled={l.bloqueada} onCommit={(v) => alterar(l, "observacoes", v)} />
+                          <Celula value={l.valores.observacoes} pendente={p("observacoes")} rotulo={`Observações, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "observacoes", v)} />
                         </td>
                         <td className="whitespace-nowrap px-2">
                           {l.nova ? (
@@ -1003,17 +1094,23 @@ export default function ParceiroReservasPage() {
                               <X className="h-4 w-4" />
                             </Button>
                           ) : (
+                            l.eliminada ? (
+                            <Button variant="outline" size="sm" onClick={() => anularEliminacao(l.key)} aria-label={`Anular a eliminação da reserva de ${nome}`}>
+                              Anular
+                            </Button>
+                            ) : (
                             <Button
                               variant="ghost"
                               size="sm"
                               onClick={() => l.reserva && setEliminar(l.reserva)}
-                              disabled={l.bloqueada}
+                              disabled={l.bloqueada || gravando}
                               title={l.bloqueada ? "A limpeza já começou ou foi concluída." : "Eliminar reserva"}
                               aria-label={`Eliminar reserva de ${nome}, ${formatarData(l.reserva?.check_in ?? "")}`}
                               className="text-destructive hover:text-destructive"
                             >
                               <Trash2 className="h-4 w-4" />
                             </Button>
+                            )
                           )}
                         </td>
                       </tr>
@@ -1131,47 +1228,53 @@ export default function ParceiroReservasPage() {
                         <X className="h-5 w-5" />
                       </Button>
                     ) : (
+                      l.eliminada ? (
+                      <Button variant="outline" className="h-11 shrink-0" onClick={() => anularEliminacao(l.key)} aria-label={`Anular a eliminação da reserva de ${nome}`}>
+                        Anular
+                      </Button>
+                      ) : (
                       <Button
                         variant="ghost"
                         className="h-11 w-11 shrink-0 text-destructive hover:text-destructive"
                         onClick={() => l.reserva && setEliminar(l.reserva)}
-                        disabled={l.bloqueada}
+                        disabled={l.bloqueada || gravando}
                         title={l.bloqueada ? "A limpeza já começou ou foi concluída." : "Eliminar reserva"}
                         aria-label={`Eliminar reserva de ${nome}, ${formatarData(l.reserva?.check_in ?? "")}`}
                       >
                         <Trash2 className="h-5 w-5" />
                       </Button>
+                      )
                     )}
                   </div>
                   {avisosLinha(l)}
                   <div className="grid grid-cols-2 gap-3">
                     <Campo texto="Check-in">
-                      <Celula cartao type="date" value={ci} pendente={p("check_in")} rotulo={`Check-in, ${nome}`} disabled={l.bloqueada} onCommit={(v) => alterar(l, "check_in", v)} />
+                      <Celula cartao type="date" value={ci} pendente={p("check_in")} rotulo={`Check-in, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "check_in", v)} />
                     </Campo>
                     <Campo texto="Check-out">
-                      <Celula cartao type="date" value={co} pendente={p("check_out")} rotulo={`Check-out, ${nome}`} disabled={l.bloqueada} onCommit={(v) => alterar(l, "check_out", v)} />
+                      <Celula cartao type="date" value={co} pendente={p("check_out")} rotulo={`Check-out, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "check_out", v)} />
                     </Campo>
                     <Campo texto="Hora de check-in">
-                      <Celula cartao value={l.valores.hora_checkin} pendente={p("hora_checkin")} rotulo={`Hora de check-in, ${nome}`} disabled={l.bloqueada} onCommit={(v) => alterar(l, "hora_checkin", v)} />
+                      <Celula cartao value={l.valores.hora_checkin} pendente={p("hora_checkin")} rotulo={`Hora de check-in, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "hora_checkin", v)} />
                     </Campo>
                     <Campo texto="Noites">
-                      <Celula cartao type="number" value={String(noites(ci, co))} pendente={p("check_out")} rotulo={`Noites, ${nome}`} disabled={l.bloqueada} onCommit={(v) => alterar(l, "noites", v)} />
+                      <Celula cartao type="number" value={String(noites(ci, co))} pendente={p("check_out")} rotulo={`Noites, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "noites", v)} />
                     </Campo>
                     <Campo texto="Hóspedes">
-                      <Celula cartao type="number" value={l.valores.hospedes} pendente={p("hospedes")} rotulo={`Hóspedes, ${nome}`} disabled={l.bloqueada} onCommit={(v) => alterar(l, "hospedes", v)} />
+                      <Celula cartao type="number" value={l.valores.hospedes} pendente={p("hospedes")} rotulo={`Hóspedes, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "hospedes", v)} />
                     </Campo>
                     <Campo texto="Plataforma">
-                      <Celula cartao type="select" options={PLATAFORMAS} value={l.valores.plataforma} pendente={p("plataforma")} rotulo={`Plataforma, ${nome}`} disabled={l.bloqueada} onCommit={(v) => alterar(l, "plataforma", v)} />
+                      <Celula cartao type="select" options={PLATAFORMAS} value={l.valores.plataforma} pendente={p("plataforma")} rotulo={`Plataforma, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "plataforma", v)} />
                     </Campo>
                   </div>
                   <Campo texto="Nome do hóspede">
-                    <Celula cartao value={l.valores.nome_hospede} pendente={p("nome_hospede")} rotulo={`Nome do hóspede, ${nome}`} disabled={l.bloqueada} onCommit={(v) => alterar(l, "nome_hospede", v)} />
+                    <Celula cartao value={l.valores.nome_hospede} pendente={p("nome_hospede")} rotulo={`Nome do hóspede, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "nome_hospede", v)} />
                   </Campo>
                   <Campo texto="Horário preferido de limpeza">
-                    <Celula cartao value={l.valores.horario_preferido} pendente={p("horario_preferido")} rotulo={`Horário preferido, ${nome}`} disabled={l.bloqueada} onCommit={(v) => alterar(l, "horario_preferido", v)} />
+                    <Celula cartao value={l.valores.horario_preferido} pendente={p("horario_preferido")} rotulo={`Horário preferido, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "horario_preferido", v)} />
                   </Campo>
                   <Campo texto="Notas">
-                    <Celula cartao value={l.valores.observacoes} pendente={p("observacoes")} rotulo={`Observações, ${nome}`} disabled={l.bloqueada} onCommit={(v) => alterar(l, "observacoes", v)} />
+                    <Celula cartao value={l.valores.observacoes} pendente={p("observacoes")} rotulo={`Observações, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "observacoes", v)} />
                   </Campo>
                 </CardContent>
               </Card>
@@ -1187,7 +1290,7 @@ export default function ParceiroReservasPage() {
           <div>
             <DialogTitle>Descartar alterações</DialogTitle>
             <DialogDescription>
-              Vais perder as {pendentes} alteração(ões) por gravar (guardadas só neste aparelho). As reservas já gravadas não mudam.
+              Vais perder: {textoPendentes(pendentes)} (guardadas só neste aparelho). As reservas já gravadas não mudam.
             </DialogDescription>
           </div>
           <DialogClose onClick={() => setDescartarAberto(false)} />
@@ -1198,8 +1301,8 @@ export default function ParceiroReservasPage() {
         </DialogFooter>
       </Dialog>
 
-      {/* Confirmação de eliminação (imediata, como antes) */}
-      <Dialog open={!!eliminar} onOpenChange={(o) => !o && !eliminando && setEliminar(null)}>
+      {/* Confirmação de eliminação: só marca a linha; envia-se ao Gravar */}
+      <Dialog open={!!eliminar} onOpenChange={(o) => !o && setEliminar(null)}>
         <DialogHeader>
           <div>
             <DialogTitle className="flex items-center gap-2">
@@ -1208,19 +1311,19 @@ export default function ParceiroReservasPage() {
             </DialogTitle>
             <DialogDescription>
               {eliminar
-                ? `Eliminar a reserva de ${eliminar.propriedade_id?.nome ?? "propriedade"} (${formatarData(eliminar.check_in)} → ${formatarData(eliminar.check_out)})? A limpeza associada será cancelada. Isto acontece já, sem passar por «Gravar».`
+                ? `Eliminar a reserva de ${eliminar.propriedade_id?.nome ?? "propriedade"} (${formatarData(eliminar.check_in)} → ${formatarData(eliminar.check_out)})? A reserva fica marcada «a eliminar» e só é eliminada (com a limpeza associada cancelada) quando carregares em «Gravar». Podes anular antes.`
                 : ""}
             </DialogDescription>
           </div>
-          <DialogClose onClick={() => !eliminando && setEliminar(null)} />
+          <DialogClose onClick={() => setEliminar(null)} />
         </DialogHeader>
         <DialogFooter>
-          <Button variant="outline" onClick={() => setEliminar(null)} disabled={eliminando}>
+          <Button variant="outline" onClick={() => setEliminar(null)}>
             Cancelar
           </Button>
-          <Button variant="destructive" onClick={handleEliminar} disabled={eliminando}>
-            {eliminando ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
-            Eliminar
+          <Button variant="destructive" onClick={marcarParaEliminar}>
+            <Trash2 className="mr-2 h-4 w-4" />
+            Marcar para eliminar
           </Button>
         </DialogFooter>
       </Dialog>
