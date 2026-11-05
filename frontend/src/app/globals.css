@@ -11,9 +11,11 @@
  *   - Background: branco puro (#fff).
  *   - Foreground: azul/cinza muito escuro (texto principal).
  *   - Primary: tom Dourado/Areia elegante (43 74% 49%) — luxo, sofisticado.
+ *     Texto SEMPRE escuro sobre dourado (branco só dava 2,25:1); para texto,
+ *     links e anel de foco sobre fundo claro usa-se --gold-text (dourado escuro).
  *   - Muted/Secondary: cinza super suave (210 40% 96%) para fundos secundários.
  *   - Border/Input: hairline discreto (214.3 31.8% 91.4%).
- *   - Radius: 0.25rem — bordas "afiadas" e corporativas.
+ *   - Radius: 0.5rem (opção aprovada "Dourado refinado").
  *   - Sombras: shadow-sm (flat), sem elevação pesada.
  */
 
@@ -31,27 +33,45 @@
 
     /* Primary — Dourado/Areia elegante */
     --primary: 43 74% 49%;
-    --primary-foreground: 0 0% 100%;      /* texto branco sobre dourado */
+    --primary-foreground: 222 47% 11%;    /* texto escuro sobre dourado (7,96:1) */
 
     /* Secondary / muted / accent — cinza super suave */
     --secondary: 210 40% 96%;
     --secondary-foreground: 222 47% 11%;
     --muted: 210 40% 96%;                 /* fundos secundários */
-    --muted-foreground: 215 16% 47%;      /* texto secundário */
+    --muted-foreground: 215 19% 38%;      /* texto secundário (6,6:1 sobre branco) */
     --accent: 210 40% 96%;
     --accent-foreground: 222 47% 11%;
 
     /* Destructive (vermelho) */
-    --destructive: 0 72% 51%;
+    --destructive: 0 70% 42%;
     --destructive-foreground: 0 0% 98%;
 
     /* Borders hairline */
     --border: 214.3 31.8% 91.4%;
     --input: 214.3 31.8% 91.4%;
-    --ring: 43 74% 49%;                   /* igual ao primary (dourado) */
+    --ring: 40 90% 25%;                   /* dourado escuro: o dourado da marca dava 2,25:1 sobre branco */
 
-    /* Radius "afiado" / corporativo */
-    --radius: 0.25rem;
+    --radius: 0.5rem;
+
+    /* Dourado para texto/links/realces (o --primary é para fundos) */
+    --gold-text: 40 90% 25%;
+    --gold-soft: 43 80% 94%;
+    --gold-border: 44 69% 76%;
+
+    /*
+     * Estados da tarefa — UMA SÓ fonte de verdade (cor forte + fundo suave).
+     * Usar via classes Tailwind `text-status-*` / `bg-status-*-bg` ou via
+     * <EstadoTarefaBadge/> / variantes do <Badge/>. Nunca com cores à mão.
+     *   porAtribuir  = ainda ninguém (espera normal, p. ex. libertada por uma ausência)
+     *   naoAtribuida = tentou-se e falhou (equipa sem folga/lotada): exige ação do gestor
+     */
+    --status-porat: 30 90% 28%;   --status-porat-bg: 38 95% 92%;
+    --status-naoat: 0 70% 38%;    --status-naoat-bg: 0 90% 96%;
+    --status-atrib: 215 70% 38%;  --status-atrib-bg: 213 77% 95%;
+    --status-curso: 262 55% 40%;  --status-curso-bg: 263 69% 95%;
+    --status-conc: 150 59% 25%;   --status-conc-bg: 150 50% 93%;
+    --status-canc: 213 14% 38%;   --status-canc-bg: 210 17% 93%;
   }
 
   .dark {
@@ -78,6 +98,19 @@
     --border: 215 28% 20%;
     --input: 215 28% 20%;
     --ring: 43 74% 55%;
+
+    /* Dourado para texto sobre fundo escuro */
+    --gold-text: 43 74% 60%;
+    --gold-soft: 43 30% 18%;
+    --gold-border: 43 35% 32%;
+
+    /* Estados: texto claro sobre fundo escuro tingido */
+    --status-porat: 38 92% 70%;   --status-porat-bg: 30 60% 16%;
+    --status-naoat: 0 90% 78%;    --status-naoat-bg: 0 50% 18%;
+    --status-atrib: 213 90% 76%;  --status-atrib-bg: 215 55% 20%;
+    --status-curso: 262 85% 82%;  --status-curso-bg: 262 40% 22%;
+    --status-conc: 150 55% 66%;   --status-conc-bg: 150 40% 15%;
+    --status-canc: 213 15% 72%;   --status-canc-bg: 215 14% 20%;
   }
 }
 

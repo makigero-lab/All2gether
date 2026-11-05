@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { corEstadoTarefa, infoEstadoTarefa } from "@/lib/estados";
 import {
   BarChart3,
   Loader2,
@@ -107,25 +108,8 @@ const CORES = {
   muted: "hsl(220, 14%, 55%)",
 };
 
-const ESTADO_LABEL: Record<string, string> = {
-  por_atribuir: "Por atribuir",
-  atribuida: "Atribuída",
-  em_curso: "Em curso",
-  concluida: "Concluída",
-  cancelada: "Cancelada",
-  // Prompt 138 (136 V2) — SLA excedido.
-  nao_atribuida: "Não atribuída (SLA)",
-};
-
-const ESTADO_COR: Record<string, string> = {
-  concluida: CORES.verde,
-  atribuida: CORES.dourado,
-  em_curso: CORES.amber,
-  por_atribuir: CORES.muted,
-  cancelada: CORES.vermelho,
-  // Prompt 138 (136 V2) — vermelho (urgente).
-  nao_atribuida: CORES.vermelho,
-};
+// Rótulos e cores dos estados vêm de @/lib/estados (tokens --status-*).
+const ESTADO_LABEL = (estado: string): string => infoEstadoTarefa(estado).label;
 
 const PRESETS = [
   { id: "7", label: "7 dias", dias: 7 },
@@ -574,7 +558,7 @@ export default function RelatoriosPage() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <TrendingUp className="h-5 w-5 text-primary" />
+                <TrendingUp className="h-5 w-5 text-gold-text" />
                 Evolução diária
               </CardTitle>
               <CardDescription>
@@ -631,7 +615,7 @@ export default function RelatoriosPage() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <BarChart3 className="h-5 w-5 text-primary" />
+                  <BarChart3 className="h-5 w-5 text-gold-text" />
                   Produtividade por funcionário
                 </CardTitle>
                 <CardDescription>Concluídas vs. total de tarefas atribuídas.</CardDescription>
@@ -673,7 +657,7 @@ export default function RelatoriosPage() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <BarChart3 className="h-5 w-5 text-primary" />
+                  <BarChart3 className="h-5 w-5 text-gold-text" />
                   Distribuição por estado
                 </CardTitle>
                 <CardDescription>Repartição das tarefas no período.</CardDescription>
@@ -697,17 +681,17 @@ export default function RelatoriosPage() {
                           innerRadius={45}
                           paddingAngle={2}
                           label={({ payload }: { payload?: PorEstado }) =>
-                            `${ESTADO_LABEL[payload?.estado ?? ""] ?? payload?.estado}: ${payload?.total ?? 0}`
+                            `${ESTADO_LABEL(payload?.estado ?? "")}: ${payload?.total ?? 0}`
                           }
                           labelLine={false}
                           style={{ fontSize: 11 }}
                         >
                           {data.porEstado.map((e) => (
-                            <Cell key={e.estado} fill={ESTADO_COR[e.estado] ?? CORES.muted} />
+                            <Cell key={e.estado} fill={corEstadoTarefa(e.estado)} />
                           ))}
                         </Pie>
                         <Tooltip
-                          formatter={(v, n) => [v, ESTADO_LABEL[String(n)] ?? n]}
+                          formatter={(v, n) => [v, ESTADO_LABEL(String(n))]}
                           contentStyle={{ borderRadius: 8, fontSize: 12 }}
                         />
                       </PieChart>
@@ -781,7 +765,7 @@ export default function RelatoriosPage() {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="space-y-1">
                   <CardTitle className="flex items-center gap-2">
-                    <Sparkles className="h-5 w-5 text-primary" />
+                    <Sparkles className="h-5 w-5 text-gold-text" />
                     Resumo Executivo IA
                   </CardTitle>
                   <CardDescription>
@@ -876,7 +860,7 @@ function ResumoIATexto({ texto }: { texto: string }) {
       blocos.push(
         <h3
           key={`h-${idx}`}
-          className="mt-4 mb-1 text-sm font-semibold text-primary first:mt-0"
+          className="mt-4 mb-1 text-sm font-semibold text-gold-text first:mt-0"
         >
           {t.slice(3).trim()}
         </h3>

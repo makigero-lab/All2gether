@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { EstadoTarefaBadge } from "@/components/ui/estado-tarefa-badge";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
@@ -48,19 +48,18 @@ interface ReservaDTO {
   createdAt: string;
 }
 
-const ESTADO_LIMPEZA: Record<string, string> = {
-  por_atribuir: "Por atribuir",
-  nao_atribuida: "Por atribuir",
-  atribuida: "Atribuída",
-  em_curso: "Em curso",
-  concluida: "Concluída",
-  cancelada: "Cancelada",
-};
-
 const PLATAFORMAS = ["Booking", "Airbnb", "Direto", "Vrbo", "Outra"];
 
+/** Célula do desktop (tabela, estilo folha de cálculo). */
 const CELULA =
   "h-9 w-full bg-transparent px-2 text-sm outline-none focus:bg-primary/5 focus:ring-2 focus:ring-inset focus:ring-primary disabled:cursor-not-allowed disabled:opacity-60";
+
+/** Campo do cartão (telemóvel): alvo de toque >= 44 px, 16 px (o iOS não faz zoom). */
+const CELULA_CARTAO =
+  "h-11 w-full min-w-0 rounded-md border border-input bg-background px-3 text-base outline-none focus:border-gold-text focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60";
+
+/** Para o parceiro, "Não atribuída" (detalhe interno) é igual a "Por atribuir". */
+const estadoParaParceiro = (e: string) => (e === "nao_atribuida" ? "por_atribuir" : e);
 
 const dia = (iso: string) => iso.slice(0, 10);
 
@@ -90,6 +89,7 @@ function Celula({
   placeholder,
   align,
   rotulo,
+  cartao,
   onCommit,
 }: {
   value: string;
@@ -100,6 +100,8 @@ function Celula({
   align?: "right";
   /** Nome acessível da célula (aria-label), ex.: "Check-in, Casa Azul". */
   rotulo: string;
+  /** Aspeto de cartão (telemóvel): campo com contorno e o aviso de erro em linha. */
+  cartao?: boolean;
   onCommit: (novo: string) => Promise<void> | void;
 }) {
   const [v, setV] = useState(value);
@@ -144,7 +146,7 @@ function Celula({
     "aria-label": rotulo,
     "aria-invalid": erro ? true : undefined,
     title: erro ?? undefined,
-    className: `${CELULA} ${align === "right" ? "text-right" : ""} ${erro ? "ring-2 ring-inset ring-destructive" : ""}`,
+    className: `${cartao ? CELULA_CARTAO : CELULA} ${align === "right" ? "text-right" : ""} ${erro ? "ring-2 ring-inset ring-destructive" : ""}`,
   };
 
   if (type === "select") {
@@ -164,7 +166,7 @@ function Celula({
           <option key={o} value={o}>{o}</option>
         ))}
       </select>
-      {erro && <AvisoCelula mensagem={erro} onRepetir={() => guardar(v)} />}
+      {erro && <AvisoCelula mensagem={erro} emLinha={cartao} onRepetir={() => guardar(v)} />}
       </div>
     );
   }
@@ -197,29 +199,54 @@ function Celula({
         }
       }}
     />
-    {erro && <AvisoCelula mensagem={erro} onRepetir={() => guardar(v)} />}
+    {erro && <AvisoCelula mensagem={erro} emLinha={cartao} onRepetir={() => guardar(v)} />}
     </div>
   );
 }
 
 /** Aviso visível (texto, não só tooltip) quando a gravação de uma célula falha. */
-function AvisoCelula({ mensagem, onRepetir }: { mensagem: string; onRepetir: () => void }) {
+function AvisoCelula({
+  mensagem,
+  onRepetir,
+  emLinha,
+}: {
+  mensagem: string;
+  onRepetir: () => void;
+  /** No cartão o aviso ocupa o seu espaço (não flutua por cima dos campos de baixo). */
+  emLinha?: boolean;
+}) {
   return (
     <span
       role="alert"
-      className="absolute left-1 top-full z-10 flex items-center gap-2 rounded bg-destructive px-1.5 py-0.5 text-[11px] text-white shadow"
+      className={
+        emLinha
+          ? "mt-1 flex flex-wrap items-center gap-2 rounded bg-destructive px-2 py-1.5 text-sm text-white"
+          : "absolute left-1 top-full z-10 flex items-center gap-2 rounded bg-destructive px-1.5 py-0.5 text-[11px] text-white shadow"
+      }
     >
-      <span className="max-w-[16rem] whitespace-normal">{mensagem}</span>
+      <span className={emLinha ? "min-w-0 flex-1 whitespace-normal" : "max-w-[16rem] whitespace-normal"}>{mensagem}</span>
       <button
         type="button"
         // Evita o blur do campo (que já repetiria a gravação) antes do clique.
         onMouseDown={(e) => e.preventDefault()}
         onClick={onRepetir}
-        className="shrink-0 whitespace-nowrap rounded bg-white/20 px-1.5 py-0.5 font-medium underline hover:bg-white/30"
+        className={`shrink-0 whitespace-nowrap rounded bg-white/20 font-medium underline hover:bg-white/30 ${emLinha ? "min-h-[44px] px-3" : "px-1.5 py-0.5"}`}
       >
         Tentar de novo
       </button>
     </span>
+  );
+}
+
+/** Campo de cartão com etiqueta visível (o controlo tem o seu próprio aria-label). */
+function Campo({ texto, className, children }: { texto: string; className?: string; children: React.ReactNode }) {
+  return (
+    <div className={`min-w-0 ${className ?? ""}`}>
+      <span aria-hidden="true" className="mb-1 block text-xs font-medium text-muted-foreground">
+        {texto}
+      </span>
+      {children}
+    </div>
   );
 }
 
@@ -404,12 +431,13 @@ export default function ParceiroReservasPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
-            <Table2 className="h-6 w-6 text-primary" />
+            <Table2 className="h-6 w-6 text-gold-text" />
             Minhas Reservas
           </h1>
           <p className="text-sm text-muted-foreground">
-            Clica numa célula para editar (guarda ao sair). Para uma reserva nova, preenche a linha
-            do topo e carrega em Enter. Cada reserva gera uma tarefa de limpeza.
+            Clica num campo para editar (guarda ao sair). Para uma reserva nova, preenche a linha
+            do topo (ou o cartão &quot;Nova reserva&quot; no telemóvel) e carrega em Enter. Cada reserva
+            gera uma tarefa de limpeza.
           </p>
         </div>
         <div className="flex gap-2">
@@ -418,6 +446,7 @@ export default function ParceiroReservasPage() {
             onClick={handleExportarExcel}
             className="gap-2"
             title="Exporta as tuas reservas para Excel (.xlsx)."
+            aria-label="Exportar reservas para Excel"
           >
             <Download className="h-4 w-4" />
             <span className="hidden sm:inline">Exportar</span>
@@ -432,6 +461,7 @@ export default function ParceiroReservasPage() {
             disabled={importLoading}
             className="gap-2"
             title="Importa reservas em massa de um ficheiro Excel (.xlsx)."
+            aria-label="Importar reservas de um ficheiro Excel"
           >
             <Upload className="h-4 w-4" />
             <span className="hidden sm:inline">Importar</span>
@@ -460,7 +490,9 @@ export default function ParceiroReservasPage() {
           </p>
         </div>
       ) : (
-        <Card>
+        <>
+        {/* Desktop (md+): tabela editável tipo folha de cálculo. */}
+        <Card className="hidden md:block">
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1250px] border-collapse text-sm">
               <thead>
@@ -487,6 +519,7 @@ export default function ParceiroReservasPage() {
                       value={nova.propriedade_id}
                       onChange={(e) => setN("propriedade_id")(e.target.value)}
                       className={CELULA}
+                      aria-label="Nova reserva: propriedade"
                     >
                       <option value="">Propriedade…</option>
                       {propriedades.map((p) => (
@@ -495,37 +528,37 @@ export default function ParceiroReservasPage() {
                     </select>
                   </td>
                   <td className="p-0">
-                    <input type="date" value={nova.check_in} className={CELULA}
+                    <input type="date" value={nova.check_in} className={CELULA} aria-label="Nova reserva: check-in"
                       onChange={(e) => setNova((n) => ({ ...n, check_in: e.target.value, check_out: n.check_out || e.target.value }))} />
                   </td>
                   <td className="p-0">
-                    <input value={nova.hora_checkin} onChange={(e) => setN("hora_checkin")(e.target.value)} placeholder="18:00" className={CELULA} />
+                    <input value={nova.hora_checkin} onChange={(e) => setN("hora_checkin")(e.target.value)} placeholder="18:00" className={CELULA} aria-label="Nova reserva: hora de check-in" />
                   </td>
                   <td className="p-0">
-                    <input type="date" value={nova.check_out} onChange={(e) => setN("check_out")(e.target.value)} className={CELULA} />
+                    <input type="date" value={nova.check_out} onChange={(e) => setN("check_out")(e.target.value)} className={CELULA} aria-label="Nova reserva: check-out" />
                   </td>
                   <td className="px-2 text-right text-muted-foreground">{noites(nova.check_in, nova.check_out) || ""}</td>
                   <td className="p-0">
-                    <input type="number" min={0} value={nova.hospedes} onChange={(e) => setN("hospedes")(e.target.value)} className={`${CELULA} text-right`} />
+                    <input type="number" min={0} value={nova.hospedes} onChange={(e) => setN("hospedes")(e.target.value)} className={`${CELULA} text-right`} aria-label="Nova reserva: hóspedes" />
                   </td>
                   <td className="p-0">
-                    <input value={nova.nome_hospede} onChange={(e) => setN("nome_hospede")(e.target.value)} className={CELULA} />
+                    <input value={nova.nome_hospede} onChange={(e) => setN("nome_hospede")(e.target.value)} className={CELULA} aria-label="Nova reserva: nome do hóspede" />
                   </td>
                   <td className="p-0">
-                    <select value={nova.plataforma} onChange={(e) => setN("plataforma")(e.target.value)} className={CELULA}>
+                    <select value={nova.plataforma} onChange={(e) => setN("plataforma")(e.target.value)} className={CELULA} aria-label="Nova reserva: plataforma">
                       <option value="">—</option>
                       {PLATAFORMAS.map((o) => <option key={o} value={o}>{o}</option>)}
                     </select>
                   </td>
                   <td className="p-0">
-                    <input value={nova.horario_preferido} onChange={(e) => setN("horario_preferido")(e.target.value)} placeholder="11h - 14h" className={CELULA} />
+                    <input value={nova.horario_preferido} onChange={(e) => setN("horario_preferido")(e.target.value)} placeholder="11h - 14h" className={CELULA} aria-label="Nova reserva: horário preferido de limpeza" />
                   </td>
                   <td className="p-0">
-                    <input value={nova.observacoes} onChange={(e) => setN("observacoes")(e.target.value)} className={CELULA} />
+                    <input value={nova.observacoes} onChange={(e) => setN("observacoes")(e.target.value)} className={CELULA} aria-label="Nova reserva: notas" />
                   </td>
                   <td className="px-2 text-xs text-muted-foreground">nova</td>
                   <td className="px-1 text-right">
-                    <Button size="sm" onClick={criarNova} disabled={criando} title="Adicionar reserva (Enter)">
+                    <Button size="sm" onClick={criarNova} disabled={criando} title="Adicionar reserva (Enter)" aria-label="Adicionar reserva">
                       {criando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
                     </Button>
                   </td>
@@ -580,17 +613,7 @@ export default function ParceiroReservasPage() {
                       </td>
                       <td className="whitespace-nowrap px-2">
                         {estado ? (
-                          <Badge
-                            variant={
-                              estado === "concluida"
-                                ? "success"
-                                : estado === "atribuida"
-                                ? "secondary"
-                                : "outline"
-                            }
-                          >
-                            {ESTADO_LIMPEZA[estado] ?? estado}
-                          </Badge>
+                          <EstadoTarefaBadge estado={estadoParaParceiro(estado)} />
                         ) : (
                           "—"
                         )}
@@ -602,6 +625,7 @@ export default function ParceiroReservasPage() {
                           onClick={() => setEliminar(r)}
                           disabled={bloqueada}
                           title={bloqueada ? "A limpeza já começou ou foi concluída." : "Eliminar reserva"}
+                          aria-label={`Eliminar reserva de ${r.propriedade_id?.nome ?? "propriedade"}, ${formatarData(r.check_in)}`}
                           className="text-destructive hover:text-destructive"
                         >
                           <Trash2 className="h-4 w-4" />
@@ -619,6 +643,131 @@ export default function ParceiroReservasPage() {
             </p>
           )}
         </Card>
+
+        {/* Telemóvel (< md): cartões com os mesmos campos editáveis (a mesma <Celula/>). */}
+        <div className="flex flex-col gap-3 md:hidden">
+          <Card onKeyDown={enterCria}>
+            <CardContent className="space-y-3 p-4">
+              <h2 className="text-base font-semibold">Nova reserva</h2>
+              <Campo texto="Propriedade">
+                <select
+                  value={nova.propriedade_id}
+                  onChange={(e) => setN("propriedade_id")(e.target.value)}
+                  className={CELULA_CARTAO}
+                  aria-label="Nova reserva: propriedade"
+                >
+                  <option value="">Propriedade…</option>
+                  {propriedades.map((p) => (
+                    <option key={p._id} value={p._id}>{p.nome}</option>
+                  ))}
+                </select>
+              </Campo>
+              <div className="grid grid-cols-2 gap-3">
+                <Campo texto="Check-in">
+                  <input type="date" value={nova.check_in} className={CELULA_CARTAO} aria-label="Nova reserva: check-in"
+                    onChange={(e) => setNova((n) => ({ ...n, check_in: e.target.value, check_out: n.check_out || e.target.value }))} />
+                </Campo>
+                <Campo texto="Check-out">
+                  <input type="date" value={nova.check_out} onChange={(e) => setN("check_out")(e.target.value)} className={CELULA_CARTAO} aria-label="Nova reserva: check-out" />
+                </Campo>
+                <Campo texto="Hora de check-in">
+                  <input value={nova.hora_checkin} onChange={(e) => setN("hora_checkin")(e.target.value)} placeholder="18:00" className={CELULA_CARTAO} aria-label="Nova reserva: hora de check-in" />
+                </Campo>
+                <Campo texto="Hóspedes">
+                  <input type="number" inputMode="numeric" min={0} value={nova.hospedes} onChange={(e) => setN("hospedes")(e.target.value)} className={CELULA_CARTAO} aria-label="Nova reserva: hóspedes" />
+                </Campo>
+              </div>
+              <Campo texto="Nome do hóspede">
+                <input value={nova.nome_hospede} onChange={(e) => setN("nome_hospede")(e.target.value)} className={CELULA_CARTAO} aria-label="Nova reserva: nome do hóspede" />
+              </Campo>
+              <Campo texto="Plataforma">
+                <select value={nova.plataforma} onChange={(e) => setN("plataforma")(e.target.value)} className={CELULA_CARTAO} aria-label="Nova reserva: plataforma">
+                  <option value="">—</option>
+                  {PLATAFORMAS.map((o) => <option key={o} value={o}>{o}</option>)}
+                </select>
+              </Campo>
+              <Campo texto="Horário preferido de limpeza">
+                <input value={nova.horario_preferido} onChange={(e) => setN("horario_preferido")(e.target.value)} placeholder="11h - 14h" className={CELULA_CARTAO} aria-label="Nova reserva: horário preferido de limpeza" />
+              </Campo>
+              <Campo texto="Notas">
+                <input value={nova.observacoes} onChange={(e) => setN("observacoes")(e.target.value)} className={CELULA_CARTAO} aria-label="Nova reserva: notas" />
+              </Campo>
+              {novaErro && <p role="alert" className="text-sm text-destructive">{novaErro}</p>}
+              <Button size="touch" className="w-full" onClick={criarNova} disabled={criando} aria-label="Adicionar reserva">
+                {criando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                Adicionar reserva
+              </Button>
+            </CardContent>
+          </Card>
+
+          {reservas.length === 0 && (
+            <p className="px-2 py-4 text-center text-sm text-muted-foreground">
+              Sem reservas. Preenche o cartão &quot;Nova reserva&quot; para adicionar a primeira.
+            </p>
+          )}
+
+          {reservas.map((r) => {
+            const estado = r.tarefa_gerada_id?.estado ?? null;
+            const bloqueada = estado === "em_curso" || estado === "concluida";
+            const ci = dia(r.check_in);
+            const co = dia(r.check_out);
+            const nome = r.propriedade_id?.nome ?? "reserva";
+            return (
+              <Card key={r._id} aria-label={`Reserva, ${nome}, ${formatarData(r.check_in)}`}>
+                <CardContent className="space-y-3 p-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <h2 className="truncate text-base font-semibold">{r.propriedade_id?.nome ?? "—"}</h2>
+                      <div className="mt-1">
+                        {estado ? <EstadoTarefaBadge estado={estadoParaParceiro(estado)} /> : <span className="text-xs text-muted-foreground">Sem limpeza</span>}
+                      </div>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      className="h-11 w-11 shrink-0 text-destructive hover:text-destructive"
+                      onClick={() => setEliminar(r)}
+                      disabled={bloqueada}
+                      title={bloqueada ? "A limpeza já começou ou foi concluída." : "Eliminar reserva"}
+                      aria-label={`Eliminar reserva de ${nome}, ${formatarData(r.check_in)}`}
+                    >
+                      <Trash2 className="h-5 w-5" />
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Campo texto="Check-in">
+                      <Celula cartao type="date" value={ci} rotulo={`Check-in, ${nome}`} disabled={bloqueada} onCommit={(v) => v ? atualizar(r._id, { check_in: v }) : undefined} />
+                    </Campo>
+                    <Campo texto="Check-out">
+                      <Celula cartao type="date" value={co} rotulo={`Check-out, ${nome}`} disabled={bloqueada} onCommit={(v) => v ? atualizar(r._id, { check_out: v }) : undefined} />
+                    </Campo>
+                    <Campo texto="Hora de check-in">
+                      <Celula cartao value={r.hora_checkin ?? ""} rotulo={`Hora de check-in, ${nome}`} disabled={bloqueada} onCommit={(v) => atualizar(r._id, { hora_checkin: v })} />
+                    </Campo>
+                    <Campo texto="Noites">
+                      <Celula cartao type="number" value={String(noites(ci, co))} rotulo={`Noites, ${nome}`} disabled={bloqueada} onCommit={(v) => v !== "" ? atualizar(r._id, { check_out: somarDias(ci, Number(v)) }) : undefined} />
+                    </Campo>
+                    <Campo texto="Hóspedes">
+                      <Celula cartao type="number" value={r.hospedes != null ? String(r.hospedes) : ""} rotulo={`Hóspedes, ${nome}`} disabled={bloqueada} onCommit={(v) => atualizar(r._id, { hospedes: v === "" ? null : Number(v) })} />
+                    </Campo>
+                    <Campo texto="Plataforma">
+                      <Celula cartao type="select" options={PLATAFORMAS} value={r.plataforma ?? ""} rotulo={`Plataforma, ${nome}`} disabled={bloqueada} onCommit={(v) => atualizar(r._id, { plataforma: v })} />
+                    </Campo>
+                  </div>
+                  <Campo texto="Nome do hóspede">
+                    <Celula cartao value={r.nome_hospede ?? ""} rotulo={`Nome do hóspede, ${nome}`} disabled={bloqueada} onCommit={(v) => atualizar(r._id, { nome_hospede: v })} />
+                  </Campo>
+                  <Campo texto="Horário preferido de limpeza">
+                    <Celula cartao value={r.horario_preferido ?? ""} rotulo={`Horário preferido, ${nome}`} disabled={bloqueada} onCommit={(v) => atualizar(r._id, { horario_preferido: v })} />
+                  </Campo>
+                  <Campo texto="Notas">
+                    <Celula cartao value={r.observacoes ?? ""} rotulo={`Observações, ${nome}`} disabled={bloqueada} onCommit={(v) => atualizar(r._id, { observacoes: v })} />
+                  </Campo>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+        </>
       )}
 
       {/* Confirmação de eliminação */}
@@ -653,7 +802,7 @@ export default function ParceiroReservasPage() {
         <DialogHeader>
           <div>
             <DialogTitle className="flex items-center gap-2">
-              <Upload className="h-5 w-5 text-primary" />
+              <Upload className="h-5 w-5 text-gold-text" />
               Importar Reservas (Excel)
             </DialogTitle>
             <DialogDescription>

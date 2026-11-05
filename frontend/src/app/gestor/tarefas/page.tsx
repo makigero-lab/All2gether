@@ -24,6 +24,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { EstadoTarefaBadge } from "@/components/ui/estado-tarefa-badge";
 import {
   Card,
   CardContent,
@@ -83,26 +84,6 @@ interface TarefaAdmin {
   // (ex: "Toda a equipa de folga/férias", "Lotação máxima excedida").
   motivo_nao_atribuicao?: string | null;
 }
-
-const ESTADO_LABEL: Record<string, string> = {
-  por_atribuir: "Por atribuir",
-  atribuida: "Atribuída",
-  em_curso: "Em curso",
-  concluida: "Concluída",
-  cancelada: "Cancelada",
-  // Prompt 138 (136 V2) — SLA excedido (todos os staff > 480 min).
-  nao_atribuida: "Não atribuída (SLA)",
-};
-
-const ESTADO_VARIANT: Record<string, "default" | "secondary" | "success" | "warning" | "outline" | "destructive"> = {
-  por_atribuir: "warning",
-  atribuida: "default",
-  em_curso: "secondary",
-  concluida: "success",
-  cancelada: "outline",
-  // Prompt 138 (136 V2) — vermelho para destacar que requer intervenção.
-  nao_atribuida: "destructive",
-};
 
 function formatarData(iso: string): string {
   const d = parsearDataSegura(iso);
@@ -745,7 +726,7 @@ export default function AdminTarefasPage() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
-              <SprayCan className="h-5 w-5 text-primary" />
+              <SprayCan className="h-5 w-5 text-gold-text" />
               Nova Limpeza Manual
             </CardTitle>
           </CardHeader>
@@ -1133,9 +1114,7 @@ export default function AdminTarefasPage() {
                                 ? "por_atribuir"
                                 : t.estado;
                             return (
-                              <Badge variant={ESTADO_VARIANT[estadoExibido] ?? "secondary"}>
-                                {ESTADO_LABEL[estadoExibido] ?? estadoExibido}
-                              </Badge>
+                              <EstadoTarefaBadge estado={estadoExibido} />
                             );
                           })()}
                           {/* FIX (motivo_falha_atribuicao) — Ícone de Info com
@@ -1303,7 +1282,7 @@ export default function AdminTarefasPage() {
       <Dialog open={confirmarAutoAtribuir} onOpenChange={setConfirmarAutoAtribuir}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Sparkles className="h-5 w-5 text-primary" />
+            <Sparkles className="h-5 w-5 text-gold-text" />
             Auto-Atribuir Pendentes
           </DialogTitle>
           <DialogDescription>
@@ -1359,7 +1338,7 @@ export default function AdminTarefasPage() {
         <DialogHeader>
           <div>
             <DialogTitle className="flex items-center gap-2">
-              <SprayCan className="h-5 w-5 text-primary" />
+              <SprayCan className="h-5 w-5 text-gold-text" />
               Nova Limpeza Espontânea
             </DialogTitle>
             <DialogDescription>
@@ -1579,7 +1558,7 @@ export default function AdminTarefasPage() {
         <DialogHeader>
           <div>
             <DialogTitle className="flex items-center gap-2">
-              <Upload className="h-5 w-5 text-primary" />
+              <Upload className="h-5 w-5 text-gold-text" />
               Importar Reservas (Excel)
             </DialogTitle>
             <DialogDescription>

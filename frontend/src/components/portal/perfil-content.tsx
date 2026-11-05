@@ -119,7 +119,7 @@ export function PerfilContent({ portalLabel }: { portalLabel: string }) {
       </Link>
       <div>
         <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-          <User className="h-6 w-6 text-primary" />
+          <User className="h-6 w-6 text-gold-text" />
           O Meu Perfil
         </h1>
         <p className="text-sm text-muted-foreground">
@@ -138,7 +138,7 @@ export function PerfilContent({ portalLabel }: { portalLabel: string }) {
       <Card className="max-w-lg">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
-            <Shield className="h-5 w-5 text-primary" />
+            <Shield className="h-5 w-5 text-gold-text" />
             Dados da Conta
           </CardTitle>
         </CardHeader>

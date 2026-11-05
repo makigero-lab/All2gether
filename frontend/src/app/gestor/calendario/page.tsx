@@ -34,6 +34,8 @@ import type { DatesSetArg, EventClickArg, EventContentArg, EventInput } from "@f
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { EstadoTarefaBadge } from "@/components/ui/estado-tarefa-badge";
+import { infoEstadoTarefa } from "@/lib/estados";
 import { cn, temHoraReal } from "@/lib/utils";
 import {
   Dialog,
@@ -127,26 +129,14 @@ interface PaletaEvento {
 }
 
 function paletaPorEstado(estado: string): PaletaEvento {
-  switch (estado) {
-    case "concluida":
-      // Verde suave
-      return { bg: "#dcfce7", border: "#86efac", text: "#166534", dot: "#22c55e" };
-    case "atribuida":
-    case "em_curso":
-      // Amarelo suave (pendente/em curso)
-      return { bg: "#fef9c3", border: "#fde047", text: "#854d0e", dot: "#eab308" };
-    case "por_atribuir":
-      // Vermelho suave
-      return { bg: "#fee2e2", border: "#fca5a5", text: "#991b1b", dot: "#ef4444" };
-    case "nao_atribuida":
-      // Prompt 138 (136 V2) — vermelho escuro (SLA excedido, mais urgente).
-      return { bg: "#fecaca", border: "#f87171", text: "#7f1d1d", dot: "#dc2626" };
-    case "cancelada":
-      // Cinza suave
-      return { bg: "#f1f5f9", border: "#cbd5e1", text: "#475569", dot: "#94a3b8" };
-    default:
-      return { bg: "#f1f5f9", border: "#cbd5e1", text: "#475569", dot: "#94a3b8" };
-  }
+  // Cores vêm dos tokens --status-* (uma só fonte de verdade: @/lib/estados).
+  const token = infoEstadoTarefa(estado).token;
+  return {
+    bg: `hsl(var(--status-${token}-bg))`,
+    border: `hsl(var(--status-${token}) / 0.45)`,
+    text: `hsl(var(--status-${token}))`,
+    dot: `hsl(var(--status-${token}))`,
+  };
 }
 
 /** Emoji por tipo de tarefa (Prompt 74, ponto 4). */
@@ -198,29 +188,6 @@ function horaFimTarefa(dataISO: string, minutos: number): string {
 /* ------------------------------------------------------------------ */
 /* Helpers da Vista Tabela (Prompt 99)                                 */
 /* ------------------------------------------------------------------ */
-
-const ESTADO_LABEL_TAB: Record<string, string> = {
-  por_atribuir: "Por Atribuir",
-  atribuida: "Atribuída",
-  em_curso: "Em Curso",
-  concluida: "Concluída",
-  cancelada: "Cancelada",
-  // Prompt 138 (136 V2) — SLA excedido.
-  nao_atribuida: "Não Atribuída (SLA)",
-};
-
-const ESTADO_VARIANT_TAB: Record<
-  string,
-  "default" | "secondary" | "success" | "warning" | "destructive" | "outline"
-> = {
-  por_atribuir: "destructive",
-  atribuida: "default",
-  em_curso: "warning",
-  concluida: "success",
-  cancelada: "outline",
-  // Prompt 138 (136 V2) — vermelho (mais urgente que por_atribuir).
-  nao_atribuida: "destructive",
-};
 
 /**
  * Formata uma data ISO (ou YYYY-MM-DD) para DD/MM/YYYY.
@@ -1112,7 +1079,7 @@ export default function CalendarioOperacionalPage() {
         Reserva: formatarReservaExcel(t.detalhes_reserva),
         Funcionário: t.utilizador_id?.nome ?? "Por Atribuir",
         Horário: formatarHorario(t) === "—" ? "" : formatarHorario(t),
-        Estado: ESTADO_LABEL_TAB[t.estado] ?? t.estado,
+        Estado: infoEstadoTarefa(t.estado).label,
       }));
 
       const ws = XLSX.utils.json_to_sheet(linhas, {
@@ -1473,9 +1440,7 @@ export default function CalendarioOperacionalPage() {
                         {formatarHorario(t)}
                       </td>
                       <td className="px-4 py-3">
-                        <Badge variant={ESTADO_VARIANT_TAB[t.estado] ?? "secondary"}>
-                          {ESTADO_LABEL_TAB[t.estado] ?? t.estado}
-                        </Badge>
+                        <EstadoTarefaBadge estado={t.estado} />
                       </td>
                     </tr>
                   ))}
@@ -1557,20 +1522,7 @@ export default function CalendarioOperacionalPage() {
           <DialogContent className="space-y-4">
             {/* Estado + tipo + propriedade */}
             <div className="flex flex-wrap items-center gap-2">
-              <Badge
-                variant={
-                  tarefaSelecionada.estado === "concluida"
-                    ? "default"
-                    : tarefaSelecionada.estado === "cancelada"
-                    ? "secondary"
-                    : tarefaSelecionada.estado === "por_atribuir"
-                    ? "destructive"
-                    : "outline"
-                }
-              >
-                {ESTADO_OPTS.find((o) => o.value === tarefaSelecionada.estado)?.label ??
-                  tarefaSelecionada.estado}
-              </Badge>
+              <EstadoTarefaBadge estado={tarefaSelecionada.estado} />
               {/* v1.58.0 (Prompt 80, ponto 4) — Badge de tipo para deixar claro
                   que manutenções também podem ser atribuídas/reatribuídas. */}
               {tarefaSelecionada.tipo && TIPO_LABEL[tarefaSelecionada.tipo] && (
@@ -1617,7 +1569,7 @@ export default function CalendarioOperacionalPage() {
                   {tarefaSelecionada.utilizador_id ? (
                     <Link
                       href={`/gestor/equipa?editar=${tarefaSelecionada.utilizador_id._id}`}
-                      className="text-primary underline-offset-2 hover:underline font-medium"
+                      className="text-gold-text underline-offset-2 hover:underline font-medium"
                       title="Editar funcionário"
                     >
                       {tarefaSelecionada.utilizador_id.nome}
@@ -1777,7 +1729,7 @@ export default function CalendarioOperacionalPage() {
       <Dialog open={confirmarAutoAtribuir} onOpenChange={setConfirmarAutoAtribuir}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Sparkles className="h-5 w-5 text-primary" />
+            <Sparkles className="h-5 w-5 text-gold-text" />
             Auto-Atribuir Pendentes
           </DialogTitle>
           <DialogDescription>
@@ -1827,7 +1779,7 @@ export default function CalendarioOperacionalPage() {
       <Dialog open={mostrarNovaTarefa} onOpenChange={setMostrarNovaTarefa}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Plus className="h-5 w-5 text-primary" />
+            <Plus className="h-5 w-5 text-gold-text" />
             Nova Limpeza
           </DialogTitle>
           <DialogDescription>

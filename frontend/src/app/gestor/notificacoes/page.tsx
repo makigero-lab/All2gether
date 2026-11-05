@@ -172,7 +172,7 @@ export default function GestorNotificacoesPage() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Bell className="h-5 w-5 text-primary" />
+            <Bell className="h-5 w-5 text-gold-text" />
             Notificações
           </CardTitle>
           <CardDescription>

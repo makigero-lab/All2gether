@@ -413,7 +413,7 @@ export function DetalheTarefaClient({
         </Link>
 
         <div className="flex items-start gap-3">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-gold-text">
             <Icon className="h-6 w-6" />
           </div>
           <div className="min-w-0 flex-1">
@@ -457,7 +457,7 @@ export function DetalheTarefaClient({
                     href={url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex shrink-0 items-center gap-1 rounded text-primary hover:underline"
+                    className="inline-flex shrink-0 items-center gap-1 rounded text-gold-text hover:underline"
                     title="Abrir no Google Maps"
                     aria-label="Abrir no Google Maps"
                   >
@@ -472,7 +472,7 @@ export function DetalheTarefaClient({
         {/* Prompt 118 — Data da Limpeza + Hora destacadas no topo */}
         {tarefa.data && (
           <div className="mt-3 flex items-center gap-3 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5">
-            <CalendarRange className="h-5 w-5 shrink-0 text-primary" />
+            <CalendarRange className="h-5 w-5 shrink-0 text-gold-text" />
             <div className="flex-1">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Data da Limpeza
@@ -527,7 +527,7 @@ export function DetalheTarefaClient({
           <Card className="border-primary/30">
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-base">
-                <ClipboardList className="h-5 w-5 text-primary" />
+                <ClipboardList className="h-5 w-5 text-gold-text" />
                 Observações da Propriedade
               </CardTitle>
             </CardHeader>
@@ -544,7 +544,7 @@ export function DetalheTarefaClient({
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between gap-2">
               <CardTitle className="flex items-center gap-2 text-base">
-                <ListChecks className="h-5 w-5 text-primary" />
+                <ListChecks className="h-5 w-5 text-gold-text" />
                 Checklist
               </CardTitle>
               <Badge variant={todasMarcadas ? "success" : "secondary"}>
@@ -564,7 +564,7 @@ export function DetalheTarefaClient({
                       {/* Sub-header da secção */}
                       <div className="flex items-center justify-between gap-2 rounded-md bg-muted/60 px-3 py-2">
                         <div className="flex min-w-0 items-center gap-2">
-                          <Folder className="h-4 w-4 shrink-0 text-primary" />
+                          <Folder className="h-4 w-4 shrink-0 text-gold-text" />
                           <span className="truncate text-sm font-semibold text-foreground">
                             {sec.nome || "Secção"}
                           </span>
@@ -669,7 +669,7 @@ export function DetalheTarefaClient({
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
-              <StickyNote className="h-5 w-5 text-primary" />
+              <StickyNote className="h-5 w-5 text-gold-text" />
               Observações ou Problemas
               <span className="text-xs font-normal text-muted-foreground">
                 (opcional)
@@ -701,7 +701,7 @@ export function DetalheTarefaClient({
 
         {/* Mensagem de sucesso verde vibrante */}
         {concluida && (
-          <div className="flex items-center justify-center gap-2 rounded-lg bg-emerald-500 p-3 text-center text-white">
+          <div className="flex items-center justify-center gap-2 rounded-lg bg-status-conc p-3 text-center text-white">
             <CheckCircle2 className="h-5 w-5" />
             <span className="font-semibold">Limpeza Concluída!</span>
           </div>
@@ -712,7 +712,7 @@ export function DetalheTarefaClient({
           <div className="flex gap-2">
             <Button size="touch"
               variant="outline"
-              className="flex-1 gap-2 text-amber-600 border-amber-300 hover:bg-amber-50"
+              className="flex-1 gap-2 text-status-porat border-status-porat/40 hover:bg-status-porat-bg"
               onClick={() => {
                 setMostrarAtraso(true);
                 setMinutosAtraso(null);
@@ -741,7 +741,7 @@ export function DetalheTarefaClient({
         {!concluida && (
           <Button
             size="touch"
-            className="w-full bg-emerald-600 text-white hover:bg-emerald-700"
+            className="w-full bg-status-conc text-white hover:bg-status-conc/90"
             disabled={!todasMarcadas || concluindo}
             onClick={handleConcluir}
           >
@@ -795,7 +795,7 @@ export function DetalheTarefaClient({
                     onClick={() => setMinutosAtraso(min)}
                     className={`rounded-md border px-4 py-3 text-sm font-medium transition-colors ${
                       minutosAtraso === min
-                        ? "border-amber-500 bg-amber-500 text-white"
+                        ? "border-status-porat bg-status-porat text-white"
                         : "border-input bg-background hover:bg-accent"
                     }`}
                   >
@@ -822,7 +822,7 @@ export function DetalheTarefaClient({
           {!atrasoResultado && (
             <Button size="touch"
               type="button"
-              className="bg-amber-500 text-white hover:bg-amber-600"
+              className="bg-status-porat text-white hover:bg-status-porat/90"
               disabled={minutosAtraso === null || atrasoSubmitting}
               onClick={handleReportarAtraso}
             >
@@ -1067,7 +1067,7 @@ export function DetalheTarefaClient({
           {/* FIX (portal lavandaria) — Input de sacos de roupa suja recolhidos. */}
           <div className="space-y-1.5 rounded-md border border-input p-3">
             <label htmlFor="sacos-roupa-suja" className="text-sm font-medium flex items-center gap-1.5">
-              <Shirt className="h-4 w-4 text-primary" />
+              <Shirt className="h-4 w-4 text-gold-text" />
               Sacos de Roupa Suja Recolhidos
             </label>
             <Input
@@ -1104,7 +1104,7 @@ export function DetalheTarefaClient({
             type="button"
             disabled={concluirFotos.length === 0 || concluindo}
             onClick={handleConfirmarConclusao}
-            className="bg-emerald-600 text-white hover:bg-emerald-700"
+            className="bg-status-conc text-white hover:bg-status-conc/90"
           >
             {concluindo ? (
               <>

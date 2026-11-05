@@ -10,7 +10,7 @@ import {
   Users,
 } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
+import { EstadoTarefaBadge } from "@/components/ui/estado-tarefa-badge";
 import {
   Card,
   CardContent,
@@ -28,24 +28,6 @@ interface TarefaParceiroDTO {
   hospedes?: number | null;
   propriedade_id: { nome: string; morada?: string } | null;
 }
-
-const ESTADO_LABEL: Record<string, string> = {
-  por_atribuir: "Por Atribuir",
-  atribuida: "Atribuída",
-  em_curso: "Em Curso",
-  concluida: "Concluída",
-  cancelada: "Cancelada",
-  nao_atribuida: "Não Atribuída",
-};
-
-const ESTADO_VARIANT: Record<string, "default" | "secondary" | "success" | "warning" | "destructive" | "outline"> = {
-  por_atribuir: "warning",
-  atribuida: "secondary",
-  em_curso: "default",
-  concluida: "success",
-  cancelada: "outline",
-  nao_atribuida: "destructive",
-};
 
 export default function ParceiroTarefasPage() {
   const [tarefas, setTarefas] = useState<TarefaParceiroDTO[]>([]);
@@ -85,7 +67,7 @@ export default function ParceiroTarefasPage() {
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
       <div>
         <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-          <ClipboardList className="h-6 w-6 text-primary" />
+          <ClipboardList className="h-6 w-6 text-gold-text" />
           Tarefas de Limpeza
         </h1>
         <p className="text-sm text-muted-foreground">
@@ -119,7 +101,7 @@ export default function ParceiroTarefasPage() {
             <Card key={t._id}>
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center gap-2 text-sm">
-                  <Building2 className="h-4 w-4 text-primary" />
+                  <Building2 className="h-4 w-4 text-gold-text" />
                   {t.propriedade_id?.nome ?? "Propriedade"}
                 </CardTitle>
               </CardHeader>
@@ -137,9 +119,7 @@ export default function ParceiroTarefasPage() {
                 {t.observacoes && (
                   <p className="text-xs text-muted-foreground line-clamp-2">{t.observacoes}</p>
                 )}
-                <Badge variant={ESTADO_VARIANT[t.estado] ?? "outline"}>
-                  {ESTADO_LABEL[t.estado] ?? t.estado}
-                </Badge>
+                <EstadoTarefaBadge estado={t.estado} />
               </CardContent>
             </Card>
           ))}

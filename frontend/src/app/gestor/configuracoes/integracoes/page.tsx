@@ -385,7 +385,7 @@ export default function IntegracoesPage() {
     <div className="mx-auto w-full max-w-3xl space-y-6 p-4 md:p-6">
       {/* Cabeçalho */}
       <div className="flex items-center gap-3">
-        <Plug className="h-6 w-6 text-primary" />
+        <Plug className="h-6 w-6 text-gold-text" />
         <div>
           <h1 className="text-2xl font-bold tracking-tight">
             Integrações &amp; Rotinas

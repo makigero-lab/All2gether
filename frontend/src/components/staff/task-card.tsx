@@ -15,7 +15,7 @@ import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 
 import { cn, parsearDataSegura, googleMapsUrl } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
+import { EstadoTarefaBadge } from "@/components/ui/estado-tarefa-badge";
 import { buttonVariants } from "@/components/ui/button";
 import {
   Card,
@@ -92,7 +92,7 @@ export function TaskCard({ tarefa }: { tarefa: TarefaMock }) {
       <Card
         className={cn(
           "relative cursor-pointer overflow-hidden transition-all hover:shadow-md hover:border-primary/40 active:scale-[0.99]",
-          porAtribuir && "border-amber-300/70"
+          porAtribuir && "border-status-porat/40"
         )}
       >
         <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-3">
@@ -101,8 +101,8 @@ export function TaskCard({ tarefa }: { tarefa: TarefaMock }) {
               className={cn(
                 "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg",
                 porAtribuir
-                  ? "bg-amber-100 text-amber-700"
-                  : "bg-primary/10 text-primary"
+                  ? "bg-status-porat-bg text-status-porat"
+                  : "bg-primary/10 text-gold-text"
               )}
             >
               <Icon className="h-5 w-5" />
@@ -123,9 +123,7 @@ export function TaskCard({ tarefa }: { tarefa: TarefaMock }) {
               </p>
             </div>
           </div>
-          <Badge variant={porAtribuir ? "warning" : "success"} className="shrink-0">
-            {porAtribuir ? "Por atribuir" : "Atribuída"}
-          </Badge>
+          <EstadoTarefaBadge estado={tarefa.estado} className="shrink-0" />
         </CardHeader>
 
         <CardContent className="space-y-3">
@@ -167,7 +165,7 @@ export function TaskCard({ tarefa }: { tarefa: TarefaMock }) {
                     href={url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="relative z-10 -my-3.5 -mr-3 inline-flex h-11 w-11 shrink-0 items-center justify-center self-center rounded text-primary hover:underline"
+                    className="relative z-10 -my-3.5 -mr-3 inline-flex h-11 w-11 shrink-0 items-center justify-center self-center rounded text-gold-text hover:underline"
                     title="Abrir no Google Maps"
                     aria-label="Abrir no Google Maps"
                   >
@@ -183,7 +181,7 @@ export function TaskCard({ tarefa }: { tarefa: TarefaMock }) {
               a quem vai receber. */}
           {nomeHospede && (
             <p className="flex items-center gap-1.5 rounded-md bg-primary/5 px-2 py-1.5 text-xs">
-              <User className="h-3.5 w-3.5 shrink-0 text-primary" />
+              <User className="h-3.5 w-3.5 shrink-0 text-gold-text" />
               <span className="font-medium text-foreground">{nomeHospede}</span>
             </p>
           )}

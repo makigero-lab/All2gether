@@ -227,7 +227,7 @@ export default function WebhooksPage() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <WebhookIcon className="h-5 w-5 text-primary" />
+            <WebhookIcon className="h-5 w-5 text-gold-text" />
             Logs recentes
           </CardTitle>
           <CardDescription>

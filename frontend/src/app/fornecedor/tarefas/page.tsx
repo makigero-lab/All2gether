@@ -15,6 +15,7 @@ import { pt } from "date-fns/locale";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { EstadoTarefaBadge } from "@/components/ui/estado-tarefa-badge";
 import {
   Card,
   CardContent,
@@ -49,15 +50,6 @@ interface TarefaFornecedorDTO {
   sacos_roupa_suja?: number;
   propriedade_id: { nome: string; morada?: string; capacidade_hospedes?: number | null } | null;
 }
-
-const ESTADO_LABEL: Record<string, string> = {
-  por_atribuir: "Por Atribuir",
-  atribuida: "Atribuída",
-  em_curso: "Em Curso",
-  concluida: "Concluída",
-  cancelada: "Cancelada",
-  nao_atribuida: "Não Atribuída",
-};
 
 /** Data YYYY-MM-DD no fuso de Lisboa (en-CA formata como ISO). */
 function chaveDiaLisboa(d: Date): string {
@@ -203,7 +195,7 @@ export default function FornecedorTarefasPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-            <Shirt className="h-6 w-6 text-primary" />
+            <Shirt className="h-6 w-6 text-gold-text" />
             Tarefas de Lavandaria
           </h1>
           <p className="text-sm text-muted-foreground">
@@ -244,7 +236,8 @@ export default function FornecedorTarefasPage() {
         </div>
       ) : (
         /* FIX (agrupamento por dias) — Tabela com separadores por dia. */
-        <Card>
+        <>
+        <Card className="hidden md:block">
           <CardContent className="p-0">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -271,12 +264,111 @@ export default function FornecedorTarefasPage() {
             </div>
           </CardContent>
         </Card>
+
+        {/* Telemóvel (< md): um cartão por tarefa, com o botão sempre visível. */}
+        <div className="flex flex-col gap-4 md:hidden">
+          {tarefasAgrupadas.map((grupo) => (
+            <section key={grupo.dataKey} aria-label={grupo.dataLabel} className="space-y-2">
+              <h2 className="text-sm font-bold capitalize text-gold-text">
+                {grupo.dataLabel}
+                <span className="ml-2 text-xs font-normal text-muted-foreground">
+                  {grupo.tarefas.length} tarefa(s)
+                </span>
+              </h2>
+              {grupo.tarefas.map((t) => (
+                <CartaoTarefaLavandaria key={t._id} t={t} togglingId={togglingId} onToggle={toggleRoupaEntregue} />
+              ))}
+            </section>
+          ))}
+        </div>
+        </>
       )}
 
       <p className="mt-auto text-xs text-muted-foreground">
         © {new Date().getFullYear()} All2gether — Portal da Lavandaria
       </p>
     </div>
+  );
+}
+
+
+/**
+ * Botão "Marcar Entregue": alvo de toque >= 44 px (h-11), sempre visível.
+ * Partilhado pela tabela (desktop) e pelos cartões (telemóvel).
+ */
+function BotaoEntregue({
+  t,
+  togglingId,
+  onToggle,
+  className,
+}: {
+  t: TarefaFornecedorDTO;
+  togglingId: string | null;
+  onToggle: (t: TarefaFornecedorDTO) => void;
+  className?: string;
+}) {
+  const nome = t.propriedade_id?.nome ?? "propriedade";
+  return (
+    <Button
+      type="button"
+      variant={t.roupa_entregue ? "default" : "outline"}
+      disabled={togglingId === t._id}
+      onClick={() => onToggle(t)}
+      aria-label={t.roupa_entregue ? `Roupa entregue em ${nome}: desmarcar` : `Marcar roupa entregue em ${nome}`}
+      aria-pressed={!!t.roupa_entregue}
+      className={`h-11 min-w-[44px] gap-1.5 px-4 ${t.roupa_entregue ? "bg-status-conc text-white hover:bg-status-conc/90" : ""} ${className ?? ""}`}
+    >
+      {togglingId === t._id ? (
+        <Loader2 className="h-4 w-4 animate-spin" />
+      ) : t.roupa_entregue ? (
+        <CheckCircle2 className="h-4 w-4" />
+      ) : (
+        <Shirt className="h-4 w-4" />
+      )}
+      {t.roupa_entregue ? "Entregue" : "Marcar Entregue"}
+    </Button>
+  );
+}
+
+/** Cartão de uma tarefa (telemóvel, < md). */
+function CartaoTarefaLavandaria({
+  t,
+  togglingId,
+  onToggle,
+}: {
+  t: TarefaFornecedorDTO;
+  togglingId: string | null;
+  onToggle: (t: TarefaFornecedorDTO) => void;
+}) {
+  const hospedesReal =
+    t.hospedes && t.hospedes > 0 ? t.hospedes : t.propriedade_id?.capacidade_hospedes ?? null;
+  return (
+    <Card>
+      <CardContent className="space-y-3 p-4">
+        <div className="flex items-start justify-between gap-2">
+          <h3 className="flex min-w-0 items-center gap-1.5 text-base font-semibold">
+            <Building2 className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <span className="truncate">{t.propriedade_id?.nome ?? "—"}</span>
+          </h3>
+          <EstadoTarefaBadge estado={t.estado} className="shrink-0" />
+        </div>
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
+          {hospedesReal != null && hospedesReal > 0 && (
+            <span className="inline-flex items-center gap-1">
+              <Users className="h-3.5 w-3.5" />
+              {hospedesReal} hóspede(s){(!t.hospedes || t.hospedes === 0) && " (máx)"}
+            </span>
+          )}
+          {t.sacos_roupa_suja && t.sacos_roupa_suja > 0 ? (
+            <span className="inline-flex items-center gap-1">
+              <Shirt className="h-3.5 w-3.5" />
+              {t.sacos_roupa_suja} saco(s) de roupa suja
+            </span>
+          ) : null}
+        </div>
+        <BotaoEntregue t={t} togglingId={togglingId} onToggle={onToggle} className="w-full" />
+      </CardContent>
+    </Card>
   );
 }
 
@@ -299,7 +391,7 @@ function GrupoTarefasLavandaria({
       {/* FIX (agrupamento por dias) — Linha separadora com a data em destaque. */}
       <tr className="border-y border-primary/20 bg-primary/5">
         <td colSpan={5} className="px-4 py-2.5">
-          <span className="text-sm font-bold capitalize text-primary">
+          <span className="text-sm font-bold capitalize text-gold-text">
             {grupo.dataLabel}
           </span>
           <span className="ml-2 text-xs text-muted-foreground">
@@ -349,32 +441,10 @@ function GrupoTarefasLavandaria({
               )}
             </td>
             <td className="px-4 py-3">
-              <Badge variant={t.estado === "concluida" ? "success" : "outline"}>
-                {ESTADO_LABEL[t.estado] ?? t.estado}
-              </Badge>
+              <EstadoTarefaBadge estado={t.estado} />
             </td>
             <td className="px-4 py-3 text-center">
-              <Button
-                type="button"
-                variant={t.roupa_entregue ? "default" : "outline"}
-                size="sm"
-                disabled={togglingId === t._id}
-                onClick={() => onToggle(t)}
-                className={
-                  t.roupa_entregue
-                    ? "bg-emerald-600 text-white hover:bg-emerald-700 gap-1.5"
-                    : "gap-1.5"
-                }
-              >
-                {togglingId === t._id ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : t.roupa_entregue ? (
-                  <CheckCircle2 className="h-3.5 w-3.5" />
-                ) : (
-                  <Shirt className="h-3.5 w-3.5" />
-                )}
-                {t.roupa_entregue ? "Entregue" : "Marcar Entregue"}
-              </Button>
+              <BotaoEntregue t={t} togglingId={togglingId} onToggle={onToggle} />
             </td>
           </tr>
         );
