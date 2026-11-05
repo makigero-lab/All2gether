@@ -264,7 +264,7 @@ export default function StaffNotificacoesPage() {
                           </Badge>
                         )}
                       </div>
-                      <span className="text-xs text-muted-foreground/70 tabular-nums whitespace-nowrap">
+                      <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
                         {formatarData(n.data)}
                       </span>
                     </div>

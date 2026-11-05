@@ -51,6 +51,9 @@ interface TarefaFornecedorDTO {
   propriedade_id: { nome: string; morada?: string; capacidade_hospedes?: number | null } | null;
 }
 
+/** Para o fornecedor, "Não atribuída" (detalhe interno) é igual a "Por atribuir". */
+const estadoParaFornecedor = (e: string) => (e === "nao_atribuida" ? "por_atribuir" : e);
+
 /** Data YYYY-MM-DD no fuso de Lisboa (en-CA formata como ISO). */
 function chaveDiaLisboa(d: Date): string {
   return new Intl.DateTimeFormat("en-CA", {
@@ -269,7 +272,7 @@ export default function FornecedorTarefasPage() {
         <div className="flex flex-col gap-4 md:hidden">
           {tarefasAgrupadas.map((grupo) => (
             <section key={grupo.dataKey} aria-label={grupo.dataLabel} className="space-y-2">
-              <h2 className="text-sm font-bold capitalize text-gold-text">
+              <h2 className="text-sm font-bold first-letter:uppercase text-gold-text">
                 {grupo.dataLabel}
                 <span className="ml-2 text-xs font-normal text-muted-foreground">
                   {grupo.tarefas.length} tarefa(s)
@@ -350,7 +353,7 @@ function CartaoTarefaLavandaria({
             <Building2 className="h-4 w-4 shrink-0 text-muted-foreground" />
             <span className="truncate">{t.propriedade_id?.nome ?? "—"}</span>
           </h3>
-          <EstadoTarefaBadge estado={t.estado} className="shrink-0" />
+          <EstadoTarefaBadge estado={estadoParaFornecedor(t.estado)} className="shrink-0" />
         </div>
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
           {hospedesReal != null && hospedesReal > 0 && (
@@ -391,7 +394,7 @@ function GrupoTarefasLavandaria({
       {/* FIX (agrupamento por dias) — Linha separadora com a data em destaque. */}
       <tr className="border-y border-primary/20 bg-primary/5">
         <td colSpan={5} className="px-4 py-2.5">
-          <span className="text-sm font-bold capitalize text-gold-text">
+          <span className="text-sm font-bold inline-block first-letter:uppercase text-gold-text">
             {grupo.dataLabel}
           </span>
           <span className="ml-2 text-xs text-muted-foreground">
@@ -427,7 +430,7 @@ function GrupoTarefasLavandaria({
                   )}
                 </span>
               ) : (
-                <span className="text-muted-foreground/50">—</span>
+                <span className="text-muted-foreground">—</span>
               )}
             </td>
             <td className="px-4 py-3">
@@ -437,11 +440,11 @@ function GrupoTarefasLavandaria({
                   {t.sacos_roupa_suja} saco(s)
                 </Badge>
               ) : (
-                <span className="text-muted-foreground/50 text-xs">—</span>
+                <span className="text-muted-foreground text-xs">—</span>
               )}
             </td>
             <td className="px-4 py-3">
-              <EstadoTarefaBadge estado={t.estado} />
+              <EstadoTarefaBadge estado={estadoParaFornecedor(t.estado)} />
             </td>
             <td className="px-4 py-3 text-center">
               <BotaoEntregue t={t} togglingId={togglingId} onToggle={onToggle} />

@@ -20,6 +20,8 @@ const withPWA = withPWAInit({
   register: true,
   skipWaiting: true,
   clientsClaim: true,
+  // O padrao (true) faz location.reload() ao voltar a rede e apaga o que o utilizador estava a editar.
+  reloadOnOnline: false,
   disable: process.env.NODE_ENV === "development",
   customWorkerSrc: "worker",
   // Prompt 129 — Exclui rotas dinâmicas de API da intercetação do SW.

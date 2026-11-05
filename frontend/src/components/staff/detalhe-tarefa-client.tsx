@@ -457,7 +457,7 @@ export function DetalheTarefaClient({
                     href={url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex shrink-0 items-center gap-1 rounded text-gold-text hover:underline"
+                    className="-my-3.5 -mr-3 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded text-gold-text hover:underline"
                     title="Abrir no Google Maps"
                     aria-label="Abrir no Google Maps"
                   >
@@ -741,7 +741,13 @@ export function DetalheTarefaClient({
         {!concluida && (
           <Button
             size="touch"
-            className="w-full bg-status-conc text-white hover:bg-status-conc/90"
+            className={cn(
+              "w-full",
+              todasMarcadas
+                ? "bg-status-conc text-white hover:bg-status-conc/90"
+                : // Incompleto: cinzento tracejado com texto legível (não só "mais pálido").
+                  "border border-dashed border-border bg-muted text-muted-foreground disabled:opacity-100"
+            )}
             disabled={!todasMarcadas || concluindo}
             onClick={handleConcluir}
           >

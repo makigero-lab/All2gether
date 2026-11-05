@@ -127,7 +127,7 @@ export function DialogHeader({
   children: React.ReactNode;
 }) {
   return (
-    <div className={cn("flex items-center justify-between border-b px-6 py-4", className)}>
+    <div className={cn("relative flex items-center justify-between border-b py-4 pl-6 pr-16", className)}>
       <div className="flex-1">{children}</div>
     </div>
   );
@@ -175,7 +175,7 @@ export function DialogClose({
       onClick={onClick}
       aria-label="Fechar"
       className={cn(
-        "ml-4 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground",
+        "absolute right-3 top-3 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground",
         className
       )}
     >

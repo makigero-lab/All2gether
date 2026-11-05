@@ -108,6 +108,22 @@ const CORES = {
   muted: "hsl(220, 14%, 55%)",
 };
 
+// Cor do TEXTO (≥ 4,5:1 nos dois temas) para cada cor de série: as cores de série
+// servem só para ícones e gráficos (não chegam a 4,5:1 como texto).
+const TEXTO_POR_COR: Record<string, string> = {
+  [CORES.dourado]: "hsl(var(--gold-text))",
+  [CORES.verde]: "hsl(var(--status-conc))",
+  [CORES.vermelho]: "hsl(var(--status-naoat))",
+  [CORES.amber]: "hsl(var(--status-porat))",
+  [CORES.muted]: "hsl(var(--muted-foreground))",
+};
+
+// Eixos e legendas em cores do tema (o Recharts usa #666 e a cor da série por defeito).
+const TICK = { fontSize: 12, fill: "hsl(var(--muted-foreground))" };
+const legendaTexto = (value: string) => (
+  <span style={{ color: "hsl(var(--foreground))" }}>{value}</span>
+);
+
 // Rótulos e cores dos estados vêm de @/lib/estados (tokens --status-*).
 const ESTADO_LABEL = (estado: string): string => infoEstadoTarefa(estado).label;
 
@@ -543,7 +559,7 @@ export default function RelatoriosPage() {
                       <span className="text-2xl font-bold leading-none">{s.value}</span>
                       <span className="mt-1 text-sm text-muted-foreground">{s.label}</span>
                       {s.sub && (
-                        <span className="text-xs font-medium" style={{ color: s.cor }}>
+                        <span className="text-xs font-medium" style={{ color: TEXTO_POR_COR[s.cor] ?? "hsl(var(--foreground))" }}>
                           {s.sub}
                         </span>
                       )}
@@ -578,15 +594,15 @@ export default function RelatoriosPage() {
                       <XAxis
                         dataKey="data"
                         tickFormatter={formatarDataCurta}
-                        tick={{ fontSize: 12 }}
+                        tick={TICK}
                         className="fill-muted-foreground"
                       />
-                      <YAxis allowDecimals={false} tick={{ fontSize: 12 }} className="fill-muted-foreground" />
+                      <YAxis allowDecimals={false} tick={TICK} className="fill-muted-foreground" />
                       <Tooltip
                         labelFormatter={(l) => formatarDataCurta(String(l))}
                         contentStyle={{ borderRadius: 8, fontSize: 12 }}
                       />
-                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      <Legend wrapperStyle={{ fontSize: 12 }} formatter={legendaTexto} />
                       <Line
                         type="monotone"
                         dataKey="total"
@@ -634,16 +650,16 @@ export default function RelatoriosPage() {
                         margin={{ top: 5, right: 10, left: 10, bottom: 0 }}
                       >
                         <CartesianGrid strokeDasharray="3 3" className="stroke-muted/40" horizontal={false} />
-                        <XAxis type="number" allowDecimals={false} tick={{ fontSize: 12 }} className="fill-muted-foreground" />
+                        <XAxis type="number" allowDecimals={false} tick={TICK} className="fill-muted-foreground" />
                         <YAxis
                           type="category"
                           dataKey="nome"
                           width={90}
-                          tick={{ fontSize: 12 }}
+                          tick={TICK}
                           className="fill-muted-foreground"
                         />
                         <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12 }} />
-                        <Legend wrapperStyle={{ fontSize: 12 }} />
+                        <Legend wrapperStyle={{ fontSize: 12 }} formatter={legendaTexto} />
                         <Bar dataKey="concluidas" name="Concluídas" stackId="a" fill={CORES.verde} radius={[0, 0, 0, 0]} />
                         <Bar dataKey="total" name="Total" stackId="a" fill={CORES.dourado} radius={[0, 4, 4, 0]} />
                       </BarChart>
@@ -680,9 +696,11 @@ export default function RelatoriosPage() {
                           outerRadius={90}
                           innerRadius={45}
                           paddingAngle={2}
-                          label={({ payload }: { payload?: PorEstado }) =>
-                            `${ESTADO_LABEL(payload?.estado ?? "")}: ${payload?.total ?? 0}`
-                          }
+                          label={({ x, y, textAnchor, payload }: { x: number; y: number; textAnchor?: "inherit" | "start" | "middle" | "end"; payload?: PorEstado }) => (
+                            <text x={x} y={y} textAnchor={textAnchor} fontSize={11} className="fill-foreground">
+                              {`${ESTADO_LABEL(payload?.estado ?? "")}: ${payload?.total ?? 0}`}
+                            </text>
+                          )}
                           labelLine={false}
                           style={{ fontSize: 11 }}
                         >

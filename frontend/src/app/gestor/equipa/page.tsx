@@ -67,7 +67,7 @@ import {
 } from "@/lib/api";
 import { PaginationBar } from "@/components/admin/pagination-bar";
 import { Switch } from "@/components/ui/switch";
-import { formatarDataSegura, parsearDataSegura, tarefasPorAtribuir, textoRedistribuicao, type RedistribuicaoDTO } from "@/lib/utils";
+import { parsearDataSegura, tarefasPorAtribuir, textoRedistribuicao, type RedistribuicaoDTO } from "@/lib/utils";
 
 /**
  * Página de Equipa — Painel de Administração.
@@ -115,49 +115,6 @@ const DIAS_SEMANA = [
   { valor: 5, label: "Sex" },
   { valor: 6, label: "Sáb" },
 ];
-
-/* ------------------------------------------------------------------ */
-/* Constantes & tipos — Aprovações                                     */
-/* ------------------------------------------------------------------ */
-
-interface AusenciaDTO {
-  _id: string;
-  utilizador_id: string;
-  utilizador: {
-    _id: string;
-    nome: string;
-    email: string;
-    role: Role;
-  } | null;
-  data_inicio: string;
-  data_fim: string;
-  tipo: string;
-  estado: string;
-  justificacao?: string;
-  notas?: string;
-  createdAt: string;
-}
-
-const TIPO_LABEL: Record<string, string> = {
-  ferias: "Férias",
-  doenca: "Doença",
-  outro: "Outro",
-};
-
-const TIPO_VARIANT: Record<string, "default" | "secondary" | "outline"> = {
-  ferias: "default",
-  doenca: "secondary",
-  outro: "outline",
-};
-
-/** Formata uma data ISO (yyyy-MM-dd) para "d MMM yyyy" em PT. */
-function formatarData(iso: string): string {
-  return formatarDataSegura(
-    iso,
-    (d) => format(d, "d MMM yyyy", { locale: pt }),
-    iso
-  );
-}
 
 /* ------------------------------------------------------------------ */
 /* Sub-componente — Folgas Semanais                                    */
@@ -396,7 +353,7 @@ function EquipaPage() {
    * Bloco de nova tentativa (falta súbita e baixa). A reatribuição já correu
    * sozinha; este bloco só aparece se SOBRARAM tarefas por atribuir.
    */
-  function renderReatribuir(porAtribuir: number, fechar: () => void) {
+  function renderReatribuir(porAtribuir: number) {
     if (porAtribuir <= 0) return null;
     return (
       <div className="space-y-2 rounded-md border p-3">
@@ -424,15 +381,6 @@ function EquipaPage() {
                 ) : (
                   "Reatribuir automaticamente"
                 )}
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={fechar}
-                disabled={autoAtribuindo}
-              >
-                Fechar
               </Button>
             </div>
           </>
@@ -750,116 +698,6 @@ function EquipaPage() {
       setFaltaSubmitting(false);
     }
   }
-
-  // ===== Estado — Aprovações (prefix apr_) =====
-  const [aprPendentes, setAprPendentes] = useState<AusenciaDTO[]>([]);
-  const [aprLoading, setAprLoading] = useState(true);
-  const [aprErro, setAprErro] = useState<string | null>(null);
-  const [aprToast, setAprToast] = useState<{
-    tipo: "sucesso" | "erro";
-    msg: string;
-  } | null>(null);
-  const [aprProcessando, setAprProcessando] = useState<string | null>(null);
-  // v1.62.0 (Prompt 85) — Alvo do dialog de eliminação de ausência.
-  const [aprEliminarAlvo, setAprEliminarAlvo] = useState<AusenciaDTO | null>(null);
-
-  /** Carrega as ausências pendentes da empresa. */
-  const aprCarregar = useCallback(async () => {
-    setAprLoading(true);
-    setAprErro(null);
-    try {
-      const res = await adminGet<{ ausencias: AusenciaDTO[] }>(
-        "/api/gestor/ausencias?estado=pendente,pendente_emergencia"
-      );
-      setAprPendentes(res.ausencias ?? []);
-    } catch (e) {
-      setAprErro(e instanceof Error ? e.message : "Erro ao carregar pedidos.");
-    } finally {
-      setAprLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    aprCarregar();
-  }, [aprCarregar]);
-
-  /** Aprova um pedido e mostra toast com o resultado da redistribuição. */
-  async function aprAprovar(a: AusenciaDTO) {
-    setAprProcessando(`aprovar-${a._id}`);
-    setAprErro(null);
-    try {
-      const res = await adminPatch<{
-        mensagem: string;
-        redistribuicao: RedistribuicaoDTO | null;
-      }>(`/api/gestor/ausencias/${a._id}/estado`, { estado: "aprovada" });
-
-      const r = res.redistribuicao;
-      const msg = textoRedistribuicao("Férias aprovadas.", r, "Sem tarefas para desatribuir no período.");
-      setAprToast({ tipo: "sucesso", msg: r?.aviso ? `${msg} ${r.aviso}` : msg });
-
-      // Remove da lista de pendentes (já foi decidido).
-      setAprPendentes((prev) => prev.filter((p) => p._id !== a._id));
-    } catch (e) {
-      setAprToast({
-        tipo: "erro",
-        msg: e instanceof Error ? `Erro ao aprovar: ${e.message}` : "Erro ao aprovar pedido.",
-      });
-    } finally {
-      setAprProcessando(null);
-    }
-  }
-
-  /** Rejeita um pedido. */
-  async function aprRejeitar(a: AusenciaDTO) {
-    setAprProcessando(`rejeitar-${a._id}`);
-    setAprErro(null);
-    try {
-      await adminPatch(`/api/gestor/ausencias/${a._id}/estado`, {
-        estado: "rejeitada",
-      });
-      setAprToast({ tipo: "sucesso", msg: "Pedido rejeitado." });
-      setAprPendentes((prev) => prev.filter((p) => p._id !== a._id));
-    } catch (e) {
-      setAprToast({
-        tipo: "erro",
-        msg: e instanceof Error ? `Erro ao rejeitar: ${e.message}` : "Erro ao rejeitar pedido.",
-      });
-    } finally {
-      setAprProcessando(null);
-    }
-  }
-
-  /**
-   * v1.62.0 (Prompt 85) — Elimina definitivamente uma ausência.
-   * Chamado após confirmação no Dialog. Faz DELETE /api/gestor/ausencias/:id.
-   */
-  async function aprEliminar() {
-    if (!aprEliminarAlvo) return;
-    const alvo = aprEliminarAlvo;
-    setAprProcessando(`eliminar-${alvo._id}`);
-    setAprErro(null);
-    try {
-      await adminDelete(`/api/gestor/ausencias/${alvo._id}`);
-      setAprToast({ tipo: "sucesso", msg: "Ausência eliminada com sucesso." });
-      // Remove da lista de pendentes.
-      setAprPendentes((prev) => prev.filter((p) => p._id !== alvo._id));
-      setAprEliminarAlvo(null);
-    } catch (e) {
-      setAprToast({
-        tipo: "erro",
-        msg: e instanceof Error ? `Erro ao eliminar: ${e.message}` : "Erro ao eliminar ausência.",
-      });
-    } finally {
-      setAprProcessando(null);
-    }
-  }
-
-  // Auto-esconde o toast após 6s.
-  useEffect(() => {
-    if (!aprToast) return;
-    const t = setTimeout(() => setAprToast(null), aprToast.msg.includes("em curso") ? 20000 : 6000);
-    return () => clearTimeout(t);
-  }, [aprToast]);
 
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
@@ -2017,7 +1855,7 @@ function EquipaPage() {
               )}
               {faltaResultado && faltaAviso && avisoEmCurso(faltaAviso)}
               {faltaResultado &&
-                renderReatribuir(faltaPorAtribuir, () => setFaltaSubita(null))}
+                renderReatribuir(faltaPorAtribuir)}
             </DialogContent>
             <DialogFooter>
               <Button
@@ -2115,7 +1953,7 @@ function EquipaPage() {
                     {baixaResultado}
                   </div>
                   {baixaAviso && avisoEmCurso(baixaAviso)}
-                  {renderReatribuir(baixaPorAtribuir, () => setBaixaModal(null))}
+                  {renderReatribuir(baixaPorAtribuir)}
                 </>
               )}
             </DialogContent>
@@ -2182,80 +2020,6 @@ function EquipaPage() {
           </Dialog>
         </div>
       </div>
-
-      {/* Dialog de confirmação de eliminação de ausência (mantido para o
-          botão de eliminar da lista de staff, se aplicável) */}
-      <Dialog
-        open={aprEliminarAlvo !== null}
-        onOpenChange={(o) => !o && setAprEliminarAlvo(null)}
-      >
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Trash2 className="h-5 w-5 text-destructive" />
-            Eliminar Ausência
-          </DialogTitle>
-          <DialogDescription>
-            Tens a certeza que queres eliminar esta ausência? Esta ação é
-            definitiva e não pode ser desfeita.
-          </DialogDescription>
-          <DialogClose onClick={() => setAprEliminarAlvo(null)} />
-        </DialogHeader>
-        <DialogContent className="space-y-3">
-          {aprEliminarAlvo && (
-            <div className="rounded-lg border bg-muted/30 p-4 space-y-2 text-sm">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-muted-foreground">Equipa</span>
-                <span className="font-medium">
-                  {aprEliminarAlvo.utilizador?.nome ?? "—"}
-                </span>
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-muted-foreground">Tipo</span>
-                <span className="font-medium">
-                  {TIPO_LABEL[aprEliminarAlvo.tipo] ?? aprEliminarAlvo.tipo}
-                </span>
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-muted-foreground">Período</span>
-                <span className="font-medium tabular-nums">
-                  {formatarData(aprEliminarAlvo.data_inicio)}
-                  {aprEliminarAlvo.data_inicio !== aprEliminarAlvo.data_fim && (
-                    <> → {formatarData(aprEliminarAlvo.data_fim)}</>
-                  )}
-                </span>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setAprEliminarAlvo(null)}
-            disabled={aprProcessando !== null}
-          >
-            Cancelar
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            onClick={aprEliminar}
-            disabled={aprProcessando !== null}
-          >
-            {aprProcessando !== null ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                A eliminar…
-              </>
-            ) : (
-              <>
-                <Trash2 className="mr-2 h-4 w-4" />
-                Eliminar Definitivamente
-              </>
-            )}
-          </Button>
-        </DialogFooter>
-      </Dialog>
     </div>
   );
 }

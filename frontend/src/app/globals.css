@@ -164,6 +164,8 @@
 .fc .fc-button-primary:not(:disabled).fc-button-active {
   background-color: hsl(var(--primary) / 0.85);
   border-color: hsl(var(--primary) / 0.85);
+  /* O FullCalendar põe texto branco no botão ativo: 1,98:1 no claro. Mantém o token. */
+  color: hsl(var(--primary-foreground));
 }
 
 /* Cabeçalho dos dias */
@@ -280,7 +282,6 @@
   flex: 0 0 auto;
   font-variant-numeric: tabular-nums;
   font-weight: 600;
-  opacity: 0.85;
   font-size: 0.6875rem;
 }
 
@@ -321,7 +322,6 @@
   align-items: center;
   gap: 0.25rem;
   font-size: 0.625rem;
-  opacity: 0.85;
 }
 
 .fc-evt-block__dot {
@@ -356,7 +356,6 @@
   align-items: center;
   gap: 0.2rem;
   font-size: 0.625rem;
-  opacity: 0.8;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -369,7 +368,8 @@
 }
 
 .fc-evt-block__unassigned {
-  color: hsl(var(--destructive));
+  /* Sobre o fundo --status-naoat-bg do bloco de alerta (6,6:1 claro / 7,0:1 escuro). */
+  color: hsl(var(--status-naoat));
   font-weight: 600;
 }
 
@@ -401,12 +401,12 @@
   width: 100%;
   overflow: hidden;
   white-space: nowrap;
-  background-color: #fee2e2 !important;
-  border-left: 3px solid #ef4444 !important;
+  background-color: hsl(var(--status-naoat-bg)) !important;
+  border-left: 3px solid hsl(var(--status-naoat)) !important;
   padding: 1px 4px !important;
   border-radius: calc(var(--radius) - 1px);
   font-weight: 600;
-  color: #991b1b !important;
+  color: hsl(var(--status-naoat)) !important;
 }
 
 .fc-evt-month--alert .fc-evt-month__alert-icon {
@@ -422,7 +422,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 700;
-  color: #991b1b;
+  color: hsl(var(--status-naoat));
 }
 
 .fc-evt-month--alert .fc-evt-month__alert-tag {
@@ -431,8 +431,8 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  background-color: #ef4444;
-  color: #ffffff;
+  background-color: hsl(var(--status-naoat));
+  color: hsl(var(--status-naoat-bg));
   padding: 1px 4px;
   border-radius: 3px;
   line-height: 1.2;
@@ -447,8 +447,9 @@
 
 /* Variante alerta nas vistas semanal/diária — borda vermelha mais forte. */
 .fc-evt-block--alert {
-  border-left: 3px solid #ef4444 !important;
-  background-color: #fef2f2 !important;
+  border-left: 3px solid hsl(var(--status-naoat)) !important;
+  background-color: hsl(var(--status-naoat-bg)) !important;
+  color: hsl(var(--status-naoat));
 }
 
 /* --------------------------------------------------------------------------
@@ -616,7 +617,6 @@
   /* Borda tracejada + fundo cinzento claro + opacidade reduzida. */
   border: 1px dashed #94a3b8 !important;
   background-color: #f1f5f9 !important;
-  opacity: 0.85;
 }
 
 .fc-evt-viagem:hover {
@@ -638,7 +638,7 @@
   border-radius: calc(var(--radius) - 1px);
   font-style: italic;
   font-weight: 500;
-  color: #64748b !important;
+  color: #475569 !important;
 }
 
 .fc-evt-month--viagem .fc-evt-month__title {
@@ -648,7 +648,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 0.7rem;
-  color: #64748b;
+  color: #475569;
 }
 
 /* Variante viagem nas vistas semanal/diária — bloco com borda tracejada. */
@@ -667,12 +667,12 @@
 }
 
 .fc-evt-block--viagem .fc-evt-block__time {
-  color: #94a3b8;
+  color: #475569;
   font-size: 0.65rem;
 }
 
 .fc-evt-block--viagem .fc-evt-block__subtitle {
-  color: #94a3b8;
+  color: #475569;
   font-size: 0.6rem;
 }
 
@@ -776,6 +776,6 @@
 }
 
 .fc-evt-block--folga .fc-evt-block__subtitle {
-  color: #64748b;
+  color: #475569;
 }
 

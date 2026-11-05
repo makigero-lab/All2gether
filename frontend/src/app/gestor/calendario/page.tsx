@@ -35,7 +35,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { EstadoTarefaBadge } from "@/components/ui/estado-tarefa-badge";
-import { infoEstadoTarefa } from "@/lib/estados";
+import { ESTADOS_TAREFA, infoEstadoTarefa } from "@/lib/estados";
 import { cn, temHoraReal } from "@/lib/utils";
 import {
   Dialog,
@@ -96,11 +96,7 @@ interface PeriodoState {
 
 const ESTADO_OPTS = [
   { value: "", label: "Todos os estados" },
-  { value: "por_atribuir", label: "Por atribuir" },
-  { value: "atribuida", label: "Atribuída" },
-  { value: "em_curso", label: "Em curso" },
-  { value: "concluida", label: "Concluída" },
-  { value: "cancelada", label: "Cancelada" },
+  ...Object.entries(ESTADOS_TAREFA).map(([value, info]) => ({ value, label: info.label })),
 ];
 
 const TIPO_LABEL: Record<string, string> = {
@@ -570,7 +566,9 @@ export default function CalendarioOperacionalPage() {
     const isAusencia = t.tipo === "ausencia";
     // HF25 — ausência pendente (pedido por aprovar).
     const isAusenciaPendente = t.tipo === "ausencia_pendente";
-    const isPorAtribuir = t.estado === "por_atribuir";
+    // por_atribuir e nao_atribuida têm o mesmo destaque; o rótulo vem de @/lib/estados.
+    const isPorAtribuir = t.estado === "por_atribuir" || t.estado === "nao_atribuida";
+    const rotuloEstado = infoEstadoTarefa(t.estado).label;
     const isViagem = !!t._isViagem;
 
     // --- Bloco de Viagem (Prompt 137) — cinzento + tracejado + ícone 🚗 ---
@@ -689,12 +687,12 @@ export default function CalendarioOperacionalPage() {
       // Prompt 80, ponto 1 — destaque forte para por_atribuir na vista mensal.
       if (isPorAtribuir) {
         return (
-          <div className="fc-evt-month fc-evt-month--alert" title={`⚠️ Por atribuir — ${titulo}`}>
+          <div className="fc-evt-month fc-evt-month--alert" title={`⚠️ ${rotuloEstado} — ${titulo}`}>
             <span className="fc-evt-month__alert-icon" aria-hidden>⚠️</span>
             <span className="fc-evt-month__title">
               {emoji} {titulo}
             </span>
-            <span className="fc-evt-month__alert-tag">Por Atribuir</span>
+            <span className="fc-evt-month__alert-tag">{rotuloEstado}</span>
           </div>
         );
       }
@@ -746,7 +744,7 @@ export default function CalendarioOperacionalPage() {
               <span>{primeiroNome(staff)}</span>
             </>
           ) : (
-            <span className="fc-evt-block__unassigned">⚠️ Por Atribuir</span>
+            <span className="fc-evt-block__unassigned">⚠️ {rotuloEstado}</span>
           )}
         </div>
       </div>
@@ -1471,34 +1469,18 @@ export default function CalendarioOperacionalPage() {
       {/* Legenda */}
       <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
         <span className="font-medium">Legenda:</span>
-        <span className="flex items-center gap-1.5">
-          <span
-            className="h-3 w-3 rounded border"
-            style={{ backgroundColor: "#fee2e2", borderColor: "#fca5a5" }}
-          />
-          Por atribuir
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span
-            className="h-3 w-3 rounded border"
-            style={{ backgroundColor: "#fef9c3", borderColor: "#fde047" }}
-          />
-          Atribuída / Em curso
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span
-            className="h-3 w-3 rounded border"
-            style={{ backgroundColor: "#dcfce7", borderColor: "#86efac" }}
-          />
-          Concluída
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span
-            className="h-3 w-3 rounded border"
-            style={{ backgroundColor: "#f1f5f9", borderColor: "#cbd5e1" }}
-          />
-          Cancelada
-        </span>
+        {Object.values(ESTADOS_TAREFA).map((info) => (
+          <span key={info.token} className="flex items-center gap-1.5">
+            <span
+              className="h-3 w-3 rounded border"
+              style={{
+                backgroundColor: `hsl(var(--status-${info.token}-bg))`,
+                borderColor: `hsl(var(--status-${info.token}) / 0.45)`,
+              }}
+            />
+            {info.label}
+          </span>
+        ))}
         <span className="flex items-center gap-1.5">
           <span
             className="h-3 w-3 rounded border"

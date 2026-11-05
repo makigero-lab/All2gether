@@ -887,9 +887,9 @@ export default function AdminTarefasPage() {
           </TabsTrigger>
           <TabsTrigger value="por_atribuir" className="gap-1.5">
             Por Atribuir
-            {tarefas.filter((t) => t.estado === "por_atribuir").length > 0 && (
+            {tarefas.filter((t) => ["por_atribuir", "nao_atribuida"].includes(t.estado)).length > 0 && (
               <Badge variant="destructive" className="ml-1 px-1.5 py-0 text-xs">
-                {tarefas.filter((t) => t.estado === "por_atribuir").length}
+                {tarefas.filter((t) => ["por_atribuir", "nao_atribuida"].includes(t.estado)).length}
               </Badge>
             )}
           </TabsTrigger>
@@ -1099,7 +1099,7 @@ export default function AdminTarefasPage() {
                               </span>
                             );
                           }
-                          return <span className="text-muted-foreground/50">—</span>;
+                          return <span className="text-muted-foreground">—</span>;
                         })()}
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">{t.utilizador_id?.nome ?? "—"}</td>
@@ -1140,7 +1140,7 @@ export default function AdminTarefasPage() {
                             {t.observacoes}
                           </span>
                         ) : (
-                          <span className="text-xs text-muted-foreground/50">—</span>
+                          <span className="text-xs text-muted-foreground">—</span>
                         )}
                       </td>
                       <td className="px-4 py-3">
