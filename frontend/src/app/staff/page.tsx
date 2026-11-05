@@ -29,6 +29,7 @@ import type { UtilizadorAuth } from "@/lib/auth";
 import { NotificationBell } from "@/components/notification-bell";
 // Prompt Extra — parsearDataSegura para compatibilidade Safari/iOS.
 import { parsearDataSegura } from "@/lib/utils";
+import { mensagemErro } from "@/lib/rascunho-staff";
 
 /**
  * Interface para a tarefa real vinda da API.
@@ -174,7 +175,7 @@ export default function StaffPage() {
       setJustificacao("");
       setFaltaPendente(true);
     } catch (e) {
-      setErroFalta(e instanceof Error ? e.message : "Erro ao reportar falta.");
+      setErroFalta(mensagemErro(e, "Erro ao reportar falta."));
     } finally {
       setSubmetendoFalta(false);
     }

@@ -418,6 +418,66 @@ export default function AusenciasPage() {
     }
   }
 
+  /** Ações da ausência (iguais na tabela e nos cartões; `tam` ajusta o alvo de toque). */
+  function acoesAusencia(a: AusenciaAmp, jaPassada: boolean, tam: string) {
+    return (
+      <>
+{/* Aprovar / Rejeitar (só para pendentes não passadas) */}
+                            {(a.estado === "pendente" || a.estado === "pendente_emergencia") && !jaPassada && (
+                              <>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className={`${tam} text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50`}
+                                  onClick={() => handleMudarEstado(a, "aprovada")}
+                                  aria-label="Aprovar"
+                                  title="Aprovar"
+                                >
+                                  <Check className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className={`${tam} text-destructive hover:text-destructive hover:bg-destructive/10`}
+                                  onClick={() => handleMudarEstado(a, "rejeitada")}
+                                  aria-label="Rejeitar"
+                                  title="Rejeitar"
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              </>
+                            )}
+                            {/* Prompt 131b — Cancelar (soft cancel).
+                                Só para pendentes ou aprovadas (não rejeitadas/canceladas).
+                                Usa X icon com cor âmbar para distinguir do Rejeitar (vermelho). */}
+                            {(a.estado === "pendente" || a.estado === "aprovada") && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className={`${tam} text-amber-600 hover:text-amber-700 hover:bg-amber-50`}
+                                onClick={() => setACancelar(a)}
+                                aria-label="Cancelar ausência"
+                                title="Cancelar (mantém no histórico)"
+                              >
+                                <X className="h-4 w-4" />
+                              </Button>
+                            )}
+                            {/* Eliminar (hard delete) */}
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className={`${tam} text-destructive hover:text-destructive`}
+                              onClick={() => setAEliminar(a)}
+                              aria-label="Eliminar ausência"
+                              title="Eliminar (apaga definitivamente)"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          
+      </>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
       {/* Cabeçalho */}
@@ -549,7 +609,44 @@ export default function AusenciasPage() {
               </p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <>
+            {/* Telemóvel: cartões (sem scroll horizontal) */}
+            <ul className="divide-y md:hidden" aria-label="Ausências">
+              {ausenciasFiltradas.map((a) => {
+                const TipoIcon = TIPO_ICON[a.tipo] ?? CircleDot;
+                const estadoExibido = resolverEstadoExibido(a);
+                const hoje = new Date();
+                hoje.setHours(0, 0, 0, 0);
+                const fim = parsearDataSegura(a.data_fim);
+                const jaPassada = fim ? fim.getTime() < hoje.getTime() : false;
+                return (
+                  <li key={a._id} className="space-y-2 py-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="min-w-0 break-words font-medium">{a.utilizador?.nome ?? "—"}</p>
+                      <div className="shrink-0">
+                        <Badge
+                          variant={
+                            (estadoExibido.variant as "default" | "secondary" | "success" | "warning" | "destructive" | "outline") ?? "secondary"
+                          }
+                        >
+                          {estadoExibido.label}
+                        </Badge>
+                        {jaPassada && a.estado === "aprovada" && (
+                          <span className="ml-1 text-xs text-muted-foreground">(terminou)</span>
+                        )}
+                      </div>
+                    </div>
+                    <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                      <TipoIcon className="h-4 w-4 shrink-0" />
+                      {TIPO_LABEL[a.tipo] ?? a.tipo} · {formatarPeriodo(a.data_inicio, a.data_fim)}
+                    </p>
+                    {a.notas && <p className="break-words text-sm text-muted-foreground">{a.notas}</p>}
+                    <div className="flex items-center justify-end gap-1">{acoesAusencia(a, jaPassada, "h-11 w-11")}</div>
+                  </li>
+                );
+              })}
+            </ul>
+            <div className="hidden overflow-x-auto md:block">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
@@ -611,59 +708,7 @@ export default function AusenciasPage() {
                           )}
                         </td>
                         <td className="px-4 py-3">
-                          <div className="flex items-center justify-end gap-1">
-                            {/* Aprovar / Rejeitar (só para pendentes não passadas) */}
-                            {(a.estado === "pendente" || a.estado === "pendente_emergencia") && !jaPassada && (
-                              <>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
-                                  onClick={() => handleMudarEstado(a, "aprovada")}
-                                  aria-label="Aprovar"
-                                  title="Aprovar"
-                                >
-                                  <Check className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
-                                  onClick={() => handleMudarEstado(a, "rejeitada")}
-                                  aria-label="Rejeitar"
-                                  title="Rejeitar"
-                                >
-                                  <X className="h-4 w-4" />
-                                </Button>
-                              </>
-                            )}
-                            {/* Prompt 131b — Cancelar (soft cancel).
-                                Só para pendentes ou aprovadas (não rejeitadas/canceladas).
-                                Usa X icon com cor âmbar para distinguir do Rejeitar (vermelho). */}
-                            {(a.estado === "pendente" || a.estado === "aprovada") && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 text-amber-600 hover:text-amber-700 hover:bg-amber-50"
-                                onClick={() => setACancelar(a)}
-                                aria-label="Cancelar ausência"
-                                title="Cancelar (mantém no histórico)"
-                              >
-                                <X className="h-4 w-4" />
-                              </Button>
-                            )}
-                            {/* Eliminar (hard delete) */}
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-destructive hover:text-destructive"
-                              onClick={() => setAEliminar(a)}
-                              aria-label="Eliminar ausência"
-                              title="Eliminar (apaga definitivamente)"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
+                          <div className="flex items-center justify-end gap-1">{acoesAusencia(a, jaPassada, "h-8 w-8")}</div>
                         </td>
                       </tr>
                     );
@@ -671,6 +716,7 @@ export default function AusenciasPage() {
                 </tbody>
               </table>
             </div>
+            </>
           )}
         </CardContent>
       </Card>

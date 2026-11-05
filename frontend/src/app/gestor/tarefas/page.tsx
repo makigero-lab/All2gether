@@ -60,6 +60,10 @@ interface TarefaAdmin {
   // para fallback quando tarefa.hospedes é null/0.
   propriedade_id?: { _id?: string; nome: string; capacidade_hospedes?: number | null } | null;
   utilizador_id?: { _id?: string; nome: string } | null;
+  // Equipa completa (responsável incluído). Vazia em tarefas antigas: vale só utilizador_id.
+  equipa_atribuida?: { _id?: string; nome: string }[] | null;
+  // > 0 quando faltou alguém e não houve substituto.
+  pessoas_em_falta?: number;
   data: string;
   tipo: string;
   estado: string;
@@ -83,6 +87,47 @@ interface TarefaAdmin {
   // FIX (motivo_falha_atribuicao) — Motivo pelo qual a auto-atribuição falhou
   // (ex: "Toda a equipa de folga/férias", "Lotação máxima excedida").
   motivo_nao_atribuicao?: string | null;
+}
+
+/** Nomes da equipa (responsável primeiro, sem repetidos). */
+function nomesEquipa(t: TarefaAdmin): string[] {
+  const vistos = new Set<string>();
+  const nomes: string[] = [];
+  const todos = [t.utilizador_id, ...(t.equipa_atribuida ?? [])];
+  for (const m of todos) {
+    if (!m || !m.nome) continue;
+    const chave = m._id ?? m.nome;
+    if (vistos.has(chave)) continue;
+    vistos.add(chave);
+    nomes.push(m.nome);
+  }
+  return nomes;
+}
+
+/** Equipa para mostrar: "Ana (resp.) + Bia" quando há mais de um membro. */
+function EquipaTarefa({ t }: { t: TarefaAdmin }) {
+  const nomes = nomesEquipa(t);
+  if (nomes.length === 0) return <>—</>;
+  return (
+    <span className="block">
+      {nomes.length === 1 ? (
+        nomes[0]
+      ) : (
+        <>
+          <span className="font-medium text-foreground">{nomes[0]}</span>
+          <span className="text-xs"> (resp.)</span>
+          {nomes.slice(1).map((n) => (
+            <span key={n}> + {n}</span>
+          ))}
+        </>
+      )}
+      {(t.pessoas_em_falta ?? 0) > 0 && (
+        <span className="mt-0.5 block text-xs font-medium text-amber-700 dark:text-amber-400">
+          Falta {t.pessoas_em_falta} {t.pessoas_em_falta === 1 ? "pessoa" : "pessoas"}
+        </span>
+      )}
+    </span>
+  );
 }
 
 function formatarData(iso: string): string {
@@ -431,6 +476,7 @@ export default function AdminTarefasPage() {
   const [importLoading, setImportLoading] = useState(false);
   const [importResult, setImportResult] = useState<string | null>(null);
   const [importErros, setImportErros] = useState<string[]>([]);
+  const [importNaoAtribuidas, setImportNaoAtribuidas] = useState<string[]>([]);
   const [espontaneaForm, setEspontaneaForm] = useState({
     propriedade_id: "",
     data: "",
@@ -569,6 +615,7 @@ export default function AdminTarefasPage() {
     setImportLoading(true);
     setImportResult(null);
     setImportErros([]);
+    setImportNaoAtribuidas([]);
     try {
       // Lê o ficheiro como ArrayBuffer e envia como raw body.
       const arrayBuffer = await importFile.arrayBuffer();
@@ -581,6 +628,7 @@ export default function AdminTarefasPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data?.erro || `Erro ${res.status}`);
       setImportErros(lerDetalheErros(data.detalheErros));
+      setImportNaoAtribuidas(lerDetalheErros(data.detalheNaoAtribuidas, 50));
       setImportResult(data.message || `${data.criadas} criadas, ${data.ignoradas} ignoradas, ${data.erros} erros.`);
       // Recarrega as tarefas para mostrar as importadas.
       await carregar();
@@ -589,6 +637,48 @@ export default function AdminTarefasPage() {
     } finally {
       setImportLoading(false);
     }
+  }
+
+  /** Ações da limpeza (iguais na tabela e nos cartões; `tam` ajusta o alvo de toque). */
+  function acoesTarefa(t: TarefaAdmin, tam: string) {
+    return (
+      <>
+        <Button variant="ghost" size="icon" className={tam} onClick={() => setDetalheTarefa(t)} aria-label="Ver detalhe" title="Ver detalhe">
+          <Eye className="h-4 w-4" />
+        </Button>
+        {(t.estado === "por_atribuir" || t.estado === "atribuida" || t.estado === "nao_atribuida") && (
+          <Button variant="ghost" size="icon" className={tam} onClick={() => { setAtribuindo(t); setAtribuirUserId(""); }} aria-label="Atribuir" title="Atribuir / Reatribuir">
+            <UserCheck className="h-4 w-4" />
+          </Button>
+        )}
+        {(t.estado === "atribuida" || t.estado === "em_curso") && (
+          <Button variant="ghost" size="icon" className={`${tam} text-amber-600 hover:text-amber-700`} onClick={() => handleDesatribuir(t)} aria-label="Desatribuir (por atribuir)" title="Desatribuir (colocar por atribuir)">
+            <UserMinus className="h-4 w-4" />
+          </Button>
+        )}
+        {t.estado !== "cancelada" && t.estado !== "concluida" && (
+          <Button variant="ghost" size="icon" className={`${tam} text-destructive hover:text-destructive`} onClick={() => handleCancelar(t)} aria-label="Cancelar tarefa" title="Cancelar">
+            <AlertCircle className="h-4 w-4" />
+          </Button>
+        )}
+      </>
+    );
+  }
+
+  /** Estado visível (staff desativado => "por atribuir") + motivo. */
+  function estadoTarefa(t: TarefaAdmin) {
+    const estadoExibido =
+      (t.estado === "atribuida" || t.estado === "em_curso") && !t.utilizador_id ? "por_atribuir" : t.estado;
+    return (
+      <div className="flex items-center gap-1">
+        <EstadoTarefaBadge estado={estadoExibido} />
+        {(t.estado === "por_atribuir" || t.estado === "nao_atribuida") && t.motivo_nao_atribuicao && (
+          <span title={t.motivo_nao_atribuicao} className="cursor-help">
+            <Info className="h-3.5 w-3.5 text-muted-foreground" />
+          </span>
+        )}
+      </div>
+    );
   }
 
   return (
@@ -1018,7 +1108,43 @@ export default function AdminTarefasPage() {
               </p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <>
+            {/* Telemóvel: cartões (sem scroll horizontal) */}
+            <ul className="divide-y md:hidden" aria-label="Limpezas">
+              {tarefasPagina.map((t) => (
+                <li key={t._id} className="space-y-2 p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="break-words font-medium">{t.propriedade_id?.nome ?? "—"}</p>
+                      <p className="text-xs tabular-nums text-muted-foreground">{formatarDataHora(t.data)}</p>
+                    </div>
+                    <div className="shrink-0">{estadoTarefa(t)}</div>
+                  </div>
+                  <p className="break-words text-sm text-muted-foreground">
+                    <span className="text-xs uppercase tracking-wide">Equipa: </span>
+                    <EquipaTarefa t={t} />
+                  </p>
+                  {(t.origem_parceiro || (Array.isArray(t.avarias) && t.avarias.length > 0)) && (
+                    <div className="flex flex-wrap gap-1">
+                      {t.origem_parceiro && (
+                        <Badge variant="secondary" className="px-1.5 py-0 text-xs">🤝 Parceiro</Badge>
+                      )}
+                      {Array.isArray(t.avarias) && t.avarias.length > 0 && (
+                        <Badge variant="destructive" className="gap-1 px-1.5 py-0 text-xs">
+                          <Wrench className="h-3 w-3" />
+                          Avaria
+                        </Badge>
+                      )}
+                    </div>
+                  )}
+                  {t.observacoes && (
+                    <p className="line-clamp-2 break-words text-xs text-muted-foreground">{t.observacoes}</p>
+                  )}
+                  <div className="flex items-center justify-end gap-1">{acoesTarefa(t, "h-11 w-11")}</div>
+                </li>
+              ))}
+            </ul>
+            <div className="hidden overflow-x-auto md:block">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b bg-muted/40 text-left">
@@ -1102,30 +1228,8 @@ export default function AdminTarefasPage() {
                           return <span className="text-muted-foreground">—</span>;
                         })()}
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground">{t.utilizador_id?.nome ?? "—"}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1">
-                          {/* FIX (estado fantasma) — Se estado é 'atribuida' mas
-                              utilizador_id é null (staff desativado), mostra como
-                              'Por atribuir' visualmente. */}
-                          {(() => {
-                            const estadoExibido =
-                              (t.estado === "atribuida" || t.estado === "em_curso") && !t.utilizador_id
-                                ? "por_atribuir"
-                                : t.estado;
-                            return (
-                              <EstadoTarefaBadge estado={estadoExibido} />
-                            );
-                          })()}
-                          {/* FIX (motivo_falha_atribuicao) — Ícone de Info com
-                              tooltip que mostra o motivo da falha na auto-atribuição. */}
-                          {(t.estado === "por_atribuir" || t.estado === "nao_atribuida") && t.motivo_nao_atribuicao && (
-                            <span title={t.motivo_nao_atribuicao} className="cursor-help">
-                              <Info className="h-3.5 w-3.5 text-muted-foreground" />
-                            </span>
-                          )}
-                        </div>
-                      </td>
+                      <td className="px-4 py-3 text-muted-foreground"><EquipaTarefa t={t} /></td>
+                      <td className="px-4 py-3">{estadoTarefa(t)}</td>
                       {/* v1.68.0 (Prompt 91) — Excerto das observações (descrição da avaria) */}
                       <td className="px-4 py-3 max-w-xs">
                         {t.observacoes ? (
@@ -1144,58 +1248,7 @@ export default function AdminTarefasPage() {
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-1">
-                          {/* Prompt 95 — Ver detalhe da tarefa (card de detalhes_reserva) */}
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8"
-                            onClick={() => setDetalheTarefa(t)}
-                            aria-label="Ver detalhe"
-                            title="Ver detalhe"
-                          >
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                          {(t.estado === "por_atribuir" || t.estado === "atribuida" || t.estado === "nao_atribuida") && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                              onClick={() => { setAtribuindo(t); setAtribuirUserId(""); }}
-                              aria-label="Atribuir"
-                              title="Atribuir / Reatribuir"
-                            >
-                              <UserCheck className="h-4 w-4" />
-                            </Button>
-                          )}
-                          {/* FIX (por atribuir manual) — Botão para desatribuir
-                              (colocar 'por atribuir'). Visível para tarefas
-                              atribuídas ou em curso. */}
-                          {(t.estado === "atribuida" || t.estado === "em_curso") && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-amber-600 hover:text-amber-700"
-                              onClick={() => handleDesatribuir(t)}
-                              aria-label="Desatribuir (por atribuir)"
-                              title="Desatribuir (colocar por atribuir)"
-                            >
-                              <UserMinus className="h-4 w-4" />
-                            </Button>
-                          )}
-                          {t.estado !== "cancelada" && t.estado !== "concluida" && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-destructive hover:text-destructive"
-                              onClick={() => handleCancelar(t)}
-                              aria-label="Cancelar tarefa"
-                              title="Cancelar"
-                            >
-                              <AlertCircle className="h-4 w-4" />
-                            </Button>
-                          )}
-                        </div>
+                        <div className="flex items-center justify-end gap-1">{acoesTarefa(t, "h-8 w-8")}</div>
                       </td>
                     </tr>
                     );
@@ -1203,6 +1256,7 @@ export default function AdminTarefasPage() {
                 </tbody>
               </table>
             </div>
+            </>
           )}
           {/* Paginação */}
           {!loading && tarefasFiltradas.length > 0 && (
@@ -1229,6 +1283,11 @@ export default function AdminTarefasPage() {
             <DialogTitle>Atribuir Limpeza</DialogTitle>
             <DialogDescription>
               {atribuindo?.propriedade_id?.nome} — {atribuindo ? formatarData(atribuindo.data) : ""}
+              {atribuindo && nomesEquipa(atribuindo).length > 1 && (
+                <span className="mt-1 block text-xs">
+                  Equipa atual: {nomesEquipa(atribuindo).join(" + ")}. A pessoa escolhida passa a responsável e os outros membros mantêm-se.
+                </span>
+              )}
             </DialogDescription>
           </div>
           <DialogClose onClick={() => setAtribuindo(null)} />
@@ -1589,7 +1648,7 @@ export default function AdminTarefasPage() {
             )}
           </div>
           {importResult && (
-            <ResultadoImportacao resumo={importResult} detalheErros={importErros} />
+            <ResultadoImportacao resumo={importResult} detalheErros={importErros} naoAtribuidas={importNaoAtribuidas} />
           )}
         </DialogContent>
         <DialogFooter>

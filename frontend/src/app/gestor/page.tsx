@@ -36,6 +36,8 @@ interface DashboardData {
   membrosEquipaAtivos: number;
   tarefasHoje: number;
   tarefasPorAtribuir: number;
+  // Limpezas a que falta pelo menos uma pessoa (sem substituto).
+  tarefasEquipaIncompleta?: number;
   tarefasConcluidasHoje: number;
   tarefasPorStaff: { utilizador_id: string; nome: string; tarefas: number; carga_minutos: number }[];
   // v1.54.0 (Prompt 76) — Radar de Risco: check-ins sem limpeza nas próximas 48h.
@@ -135,6 +137,9 @@ export default function AdminDashboardPage() {
         { label: "Equipa ativa", value: data.membrosEquipaAtivos, icon: Users },
         { label: "Limpezas hoje", value: data.tarefasHoje, icon: ClipboardList },
         { label: "Por atribuir", value: data.tarefasPorAtribuir, icon: AlertCircle },
+        ...((data.tarefasEquipaIncompleta ?? 0) > 0
+          ? [{ label: "Falta pessoa", value: data.tarefasEquipaIncompleta ?? 0, icon: Users }]
+          : []),
         { label: "Concluídas", value: data.tarefasConcluidasHoje, icon: CheckCircle2 },
       ]
     : [];
