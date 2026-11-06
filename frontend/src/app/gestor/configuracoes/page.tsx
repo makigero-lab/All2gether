@@ -35,6 +35,7 @@ import {
 import { adminGet, adminDelete, adminPost } from "@/lib/api";
 import { lerUtilizador, type Role } from "@/lib/auth";
 
+import { plural } from "@/lib/utils";
 type Toast = { tipo: "sucesso" | "erro"; msg: string } | null;
 
 // Prompt 126 — Tipos para os logs de webhooks (smoobu) exibidos no modal.
@@ -187,7 +188,7 @@ export default function ConfiguracoesPage() {
         "/api/gestor/smoobu/reconciliar-cancelamentos", {});
       setPendentes({ candidatas: res.candidatas, revisao_manual: res.revisao_manual });
       const n = res.candidatas.length + res.revisao_manual.length;
-      showToast(n === 0 ? "sucesso" : "erro", n === 0 ? "Nada por cancelar." : `${n} limpeza(s) de reservas canceladas.`);
+      showToast(n === 0 ? "sucesso" : "erro", n === 0 ? "Nada por cancelar." : `${plural(n, "limpeza")} de reservas canceladas.`);
     } catch (e) {
       showToast("erro", e instanceof Error ? e.message : "Erro ao verificar.");
     } finally {
@@ -200,7 +201,7 @@ export default function ConfiguracoesPage() {
     try {
       const res = await adminPost<{ canceladas: number }>("/api/gestor/smoobu/reconciliar-cancelamentos", { aplicar: true });
       setPendentes(null);
-      showToast("sucesso", `${res.canceladas} limpeza(s) cancelada(s).`);
+      showToast("sucesso", `${plural(plural(res.canceladas, "limpeza"), "cancelada")}.`);
     } catch (e) {
       showToast("erro", e instanceof Error ? e.message : "Erro ao cancelar.");
     } finally {
@@ -215,7 +216,7 @@ export default function ConfiguracoesPage() {
       const res = await adminDelete<{ mensagem: string; apagadas: number }>(
         "/api/gestor/tarefas/futuras"
       );
-      const msg = res.mensagem || `${res.apagadas} tarefa(s) apagada(s).`;
+      const msg = res.mensagem || `${plural(plural(res.apagadas, "tarefa"), "apagada")}.`;
       showToast("sucesso", msg);
     } catch (e) {
       showToast("erro", e instanceof Error ? e.message : "Erro ao apagar.");
@@ -232,7 +233,7 @@ export default function ConfiguracoesPage() {
         message?: string;
       }>("/api/gestor/smoobu/sincronizar", {});
       const msg = res.message ||
-        `${res.criadas} tarefa(s) criada(s)` +
+        `${plural(plural(res.criadas, "tarefa"), "criada")}` +
         (res.existentes > 0 ? `, ${res.existentes} já existiam` : "") +
         (res.erros > 0 ? `, ${res.erros} com erro` : "") + ".";
       showToast("sucesso", msg);
@@ -416,7 +417,7 @@ export default function ConfiguracoesPage() {
             </p>
             <Button variant="outline" className="w-full gap-2" onClick={() => executarAcao("Registrar Webhooks", "/api/admin/registrar-webhooks")} disabled={actionLoading !== null}>
               {actionLoading === "Registrar Webhooks" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Webhook className="h-4 w-4" />}
-              Registrar Webhooks
+              Registrar webhooks
             </Button>
             {/* Prompt 126 — Botão para abrir o modal de logs de sincronização Smoobu. */}
             <Button variant="outline" className="w-full gap-2" onClick={() => setMostrarLogs(true)}>
@@ -507,7 +508,7 @@ export default function ConfiguracoesPage() {
                 ) : (
                   <Trash2 className="h-4 w-4" />
                 )}
-                Eliminar Limpezas Futuras
+                Eliminar limpezas futuras
               </Button>
             </div>
             {pendentes && (
@@ -518,19 +519,19 @@ export default function ConfiguracoesPage() {
                   <>
                     {pendentes.candidatas.length > 0 && (
                       <>
-                        <p className="font-medium">{pendentes.candidatas.length} limpeza(s) de reservas já canceladas ou bloqueadas no Smoobu:</p>
+                        <p className="font-medium">{plural(pendentes.candidatas.length, "limpeza")} de reservas já canceladas ou bloqueadas no Smoobu:</p>
                         <ul className="max-h-56 list-disc space-y-0.5 overflow-y-auto pl-5">
                           {pendentes.candidatas.slice(0, 50).map((c) => (
                             <li key={c.tarefa_id}>{c.propriedade} · {String(c.data).slice(0, 10)} · {c.motivo}</li>
                           ))}
                         </ul>
                         <Button variant="outline" className="border-destructive/40 text-destructive hover:bg-destructive/10" onClick={handleAplicarCancelamentos} disabled={verificando}>
-                          Cancelar estas {pendentes.candidatas.length} limpeza(s)
+                          Cancelar estas {plural(pendentes.candidatas.length, "limpeza")}
                         </Button>
                       </>
                     )}
                     {pendentes.revisao_manual.length > 0 && (
-                      <p className="text-muted-foreground">{pendentes.revisao_manual.length} limpeza(s) já em curso de reservas canceladas: revê-as manualmente.</p>
+                      <p className="text-muted-foreground">{plural(pendentes.revisao_manual.length, "limpeza")} já em curso de reservas canceladas: revê-as manualmente.</p>
                     )}
                   </>
                 )}
@@ -562,7 +563,7 @@ export default function ConfiguracoesPage() {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Trash2 className="h-5 w-5 text-destructive" />
-            Eliminar Limpezas Futuras
+            Eliminar limpezas futuras
           </DialogTitle>
           <DialogDescription>
             Isto vai eliminar todas as tarefas não concluídas de hoje para a frente.
@@ -623,7 +624,7 @@ export default function ConfiguracoesPage() {
         <DialogContent className="space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-xs text-muted-foreground">
-              {logs.length} webhook(s)
+              {plural(logs.length, "webhook")}
             </span>
             <Button
               type="button"

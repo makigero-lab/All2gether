@@ -320,7 +320,7 @@ export default function ChecklistsPage() {
           </Button>
           <Button onClick={abrirNovo}>
             <Plus className="h-4 w-4" />
-            Novo Modelo
+            Novo modelo
           </Button>
         </div>
       </div>
@@ -428,7 +428,7 @@ export default function ChecklistsPage() {
                       variant="ghost"
                       size="sm"
                       onClick={() => abrirApagar(m)}
-                      className="h-8 gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      className="h-8 gap-1.5 text-red-700 hover:bg-red-100 hover:text-red-800 dark:text-red-300 dark:hover:bg-red-950 dark:hover:text-red-200"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                       Apagar
@@ -574,7 +574,7 @@ export default function ChecklistsPage() {
                       className="h-7 gap-1 text-xs"
                     >
                       <Plus className="h-3 w-3" />
-                      Adicionar Item
+                      Adicionar item
                     </Button>
                   </div>
                 </div>
@@ -588,7 +588,7 @@ export default function ChecklistsPage() {
                 className="gap-1.5"
               >
                 <Plus className="h-4 w-4" />
-                Adicionar Secção
+                Adicionar secção
               </Button>
             </div>
 
@@ -639,7 +639,7 @@ export default function ChecklistsPage() {
           <div>
             <DialogTitle className="flex items-center gap-2">
               <AlertCircle className="h-5 w-5 text-destructive" />
-              Eliminar Modelo
+              Eliminar modelo
             </DialogTitle>
             <DialogDescription>
               Tens a certeza que queres eliminar o modelo{" "}
@@ -687,7 +687,7 @@ export default function ChecklistsPage() {
             ) : (
               <>
                 <Trash2 className="h-4 w-4" />
-                Eliminar Modelo
+                Eliminar modelo
               </>
             )}
           </Button>

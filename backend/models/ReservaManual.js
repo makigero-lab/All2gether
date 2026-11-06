@@ -52,6 +52,11 @@ const reservaManualSchema = new mongoose.Schema(
     // Preferência do parceiro para a limpeza (ex.: "11h - 14h", "depois das 11h").
     // É só uma preferência: a hora real da tarefa é decidida pelo sistema.
     horario_preferido: { type: String, default: null, trim: true, maxlength: 60 },
+    // Tipo de limpeza (normal, intermedia, profunda, preparacao). Sem o campo = normal.
+    // Normal e profunda ficam no check-out; intermedia e preparacao usam `data_limpeza`.
+    tipo_limpeza: { type: String, enum: ['normal', 'intermedia', 'profunda', 'preparacao'], default: 'normal' },
+    // Dia da limpeza escolhido pelo parceiro (só intermedia/preparacao; null nos outros).
+    data_limpeza: { type: Date, default: null },
     // ID da tarefa de limpeza gerada automaticamente para o check-out.
     tarefa_gerada_id: {
       type: mongoose.Schema.Types.ObjectId,

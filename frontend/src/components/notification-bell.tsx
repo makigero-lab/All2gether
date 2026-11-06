@@ -22,7 +22,8 @@ import { Button } from "@/components/ui/button";
  *
  * Polling: a cada 30s, refaz a contagem de não-lidas.
  */
-export function NotificationBell() {
+/** `paraCima`: abre a lista para cima (sino no fundo da barra lateral). */
+export function NotificationBell({ paraCima = false }: { paraCima?: boolean } = {}) {
   const router = useRouter();
   const [naoLidas, setNaoLidas] = useState(0);
   const [aberto, setAberto] = useState(false);
@@ -85,9 +86,16 @@ export function NotificationBell() {
         setAberto(false);
       }
     }
+    function handleEsc(e: KeyboardEvent) {
+      if (e.key === "Escape") setAberto(false);
+    }
     if (aberto) {
       document.addEventListener("mousedown", handleClickOutside);
-      return () => document.removeEventListener("mousedown", handleClickOutside);
+      document.addEventListener("keydown", handleEsc);
+      return () => {
+        document.removeEventListener("mousedown", handleClickOutside);
+        document.removeEventListener("keydown", handleEsc);
+      };
     }
   }, [aberto]);
 
@@ -167,7 +175,7 @@ export function NotificationBell() {
         size="icon"
         onClick={handleToggle}
         aria-label={`Notificações${naoLidas > 0 ? ` (${naoLidas} não lidas)` : ""}`}
-        className="relative"
+        className="relative h-11 w-11 sm:h-9 sm:w-9"
       >
         <Bell className="h-5 w-5" />
         {naoLidas > 0 && (
@@ -178,12 +186,12 @@ export function NotificationBell() {
       </Button>
 
       {aberto && (
-        <div className="absolute right-0 top-full z-50 mt-2 flex max-h-[70vh] w-[calc(100vw-2rem)] max-w-sm flex-col origin-top-right overflow-hidden rounded-lg border bg-card shadow-lg">
+        <div className={`absolute right-0 z-50 ${paraCima ? "bottom-full mb-2" : "top-full mt-2"} flex max-h-[70vh] w-[calc(100vw-2rem)] max-w-sm flex-col origin-top-right overflow-hidden rounded-lg border bg-card shadow-lg`}>
           <div className="flex shrink-0 items-center justify-between border-b px-4 py-3">
             <span className="text-sm font-semibold">Notificações</span>
             {naoLidas > 0 && (
               <span className="text-xs text-muted-foreground">
-                {naoLidas} não lida(s)
+                {naoLidas} {naoLidas === 1 ? "não lida" : "não lidas"}
               </span>
             )}
           </div>

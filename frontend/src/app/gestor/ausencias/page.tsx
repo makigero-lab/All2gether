@@ -44,7 +44,7 @@ import {
   type AusenciaDTO,
   type UtilizadorDTO,
 } from "@/lib/api";
-import { parsearDataSegura, textoRedistribuicao, type RedistribuicaoDTO } from "@/lib/utils";
+import { parsearDataSegura, textoRedistribuicao, type RedistribuicaoDTO, plural } from "@/lib/utils";
 import { mensagemErro } from "@/lib/rascunho-staff";
 
 /**
@@ -494,7 +494,7 @@ export default function AusenciasPage() {
         <div className="flex items-center gap-2">
           <Button onClick={abrirFormCriacao}>
             <Plus className="h-4 w-4" />
-            Nova Ausência
+            Nova ausência
           </Button>
           <Button
             variant="outline"
@@ -581,7 +581,7 @@ export default function AusenciasPage() {
             </Button>
           )}
           <span className="ml-auto text-xs text-muted-foreground">
-            {ausenciasFiltradas.length} de {ausencias.length} ausência(s)
+            {ausenciasFiltradas.length} de {plural(ausencias.length, "ausência")}
           </span>
         </CardContent>
       </Card>
@@ -811,7 +811,7 @@ export default function AusenciasPage() {
           <div>
             <DialogTitle className="flex items-center gap-2">
               <Trash2 className="h-5 w-5 text-destructive" />
-              Eliminar Ausência
+              Eliminar ausência
             </DialogTitle>
             <DialogDescription>
               Tens a certeza que queres eliminar esta ausência? Esta ação é
@@ -882,7 +882,7 @@ export default function AusenciasPage() {
           <div>
             <DialogTitle className="flex items-center gap-2">
               <X className="h-5 w-5 text-amber-600" />
-              Cancelar Ausência
+              Cancelar ausência
             </DialogTitle>
             <DialogDescription>
               Vais cancelar esta ausência. O registo fica marcado como
@@ -945,7 +945,7 @@ export default function AusenciasPage() {
             ) : (
               <>
                 <X className="mr-2 h-4 w-4" />
-                Cancelar Ausência
+                Cancelar ausência
               </>
             )}
           </Button>
@@ -961,7 +961,7 @@ export default function AusenciasPage() {
           <div>
             <DialogTitle className="flex items-center gap-2">
               <Plus className="h-5 w-5 text-gold-text" />
-              Nova Ausência
+              Nova ausência
             </DialogTitle>
             <DialogDescription>
               Regista um período de férias, doença ou outra ausência para um
@@ -1077,7 +1077,7 @@ export default function AusenciasPage() {
             ) : (
               <>
                 <Plus className="mr-2 h-4 w-4" />
-                Criar Ausência
+                Criar ausência
               </>
             )}
           </Button>

@@ -22,7 +22,52 @@ export const CAMPOS = [
   "plataforma",
   "horario_preferido",
   "observacoes",
+  "tipo_limpeza",
+  "data_limpeza",
 ] as const;
+
+/** Tipos de limpeza (o tipo não muda preços nem faturação). Vazio/ausente = normal. */
+export const TIPOS_LIMPEZA = ["normal", "intermedia", "profunda", "preparacao"] as const;
+export type TipoLimpeza = (typeof TIPOS_LIMPEZA)[number];
+
+export const ROTULO_TIPO: Record<TipoLimpeza, string> = {
+  normal: "Normal",
+  intermedia: "Intermédia",
+  profunda: "Profunda",
+  preparacao: "Preparação",
+};
+
+/** Intermédia e preparação têm data da limpeza escolhida (obrigatória). */
+export function tipoPedeData(tipo: string): boolean {
+  return tipo === "intermedia" || tipo === "preparacao";
+}
+
+/** Máximo de dias que a limpeza de preparação pode anteceder o check-in. */
+export const MAX_DIAS_PREPARACAO = 30;
+
+function somarDiasIso(dia: string, n: number): string {
+  const d = new Date(`${dia}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+/** «10/11» (dia/mês) para mensagens curtas. */
+function ddmm(dia: string): string {
+  return `${dia.slice(8, 10)}/${dia.slice(5, 7)}`;
+}
+
+/** Limites (min/max) do campo «data da limpeza» conforme o tipo e as datas da reserva. */
+export function limitesDataLimpeza(tipo: string, checkIn: string, checkOut: string): { min?: string; max?: string } {
+  const ok = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
+  if (tipo === "intermedia") return { min: ok(checkIn) ? checkIn : undefined, max: ok(checkOut) ? checkOut : undefined };
+  if (tipo === "preparacao") return { min: ok(checkIn) ? somarDiasIso(checkIn, -MAX_DIAS_PREPARACAO) : undefined, max: ok(checkIn) ? checkIn : undefined };
+  return {};
+}
+
+/** Tipo válido ou "normal" (valores antigos/vazios contam como normal). */
+export function tipoOuNormal(v: string | null | undefined): TipoLimpeza {
+  return (TIPOS_LIMPEZA as readonly string[]).includes(v ?? "") ? (v as TipoLimpeza) : "normal";
+}
 
 export type Campo = (typeof CAMPOS)[number];
 export type Valores = Record<Campo, string>;
@@ -235,6 +280,24 @@ export function validarReserva(v: Valores, propriedade?: string): string | null 
   if (!dataValida(v.check_in)) return "Check-in em falta ou inválido.";
   if (!dataValida(v.check_out)) return "Check-out em falta ou inválido.";
   if (v.check_out < v.check_in) return "O check-out não pode ser anterior ao check-in.";
+  const tipoBruto = (v.tipo_limpeza ?? "").trim();
+  if (tipoBruto !== "" && !(TIPOS_LIMPEZA as readonly string[]).includes(tipoBruto)) {
+    return "Tipo de limpeza inválido.";
+  }
+  const tipo = tipoOuNormal(tipoBruto);
+  if (tipoPedeData(tipo)) {
+    const d = v.data_limpeza ?? "";
+    if (!dataValida(d)) return `Escolhe a data da limpeza ${ROTULO_TIPO[tipo].toLowerCase()}.`;
+    if (tipo === "intermedia" && (d < v.check_in || d > v.check_out)) {
+      return `A limpeza intermédia tem de ser entre ${ddmm(v.check_in)} e ${ddmm(v.check_out)}.`;
+    }
+    if (tipo === "preparacao" && d > v.check_in) {
+      return `A limpeza de preparação tem de ser até ao check-in (${ddmm(v.check_in)}).`;
+    }
+    if (tipo === "preparacao" && d < somarDiasIso(v.check_in, -MAX_DIAS_PREPARACAO)) {
+      return `A limpeza de preparação pode ser no máximo ${MAX_DIAS_PREPARACAO} dias antes do check-in (a partir de ${ddmm(somarDiasIso(v.check_in, -MAX_DIAS_PREPARACAO))}).`;
+    }
+  }
   if (v.hospedes !== "" && !/^\d{1,3}$/.test(v.hospedes.trim())) {
     return "Número de hóspedes inválido.";
   }
@@ -248,6 +311,8 @@ export function paraPayload(v: Partial<Valores>): Record<string, unknown> {
     if (!(c in v)) continue;
     const val = v[c] as string;
     if (c === "hospedes") out[c] = val.trim() === "" ? null : Number(val);
+    else if (c === "tipo_limpeza") out[c] = tipoOuNormal(val.trim());
+    else if (c === "data_limpeza") out[c] = val.trim() === "" ? null : val.trim();
     else out[c] = val;
   }
   return out;

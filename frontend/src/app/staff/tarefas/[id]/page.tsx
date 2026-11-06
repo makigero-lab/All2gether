@@ -6,6 +6,7 @@ import { Loader2, WifiOff } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { MSG_SEM_LIGACAO } from "@/lib/rascunho-staff";
+import { checklistDaTarefa } from "@/lib/utils";
 
 import { DetalheTarefaClient } from "@/components/staff/detalhe-tarefa-client";
 
@@ -87,6 +88,8 @@ export default function DetalheTarefaPage({
     propriedade_nome: tarefa.propriedade_id?.nome ?? "Propriedade",
     hora_limite: "",
     tempo_estimado_minutos: tarefa.tempo_limpeza_minutos,
+    tipo_limpeza: tarefa.tipo_limpeza ?? null,
+    checklist_do_tipo: tarefa.checklist_do_tipo === true,
     estado: tarefa.estado,
     tipo: tarefa.tipo,
     endereco: tarefa.propriedade_id?.morada,
@@ -111,7 +114,9 @@ export default function DetalheTarefaPage({
   // Usa a checklist real da propriedade (vinda do populate do backend).
   // Se a propriedade não tiver checklist definida, usa uma vazia (o botão
   // de concluir fica sempre ativo quando não há itens).
-  const checklist: string[] = tarefa.propriedade_id?.checklist ?? [];
+  // B1: a checklist da própria tarefa (do tipo de limpeza) tem prioridade; a da
+  // casa só entra se a da tarefa vier vazia (tarefas antigas).
+  const checklist: string[] = checklistDaTarefa(tarefa);
 
   return (
     <DetalheTarefaClient

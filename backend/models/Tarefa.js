@@ -249,6 +249,17 @@ const tarefaSchema = new mongoose.Schema(
       default: false,
       index: true,
     },
+    // Tipo de limpeza: normal (saída, por omissão; também sem o campo), intermedia,
+    // profunda ou preparacao. Define tempo e checklist no momento da criação (snapshot).
+    // Não afeta preços nem faturação.
+    // A checklist desta tarefa veio de uma checklist PRÓPRIA do tipo (e não da checklist base da casa).
+    // O staff vê «segue a checklist própria desta casa» só quando é verdade.
+    checklist_do_tipo: { type: Boolean, default: false },
+    tipo_limpeza: {
+      type: String,
+      enum: ['normal', 'intermedia', 'profunda', 'preparacao'],
+      default: 'normal',
+    },
   },
   { timestamps: true }
 );

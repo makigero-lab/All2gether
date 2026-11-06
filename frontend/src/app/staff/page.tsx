@@ -28,7 +28,7 @@ import { fazerLogout, lerUtilizador } from "@/lib/auth";
 import type { UtilizadorAuth } from "@/lib/auth";
 import { NotificationBell } from "@/components/notification-bell";
 // Prompt Extra — parsearDataSegura para compatibilidade Safari/iOS.
-import { parsearDataSegura } from "@/lib/utils";
+import { dataPorExtenso, parsearDataSegura } from "@/lib/utils";
 import { mensagemErro } from "@/lib/rascunho-staff";
 
 /**
@@ -42,6 +42,7 @@ interface TarefaReal {
   tipo: string;
   estado: string;
   tempo_limpeza_minutos: number;
+  tipo_limpeza?: string | null;
   // Prompt 136 — detalhes_reserva (para mostrar nome_hospede no cartão).
   detalhes_reserva?: {
     checkin?: string | null;
@@ -64,6 +65,7 @@ function adaptarTarefa(t: TarefaReal) {
     propriedade_nome: t.propriedade_id?.nome ?? "Propriedade",
     hora_limite: "",
     tempo_estimado_minutos: t.tempo_limpeza_minutos,
+    tipo_limpeza: t.tipo_limpeza ?? null,
     estado: t.estado as "por_atribuir" | "atribuida" | "em_curso" | "concluida" | "cancelada",
     tipo: t.tipo as "limpeza" | "check_in" | "check_out" | "manutencao" | "outro",
     endereco: t.propriedade_id?.morada,
@@ -206,11 +208,7 @@ export default function StaffPage() {
   const [offsetDia, setOffsetDia] = useState(0);
 
   const hoje = mounted
-    ? new Date().toLocaleDateString("pt-PT", {
-        weekday: "long",
-        day: "numeric",
-        month: "long",
-      })
+    ? dataPorExtenso(new Date())
     : "";
 
   // Calcula a data do dia selecionado.
@@ -227,12 +225,7 @@ export default function StaffPage() {
     if (offsetDia === 0) return "Hoje";
     if (offsetDia === -1) return "Ontem";
     if (offsetDia === 1) return "Amanhã";
-    return diaSelecionadoDate.toLocaleDateString("pt-PT", {
-      weekday: "long",
-      day: "numeric",
-      month: "long",
-      timeZone: "Europe/Lisbon",
-    });
+    return dataPorExtenso(diaSelecionadoDate);
   }, [offsetDia, diaSelecionadoDate]);
 
   // Filtra as tarefas do dia selecionado (ativas + concluídas).
@@ -270,7 +263,7 @@ export default function StaffPage() {
             <Button
               variant="ghost"
               size="icon"
-              className="text-muted-foreground hover:text-destructive"
+              className="h-11 w-11 sm:h-9 sm:w-9 text-muted-foreground hover:text-destructive"
               onClick={() => fazerLogout()}
               aria-label="Terminar sessão"
               title="Terminar sessão"
@@ -282,7 +275,7 @@ export default function StaffPage() {
 
         {/* Data + resumo */}
         <div className="mt-4 flex items-center justify-between">
-          <p className="text-sm capitalize text-muted-foreground">{hoje}</p>
+          <p className="text-sm text-muted-foreground">{hoje}</p>
           <div className="flex items-center gap-3 text-xs text-muted-foreground">
             <span className="flex items-center gap-1">
               <ClipboardList className="h-3.5 w-3.5" />
@@ -347,7 +340,7 @@ export default function StaffPage() {
                 Anterior
               </Button>
               <div className="flex flex-col items-center">
-                <span className={`text-sm font-bold capitalize ${offsetDia === 0 ? "text-gold-text" : "text-foreground"}`}>
+                <span className={`text-sm font-bold ${offsetDia === 0 ? "text-gold-text" : "text-foreground"}`}>
                   {diaLabel}
                 </span>
                 {offsetDia !== 0 && (
@@ -431,7 +424,7 @@ export default function StaffPage() {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <AlertTriangle className="h-5 w-5 text-destructive" />
-            Reportar Falta Hoje
+            Reportar falta hoje
           </DialogTitle>
           <DialogDescription>
             Tem a certeza que não pode trabalhar hoje? O Administrador será
@@ -480,7 +473,7 @@ export default function StaffPage() {
               ) : (
                 <>
                   <Send className="mr-2 h-4 w-4" />
-                  Confirmar Falta
+                  Confirmar falta
                 </>
               )}
             </Button>

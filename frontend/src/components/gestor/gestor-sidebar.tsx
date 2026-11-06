@@ -190,7 +190,7 @@ export function GestorSidebar() {
       <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b bg-background/95 px-4 backdrop-blur lg:hidden">
         <Button
           variant="ghost"
-          size="icon"
+          size="icon" className="h-11 w-11 sm:h-9 sm:w-9"
           onClick={() => setOpen(true)}
           aria-label="Abrir menu"
         >
@@ -208,7 +208,7 @@ export function GestorSidebar() {
         <div className="mt-auto space-y-2 border-t p-4">
           <div className="flex items-center justify-between gap-2">
             <span className="text-xs text-muted-foreground">Notificações</span>
-            <NotificationBell />
+            <NotificationBell paraCima />
           </div>
           <div className="flex items-center justify-between">
             <span className="text-xs text-muted-foreground">Tema</span>
@@ -220,7 +220,7 @@ export function GestorSidebar() {
             onClick={() => fazerLogout()}
           >
             <LogOut className="h-4 w-4" />
-            Terminar Sessão
+            Terminar sessão
           </Button>
           <p className="text-xs text-muted-foreground">
             © {new Date().getFullYear()} All2gether
@@ -246,7 +246,7 @@ export function GestorSidebar() {
               </div>
               <Button
                 variant="ghost"
-                size="icon"
+                size="icon" className="h-11 w-11 sm:h-9 sm:w-9"
                 onClick={() => setOpen(false)}
                 aria-label="Fechar menu"
               >
@@ -272,7 +272,7 @@ export function GestorSidebar() {
                 onClick={() => fazerLogout()}
               >
                 <LogOut className="h-4 w-4" />
-                Terminar Sessão
+                Terminar sessão
               </Button>
               <p className="text-xs text-muted-foreground">
                 © {new Date().getFullYear()} All2gether

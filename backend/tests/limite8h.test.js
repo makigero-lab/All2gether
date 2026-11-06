@@ -13,7 +13,7 @@ let mongod;
 beforeAll(async () => { mongod = await MongoMemoryServer.create(); await mongoose.connect(mongod.getUri()); await Tarefa.init(); });
 afterAll(async () => { await mongoose.disconnect(); await mongod.stop(); });
 
-test('A1 limite de 8h via HTTP com JWT real: 6 casas de 120 min e 1 staff = 4 atribuidas + 2 nao_atribuida', async () => {
+test('A1 limite de 8h via HTTP com JWT real: 6 casas de 120 min e 1 staff = 3 atribuidas + 3 nao_atribuida (janela 09:00-18:00, almoço e viagens)', async () => {
   const c = await cenario(app, { extra: 0, sn: 1 });
   await Utilizador.updateMany({ _id: { $in: [c.ana._id, c.bia._id] } }, { ativo: false });
   const dia = new Date(); dia.setUTCDate(dia.getUTCDate() + 10); dia.setUTCHours(10, 0, 0, 0);
@@ -25,8 +25,9 @@ test('A1 limite de 8h via HTTP com JWT real: 6 casas de 120 min e 1 staff = 4 at
   const r = await request(app).post('/api/gestor/tarefas/auto-atribuir').set(auth(c.token)).send({});
   expect(r.status).toBe(200);
   const ts = await Tarefa.find({ empresa_id: c.e._id, propriedade_id: { $ne: c.p._id } }).lean();
-  expect(ts.filter((t) => t.estado === 'atribuida')).toHaveLength(4);
-  expect(ts.filter((t) => t.estado === 'nao_atribuida')).toHaveLength(2);
+  // 09:00-11:00, 11:30-13:30 (viagem de 30), almoço 13:30-14:30, 15:00-17:00; a 4.ª já não cabe (17:30 + 2h > 18:00).
+  expect(ts.filter((t) => t.estado === 'atribuida')).toHaveLength(3);
+  expect(ts.filter((t) => t.estado === 'nao_atribuida')).toHaveLength(3);
   expect(ts.every((t) => !t.utilizador_id || String(t.utilizador_id) === String(staff._id))).toBe(true);
 });
 

@@ -10,9 +10,23 @@ import {
   Plus,
   Save,
   X,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { TipoLimpezaBadge } from "@/components/tipo-limpeza-badge";
+import {
+  ORDEM_OMISSAO,
+  alternarOrdem,
+  aplicarOrdemCongelada,
+  guardarOrdem,
+  lerOrdem,
+  ordenarPor,
+  type Ordem,
+  type TipoOrdem,
+} from "@/lib/ordenacao-reservas";
 import { EstadoTarefaBadge } from "@/components/ui/estado-tarefa-badge";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -44,6 +58,11 @@ import {
   guardarRascunhoReservas,
   lerRascunhoReservas,
   paraPayload,
+  TIPOS_LIMPEZA,
+  ROTULO_TIPO,
+  tipoPedeData,
+  tipoOuNormal,
+  limitesDataLimpeza,
   reconciliar,
   validarReserva,
   valoresEfetivos,
@@ -53,6 +72,7 @@ import {
   type Valores,
 } from "@/lib/rascunho-reservas";
 
+import { plural } from "@/lib/utils";
 interface ReservaDTO {
   _id: string;
   propriedade_id: { nome: string; morada?: string } | null;
@@ -64,11 +84,18 @@ interface ReservaDTO {
   plataforma?: string | null;
   hora_checkin?: string | null;
   horario_preferido?: string | null;
+  /** Tipo de limpeza; sem o campo (reservas antigas) = normal. */
+  tipo_limpeza?: string | null;
+  /** Dia da limpeza escolhido (só intermédia/preparação). */
+  data_limpeza?: string | null;
   tarefa_gerada_id: { estado: string; data: string } | null;
   createdAt: string;
 }
 
 const PLATAFORMAS = ["Booking", "Airbnb", "Direto", "Vrbo", "Outra"];
+
+/** Opções do tipo de limpeza (o tipo não muda preços). */
+const OPCOES_TIPO = TIPOS_LIMPEZA.map((t) => ({ valor: t, rotulo: ROTULO_TIPO[t] }));
 
 /** Célula do desktop (tabela, estilo folha de cálculo). */
 const CELULA =
@@ -99,6 +126,141 @@ function noites(ci: string, co: string): number {
   return Math.max(0, Math.round(ms / 86400000));
 }
 
+/**
+ * Cores por tipo de limpeza (faixa lateral + fundo discreto). Normal quase sem cor. Os estados da
+ * linha (erro, a eliminar, por gravar, concluída, cancelada) têm prioridade sobre a cor do tipo.
+ * A cor nunca é o único sinal: o tipo está escrito na coluna/campo e nas etiquetas.
+ */
+const COR_TIPO: Record<string, { tr: string; faixa: string; cartao: string; amostra: string }> = {
+  normal: { tr: "", faixa: "border-l-4 border-l-transparent", cartao: "", amostra: "border border-muted-foreground/60 bg-background" },
+  intermedia: {
+    tr: "bg-sky-50/70 dark:bg-sky-950/25",
+    faixa: "border-l-4 border-l-sky-500",
+    cartao: "border-l-4 border-l-sky-500 bg-sky-50/60 dark:bg-sky-950/20",
+    amostra: "bg-sky-500",
+  },
+  profunda: {
+    tr: "bg-violet-50/70 dark:bg-violet-950/25",
+    faixa: "border-l-4 border-l-violet-500",
+    cartao: "border-l-4 border-l-violet-500 bg-violet-50/60 dark:bg-violet-950/20",
+    amostra: "bg-violet-500",
+  },
+  preparacao: {
+    tr: "bg-teal-50/70 dark:bg-teal-950/25",
+    faixa: "border-l-4 border-l-teal-500",
+    cartao: "border-l-4 border-l-teal-500 bg-teal-50/60 dark:bg-teal-950/20",
+    amostra: "bg-teal-500",
+  },
+};
+
+/** Cor da linha: estado primeiro (erro > a eliminar > por gravar/alterada > concluída/cancelada), depois o tipo. */
+function corDaLinha(l: Linha): { tr: string; faixa: string; cartao: string } {
+  if (l.erro || (l.conflito && l.conflito.length > 0)) {
+    return { tr: "bg-destructive/10", faixa: "border-l-4 border-l-destructive", cartao: "border-l-4 border-l-destructive bg-destructive/5" };
+  }
+  if (l.eliminada) {
+    return { tr: "bg-destructive/5 opacity-70", faixa: "border-l-4 border-l-destructive", cartao: "border-l-4 border-l-destructive opacity-70" };
+  }
+  if (l.nova || l.pendentes.size > 0) {
+    return { tr: "bg-amber-50/70 dark:bg-amber-950/25", faixa: "border-l-4 border-l-amber-600", cartao: "border-l-4 border-l-amber-600 bg-amber-50 dark:bg-amber-950/30" };
+  }
+  if (l.estado === "concluida") {
+    return { tr: "bg-emerald-50/60 dark:bg-emerald-950/20", faixa: "border-l-4 border-l-emerald-600", cartao: "border-l-4 border-l-emerald-600 bg-emerald-50/50 dark:bg-emerald-950/20" };
+  }
+  if (l.estado === "cancelada") {
+    return { tr: "bg-muted/40 text-muted-foreground", faixa: "border-l-4 border-l-muted-foreground/50", cartao: "border-l-4 border-l-muted-foreground/50 bg-muted/40" };
+  }
+  const t = COR_TIPO[tipoOuNormal(l.valores.tipo_limpeza)];
+  return { tr: t.tr, faixa: t.faixa, cartao: t.cartao };
+}
+
+/** Legenda curta das cores (cada cor leva sempre o nome ao lado). */
+function LegendaCores() {
+  const item = (amostra: string, texto: string) => (
+    <span className="inline-flex items-center gap-1.5">
+      <span aria-hidden="true" className={`inline-block h-3 w-3 rounded-sm ${amostra}`} />
+      {texto}
+    </span>
+  );
+  return (
+    <div className="flex flex-col gap-y-1 text-xs text-muted-foreground sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-6" aria-label="Legenda das cores">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <span className="font-medium">Tipo de limpeza:</span>
+        {item(COR_TIPO.normal.amostra, "Normal")}
+        {item(COR_TIPO.intermedia.amostra, "Intermédia")}
+        {item(COR_TIPO.profunda.amostra, "Profunda")}
+        {item(COR_TIPO.preparacao.amostra, "Preparação")}
+      </div>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <span className="font-medium">Estado (tem prioridade):</span>
+        {item("bg-amber-600", "Por gravar")}
+        {item("bg-destructive", "Erro / a eliminar")}
+        {item("bg-emerald-600", "Concluída")}
+        {item("bg-muted-foreground/50", "Cancelada")}
+      </div>
+    </div>
+  );
+}
+
+interface ColunaOrdem {
+  chave: string;
+  rotulo: string;
+  tipo: TipoOrdem;
+  valor: (l: Linha) => string | number | null | undefined;
+}
+
+const dataDaLimpeza = (l: Linha) => (tipoPedeData(l.valores.tipo_limpeza) ? l.valores.data_limpeza : l.valores.check_out);
+
+/** Colunas ordenáveis (desktop: cabeçalho; telemóvel: seletor). */
+const COLUNAS_ORDEM: ColunaOrdem[] = [
+  { chave: "propriedade", rotulo: "Propriedade", tipo: "texto", valor: (l) => l.propNome },
+  { chave: "check_in", rotulo: "Check-in", tipo: "data", valor: (l) => l.valores.check_in },
+  { chave: "hora_checkin", rotulo: "Hora de check-in", tipo: "texto", valor: (l) => l.valores.hora_checkin },
+  { chave: "check_out", rotulo: "Check-out", tipo: "data", valor: (l) => l.valores.check_out },
+  { chave: "noites", rotulo: "Noites", tipo: "numero", valor: (l) => noites(l.valores.check_in, l.valores.check_out) },
+  { chave: "hospedes", rotulo: "Hóspedes", tipo: "numero", valor: (l) => l.valores.hospedes },
+  { chave: "nome_hospede", rotulo: "Hóspede", tipo: "texto", valor: (l) => l.valores.nome_hospede },
+  { chave: "plataforma", rotulo: "Plataforma", tipo: "texto", valor: (l) => l.valores.plataforma },
+  { chave: "tipo_limpeza", rotulo: "Tipo de limpeza", tipo: "texto", valor: (l) => ROTULO_TIPO[tipoOuNormal(l.valores.tipo_limpeza)] },
+  { chave: "data_limpeza", rotulo: "Data da limpeza", tipo: "data", valor: dataDaLimpeza },
+  { chave: "horario_preferido", rotulo: "Horário preferido", tipo: "texto", valor: (l) => l.valores.horario_preferido },
+  { chave: "observacoes", rotulo: "Notas", tipo: "texto", valor: (l) => l.valores.observacoes },
+  { chave: "estado", rotulo: "Estado da limpeza", tipo: "texto", valor: (l) => (l.estado ? estadoParaParceiro(l.estado) : "") },
+];
+const CHAVES_ORDEM = COLUNAS_ORDEM.map((c) => c.chave);
+
+/** Cabeçalho de coluna ordenável (botão, indicador visível e aria-sort). */
+function Cab({
+  chave, rotulo, ordem, onOrdenar, className = "", direita,
+}: {
+  chave: string;
+  rotulo: string;
+  ordem: Ordem;
+  onOrdenar: (chave: string) => void;
+  className?: string;
+  direita?: boolean;
+}) {
+  const ativo = ordem.chave === chave;
+  const Icone = !ativo ? ArrowUpDown : ordem.direcao === "asc" ? ArrowUp : ArrowDown;
+  return (
+    <th
+      scope="col"
+      aria-sort={ativo ? (ordem.direcao === "asc" ? "ascending" : "descending") : "none"}
+      className={`px-2 py-2 font-medium ${direita ? "text-right" : ""} ${className}`}
+    >
+      <button
+        type="button"
+        onClick={() => onOrdenar(chave)}
+        className={`inline-flex items-center gap-1 rounded uppercase tracking-wide hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${ativo ? "text-foreground" : ""}`}
+        title={`Ordenar por ${rotulo}`}
+      >
+        {rotulo}
+        <Icone className={`h-3.5 w-3.5 ${ativo ? "" : "opacity-50"}`} aria-hidden="true" />
+      </button>
+    </th>
+  );
+}
+
 /** Valores de uma reserva tal como estão gravados no servidor. */
 function doServidor(r: ReservaDTO): Valores {
   return {
@@ -110,6 +272,8 @@ function doServidor(r: ReservaDTO): Valores {
     plataforma: r.plataforma ?? "",
     horario_preferido: r.horario_preferido ?? "",
     observacoes: r.observacoes ?? "",
+    tipo_limpeza: tipoOuNormal(r.tipo_limpeza),
+    data_limpeza: r.data_limpeza ? dia(r.data_limpeza) : "",
   };
 }
 
@@ -122,6 +286,8 @@ const ROTULO_CAMPO: Record<Campo, string> = {
   plataforma: "Plataforma",
   horario_preferido: "Horário preferido",
   observacoes: "Notas",
+  tipo_limpeza: "Tipo de limpeza",
+  data_limpeza: "Data da limpeza",
 };
 
 /**
@@ -133,9 +299,12 @@ function Celula({
   value,
   type = "text",
   options,
+  opcoes,
   disabled,
   placeholder,
   align,
+  min,
+  max,
   rotulo,
   cartao,
   pendente,
@@ -144,9 +313,14 @@ function Celula({
   value: string;
   type?: "text" | "date" | "number" | "select";
   options?: string[];
+  /** Opções com rótulo diferente do valor (ex.: tipo de limpeza); sem opção vazia. */
+  opcoes?: { valor: string; rotulo: string }[];
   disabled?: boolean;
   placeholder?: string;
   align?: "right";
+  /** Limites de um campo de data (AAAA-MM-DD). */
+  min?: string;
+  max?: string;
   /** Nome acessível da célula (aria-label), ex.: "Check-in, Casa Azul". */
   rotulo: string;
   /** Aspeto de cartão (telemóvel): campo com contorno. */
@@ -193,9 +367,12 @@ function Celula({
           guardar(e.target.value);
         }}
       >
-        <option value="">—</option>
+        {!opcoes && <option value="">—</option>}
         {(options ?? []).map((o) => (
           <option key={o} value={o}>{o}</option>
+        ))}
+        {(opcoes ?? []).map((o) => (
+          <option key={o.valor} value={o.valor}>{o.rotulo}</option>
         ))}
       </select>
     );
@@ -204,7 +381,8 @@ function Celula({
     <input
       {...comum}
       type={type}
-      min={type === "number" ? 0 : undefined}
+      min={type === "number" ? 0 : min}
+      max={max}
       placeholder={placeholder}
       value={v}
       onChange={(e) => setV(e.target.value)}
@@ -249,6 +427,8 @@ const NOVA_VAZIA = {
   hora_checkin: "",
   horario_preferido: "",
   observacoes: "",
+  tipo_limpeza: "normal",
+  data_limpeza: "",
 };
 
 /** Linha (existente ou nova) pronta a desenhar, igual para a tabela e para os cartões. */
@@ -281,6 +461,33 @@ export default function ParceiroReservasPage() {
 
   // Rascunho local (edições + reservas novas) — só vai para o servidor em "Gravar".
   const [chave, setChave] = useState<string | null>(null);
+
+  // Ordenação da tabela (preferência em localStorage). Enquanto se edita, a ordem fica congelada.
+  const [ordem, setOrdem] = useState<Ordem>(ORDEM_OMISSAO);
+  const [ordemCongelada, setOrdemCongelada] = useState<string[] | null>(null);
+  const descongelar = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    try {
+      setOrdem(lerOrdem(window.localStorage, CHAVES_ORDEM));
+    } catch {
+      // sem localStorage: usa a omissão
+    }
+  }, []);
+  const ordenarPorColuna = (c: string) => {
+    const nova = alternarOrdem(ordem, c);
+    setOrdem(nova);
+    try { guardarOrdem(window.localStorage, nova); } catch { /* ignora */ }
+  };
+  const mudarColunaOrdem = (c: string) => {
+    const nova: Ordem = { chave: c, direcao: ordem.direcao };
+    setOrdem(nova);
+    try { guardarOrdem(window.localStorage, nova); } catch { /* ignora */ }
+  };
+  const inverterOrdem = () => {
+    const nova: Ordem = { ...ordem, direcao: ordem.direcao === "asc" ? "desc" : "asc" };
+    setOrdem(nova);
+    try { guardarOrdem(window.localStorage, nova); } catch { /* ignora */ }
+  };
   const [rascunho, setRascunho] = useState<Rascunho>({ edicoes: {}, novas: [], eliminar: {} });
   const [rascunhoPronto, setRascunhoPronto] = useState(false);
   const [conflitos, setConflitos] = useState<Record<string, Campo[]>>({});
@@ -372,7 +579,7 @@ export default function ParceiroReservasPage() {
     if (Object.keys(r.edicoes).length === 0) {
       setConflitos({});
       if (recE.jaEliminadas.length > 0) {
-        setAviso(`${recE.jaEliminadas.length} reserva(s) marcadas para eliminar já tinham sido eliminadas no sistema.`);
+        setAviso(`${plural(recE.jaEliminadas.length, "reserva")} marcadas para eliminar já tinham sido eliminadas no sistema.`);
         setRascunho((prev) => ({ ...prev, eliminar: recE.eliminar }));
       }
       return;
@@ -381,7 +588,7 @@ export default function ParceiroReservasPage() {
     setConflitos(rec.conflitos);
     if (rec.desaparecidas.length > 0 || recE.jaEliminadas.length > 0) {
       setAviso(
-        `${rec.desaparecidas.length + recE.jaEliminadas.length} reserva(s) com alterações por gravar já não existem no sistema: o rascunho dessas linhas foi descartado.`
+        `${plural(rec.desaparecidas.length + recE.jaEliminadas.length, "reserva")} com alterações por gravar já não existem no sistema: o rascunho dessas linhas foi descartado.`
       );
     }
     setRascunho((prev) => ({ ...prev, edicoes: rec.edicoes, eliminar: recE.eliminar }));
@@ -421,16 +628,30 @@ export default function ParceiroReservasPage() {
       const { [linha.key]: _x, ...resto } = e;
       return resto;
     });
+    // Mudar o tipo acerta a data da limpeza: limpa-a em Normal/Profunda e, em Intermédia/Preparação
+    // sem data, sugere o check-in.
+    const extras: Array<[Campo, string]> = [];
+    if (c === "tipo_limpeza") {
+      if (!tipoPedeData(valor)) {
+        if (linha.valores.data_limpeza !== "") extras.push(["data_limpeza", ""]);
+      } else if (!linha.valores.data_limpeza && linha.valores.check_in) {
+        extras.push(["data_limpeza", linha.valores.check_in]);
+      }
+    }
     if (linha.nova) {
       setRascunho((r) => ({
         ...r,
-        novas: r.novas.map((n) => (n.tmp === linha.key ? { ...n, [c]: valor } : n)),
+        novas: r.novas.map((n) => (n.tmp === linha.key ? { ...n, [c]: valor, ...Object.fromEntries(extras) } : n)),
       }));
       return;
     }
     const servidor = servidorPorId[linha.key];
     if (!servidor) return;
-    setRascunho((r) => ({ ...r, edicoes: aplicarCampo(r.edicoes, linha.key, c, valor, servidor) }));
+    setRascunho((r) => {
+      let ed = aplicarCampo(r.edicoes, linha.key, c, valor, servidor);
+      for (const [campoExtra, v] of extras) ed = aplicarCampo(ed, linha.key, campoExtra, v, servidor);
+      return { ...r, edicoes: ed };
+    });
   }
 
   /** Enter / "+": acrescenta a linha de entrada às reservas por gravar (não envia). */
@@ -445,6 +666,8 @@ export default function ParceiroReservasPage() {
       plataforma: nova.plataforma,
       horario_preferido: nova.horario_preferido,
       observacoes: nova.observacoes,
+      tipo_limpeza: nova.tipo_limpeza,
+      data_limpeza: tipoPedeData(nova.tipo_limpeza) ? nova.data_limpeza : "",
     };
     const msg = validarReserva(v, nova.propriedade_id);
     if (msg) {
@@ -515,6 +738,8 @@ export default function ParceiroReservasPage() {
    * não perde nada.
    */
   async function gravar() {
+    if (descongelar.current) clearTimeout(descongelar.current);
+    setOrdemCongelada(null); // reordena ao gravar
     if (gravando || pendentes === 0) return;
     setGravando(true);
     setErro(null);
@@ -646,15 +871,15 @@ export default function ParceiroReservasPage() {
     setErrosLinha(erros);
     const comErro = Object.keys(erros).length;
     const partes = [];
-    if (gravadas) partes.push(`${gravadas} reserva(s) atualizada(s)`);
-    if (criadas) partes.push(`${criadas} reserva(s) criada(s)`);
-    if (eliminadas) partes.push(`${eliminadas} reserva(s) eliminada(s)`);
+    if (gravadas) partes.push(`${plural(plural(gravadas, "reserva"), "atualizada")}`);
+    if (criadas) partes.push(`${plural(plural(criadas, "reserva"), "criada")}`);
+    if (eliminadas) partes.push(`${plural(plural(eliminadas, "reserva"), "eliminada")}`);
     const resultado = partes.length ? partes.join(", ") : "Nada foi gravado";
     setResumo(
       semRede || semSessao
         ? `${resultado}. O resto continua por gravar.`
         : comErro > 0
-        ? `${resultado}. ${comErro} linha(s) com erro continuam por gravar.`
+        ? `${resultado}. ${plural(comErro, "linha")} com erro continuam por gravar.`
         : criadas > 0 || gravadas > 0
         ? `${resultado}. As limpezas foram criadas/reatribuídas.`
         : `${resultado}.`
@@ -735,15 +960,18 @@ export default function ParceiroReservasPage() {
   }
 
   const setN = (k: keyof typeof NOVA_VAZIA) => (v: string) => setNova((n) => ({ ...n, [k]: v }));
+  /** Tipo da reserva nova: limpa a data em Normal/Profunda; em Intermédia/Preparação sugere o check-in. */
+  const mudarTipoNova = (v: string) =>
+    setNova((n) => ({ ...n, tipo_limpeza: v, data_limpeza: tipoPedeData(v) ? n.data_limpeza || n.check_in : "" }));
   const enterAdiciona = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") acrescentarNova();
   };
 
   const nomePropriedade = (id: string) => propriedades.find((p) => p._id === id)?.nome ?? "—";
 
-  // Linhas a desenhar: primeiro as novas por gravar, depois as reservas do servidor.
-  const linhas: Linha[] = [
-    ...rascunho.novas.map<Linha>((n) => ({
+  // Linhas a desenhar: primeiro as novas por gravar (ficam sempre no topo), depois as reservas do servidor
+  // ordenadas pela coluna escolhida (congeladas enquanto se edita, para a linha não saltar).
+  const linhasNovas: Linha[] = rascunho.novas.map<Linha>((n) => ({
       key: n.tmp,
       nova: true,
       propNome: nomePropriedade(n.propriedade_id),
@@ -753,8 +981,8 @@ export default function ParceiroReservasPage() {
       bloqueada: false,
       semEdicao: gravando,
       erro: errosLinha[n.tmp],
-    })),
-    ...reservas.map<Linha>((r) => {
+  }));
+  const linhasReservas: Linha[] = reservas.map<Linha>((r) => {
       const e = rascunho.edicoes[r._id];
       return {
         key: r._id,
@@ -770,8 +998,26 @@ export default function ParceiroReservasPage() {
         conflito: conflitos[r._id],
         reserva: r,
       };
-    }),
-  ];
+  });
+  const colOrdem = COLUNAS_ORDEM.find((c) => c.chave === ordem.chave) ?? COLUNAS_ORDEM[1];
+  const linhasReservasOrdenadas = aplicarOrdemCongelada(
+    ordenarPor(linhasReservas, colOrdem.valor, colOrdem.tipo, ordem.direcao),
+    ordemCongelada,
+    (l) => l.key
+  );
+  const linhas: Linha[] = [...linhasNovas, ...linhasReservasOrdenadas];
+
+  /** Ao entrar num campo congela a ordem; ao sair (com pequena folga para saltar de campo) reordena. */
+  const aoFocar = (e: React.FocusEvent) => {
+    const alvo = e.target as HTMLElement;
+    if (!/^(INPUT|SELECT|TEXTAREA)$/.test(alvo.tagName)) return;
+    if (descongelar.current) clearTimeout(descongelar.current);
+    setOrdemCongelada((c) => c ?? linhasReservasOrdenadas.map((l) => l.key));
+  };
+  const aoDesfocar = () => {
+    if (descongelar.current) clearTimeout(descongelar.current);
+    descongelar.current = setTimeout(() => setOrdemCongelada(null), 250);
+  };
 
   /** Mensagens da linha: erro e/ou conflito com o sistema (com escolha explícita). */
   const avisosLinha = (l: Linha) => {
@@ -837,7 +1083,7 @@ export default function ParceiroReservasPage() {
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
             <Table2 className="h-6 w-6 text-gold-text" />
-            Minhas Reservas
+            Minhas reservas
           </h1>
           <p className="text-sm text-muted-foreground">
             Clica num campo para editar. Sair do campo guarda só neste aparelho (rascunho): nada é enviado nem
@@ -934,23 +1180,26 @@ export default function ParceiroReservasPage() {
         </div>
       ) : (
         <>
+        <LegendaCores />
         {/* Desktop (md+): tabela editável tipo folha de cálculo. */}
-        <Card className="hidden md:block">
+        <Card className="hidden md:block" onFocus={aoFocar} onBlur={aoDesfocar}>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1250px] border-collapse text-sm">
+            <table className="w-full min-w-[1450px] border-collapse text-sm">
               <thead>
                 <tr className="border-b bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
-                  <th className="px-2 py-2 font-medium">Propriedade</th>
-                  <th className="px-2 py-2 font-medium">Check-in</th>
-                  <th className="px-2 py-2 font-medium">Hora c/in</th>
-                  <th className="px-2 py-2 font-medium">Check-out</th>
-                  <th className="px-2 py-2 text-right font-medium">Noites</th>
-                  <th className="px-2 py-2 text-right font-medium">Hósp.</th>
-                  <th className="px-2 py-2 font-medium">Hóspede</th>
-                  <th className="px-2 py-2 font-medium">Plataforma</th>
-                  <th className="px-2 py-2 font-medium">Horário pref. limpeza</th>
-                  <th className="px-2 py-2 font-medium">Notas</th>
-                  <th className="px-2 py-2 font-medium">Limpeza</th>
+                  <Cab chave="propriedade" rotulo="Propriedade" ordem={ordem} onOrdenar={ordenarPorColuna} />
+                  <Cab chave="check_in" rotulo="Check-in" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[11rem]" />
+                  <Cab chave="hora_checkin" rotulo="Hora c/in" ordem={ordem} onOrdenar={ordenarPorColuna} />
+                  <Cab chave="check_out" rotulo="Check-out" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[11rem]" />
+                  <Cab chave="noites" rotulo="Noites" ordem={ordem} onOrdenar={ordenarPorColuna} direita />
+                  <Cab chave="hospedes" rotulo="Hósp." ordem={ordem} onOrdenar={ordenarPorColuna} direita />
+                  <Cab chave="nome_hospede" rotulo="Hóspede" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[11rem]" />
+                  <Cab chave="plataforma" rotulo="Plataforma" ordem={ordem} onOrdenar={ordenarPorColuna} />
+                  <Cab chave="tipo_limpeza" rotulo="Tipo de limpeza" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[11rem]" />
+                  <Cab chave="data_limpeza" rotulo="Data da limpeza" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[11rem]" />
+                  <Cab chave="horario_preferido" rotulo="Horário pref. limpeza" ordem={ordem} onOrdenar={ordenarPorColuna} />
+                  <Cab chave="observacoes" rotulo="Notas" ordem={ordem} onOrdenar={ordenarPorColuna} />
+                  <Cab chave="estado" rotulo="Limpeza" ordem={ordem} onOrdenar={ordenarPorColuna} />
                   <th className="px-2 py-2" />
                 </tr>
               </thead>
@@ -994,6 +1243,14 @@ export default function ParceiroReservasPage() {
                     </select>
                   </td>
                   <td className="p-0">
+                    <select value={nova.tipo_limpeza} onChange={(e) => mudarTipoNova(e.target.value)} className={CELULA} disabled={gravando} aria-label="Nova reserva: tipo de limpeza">
+                      {OPCOES_TIPO.map((o) => <option key={o.valor} value={o.valor}>{o.rotulo}</option>)}
+                    </select>
+                  </td>
+                  <td className="p-0">
+                    <input type="date" {...limitesDataLimpeza(nova.tipo_limpeza, nova.check_in, nova.check_out)} value={tipoPedeData(nova.tipo_limpeza) ? nova.data_limpeza : ""} onChange={(e) => setN("data_limpeza")(e.target.value)} className={CELULA} disabled={gravando || !tipoPedeData(nova.tipo_limpeza)} aria-label="Nova reserva: data da limpeza (intermédia ou preparação)" />
+                  </td>
+                  <td className="p-0">
                     <input value={nova.horario_preferido} onChange={(e) => setN("horario_preferido")(e.target.value)} placeholder="11h - 14h" className={CELULA} disabled={gravando} aria-label="Nova reserva: horário preferido de limpeza" />
                   </td>
                   <td className="p-0">
@@ -1018,10 +1275,11 @@ export default function ParceiroReservasPage() {
                   const nome = l.propNome;
                   const p = (c: Campo) => l.pendentes.has(c);
                   const avisos = avisosLinha(l);
+                  const cor = corDaLinha(l);
                   return (
                     <FragmentoLinha key={l.key} avisos={avisos}>
-                      <tr className={`border-b last:border-0 hover:bg-muted/30 ${l.nova ? "bg-amber-50/60 dark:bg-amber-950/20" : ""}`}>
-                        <td className="whitespace-nowrap px-2 py-1 font-medium">{nome}</td>
+                      <tr className={`border-b last:border-0 hover:bg-muted/30 ${cor.tr}`}>
+                        <td className={`whitespace-nowrap px-2 py-1 font-medium ${cor.faixa}`}>{nome}</td>
                         <td className="p-0">
                           <Celula type="date" value={ci} pendente={p("check_in")} rotulo={`Check-in, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "check_in", v)} />
                         </td>
@@ -1042,6 +1300,16 @@ export default function ParceiroReservasPage() {
                         </td>
                         <td className="p-0">
                           <Celula type="select" options={PLATAFORMAS} pendente={p("plataforma")} rotulo={`Plataforma, ${nome}`} value={l.valores.plataforma} disabled={l.semEdicao} onCommit={(v) => alterar(l, "plataforma", v)} />
+                        </td>
+                        <td className="p-0">
+                          <Celula type="select" opcoes={OPCOES_TIPO} pendente={p("tipo_limpeza")} rotulo={`Tipo de limpeza, ${nome}`} value={tipoOuNormal(l.valores.tipo_limpeza)} disabled={l.semEdicao} onCommit={(v) => alterar(l, "tipo_limpeza", v)} />
+                        </td>
+                        <td className="p-0">
+                          {tipoPedeData(l.valores.tipo_limpeza) ? (
+                            <Celula type="date" {...limitesDataLimpeza(l.valores.tipo_limpeza, l.valores.check_in, l.valores.check_out)} pendente={p("data_limpeza")} rotulo={`Data da limpeza, ${nome}`} value={l.valores.data_limpeza} disabled={l.semEdicao} onCommit={(v) => alterar(l, "data_limpeza", v)} />
+                          ) : (
+                            <span className="px-2 text-xs text-muted-foreground" title="Normal e profunda ficam no check-out">No check-out</span>
+                          )}
                         </td>
                         <td className="p-0">
                           <Celula value={l.valores.horario_preferido} pendente={p("horario_preferido")} rotulo={`Horário preferido, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "horario_preferido", v)} />
@@ -1105,7 +1373,7 @@ export default function ParceiroReservasPage() {
         </Card>
 
         {/* Telemóvel (< md): cartões com os mesmos campos editáveis (a mesma <Celula/>). */}
-        <div className="flex flex-col gap-3 md:hidden">
+        <div className="flex flex-col gap-3 md:hidden" onFocus={aoFocar} onBlur={aoDesfocar}>
           <Card onKeyDown={enterAdiciona}>
             <CardContent className="space-y-3 p-4">
               <h2 className="text-base font-semibold">Nova reserva</h2>
@@ -1146,6 +1414,16 @@ export default function ParceiroReservasPage() {
                   {PLATAFORMAS.map((o) => <option key={o} value={o}>{o}</option>)}
                 </select>
               </Campo>
+              <Campo texto="Tipo de limpeza">
+                <select value={nova.tipo_limpeza} onChange={(e) => mudarTipoNova(e.target.value)} className={CELULA_CARTAO} disabled={gravando} aria-label="Nova reserva: tipo de limpeza">
+                  {OPCOES_TIPO.map((o) => <option key={o.valor} value={o.valor}>{o.rotulo}</option>)}
+                </select>
+              </Campo>
+              {tipoPedeData(nova.tipo_limpeza) && (
+                <Campo texto="Data da limpeza">
+                  <input type="date" {...limitesDataLimpeza(nova.tipo_limpeza, nova.check_in, nova.check_out)} value={nova.data_limpeza} onChange={(e) => setN("data_limpeza")(e.target.value)} className={CELULA_CARTAO} disabled={gravando} aria-label="Nova reserva: data da limpeza" />
+                </Campo>
+              )}
               <Campo texto="Horário preferido de limpeza">
                 <input value={nova.horario_preferido} onChange={(e) => setN("horario_preferido")(e.target.value)} placeholder="11h - 14h" className={CELULA_CARTAO} disabled={gravando} aria-label="Nova reserva: horário preferido de limpeza" />
               </Campo>
@@ -1160,6 +1438,26 @@ export default function ParceiroReservasPage() {
             </CardContent>
           </Card>
 
+          <div className="flex items-end gap-2">
+            <label className="min-w-0 flex-1 text-xs font-medium text-muted-foreground">
+              Ordenar por
+              <select
+                value={ordem.chave}
+                onChange={(e) => mudarColunaOrdem(e.target.value)}
+                className={`${CELULA_CARTAO} mt-1`}
+                aria-label="Ordenar reservas por"
+              >
+                {COLUNAS_ORDEM.map((c) => (
+                  <option key={c.chave} value={c.chave}>{c.rotulo}</option>
+                ))}
+              </select>
+            </label>
+            <Button type="button" variant="outline" size="touch" onClick={inverterOrdem} aria-label={ordem.direcao === "asc" ? "Ordem ascendente: mudar para descendente" : "Ordem descendente: mudar para ascendente"}>
+              {ordem.direcao === "asc" ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />}
+              {ordem.direcao === "asc" ? "Ascendente" : "Descendente"}
+            </Button>
+          </div>
+
           {linhas.length === 0 && (
             <p className="px-2 py-4 text-center text-sm text-muted-foreground">
               Sem reservas. Preenche o cartão &quot;Nova reserva&quot; e grava para adicionar a primeira.
@@ -1171,17 +1469,19 @@ export default function ParceiroReservasPage() {
             const co = l.valores.check_out;
             const nome = l.propNome;
             const p = (c: Campo) => l.pendentes.has(c);
+            const cor = corDaLinha(l);
             return (
               <Card
                 key={l.key}
                 aria-label={`${l.nova ? "Reserva nova por gravar" : "Reserva"}, ${nome}, ${formatarData(ci)}`}
-                className={l.pendentes.size > 0 ? "border-amber-600" : undefined}
+                className={cor.cartao || undefined}
               >
                 <CardContent className="space-y-3 p-4">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <h2 className="truncate text-base font-semibold">{nome}</h2>
                       <div className="mt-1 flex flex-wrap items-center gap-1">
+                        <TipoLimpezaBadge tipo={l.valores.tipo_limpeza} />
                         {l.nova ? (
                           <span className="rounded bg-amber-200 px-1.5 py-0.5 text-xs font-medium text-amber-900">Por gravar</span>
                         ) : l.eliminada ? (
@@ -1249,6 +1549,14 @@ export default function ParceiroReservasPage() {
                   <Campo texto="Nome do hóspede">
                     <Celula cartao value={l.valores.nome_hospede} pendente={p("nome_hospede")} rotulo={`Nome do hóspede, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "nome_hospede", v)} />
                   </Campo>
+                  <Campo texto="Tipo de limpeza">
+                    <Celula cartao type="select" opcoes={OPCOES_TIPO} value={tipoOuNormal(l.valores.tipo_limpeza)} pendente={p("tipo_limpeza")} rotulo={`Tipo de limpeza, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "tipo_limpeza", v)} />
+                  </Campo>
+                  {tipoPedeData(l.valores.tipo_limpeza) && (
+                    <Campo texto="Data da limpeza">
+                      <Celula cartao type="date" {...limitesDataLimpeza(l.valores.tipo_limpeza, l.valores.check_in, l.valores.check_out)} value={l.valores.data_limpeza} pendente={p("data_limpeza")} rotulo={`Data da limpeza, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "data_limpeza", v)} />
+                    </Campo>
+                  )}
                   <Campo texto="Horário preferido de limpeza">
                     <Celula cartao value={l.valores.horario_preferido} pendente={p("horario_preferido")} rotulo={`Horário preferido, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "horario_preferido", v)} />
                   </Campo>

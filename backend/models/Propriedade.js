@@ -68,6 +68,19 @@ const propriedadeSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
+    // Tipos de limpeza — tempo (minutos) por tipo nesta casa. Sem valor (null) usa
+    // `tempo_limpeza_minutos`. «Normal» usa sempre `tempo_limpeza_minutos`.
+    tempos_limpeza_por_tipo: {
+      intermedia: { type: Number, default: null, min: 1, max: 480 },
+      profunda: { type: Number, default: null, min: 1, max: 480 },
+      preparacao: { type: Number, default: null, min: 1, max: 480 },
+    },
+    // Tipos de limpeza — checklist própria por tipo. Vazia = usa a checklist da casa.
+    checklists_por_tipo: {
+      intermedia: { type: [String], default: [] },
+      profunda: { type: [String], default: [] },
+      preparacao: { type: [String], default: [] },
+    },
     // Prompt 133 — Referência ao ModeloChecklist (template dinâmico).
     // Se definido, as novas tarefas de limpeza copiam as secções/items
     // deste modelo para checklist_dinamica na Tarefa (snapshot).

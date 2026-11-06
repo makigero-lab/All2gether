@@ -1,6 +1,7 @@
 "use client";
 
 import { ResultadoImportacao, lerDetalheErros } from "@/components/resultado-importacao";
+import { TipoLimpezaBadge } from "@/components/tipo-limpeza-badge";
 import { useCallback, useEffect, useState } from "react";
 import {
   Plus,
@@ -52,7 +53,7 @@ import {
 } from "@/lib/api";
 import { PaginationBar } from "@/components/admin/pagination-bar";
 import { DetalheTarefaModal } from "@/components/gestor/detalhe-tarefa-modal";
-import { parsearDataSegura, extrairHoraISO } from "@/lib/utils";
+import { parsearDataSegura, extrairHoraISO, plural } from "@/lib/utils";
 
 interface TarefaAdmin {
   _id: string;
@@ -84,6 +85,8 @@ interface TarefaAdmin {
   hospedes?: number | null;
   // FIX (sync parceiros) — true se a tarefa veio de uma reserva de parceiro.
   origem_parceiro?: boolean;
+  /** Tipo de limpeza; sem o campo = normal. */
+  tipo_limpeza?: string | null;
   // FIX (motivo_falha_atribuicao) — Motivo pelo qual a auto-atribuição falhou
   // (ex: "Toda a equipa de folga/férias", "Lotação máxima excedida").
   motivo_nao_atribuicao?: string | null;
@@ -568,7 +571,7 @@ export default function AdminTarefasPage() {
       const msg =
         res.processadas === 0
           ? res.mensagem ?? "Não há tarefas por atribuir a partir de hoje."
-          : `Foram reatribuídas ${res.reatribuidas} tarefa(s). ` +
+          : `Foram reatribuídas ${plural(res.reatribuidas, "tarefa")}. ` +
             (res.orfas > 0
               ? `${res.orfas} continuam por atribuir (sem staff disponível).`
               : "Nenhuma ficou por atribuir. ✅");
@@ -691,7 +694,7 @@ export default function AdminTarefasPage() {
             Gestão manual de limpezas.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 max-sm:[&>button]:h-11 max-sm:[&>button]:min-w-[44px]">
           <Button
             variant={soAvarias ? "destructive" : "outline"}
             size="sm"
@@ -742,7 +745,7 @@ export default function AdminTarefasPage() {
             setConflitoForcar(false);
           }}>
             <Plus className="h-4 w-4" />
-            Nova Limpeza
+            Nova limpeza
           </Button>
           {/* HF18 — Botão "Nova Limpeza Espontânea" — abre um Dialog simples
               para criar uma tarefa manual (origem: 'manual') sem reserva
@@ -763,7 +766,7 @@ export default function AdminTarefasPage() {
             title="Cria uma limpeza avulsa (sem reserva Smoobu). Útil para limpezas extra solicitadas pelo proprietário ou parceiro."
           >
             <SprayCan className="h-4 w-4" />
-            <span className="hidden sm:inline">Limpeza Espontânea</span>
+            <span className="hidden sm:inline">Limpeza espontânea</span>
           </Button>
           {/* FIX (import/export excel) — Botões de importar/exportar Excel. */}
           <Button
@@ -798,7 +801,7 @@ export default function AdminTarefasPage() {
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Filter className="h-3.5 w-3.5" />
           <span>
-            A mostrar {tarefasFiltradas.length} tarefa(s) com avarias reportadas.
+            A mostrar {plural(tarefasFiltradas.length, "tarefa")} com avarias reportadas.
           </span>
           <Button
             variant="ghost"
@@ -817,7 +820,7 @@ export default function AdminTarefasPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <SprayCan className="h-5 w-5 text-gold-text" />
-              Nova Limpeza Manual
+              Nova limpeza manual
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -976,7 +979,7 @@ export default function AdminTarefasPage() {
             </Badge>
           </TabsTrigger>
           <TabsTrigger value="por_atribuir" className="gap-1.5">
-            Por Atribuir
+            Por atribuir
             {tarefas.filter((t) => ["por_atribuir", "nao_atribuida"].includes(t.estado)).length > 0 && (
               <Badge variant="destructive" className="ml-1 px-1.5 py-0 text-xs">
                 {tarefas.filter((t) => ["por_atribuir", "nao_atribuida"].includes(t.estado)).length}
@@ -1006,18 +1009,20 @@ export default function AdminTarefasPage() {
       <Card>
         <CardContent className="flex flex-wrap items-end gap-3 p-4">
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Data Início</label>
+            <label className="text-xs font-medium text-muted-foreground">Data de início</label>
             <Input
               type="date"
+              aria-label="Data de início"
               value={filtroDataInicio}
               onChange={(e) => { setFiltroDataInicio(e.target.value); setPagina(1); }}
               className="h-9 w-[150px]"
             />
           </div>
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Data Fim</label>
+            <label className="text-xs font-medium text-muted-foreground">Data de fim</label>
             <Input
               type="date"
+              aria-label="Data de fim"
               value={filtroDataFim}
               onChange={(e) => { setFiltroDataFim(e.target.value); setPagina(1); }}
               className="h-9 w-[150px]"
@@ -1080,7 +1085,7 @@ export default function AdminTarefasPage() {
             </Button>
           )}
           <span className="ml-auto text-xs text-muted-foreground">
-            {tarefasFiltradas.length} de {tarefas.length} tarefa(s)
+            {tarefasFiltradas.length} de {plural(tarefas.length, "tarefa")}
           </span>
         </CardContent>
       </Card>
@@ -1124,8 +1129,9 @@ export default function AdminTarefasPage() {
                     <span className="text-xs uppercase tracking-wide">Equipa: </span>
                     <EquipaTarefa t={t} />
                   </p>
-                  {(t.origem_parceiro || (Array.isArray(t.avarias) && t.avarias.length > 0)) && (
+                  {(t.origem_parceiro || (t.tipo_limpeza && t.tipo_limpeza !== "normal") || (Array.isArray(t.avarias) && t.avarias.length > 0)) && (
                     <div className="flex flex-wrap gap-1">
+                      <TipoLimpezaBadge tipo={t.tipo_limpeza} />
                       {t.origem_parceiro && (
                         <Badge variant="secondary" className="px-1.5 py-0 text-xs">🤝 Parceiro</Badge>
                       )}
@@ -1182,11 +1188,12 @@ export default function AdminTarefasPage() {
                               🤝 Parceiro
                             </Badge>
                           )}
+                          <TipoLimpezaBadge tipo={t.tipo_limpeza} />
                           {temAvarias && (
                             <Badge
                               variant="destructive"
                               className="shrink-0 gap-1 whitespace-nowrap text-xs px-1.5 py-0"
-                              title={`${t.avarias!.length} avaria(s) reportada(s)`}
+                              title={`${plural(plural(t.avarias!.length, "avaria"), "reportada")}`}
                             >
                               <Wrench className="h-3 w-3" />
                               Avaria
@@ -1248,7 +1255,7 @@ export default function AdminTarefasPage() {
                         )}
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-1">{acoesTarefa(t, "h-8 w-8")}</div>
+                        <div className="flex items-center justify-end gap-1">{acoesTarefa(t, "h-11 w-11 md:h-8 md:w-8")}</div>
                       </td>
                     </tr>
                     );
@@ -1280,7 +1287,7 @@ export default function AdminTarefasPage() {
       <Dialog open={atribuindo !== null} onOpenChange={(o) => !o && setAtribuindo(null)}>
         <DialogHeader>
           <div>
-            <DialogTitle>Atribuir Limpeza</DialogTitle>
+            <DialogTitle>Atribuir limpeza</DialogTitle>
             <DialogDescription>
               {atribuindo?.propriedade_id?.nome} — {atribuindo ? formatarData(atribuindo.data) : ""}
               {atribuindo && nomesEquipa(atribuindo).length > 1 && (
@@ -1324,7 +1331,7 @@ export default function AdminTarefasPage() {
             </select>
             {indisponiveis.length > 0 && (
               <p className="text-xs text-amber-600 dark:text-amber-400">
-                ⚠️ {indisponiveis.length} membro(s) da equipa está(ão) de folga/férias neste dia e apareceram como [Indisponível] na lista (não selecionáveis).
+                ⚠️ {plural(indisponiveis.length, "membro")} da equipa está(ão) de folga/férias neste dia e apareceram como [Indisponível] na lista (não selecionáveis).
               </p>
             )}
           </div>
@@ -1398,7 +1405,7 @@ export default function AdminTarefasPage() {
           <div>
             <DialogTitle className="flex items-center gap-2">
               <SprayCan className="h-5 w-5 text-gold-text" />
-              Nova Limpeza Espontânea
+              Nova limpeza espontânea
             </DialogTitle>
             <DialogDescription>
               Cria uma limpeza avulsa (sem reserva Smoobu associada). Útil
@@ -1582,7 +1589,7 @@ export default function AdminTarefasPage() {
           <div>
             <DialogTitle className="flex items-center gap-2 text-destructive">
               <AlertCircle className="h-5 w-5" />
-              Cancelar Limpeza
+              Cancelar limpeza
             </DialogTitle>
             <DialogDescription>
               Tens a certeza que queres cancelar a limpeza de{" "}
@@ -1600,7 +1607,7 @@ export default function AdminTarefasPage() {
         </DialogContent>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => setCancelarTarget(null)} disabled={cancelarLoading}>
-            Manter Limpeza
+            Manter limpeza
           </Button>
           <Button type="button" variant="destructive" onClick={confirmarCancelamento} disabled={cancelarLoading}>
             {cancelarLoading ? (

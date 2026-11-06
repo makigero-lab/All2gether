@@ -108,7 +108,7 @@ export default function ParceirosPage() {
     e.preventDefault();
     setCriarErro(null);
     if (!criarForm.nome.trim() || !criarForm.email.trim() || !criarForm.password) {
-      setCriarErro("Nome, Email e Password são obrigatórios.");
+      setCriarErro("Nome, email e palavra-passe são obrigatórios.");
       return;
     }
     if (criarForm.password.length < 6) {
@@ -220,7 +220,7 @@ export default function ParceirosPage() {
           </Button>
           <Button onClick={() => { setCriarOpen(true); setCriarErro(null); }}>
             <Plus className="h-4 w-4" />
-            Novo Parceiro
+            Novo parceiro
           </Button>
         </div>
       </div>
@@ -316,7 +316,7 @@ export default function ParceirosPage() {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Handshake className="h-5 w-5 text-gold-text" />
-            Novo Parceiro
+            Novo parceiro
           </DialogTitle>
           <DialogDescription>
             Cria um parceiro B2B. Ele terá acesso ao portal /parceiro para criar reservas.
@@ -353,7 +353,7 @@ export default function ParceirosPage() {
             </div>
             <div className="space-y-1.5">
               <label htmlFor="criar-password" className="text-sm font-medium">
-                Password <span className="text-destructive">*</span>
+                Palavra-passe <span className="text-destructive">*</span>
               </label>
               <div className="relative">
                 <Input
@@ -368,7 +368,7 @@ export default function ParceirosPage() {
                   type="button"
                   onClick={() => setShowPassword((v) => !v)}
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                  aria-label={showPassword ? "Ocultar password" : "Mostrar password"}
+                  aria-label={showPassword ? "Ocultar palavra-passe" : "Mostrar palavra-passe"}
                 >
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
@@ -433,7 +433,7 @@ export default function ParceirosPage() {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Pencil className="h-5 w-5 text-gold-text" />
-            Editar Parceiro
+            Editar parceiro
           </DialogTitle>
           <DialogDescription>{editando?.email}</DialogDescription>
           <DialogClose onClick={() => setEditando(null)} />
@@ -461,7 +461,7 @@ export default function ParceirosPage() {
             </div>
             <div className="space-y-1.5">
               <label htmlFor="edit-password" className="text-sm font-medium">
-                Nova Password (opcional)
+                Nova palavra-passe (opcional)
               </label>
               <div className="relative">
                 <Input
@@ -475,7 +475,7 @@ export default function ParceirosPage() {
                   type="button"
                   onClick={() => setShowEditPassword((v) => !v)}
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                  aria-label={showEditPassword ? "Ocultar password" : "Mostrar password"}
+                  aria-label={showEditPassword ? "Ocultar palavra-passe" : "Mostrar palavra-passe"}
                 >
                   {showEditPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>

@@ -803,7 +803,7 @@ export default function RelatoriosPage() {
                   ) : (
                     <Sparkles className="h-4 w-4" />
                   )}
-                  Gerar Relatório Inteligente
+                  Gerar relatório inteligente
                 </Button>
               </div>
             </CardHeader>

@@ -191,7 +191,7 @@ export default function StaffCalendarioPage() {
           <Button
             variant="ghost"
             size="icon"
-            className="text-muted-foreground hover:text-destructive"
+            className="h-11 w-11 sm:h-9 sm:w-9 text-muted-foreground hover:text-destructive"
             onClick={() => fazerLogout()}
             aria-label="Terminar sessão"
             title="Terminar sessão"
@@ -279,7 +279,7 @@ export default function StaffCalendarioPage() {
                                 <span className="text-sm font-bold tabular-nums text-gold-text">
                                   {hora}
                                 </span>
-                                <span className="text-xs uppercase text-gold-text/70">
+                                <span className="text-xs uppercase text-gold-text">
                                   início
                                 </span>
                               </div>

@@ -28,7 +28,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { adminGet, adminPatch } from "@/lib/api";
 import { PushNotificationSetup } from "@/components/gestor/push-notification-setup";
-import { formatarDataSegura, textoRedistribuicao, type RedistribuicaoDTO } from "@/lib/utils";
+import { formatarDataSegura, textoRedistribuicao, type RedistribuicaoDTO, plural } from "@/lib/utils";
 
 interface DashboardData {
   totalPropriedades: number;
@@ -171,7 +171,7 @@ export default function AdminDashboardPage() {
               </div>
               <div className="flex-1">
                 <p className="text-sm font-semibold text-orange-900 dark:text-orange-100">
-                  ⚠️ Tens {data.checkinsEmRisco.total} limpeza(s) crítica(s) pendente(s) para as próximas 48h!
+                  ⚠️ Tens {plural(data.checkinsEmRisco.total, "limpeza")} crítica(s) pendente(s) para as próximas 48h!
                 </p>
                 <p className="mt-0.5 text-xs text-orange-800/80 dark:text-orange-200/80">
                   Estas tarefas estão <strong>por atribuir</strong> e podem comprometer check-ins.

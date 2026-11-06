@@ -136,6 +136,10 @@ export interface TarefaMock {
   detalhes_reserva?: DetalhesReservaDTO | null;
   // Prompt 114 — Lotação máxima da propriedade (para destaque no detalhe).
   capacidade_hospedes?: number | null;
+  // Tipo de limpeza (sem o campo = normal).
+  tipo_limpeza?: string | null;
+  // A checklist desta tarefa é uma checklist PRÓPRIA do tipo de limpeza (não a base da casa).
+  checklist_do_tipo?: boolean;
   // Prompt 126 — Observações/notes internas da propriedade (ex.: regras de acesso).
   observacoes_propriedade?: string | null;
   // Prompt 133 — Checklist dinâmica (snapshot do ModeloChecklist associado à
@@ -201,6 +205,9 @@ export interface PropriedadeDTO {
   tempo_limpeza_minutos: number;
   ativo: boolean;
   checklist?: string[];
+  // Tipos de limpeza — tempo (min) e checklist próprios por tipo; sem valor = os da casa.
+  tempos_limpeza_por_tipo?: Partial<Record<"intermedia" | "profunda" | "preparacao", number | null>>;
+  checklists_por_tipo?: Partial<Record<"intermedia" | "profunda" | "preparacao", string[]>>;
   // v1.61.0 (Prompt 84) — Capacidade máxima de hóspedes (do Smoobu).
   capacidade_hospedes?: number | null;
   // Prompt 92 (Fase 1.5) — Funcionário preferencial (Algoritmo VIP).

@@ -164,7 +164,7 @@ export default function StaffNotificacoesPage() {
             <Button
               variant="ghost"
               size="icon"
-              className="text-muted-foreground hover:text-destructive"
+              className="h-11 w-11 sm:h-9 sm:w-9 text-muted-foreground hover:text-destructive"
               onClick={() => fazerLogout()}
               aria-label="Terminar sessão"
               title="Terminar sessão"
@@ -195,7 +195,7 @@ export default function StaffNotificacoesPage() {
           )}
           <Button
             variant="outline"
-            size="icon"
+            size="icon" className="h-11 w-11 sm:h-9 sm:w-9"
             onClick={carregar}
             disabled={loading}
             aria-label="Atualizar"
@@ -241,7 +241,7 @@ export default function StaffNotificacoesPage() {
             <div className="space-y-3 sm:hidden">
               <p className="text-xs text-muted-foreground">
                 {notificacoes.length} notificação(ões)
-                {naoLidas > 0 && ` · ${naoLidas} não lida(s)`}
+                {naoLidas > 0 && ` · ${naoLidas} ${naoLidas === 1 ? "não lida" : "não lidas"}`}
               </p>
               {notificacoes.map((n) => (
                 <Card
@@ -285,7 +285,7 @@ export default function StaffNotificacoesPage() {
                 </CardTitle>
                 <CardDescription>
                   {notificacoes.length} notificação(ões) no total
-                  {naoLidas > 0 && ` · ${naoLidas} não lida(s)`}.
+                  {naoLidas > 0 && ` · ${naoLidas} ${naoLidas === 1 ? "não lida" : "não lidas"}`}.
                 </CardDescription>
               </CardHeader>
               <CardContent className="p-0">

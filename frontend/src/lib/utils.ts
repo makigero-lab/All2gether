@@ -44,16 +44,17 @@ export function paraIsoMeiaNoiteLocal(dataYYYYMMDD: string): string {
  * No calendário, as primeiras devem aparecer como "todo o dia" (all-day)
  * para não ficarem abaixo do slotMinTime 08:00 (invisíveis).
  *
- * Heurística: se a hora local for anterior a 8 (ou seja, 00:00, 01:00 de
- * dados antigos em UTC midnight, etc.), consideramos que não tem hora real
- * de trabalho → render all-day.
+ * Regra: só é "sem hora" a tarefa exatamente à meia-noite (00:00 UTC, o
+ * marcador de data sem hora, ou 00:00 locais). Qualquer outra hora é real e
+ * mostra-se sempre, mesmo que seja errada: nunca se esconde um erro.
  */
 export function temHoraReal(dataISO: string): boolean {
   try {
     const d = parsearDataSegura(dataISO);
     if (!d) return true;
-    // Hora LOCAL (o browser está em Lisboa).
-    return d.getHours() >= 8;
+    const meiaNoiteUTC = d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0;
+    const meiaNoiteLocal = d.getHours() === 0 && d.getMinutes() === 0 && d.getSeconds() === 0;
+    return !(meiaNoiteUTC || meiaNoiteLocal);
   } catch {
     return true;
   }
@@ -320,5 +321,39 @@ export function textoRedistribuicao(
       : `${prefixo} Não foi possível reatribuir automaticamente.`;
   }
   if (!(desatribuidas > 0)) return `${prefixo} ${semTarefas}`;
-  return `${prefixo} ${desatribuidas} tarefa(s) por atribuir.`;
+  return `${prefixo} ${plural(desatribuidas, "tarefa")} por atribuir.`;
+}
+
+/**
+ * «1 tarefa» / «2 tarefas»: singular e plural reais (nunca «tarefa(s)»).
+ * O plural regular acrescenta «s»; para outros passa-se a forma do plural.
+ */
+export function plural(n: number | string | null | undefined, singular: string, pluralForma?: string): string {
+  return `${n ?? 0} ${Number(n) === 1 ? singular : pluralForma ?? `${singular}s`}`;
+}
+
+/**
+ * Checklist que o staff vê: a da PRÓPRIA tarefa (do tipo de limpeza) e, só se vier vazia
+ * (tarefas antigas), a da casa.
+ */
+export function checklistDaTarefa(
+  tarefa: { checklist?: unknown; propriedade_id?: { checklist?: unknown } | null } | null | undefined
+): string[] {
+  const dela = Array.isArray(tarefa?.checklist) ? (tarefa!.checklist as string[]) : [];
+  if (dela.length > 0) return dela;
+  const dacasa = tarefa?.propriedade_id?.checklist;
+  return Array.isArray(dacasa) ? (dacasa as string[]) : [];
+}
+
+/** Data por extenso igual nos três portais: «Sexta-feira, 6 de novembro». */
+export function dataPorExtenso(d: Date): string {
+  const partes = new Intl.DateTimeFormat("pt-PT", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    timeZone: "Europe/Lisbon",
+  }).formatToParts(d);
+  const p = (t: string) => partes.find((x) => x.type === t)?.value ?? "";
+  const semana = p("weekday");
+  return `${semana.charAt(0).toUpperCase()}${semana.slice(1)}, ${p("day")} de ${p("month")}`;
 }

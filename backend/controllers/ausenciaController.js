@@ -776,7 +776,7 @@ async function reatribuirTarefasPeriodo(empresaId, utilizadorId, inicio, fim) {
 
   // Lazy imports para evitar dependência circulares no carregamento do módulo.
   const { determinarEquipaAtribuida } = require('../utils/loadBalancer');
-  const { calcularInicioTarefaUtilizador } = require('../utils/scheduler');
+  const { calcularInicioEquipa } = require('../utils/scheduler');
 
   // Tarefas a tratar no período:
   //   (a) 'por_atribuir'/'nao_atribuida': equipa toda por preencher;
@@ -857,6 +857,21 @@ async function reatribuirTarefasPeriodo(empresaId, utilizadorId, inicio, fim) {
         novos = (r?.equipa || []).map((m) => m.utilizadorId);
       }
 
+      // Equipa nova: hora em que todos conseguem (mesmo cálculo de todos os caminhos).
+      // Sem hora comum no horário, não se atribui (fica por atribuir com o motivo real).
+      let horaEquipa = null;
+      if (novos.length > 0 && !parcial) {
+        try {
+          horaEquipa = await calcularInicioEquipa(novos, start, coordenadas, tempoNovaTarefa, null, propriedadeId);
+        } catch (errScheduler) {
+          console.warn(
+            `⚠️ [reatribuirTarefasPeriodo] scheduler falhou para tarefa ${tarefa._id}:`,
+            errScheduler.message
+          );
+        }
+        if (horaEquipa && !horaEquipa.cabe) novos = [];
+      }
+
       if (novos.length > 0) {
         const eq = normalizarEquipa(membrosAtuais[0] || novos[0], [...membrosAtuais, ...novos]);
         const set = {
@@ -867,23 +882,8 @@ async function reatribuirTarefasPeriodo(empresaId, utilizadorId, inicio, fim) {
           pessoas_em_falta: Math.max(0, precisa - novos.length),
         };
         if (!parcial) {
-          // Equipa nova: recalcula a hora (todos têm de estar presentes).
-          let novaData = null;
-          let viagem = 0;
-          for (const id of novos) {
-            try {
-              const rs = await calcularInicioTarefaUtilizador(id, start, coordenadas, tempoNovaTarefa);
-              if (!novaData || rs.data > novaData) novaData = rs.data;
-              viagem = Math.max(viagem, Number(rs.tempoViagem) || 0);
-            } catch (errScheduler) {
-              console.warn(
-                `⚠️ [reatribuirTarefasPeriodo] scheduler falhou para tarefa ${tarefa._id}:`,
-                errScheduler.message
-              );
-            }
-          }
-          set.data = novaData || tarefa.data;
-          set.tempo_viagem_minutos = viagem;
+          set.data = (horaEquipa && horaEquipa.data) || tarefa.data;
+          set.tempo_viagem_minutos = horaEquipa ? Number(horaEquipa.tempoViagem) || 0 : 0;
         }
         await Tarefa.updateOne({ _id: tarefa._id }, { $set: set });
 
@@ -908,7 +908,7 @@ async function reatribuirTarefasPeriodo(empresaId, utilizadorId, inicio, fim) {
       } else {
         // Ninguém disponível — mantém 'por_atribuir' com o motivo real.
         orfas++;
-        const diag = await diagnosticarFaltaDeStaff(empresaId, range, propriedadeId, staffExcluidos);
+        const diag = await diagnosticarFaltaDeStaff(empresaId, range, propriedadeId, staffExcluidos, tempoNovaTarefa);
         await Tarefa.updateOne(
           { _id: tarefa._id },
           { $set: { estado: diag.estado, motivo_nao_atribuicao: diag.motivo } }

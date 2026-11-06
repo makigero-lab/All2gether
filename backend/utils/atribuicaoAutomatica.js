@@ -14,20 +14,21 @@ const {
   determinarUtilizadorAtribuido,
   determinarEquipaAtribuida,
 } = require('./loadBalancer');
-const { calcularInicioTarefaUtilizador, obterRangeDia } = require('./scheduler');
+const { calcularInicioEquipa, obterRangeDia, carregarAgenda, prepararViagens, motivoNaoCabe } = require('./scheduler');
+const H = require('./horario');
 const Tarefa = require('../models/Tarefa');
 const { idsEquipa, comMembro, normalizarEquipa } = require('./equipaTarefa');
 
 const MOTIVO_SEM_EQUIPA = 'Sem equipa ativa';
 const MOTIVO_INDISPONIVEL = 'Toda a equipa ausente, de folga ou fora da equipa exclusiva neste dia';
-const MOTIVO_LOTACAO = 'Lotação máxima excedida (toda a equipa > 8h/dia)';
+const MOTIVO_LOTACAO = 'Não cabe no horário de ninguém (09:00-18:00, com almoço e viagens)';
 const MOTIVO_ERRO = 'Erro ao verificar disponibilidade da equipa';
 
 /**
  * Causa real de a atribuição ter falhado.
  * @returns {Promise<{ causa: 'sem_equipa'|'indisponivel'|'lotacao'|'erro', motivo: string, estado: 'por_atribuir'|'nao_atribuida' }>}
  */
-async function diagnosticarFaltaDeStaff(empresaId, range, propriedadeId = null, excluirStaffIds = null) {
+async function diagnosticarFaltaDeStaff(empresaId, range, propriedadeId = null, excluirStaffIds = null, tempoLimpeza = null) {
   try {
     const { staff, disponiveis } = await obterStaffDisponivel(empresaId, range, propriedadeId, excluirStaffIds);
     if (staff.length === 0) {
@@ -36,8 +37,9 @@ async function diagnosticarFaltaDeStaff(empresaId, range, propriedadeId = null, 
     if (disponiveis.length === 0) {
       return { causa: 'indisponivel', motivo: MOTIVO_INDISPONIVEL, estado: 'por_atribuir' };
     }
-    // Há quem esteja disponível mas ninguém cabe no limite diário.
-    return { causa: 'lotacao', motivo: MOTIVO_LOTACAO, estado: 'nao_atribuida' };
+    // Há quem esteja disponível mas ninguém cabe no horário (ou a limpeza é demasiado longa para qualquer dia).
+    const motivo = tempoLimpeza && !H.duracaoCabeNoHorario(tempoLimpeza) ? motivoNaoCabe(Number(tempoLimpeza)) : MOTIVO_LOTACAO;
+    return { causa: 'lotacao', motivo, estado: 'nao_atribuida' };
   } catch (e) {
     // Se falha a verificação, mantém por_atribuir (seguro).
     return { causa: 'erro', motivo: MOTIVO_ERRO, estado: 'por_atribuir' };
@@ -91,24 +93,22 @@ async function planearAtribuicao({ empresaId, propriedade, dia, tempoLimpeza }) 
     }
 
     if (ids.length === 0) {
-      const d = await diagnosticarFaltaDeStaff(empresaId, range, propriedade._id);
+      const d = await diagnosticarFaltaDeStaff(empresaId, range, propriedade._id, null, tempo);
       plano.estado = d.estado;
       plano.motivo_nao_atribuicao = d.motivo;
       return plano;
     }
 
-    // Todos os membros têm de estar presentes: começa quando o último consegue.
-    let dataAgendada = dataPadrao;
-    let viagem = viagemLB;
-    for (const id of ids) {
-      try {
-        const s = await calcularInicioTarefaUtilizador(id, range.start, propriedade.coordenadas, tempo);
-        if (s?.data && s.data > dataAgendada) dataAgendada = s.data;
-        if (s?.tempoViagem) viagem = Math.max(viagem, Number(s.tempoViagem) || 0);
-      } catch (errScheduler) {
-        console.warn('⚠️  [atribuicao] scheduler falhou (mantém 10:00 UTC):', errScheduler.message);
-      }
+    // Todos os membros têm de estar presentes: começa quando todos conseguem (horario.js).
+    const s = await calcularInicioEquipa(ids, range.start, propriedade.coordenadas, tempo, null, propriedade._id);
+    if (!s.cabe) {
+      // Cada um cabia sozinho, mas não há hora comum: fica por atribuir, com o motivo real.
+      plano.estado = 'nao_atribuida';
+      plano.motivo_nao_atribuicao = s.motivo || MOTIVO_LOTACAO;
+      return plano;
     }
+    const dataAgendada = s.data;
+    const viagem = Math.max(viagemLB, Number(s.tempoViagem) || 0);
 
     plano.utilizador_id = ids[0];
     plano.equipa_atribuida = ids;
@@ -128,7 +128,7 @@ async function planearAtribuicao({ empresaId, propriedade, dia, tempoLimpeza }) 
  * (usa tempo de limpeza + viagem de cada tarefa; ignora canceladas/concluídas
  * e a própria tarefa).
  */
-async function temSobreposicao(utilizadorId, data, duracaoMin, excluirTarefaId = null) {
+async function temSobreposicao(utilizadorId, data, duracaoMin, excluirTarefaId = null, coord = null) {
   const range = obterRangeDia(data);
   const filtro = {
     data: { $gte: range.start, $lt: range.end },
@@ -145,6 +145,26 @@ async function temSobreposicao(utilizadorId, data, duracaoMin, excluirTarefaId =
     const of = new Date(o.data).getTime() + (Number(o.tempo_limpeza_minutos) || 45) * 60000;
     return oi < fim && of > ini;
   });
+}
+
+/**
+ * A limpeza, na hora em que está, cumpre o horário desta pessoa (janela 09:00-18:00,
+ * sem sobreposição com viagens, almoço possível)? Usa a agenda real; a própria
+ * tarefa fica de fora. Sem hora real (meia-noite) devolve true (ainda não agendada).
+ * @returns {Promise<boolean>}
+ */
+async function cabeNaAgendaNaHora(utilizadorId, data, duracaoMin, excluirTarefaId, coord = null, propId = null) {
+  if (!H.temHoraReal(data)) return true;
+  const ag = await carregarAgenda(utilizadorId, data, excluirTarefaId);
+  const dur = Number(duracaoMin) || 45;
+  const ini = H.minutosLocais(data);
+  // Hora já fora da janela (dados antigos): não a «piora»; só recusa sobreposições.
+  if (ini < H.HORARIO.INICIO_DIA || ini >= H.HORARIO.FIM_DIA) {
+    return !(await temSobreposicao(utilizadorId, data, dur, excluirTarefaId));
+  }
+  const nova = { duracao: dur, coord, propId, nova: true, ini, fim: ini + dur };
+  const viagemFn = await prepararViagens(ag, nova, new Date(data));
+  return H.cabeNoDia(ag, nova, viagemFn);
 }
 
 /**
@@ -173,7 +193,7 @@ async function planearVaga({ empresaId, tarefa, propriedade, excluirExtra = [] }
     if (cand.length === 0) break;
     for (const id of cand) {
       excl.add(String(id));
-      if (await temSobreposicao(id, tarefa.data, tempo, tarefa._id)) out.conflitos++;
+      if (!(await cabeNaAgendaNaHora(id, tarefa.data, tempo, tarefa._id, propriedade.coordenadas, propriedade._id))) out.conflitos++;
       else out.novos.push(id);
     }
   }
@@ -433,6 +453,7 @@ module.exports = {
   avisarColegasDoSubstituto,
   preencherVagaTarefa,
   temSobreposicao,
+  cabeNaAgendaNaHora,
   planearVaga,
   diagnosticarFaltaDeStaff,
   planearAtribuicao,
