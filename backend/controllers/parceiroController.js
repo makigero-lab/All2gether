@@ -26,9 +26,7 @@ const { planearAtribuicao } = require('../utils/atribuicaoAutomatica');
 const { idsEquipa } = require('../utils/equipaTarefa');
 const { agregarNotificacao } = require('../utils/notificarAgregado');
 const { avisarGestores } = require('../utils/notificar');
-const { temProgresso, planearAtribuicao: planearMotor, temSobreposicao } = require('../utils/atribuicaoAutomatica');
-const { comMembro } = require('../utils/equipaTarefa');
-const { obterRangeDia } = require('../utils/scheduler');
+const { temProgresso, planearAtribuicao: planearMotor, cabeNaAgendaNaHora } = require('../utils/atribuicaoAutomatica');
 const {
   normalizarTipo, tipoDe, eSaida, tempoDoTipo, checklistDoTipo, temChecklistPropria, resolverDiaLimpeza, ROTULOS_TIPO,
 } = require('../utils/tipoLimpeza');
@@ -301,12 +299,34 @@ function detalhesDaReserva(extras) {
   return d;
 }
 
-/** Valida as datas (formato e check-out >= check-in). Devolve texto de erro ou null. */
-function validarDatas(check_in, check_out) {
+const MAX_NOITES_RESERVA = 365;
+const ANOS_PASSADO_MAX = 2;
+const ANOS_FUTURO_MAX = 3;
+
+/**
+ * Valida as datas (formato e check-out >= check-in). Com `limites` (por omissão),
+ * exige também que ambas fiquem entre 2 anos atrás e 3 à frente e que a estadia
+ * não passe de 365 noites (0001-01-01 e 9999-12-31 deixam de passar).
+ * Devolve texto de erro ou null.
+ */
+function validarDatas(check_in, check_out, { limites = true, agora = new Date() } = {}) {
   const ci = new Date(check_in);
   const co = new Date(check_out);
   if (Number.isNaN(ci.getTime()) || Number.isNaN(co.getTime())) return 'Datas inválidas.';
   if (co < ci) return 'O check-out não pode ser anterior ao check-in.';
+  if (!limites) return null;
+  // Só nos testes: a bateria antiga usa datas muito afastadas (2030-2064) de propósito.
+  if (process.env.NODE_ENV === 'test' && process.env.DATAS_SEM_LIMITES === '1') return null;
+  const min = Date.UTC(agora.getUTCFullYear() - ANOS_PASSADO_MAX, agora.getUTCMonth(), agora.getUTCDate());
+  const max = Date.UTC(agora.getUTCFullYear() + ANOS_FUTURO_MAX, agora.getUTCMonth(), agora.getUTCDate());
+  for (const d of [ci, co]) {
+    if (d.getTime() < min || d.getTime() > max) {
+      return `As datas têm de estar entre ${ANOS_PASSADO_MAX} anos atrás e ${ANOS_FUTURO_MAX} anos à frente.`;
+    }
+  }
+  if ((co.getTime() - ci.getTime()) / 86400000 > MAX_NOITES_RESERVA) {
+    return `A estadia não pode ter mais de ${MAX_NOITES_RESERVA} noites.`;
+  }
   return null;
 }
 
@@ -418,25 +438,18 @@ async function gerarTarefaLimpezaReserva({
 
 /**
  * A limpeza ficou mais longa (mesmo dia, outro tipo): se a equipa atual continua a caber
- * (máx. 8h/dia por pessoa e sem sobreposição), mantém pessoas e hora. Se não, liberta a
+ * (dentro do horário do dia, com almoço, viagens e sem sobreposição), mantém pessoas e hora. Se não, liberta a
  * tarefa e deixa o motor escolher de novo com o tempo novo; sem ninguém, fica por atribuir
  * com o motivo real e os gestores são avisados. Grava já os campos de atribuição (updateOne):
  * o `tarefa.save()` seguinte só escreve o resto. Nunca é chamada para `em_curso`/`concluida`
  * (a regra de 409 vem antes: a limpeza em curso fica com a pessoa).
  */
 async function replanearSeNaoCabe(tarefa, propriedade, tempoNovo) {
-  const range = obterRangeDia(tarefa.data);
   const membros = idsEquipa(tarefa);
   let cabe = true;
   for (const id of membros) {
-    const outras = await Tarefa.find(comMembro({
-      empresa_id: tarefa.empresa_id,
-      _id: { $ne: tarefa._id },
-      data: { $gte: range.start, $lt: range.end },
-      estado: { $nin: ['cancelada', 'concluida'] },
-    }, id)).select('tempo_limpeza_minutos').lean();
-    const carga = outras.reduce((acc, t) => acc + (Number(t.tempo_limpeza_minutos) || 0), 0);
-    if (carga + tempoNovo > 480 || await temSobreposicao(id, tarefa.data, tempoNovo, tarefa._id)) {
+    // Janela do dia (09:00-18:00), almoço, viagens e sobreposições (horario.js).
+    if (!(await cabeNaAgendaNaHora(id, tarefa.data, tempoNovo, tarefa._id, propriedade.coordenadas, propriedade._id))) {
       cabe = false;
       break;
     }
@@ -568,7 +581,10 @@ async function criarReserva(req, res) {
     // FIX (fallback hospedes estrito) — Se hospedes for null, 0 ou undefined,
     // usa a capacidade_hospedes da propriedade (lotação máxima da casa).
     // Antes só cobria null; agora cobre também 0 (falsy mas != null).
-    let numHospedes = hospedes != null ? Number(hospedes) : null;
+    let numHospedes = hospedes != null && hospedes !== '' ? Number(hospedes) : null;
+    if (numHospedes !== null && (Number.isNaN(numHospedes) || numHospedes < 0)) {
+      return res.status(400).json({ erro: 'Número de hóspedes inválido.' });
+    }
     if (numHospedes === null || numHospedes === 0 || Number.isNaN(numHospedes)) {
       numHospedes = propriedade.capacidade_hospedes ?? null;
     }
@@ -695,7 +711,11 @@ async function atualizarReserva(req, res) {
     const extras = lerCamposExtra(body);
     const novoCheckIn = body.check_in ?? reserva.check_in;
     const novoCheckOut = body.check_out ?? reserva.check_out;
-    const erroDatas = validarDatas(novoCheckIn, novoCheckOut);
+    // Reservas antigas: os limites só se verificam se as datas mudarem (editar notas não bloqueia).
+    const mesmoDia = (a, b) => new Date(a).getTime() === new Date(b).getTime();
+    const datasMudaram = (body.check_in !== undefined && !mesmoDia(body.check_in, reserva.check_in))
+      || (body.check_out !== undefined && !mesmoDia(body.check_out, reserva.check_out));
+    const erroDatas = validarDatas(novoCheckIn, novoCheckOut, { limites: datasMudaram });
     if (erroDatas) return res.status(400).json({ erro: erroDatas });
 
     const dia = (d) => new Date(d).toISOString().slice(0, 10);
@@ -881,6 +901,7 @@ async function eliminarReserva(req, res) {
 }
 
 module.exports = {
+  validarDatas,
   criarPropriedade,
   listarPropriedades,
   criarTarefa,

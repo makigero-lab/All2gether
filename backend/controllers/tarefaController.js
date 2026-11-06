@@ -13,10 +13,42 @@ const { obterEmpresaId } = require('./gestorController');
 const { notificarUtilizador } = require('../utils/notificar');
 const { registarAuditoria } = require('../utils/auditoria');
 const {
-  CAPACIDADE_MAXIMA_MINUTOS,
-  calcularCargaDiaUtilizador,
   calcularInicioTarefaUtilizador,
 } = require('../utils/scheduler');
+const Horario = require('../utils/horario');
+
+/**
+ * 'YYYY-MM-DD' (+ 'HH:MM' de Lisboa, com hora de verão) -> instante UTC.
+ * Sem hora fica à meia-noite UTC (marcador de «sem hora»): nunca passa para o dia anterior.
+ */
+function dataDeDiaEHora(dia, hhmm) {
+  if (!hhmm) return new Date(`${dia}T00:00:00.000Z`);
+  const [h, m] = hhmm.split(':').map(Number);
+  return Horario.utcDeMinutosLocais(dia, h * 60 + m);
+}
+
+/**
+ * Hora de uma limpeza atribuída À MÃO pelo gestor. Sem hora real (meia-noite) calcula-a
+ * pelo mesmo cálculo de todos os caminhos; com hora explícita respeita-a. Nunca bloqueia:
+ * se ficar fora do horário, devolve um aviso.
+ * @returns {Promise<{ data: Date, aviso: string|null, tempoViagem: number }>}
+ */
+async function horaDeAtribuicaoManual({ utilizadorId, data, tempo, propriedade }) {
+  const dia = Horario.diaUTC(data);
+  if (Horario.temHoraReal(data)) {
+    const a = Horario.avisoForaDoHorario(data, tempo);
+    return { data, aviso: a ? `Fica fora do horário (${a}).` : null, tempoViagem: 0 };
+  }
+  const r = await calcularInicioTarefaUtilizador(
+    utilizadorId, data, propriedade.coordenadas, tempo, null, propriedade._id
+  );
+  if (r.cabe) return { data: r.data, aviso: null, tempoViagem: Number(r.tempoViagem) || 0 };
+  return {
+    data: Horario.utcDeMinutosLocais(dia, Horario.HORARIO.INICIO_DIA),
+    aviso: `Fica fora do horário: ${r.motivo}. Ficou às 09:00; ajusta a hora se for preciso.`,
+    tempoViagem: 0,
+  };
+}
 const {
   verificarDisponibilidadeUtilizador,
   mensagemIndisponivel,
@@ -118,7 +150,7 @@ const CAPACIDADE_ATRASO_MINUTOS = 420;
  * POST /api/admin/tarefas/:id/atraso
  *
  * Reporta um atraso numa tarefa. Soma minutos_atraso ao tempo_limpeza_minutos.
- * Se a nova carga total do utilizador no dia ultrapassar a CAPACIDADE_MAXIMA_MINUTOS,
+ * Se a nova carga total do utilizador no dia ultrapassar a capacidade do dia (CAPACIDADE_ATRASO_MINUTOS),
  * a ÚLTIMA tarefa do dia desse utilizador é desatribuída (null + por_atribuir)
  * para não comprometer as limpezas seguintes.
  *
@@ -303,30 +335,9 @@ exports.criarTarefa = async (req, res) => {
       // date-only "YYYY-MM-DD"
       const horaStr = hora && /^\d{1,2}:\d{2}$/.test(String(hora).trim())
         ? String(hora).trim().padStart(5, '0')
-        : '00:00';
+        : null;
 
-      // Cria a data como LOCAL do servidor primeiro.
-      const dataLocal = new Date(`${dataStr}T${horaStr}`);
-
-      // Calcula o offset de Europe/Lisbon para esta data (em minutos).
-      // No verão (WEST = UTC+1): offset = -60. No inverno (WET = UTC+0): offset = 0.
-      // O Intl devolve o offset como "GMT+0100" → extraímos os minutos.
-      const offsetStr = new Intl.DateTimeFormat('en-US', {
-        timeZone: 'Europe/Lisbon',
-        timeZoneName: 'shortOffset',
-      }).formatToParts(dataLocal).find((p) => p.type === 'timeZoneName')?.value || 'GMT+0';
-
-      // Parse do offset (ex: "GMT+1" → +60 min, "GMT+0" → 0 min, "GMT-1" → -60 min).
-      const offsetMatch = offsetStr.match(/GMT([+-])(\d+)/);
-      const offsetMin = offsetMatch
-        ? (offsetMatch[1] === '+' ? 1 : -1) * parseInt(offsetMatch[2], 10) * 60
-        : 0;
-
-      // Ajusta: subtrai o offset de Lisboa para obter o instante UTC que
-      // corresponde à hora pretendida em Portugal.
-      // Ex: 11:00 LOCAL servidor (UTC) → 11:00 UTC. Lisboa = UTC+1 → 12:00.
-      //     Subtraímos 60min → 10:00 UTC. Lisboa = UTC+1 → 11:00. ✅
-      dataNormalizada = new Date(dataLocal.getTime() - offsetMin * 60 * 1000);
+      dataNormalizada = dataDeDiaEHora(dataStr, horaStr);
     } else {
       // Já vem com hora ou ISO — usa diretamente (assume que já está correto).
       dataNormalizada = new Date(dataStr);
@@ -397,8 +408,7 @@ exports.criarTarefa = async (req, res) => {
       // incluído na resposta (201) para o gestor ser avisado. O conflito
       // tem prioridade sobre o warning logístico (distância entre tarefas).
       const tempoMinutos = Number(tempo_limpeza_minutos) || propriedade.tempo_limpeza_minutos || 45;
-      const horaLocal = dataNormalizada.getHours();
-      if (horaLocal >= 8) {
+      if (Horario.temHoraReal(dataNormalizada)) {
         const novoInicio = dataNormalizada.getTime();
         const novoFim = novoInicio + tempoMinutos * 60 * 1000;
 
@@ -415,9 +425,8 @@ exports.criarTarefa = async (req, res) => {
           .lean();
 
         for (const tExist of tarefasExistentes) {
-          const existHoraLocal = new Date(tExist.data).getHours();
           // Só verifica conflito se a tarefa existente também tiver hora real.
-          if (existHoraLocal < 8) continue;
+          if (!Horario.temHoraReal(tExist.data)) continue;
           const existInicio = new Date(tExist.data).getTime();
           const existFim = existInicio + (tExist.tempo_limpeza_minutos || 45) * 60 * 1000;
           // Overlap: novoInicio < existFim AND novoFim > existInicio
@@ -458,6 +467,20 @@ exports.criarTarefa = async (req, res) => {
     // Prompt 137 — Debug log para confirmar que nome_hospede chega e é guardado.
     console.log('📋 criarTarefa — detalhes_reserva a guardar:', JSON.stringify(detalhesReserva));
 
+    // Atribuída à mão: sem hora real, calcula-a (nunca fica uma tarefa atribuída à meia-noite).
+    let dataFinal = dataNormalizada;
+    let avisoHorario = null;
+    if (utilizadorValidado) {
+      const hm = await horaDeAtribuicaoManual({
+        utilizadorId: utilizadorValidado,
+        data: dataNormalizada,
+        tempo: Number(tempo_limpeza_minutos) || propriedade.tempo_limpeza_minutos || 45,
+        propriedade,
+      });
+      dataFinal = hm.data;
+      avisoHorario = hm.aviso;
+    }
+
     // FIX (bloqueio de duplicados) — Rejeita a criação se já existir uma
     // tarefa ativa (não cancelada) para a MESMA propriedade, no MESMO dia E
     // MESMA hora (data exata). Múltiplas tarefas no mesmo dia são permitidas
@@ -465,14 +488,14 @@ exports.criarTarefa = async (req, res) => {
     const tarefaDuplicada = await Tarefa.findOne({
       empresa_id: empresaId,
       propriedade_id,
-      data: dataNormalizada,
+      data: dataFinal,
       estado: { $nin: ['cancelada'] },
     }).lean();
     if (tarefaDuplicada) {
       return res.status(409).json({
         erro: 'Já existe uma tarefa para esta propriedade neste dia e hora.',
         tarefa_id: tarefaDuplicada._id,
-        data: dataNormalizada,
+        data: dataFinal,
       });
     }
 
@@ -480,7 +503,7 @@ exports.criarTarefa = async (req, res) => {
       empresa_id: empresaId,
       propriedade_id,
       utilizador_id: utilizadorValidado,
-      data: dataNormalizada,
+      data: dataFinal,
       tempo_limpeza_minutos: Number(tempo_limpeza_minutos) || propriedade.tempo_limpeza_minutos || 45,
       tipo: tipoFinal,
       estado: utilizadorValidado ? 'atribuida' : 'por_atribuir',
@@ -530,6 +553,7 @@ exports.criarTarefa = async (req, res) => {
     const resposta = { tarefa: nova };
     if (warning) resposta.warning = warning;
     if (conflitoWarning) resposta.warning = conflitoWarning;
+    if (avisoHorario) resposta.warning = [resposta.warning, avisoHorario].filter(Boolean).join(' | ');
 
     // Prompt 137 — Debug log para confirmar que a tarefa guardada tem nome_hospede.
     console.log('📋 criarTarefa — tarefa criada detalhes_reserva:', JSON.stringify(nova.detalhes_reserva));
@@ -569,6 +593,7 @@ exports.atribuirTarefa = async (req, res) => {
 
     const { utilizador_id } = req.body || {};
     let equipaAntes = [];
+    let avisoHorario = null;
 
     // Tarefas concluídas/canceladas são histórico: não se atribuem (antes eram "ressuscitadas").
     if (tarefa.estado === 'concluida' || tarefa.estado === 'cancelada') {
@@ -655,8 +680,27 @@ exports.atribuirTarefa = async (req, res) => {
       tarefa.estado = 'atribuida';
       tarefa.motivo_nao_atribuicao = null;
       try {
-        const pr = await Propriedade.findById(tarefa.propriedade_id).select('staff_necessario').lean();
+        const pr = await Propriedade.findById(tarefa.propriedade_id).select('staff_necessario coordenadas').lean();
         tarefa.pessoas_em_falta = Math.max(0, (Number(pr?.staff_necessario) || 1) - eq.equipa_atribuida.length);
+        // Hora: uma tarefa atribuída nunca fica à meia-noite. Sem hora real calcula-se pelo
+        // mesmo cálculo de todos os caminhos; com hora real respeita-se (o gestor manda) e
+        // avisa-se, sem bloquear, se ficar fora do horário.
+        const tempoT = tarefa.tempo_limpeza_minutos || 45;
+        if (!Horario.temHoraReal(tarefa.data)) {
+          const r = await calcularInicioTarefaUtilizador(
+            idsEquipa(tarefa), tarefa.data, pr && pr.coordenadas, tempoT, tarefa._id, tarefa.propriedade_id
+          );
+          if (r.cabe) {
+            tarefa.data = r.data;
+            tarefa.tempo_viagem_minutos = Number(r.tempoViagem) || 0;
+          } else {
+            tarefa.data = Horario.utcDeMinutosLocais(Horario.diaUTC(tarefa.data), Horario.HORARIO.INICIO_DIA);
+            avisoHorario = `Fica fora do horário: ${r.motivo}. Ficou às 09:00; ajusta a hora se for preciso.`;
+          }
+        } else {
+          const fora = Horario.avisoForaDoHorario(tarefa.data, tempoT);
+          if (fora) avisoHorario = `Fica fora do horário (${fora}).`;
+        }
       } catch (e) { /* mantém */ }
     }
 
@@ -698,6 +742,7 @@ exports.atribuirTarefa = async (req, res) => {
 
     const resposta = { tarefa };
     if (warning) resposta.warning = warning;
+    if (avisoHorario) resposta.warning = [resposta.warning, avisoHorario].filter(Boolean).join(' | ');
     return res.status(200).json(resposta);
   } catch (err) {
     console.error('❌ atribuirTarefa:', err.message);
@@ -788,9 +833,9 @@ exports.atualizarEstadoTarefa = async (req, res) => {
  *   1. Carrega a tarefa (valida pertença à empresa).
  *   2. Valida o novo utilizador (staff/gestor ativo da empresa).
  *   3. Verifica folga fixa semanal do novo utilizador nesse dia.
- *   4. Calcula a carga atual do novo utilizador no dia (excluindo esta
- *      tarefa) + tempo_limpeza desta. Se > CAPACIDADE_MAXIMA_MINUTOS (480),
- *      rejeita com 409 Conflict.
+ *   4. (Removido) A atribuição à mão já não é bloqueada pela capacidade:
+ *      se a limpeza não couber no horário (09:00-18:00, almoço, viagens)
+ *      a resposta traz um `warning` e a tarefa fica na hora atual.
  *   5. Carrega a propriedade para obter coordenadas.
  *   6. Temporariamente desatribui a tarefa (utilizador_id = null) para que
  *      o scheduler não a considere como "última tarefa" do utilizador.
@@ -867,24 +912,6 @@ exports.reatribuirTarefa = async (req, res) => {
       });
     }
 
-    // 4. Verifica capacidade do novo utilizador no dia.
-    // Prompt 138 (136 V2) — Number() em tudo para evitar concatenação de strings.
-    const cargaAtual = Number(await calcularCargaDiaUtilizador(
-      utilizador_id,
-      tarefa.data,
-      tarefa._id
-    )) || 0;
-    const novaCarga = cargaAtual + Number(tarefa.tempo_limpeza_minutos || 45);
-    if (!Number.isFinite(novaCarga) || novaCarga > CAPACIDADE_MAXIMA_MINUTOS) {
-      return res.status(409).json({
-        erro: `Capacidade excedida para ${novoUser.nome} neste dia ` +
-          `(${novaCarga} min > ${CAPACIDADE_MAXIMA_MINUTOS} min).`,
-        codigo: 'CAPACIDADE_EXCEDIDA',
-        carga_total: novaCarga,
-        limite: CAPACIDADE_MAXIMA_MINUTOS,
-      });
-    }
-
     // 5. Carrega a propriedade para obter coordenadas.
     const propriedade = await Propriedade.findById(tarefa.propriedade_id)
       .select('coordenadas nome staff_necessario')
@@ -898,13 +925,25 @@ exports.reatribuirTarefa = async (req, res) => {
     //    anterior fica intacta e a tarefa nunca fica com o responsável a null.
     const equipaAntes = idsEquipa(tarefa);
     const antigoResp = tarefa.utilizador_id ? String(tarefa.utilizador_id) : null;
-    const resultadoScheduler = await calcularInicioTarefaUtilizador(
+    let resultadoScheduler = await calcularInicioTarefaUtilizador(
       utilizador_id,
       tarefa.data,
       propriedade.coordenadas,
       tarefa.tempo_limpeza_minutos || 45,
-      tarefa._id
+      tarefa._id,
+      tarefa.propriedade_id
     );
+    // A atribuição à mão nunca é bloqueada pelo horário: se não couber, mantém a hora
+    // da tarefa (ou as 09:00 se não tinha hora real) e AVISA o gestor.
+    let avisoHorario = null;
+    if (!resultadoScheduler.cabe) {
+      const diaT = Horario.diaUTC(tarefa.data);
+      const dataManter = Horario.temHoraReal(tarefa.data)
+        ? new Date(tarefa.data)
+        : Horario.utcDeMinutosLocais(diaT, Horario.HORARIO.INICIO_DIA);
+      avisoHorario = `${novoUser.nome} fica fora do horário neste dia: ${resultadoScheduler.motivo}.`;
+      resultadoScheduler = { ...resultadoScheduler, data: dataManter, origem: 'manual_fora_do_horario', tempoViagem: 0 };
+    }
 
     // 8. Guarda a tarefa com o novo utilizador + nova data.
     // Prompt 138 (136 V2) — guarda o tempo de viagem calculado pelo scheduler.
@@ -964,6 +1003,7 @@ exports.reatribuirTarefa = async (req, res) => {
       tempo_viagem: resultadoScheduler.tempoViagem,
     };
     if (warning) resposta.warning = warning;
+    if (avisoHorario) resposta.warning = [resposta.warning, avisoHorario].filter(Boolean).join(' | ');
     return res.status(200).json(resposta);
   } catch (err) {
     console.error('❌ reatribuirTarefa:', err.message);
@@ -1360,17 +1400,8 @@ exports.criarTarefaEspontanea = async (req, res) => {
     if (/^\d{4}-\d{2}-\d{2}$/.test(dataStr)) {
       const horaStr = hora && /^\d{1,2}:\d{2}$/.test(String(hora).trim())
         ? String(hora).trim().padStart(5, '0')
-        : '00:00';
-      const dataLocal = new Date(`${dataStr}T${horaStr}`);
-      const offsetStr = new Intl.DateTimeFormat('en-US', {
-        timeZone: 'Europe/Lisbon',
-        timeZoneName: 'shortOffset',
-      }).formatToParts(dataLocal).find((p) => p.type === 'timeZoneName')?.value || 'GMT+0';
-      const offsetMatch = offsetStr.match(/GMT([+-])(\d+)/);
-      const offsetMin = offsetMatch
-        ? (offsetMatch[1] === '+' ? 1 : -1) * parseInt(offsetMatch[2], 10) * 60
-        : 0;
-      dataNormalizada = new Date(dataLocal.getTime() - offsetMin * 60 * 1000);
+        : null;
+      dataNormalizada = dataDeDiaEHora(dataStr, horaStr);
     } else {
       dataNormalizada = new Date(dataStr);
     }
@@ -1420,13 +1451,26 @@ exports.criarTarefaEspontanea = async (req, res) => {
       }
     }
 
+    let dataFinalE = dataNormalizada;
+    let avisoHorarioE = null;
+    if (utilizadorValidado) {
+      const hm = await horaDeAtribuicaoManual({
+        utilizadorId: utilizadorValidado,
+        data: dataNormalizada,
+        tempo: Number(tempo_limpeza_minutos) || propriedade.tempo_limpeza_minutos || 45,
+        propriedade,
+      });
+      dataFinalE = hm.data;
+      avisoHorarioE = hm.aviso;
+    }
+
     const nova = await Tarefa.create({
       empresa_id: empresaId,
       propriedade_id,
       smoobu_reserva_id: null, // tarefa manual — sem reserva Smoobu
       origem: 'manual', // HF17 — origem manual
       utilizador_id: utilizadorValidado,
-      data: dataNormalizada,
+      data: dataFinalE,
       tempo_limpeza_minutos: Number(tempo_limpeza_minutos) || propriedade.tempo_limpeza_minutos || 45,
       tipo: tipoFinal,
       estado: utilizadorValidado ? 'atribuida' : 'por_atribuir',
@@ -1474,7 +1518,7 @@ exports.criarTarefaEspontanea = async (req, res) => {
         (utilizadorValidado ? `, staff=${utilizadorValidado}` : ', por_atribuir') + ').'
     );
 
-    return res.status(201).json({ tarefa: nova });
+    return res.status(201).json({ tarefa: nova, ...(avisoHorarioE ? { warning: avisoHorarioE } : {}) });
   } catch (err) {
     console.error('❌ criarTarefaEspontanea:', err.message);
     if (err.name === 'ValidationError') {

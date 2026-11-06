@@ -33,7 +33,7 @@ import {
 } from "lucide-react";
 import { textoEquipa } from "@/lib/equipa";
 
-import { cn, parsearDataSegura, googleMapsUrl } from "@/lib/utils";
+import { cn, parsearDataSegura, googleMapsUrl, plural } from "@/lib/utils";
 import {
   MSG_SEM_LIGACAO,
   eErroDeRede,
@@ -455,39 +455,40 @@ export function DetalheTarefaClient({
               {tarefa.propriedade_nome}
             </h1>
             <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-              {tipoLabel[tarefa.tipo]}
-              {tarefa.tipo === "limpeza" && <TipoLimpezaBadge tipo={tarefa.tipo_limpeza} sempre />}
+              {tarefa.tipo === "limpeza" && tarefa.tipo_limpeza && tarefa.tipo_limpeza !== "normal"
+                ? <TipoLimpezaBadge tipo={tarefa.tipo_limpeza} />
+                : tipoLabel[tarefa.tipo]}
             </div>
           </div>
         </div>
 
         {/* Metadados rápidos */}
-        <div className="mt-3 flex items-center gap-4 text-xs text-muted-foreground">
-          <span className="flex items-center gap-1">
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+          <span className="flex items-center gap-1 whitespace-nowrap">
             <Clock className="h-3.5 w-3.5" />
             {tarefa.hora_limite}
           </span>
-          <span className="flex items-center gap-1">
+          <span className="flex items-center gap-1 whitespace-nowrap">
             <Timer className="h-3.5 w-3.5" />
             {formatarMinutos(tarefa.tempo_estimado_minutos)}
           </span>
           {/* Prompt 138 (136 V2) — Tempo de viagem entre a tarefa anterior e esta. */}
           {tarefa.tempo_viagem_minutos != null && tarefa.tempo_viagem_minutos > 0 && (
-            <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
+            <span className="flex items-center gap-1 whitespace-nowrap text-amber-600 dark:text-amber-400">
               <MapPin className="h-3.5 w-3.5" />
               +{formatarMinutos(tarefa.tempo_viagem_minutos)} viagem
             </span>
           )}
           {textoEquipa(tarefa.equipa_nomes) && (
-            <span className="flex items-center gap-1 font-medium text-foreground">
+            <span className="flex basis-full items-center gap-1 font-medium text-foreground sm:basis-auto">
               <Users className="h-3.5 w-3.5" />
               Equipa: {textoEquipa(tarefa.equipa_nomes)}
             </span>
           )}
           {tarefa.endereco && (
-            <span className="flex min-w-0 items-center gap-1">
+            <span className="flex min-w-0 basis-full items-center gap-1">
               <MapPin className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate flex-1">{tarefa.endereco}</span>
+              <span className="min-w-0 flex-1 break-words">{tarefa.endereco}</span>
               {/* FIX (google maps integration) — Botão "Abrir no Google Maps"
                   para navegação direta à propriedade. */}
               {(() => {
@@ -565,7 +566,7 @@ export function DetalheTarefaClient({
             <Users className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
             <span className="text-amber-900 dark:text-amber-100">
               <strong>Lotação máxima:</strong>{" "}
-              {tarefa.capacidade_hospedes} hóspede(s)
+              {plural(tarefa.capacidade_hospedes, "hóspede")}
             </span>
           </div>
         )}
@@ -812,7 +813,7 @@ export function DetalheTarefaClient({
             ) : todasMarcadas ? (
               <>
                 <CheckCircle2 className="h-5 w-5" />
-                Concluir Limpeza
+                Concluir limpeza
               </>
             ) : (
               `Concluir Limpeza (${itensConcluidos}/${totalItens})`
@@ -835,7 +836,7 @@ export function DetalheTarefaClient({
           <div>
             <DialogTitle className="flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 text-amber-500" />
-              Reportar Atraso
+              Reportar atraso
             </DialogTitle>
             <DialogDescription>
               Quanto tempo extra precisas para concluir esta tarefa?
@@ -918,7 +919,7 @@ export function DetalheTarefaClient({
           <div>
             <DialogTitle className="flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 text-destructive" />
-              Reportar Avaria
+              Reportar avaria
             </DialogTitle>
             <DialogDescription>
               Descreve o problema encontrado na propriedade. Podes anexar fotos
@@ -1058,7 +1059,7 @@ export function DetalheTarefaClient({
           <div>
             <DialogTitle className="flex items-center gap-2">
               <CheckCircle2 className="h-5 w-5 text-emerald-600" />
-              Confirmar Conclusão
+              Confirmar conclusão
             </DialogTitle>
             <DialogDescription>
               Tira pelo menos 1 foto da propriedade limpa para confirmar a
@@ -1177,7 +1178,7 @@ export function DetalheTarefaClient({
             ) : (
               <>
                 <CheckCircle2 className="mr-2 h-4 w-4" />
-                Confirmar Conclusão
+                Confirmar conclusão
               </>
             )}
           </Button>

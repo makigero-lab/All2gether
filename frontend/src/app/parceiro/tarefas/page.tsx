@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/card";
 import { adminGet } from "@/lib/api";
 
+import { plural } from "@/lib/utils";
 interface TarefaParceiroDTO {
   _id: string;
   data: string;
@@ -113,7 +114,7 @@ export default function ParceiroTarefasPage() {
                 {t.hospedes != null && (
                   <div className="flex items-center gap-2 text-muted-foreground">
                     <Users className="h-3.5 w-3.5" />
-                    <span>{t.hospedes} hóspede(s)</span>
+                    <span>{plural(t.hospedes, "hóspede")}</span>
                   </div>
                 )}
                 {t.observacoes && (

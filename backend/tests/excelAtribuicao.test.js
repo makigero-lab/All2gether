@@ -157,7 +157,7 @@ describe('Importação Excel — atribuição automática', () => {
     for (const t of ts) {
       expect(t.estado).toBe('por_atribuir');
       expect(t.motivo_nao_atribuicao).toMatch(/ausente, de folga/);
-      expect(t.motivo_nao_atribuicao).not.toMatch(/Lotação/);
+      expect(t.motivo_nao_atribuicao).not.toMatch(/horário/);
     }
     const avisos = await Notificacao.find({ utilizador_id: gestor._id }).lean();
     expect(avisos).toHaveLength(1);

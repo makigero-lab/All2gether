@@ -123,7 +123,7 @@ export function UserMenu() {
             role="menuitem"
           >
             <LogOut className="h-4 w-4" />
-            Terminar Sessão
+            Terminar sessão
           </button>
         </div>
       )}

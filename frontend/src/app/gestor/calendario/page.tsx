@@ -23,7 +23,7 @@ import {
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 // Prompt Extra — parsearDataSegura para compatibilidade Safari/iOS.
-import { parsearDataSegura, formatarDataSegura, extrairHoraISO, calcularHoraFimISO } from "@/lib/utils";
+import { parsearDataSegura, formatarDataSegura, extrairHoraISO, calcularHoraFimISO, plural } from "@/lib/utils";
 
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
@@ -900,7 +900,7 @@ export default function CalendarioOperacionalPage() {
       const msg =
         res.processadas === 0
           ? res.mensagem ?? "Não há tarefas por atribuir a partir de hoje."
-          : `Foram reatribuídas ${res.reatribuidas} tarefa(s). ` +
+          : `Foram reatribuídas ${plural(res.reatribuidas, "tarefa")}. ` +
             (res.orfas > 0
               ? `${res.orfas} continuam por atribuir (sem staff disponível).`
               : "Nenhuma ficou por atribuir. ✅");
@@ -1122,7 +1122,7 @@ export default function CalendarioOperacionalPage() {
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
       {/* Cabeçalho */}
       <div className="hidden flex-col gap-1 lg:flex">
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-2xl font-bold tracking-tight">Calendário Operacional</h1>
           <Button
             variant="outline"
@@ -1145,7 +1145,7 @@ export default function CalendarioOperacionalPage() {
             className="gap-2"
           >
             <Plus className="h-4 w-4" />
-            Nova Limpeza
+            Nova limpeza
           </Button>
           {/* v1.64.0 (Prompt 87) — Auto-Atribuir Pendentes */}
           <Button
@@ -1176,7 +1176,7 @@ export default function CalendarioOperacionalPage() {
               aria-pressed={vista === "calendario"}
             >
               <CalendarRange className="h-3.5 w-3.5" />
-              Vista Calendário
+              Vista calendário
             </button>
             <button
               type="button"
@@ -1190,7 +1190,7 @@ export default function CalendarioOperacionalPage() {
               aria-pressed={vista === "tabela"}
             >
               <Table className="h-3.5 w-3.5" />
-              Vista Tabela
+              Vista tabela
             </button>
             <button
               type="button"
@@ -1204,7 +1204,7 @@ export default function CalendarioOperacionalPage() {
               aria-pressed={vista === "equipa"}
             >
               <Users className="h-3.5 w-3.5" />
-              Vista Equipa
+              Vista equipa
             </button>
           </div>
 
@@ -1446,7 +1446,7 @@ export default function CalendarioOperacionalPage() {
                       </td>
                       <td className="px-4 py-3">
                         {textoEquipaGestor(t.utilizador_id, t.equipa_atribuida) ?? (
-                          <span className="text-amber-600 dark:text-amber-400">Por Atribuir</span>
+                          <span className="text-amber-600 dark:text-amber-400">Por atribuir</span>
                         )}
                         {textoFalta(t.pessoas_em_falta) && (
                           <span className="block text-xs font-medium text-amber-700 dark:text-amber-400">{textoFalta(t.pessoas_em_falta)}</span>
@@ -1466,7 +1466,7 @@ export default function CalendarioOperacionalPage() {
           )}
           <div className="flex items-center justify-between border-t px-4 py-2.5 text-xs text-muted-foreground">
             <span>
-              {tarefasTabela.length} tarefa(s) no período selecionado
+              {plural(tarefasTabela.length, "tarefa")} no período selecionado
               {periodo ? ` (${formatarDataDMY(periodo.inicio)} → ${formatarDataDMY(periodo.fim)})` : ""}.
             </span>
             <span>Clica numa linha para ver o detalhe.</span>
@@ -1622,7 +1622,7 @@ export default function CalendarioOperacionalPage() {
               {/* Aviso visual de staff indisponível (mostrados como disabled) */}
               {indisponiveis.length > 0 && (
                 <p className="text-xs text-amber-600 dark:text-amber-400">
-                  ⚠️ {indisponiveis.length} membro(s) da equipa está(ão) de folga/férias neste dia e apareceram como [Indisponível] na lista (não selecionáveis).
+                  ⚠️ {plural(indisponiveis.length, "membro")} da equipa está(ão) de folga/férias neste dia e apareceram como [Indisponível] na lista (não selecionáveis).
                 </p>
               )}
             </div>
@@ -1686,7 +1686,7 @@ export default function CalendarioOperacionalPage() {
                 ) : (
                   <>
                     <Trash2 className="mr-2 h-4 w-4" />
-                    Cancelar Limpeza
+                    Cancelar limpeza
                   </>
                 )}
               </Button>
@@ -1780,7 +1780,7 @@ export default function CalendarioOperacionalPage() {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Plus className="h-5 w-5 text-gold-text" />
-            Nova Limpeza
+            Nova limpeza
           </DialogTitle>
           <DialogDescription>
             Cria uma tarefa manual no calendário. A data é tratada como local
@@ -1939,7 +1939,7 @@ export default function CalendarioOperacionalPage() {
             ) : (
               <>
                 <Plus className="mr-2 h-4 w-4" />
-                Criar Limpeza
+                Criar limpeza
               </>
             )}
           </Button>
@@ -1995,7 +1995,7 @@ export default function CalendarioOperacionalPage() {
             className="bg-amber-600 hover:bg-amber-700"
             onClick={() => setConflitoModal(null)}
           >
-            Manter Limpeza
+            Manter limpeza
           </Button>
         </DialogFooter>
       </Dialog>
@@ -2114,7 +2114,7 @@ function EquipaMapa({ tarefas, equipa, periodo, loading }: EquipaMapaProps) {
     if (tarefasDia.length > 0) {
       return {
         tipo: "tarefas",
-        label: `${tarefasDia.length} tarefa(s)`,
+        label: `${plural(tarefasDia.length, "tarefa")}`,
         count: tarefasDia.length,
       };
     }
@@ -2207,7 +2207,7 @@ function EquipaMapa({ tarefas, equipa, periodo, loading }: EquipaMapaProps) {
 
       {/* Resumo */}
       <p className="text-xs text-muted-foreground">
-        {equipa.length} membro(s) da equipa · {dias.length} dia(s) no período.
+        {plural(equipa.length, "membro")} da equipa · {plural(dias.length, "dia")} no período.
         Clica numa célula para ver detalhes (em breve).
       </p>
     </div>

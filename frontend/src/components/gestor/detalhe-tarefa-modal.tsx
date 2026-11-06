@@ -18,7 +18,7 @@ import {
 
 // Prompt Extra — parsearDataSegura para compatibilidade Safari/iOS.
 import { useEffect, useState } from "react";
-import { parsearDataSegura } from "@/lib/utils";
+import { parsearDataSegura, plural } from "@/lib/utils";
 import { TipoLimpezaBadge } from "@/components/tipo-limpeza-badge";
 import { adminGet, type ContactoHospedeDTO } from "@/lib/api";
 import { lerUtilizador } from "@/lib/auth";
@@ -287,7 +287,7 @@ export function DetalheTarefaModal({
                   <Users className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
                   <span className="text-amber-900 dark:text-amber-100">
                     <strong>Lotação máxima:</strong>{" "}
-                    {tarefa.propriedade_id.capacidade_hospedes} hóspede(s)
+                    {plural(tarefa.propriedade_id.capacidade_hospedes, "hóspede")}
                   </span>
                 </div>
               )}

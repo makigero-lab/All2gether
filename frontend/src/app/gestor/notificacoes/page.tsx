@@ -177,7 +177,7 @@ export default function GestorNotificacoesPage() {
           </CardTitle>
           <CardDescription>
             {notificacoes.length} notificação(ões) no total
-            {naoLidas > 0 && ` · ${naoLidas} não lida(s)`}.
+            {naoLidas > 0 && ` · ${naoLidas} ${naoLidas === 1 ? "não lida" : "não lidas"}`}.
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">

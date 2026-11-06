@@ -657,7 +657,7 @@ exports.exportarExcelParceiro = async (req, res) => {
     if (propIds.length === 0) {
       return enviarXlsx(
         res,
-        [{ 'Propriedade': '', 'Check-in': '', 'Check-out': '', 'Hóspedes': '', 'Estado': '' }],
+        [{ 'Propriedade': '', 'Tipo de limpeza': '', 'Check-in': '', 'Check-out': '', 'Hóspedes': '', 'Estado': '' }],
         'minhas_reservas.xlsx'
       );
     }
@@ -673,6 +673,7 @@ exports.exportarExcelParceiro = async (req, res) => {
 
     const linhas = tarefas.map((t) => ({
       'Propriedade': t.propriedade_id?.nome ?? '',
+      'Tipo de limpeza': ROTULOS_TIPO[tipoDe(t)],
       'Check-in': t.detalhes_reserva?.checkin ?? '',
       'Check-out': t.detalhes_reserva?.checkout ?? '',
       'Hóspedes': t.hospedes ?? t.detalhes_reserva?.pax ?? '',

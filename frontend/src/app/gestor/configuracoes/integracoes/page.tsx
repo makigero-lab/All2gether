@@ -49,6 +49,7 @@ import {
 import { adminGet, adminPut, adminPost, adminDelete } from "@/lib/api";
 import { lerUtilizador, type Role } from "@/lib/auth";
 
+import { plural } from "@/lib/utils";
 type Toast = { tipo: "sucesso" | "erro"; msg: string } | null;
 
 interface IntegracoesConfig {
@@ -142,7 +143,7 @@ export default function IntegracoesPage() {
       const res = await adminPost<{
         totalRecebidas: number; criadas: number; existentes: number; erros: number;
       }>("/api/gestor/smoobu/sincronizar", {});
-      let msg = `${res.criadas} tarefa(s) criada(s)`;
+      let msg = `${plural(plural(res.criadas, "tarefa"), "criada")}`;
       if (res.existentes > 0) msg += `, ${res.existentes} já existiam`;
       if (res.erros > 0) msg += `, ${res.erros} com erro`;
       setResultadoEmergencia(msg + ".");
@@ -167,7 +168,7 @@ export default function IntegracoesPage() {
       }>("/api/gestor/smoobu/reconciliar-cancelamentos", {});
       setPendentes({ candidatas: res.candidatas, revisao_manual: res.revisao_manual });
       const n = res.candidatas.length + res.revisao_manual.length;
-      showToast(n === 0 ? "sucesso" : "erro", n === 0 ? "Nada por cancelar." : `${n} limpeza(s) de reservas canceladas.`);
+      showToast(n === 0 ? "sucesso" : "erro", n === 0 ? "Nada por cancelar." : `${plural(n, "limpeza")} de reservas canceladas.`);
     } catch (e) {
       showToast("erro", e instanceof Error ? e.message : "Erro ao verificar.");
     } finally {
@@ -184,8 +185,8 @@ export default function IntegracoesPage() {
         { aplicar: true }
       );
       setPendentes(null);
-      setResultadoEmergencia(`${res.canceladas} limpeza(s) cancelada(s).`);
-      showToast("sucesso", `${res.canceladas} limpeza(s) cancelada(s).`);
+      setResultadoEmergencia(`${plural(plural(res.canceladas, "limpeza"), "cancelada")}.`);
+      showToast("sucesso", `${plural(plural(res.canceladas, "limpeza"), "cancelada")}.`);
     } catch (e) {
       showToast("erro", e instanceof Error ? e.message : "Erro ao cancelar.");
     } finally {
@@ -201,7 +202,7 @@ export default function IntegracoesPage() {
       const res = await adminPost<{
         criadas: number; atualizadas: number; existentes: number; erros: number; message?: string;
       }>("/api/gestor/smoobu/propriedades", {});
-      const msg = res.message || `${res.criadas} importada(s), ${res.atualizadas} atualizada(s).`;
+      const msg = res.message || `${plural(res.criadas, "importada")}, ${plural(res.atualizadas, "atualizada")}.`;
       setResultadoEmergencia(msg);
       showToast("sucesso", msg);
     } catch (e) {
@@ -221,7 +222,7 @@ export default function IntegracoesPage() {
       const res = await adminDelete<{ mensagem: string; apagadas: number }>(
         "/api/gestor/tarefas/futuras"
       );
-      const msg = res.mensagem || `${res.apagadas} tarefa(s) apagada(s).`;
+      const msg = res.mensagem || `${plural(plural(res.apagadas, "tarefa"), "apagada")}.`;
       setResultadoEmergencia(msg);
       showToast("sucesso", msg);
     } catch (e) {
@@ -358,7 +359,7 @@ export default function IntegracoesPage() {
       showToast(
         "sucesso",
         data.message ||
-          `${data.criadas ?? 0} importada(s), ${data.atualizadas ?? 0} atualizada(s).`
+          `${plural(data.criadas ?? 0, "importada")}, ${plural(data.atualizadas ?? 0, "atualizada")}.`
       );
       // Atualiza o timestamp de última sincronização.
       await carregar();
@@ -583,7 +584,7 @@ export default function IntegracoesPage() {
                 ) : (
                   <RefreshCw className="mr-2 h-4 w-4" />
                 )}
-                Importar Propriedades
+                Importar propriedades
               </Button>
             </div>
           </CardContent>
@@ -651,7 +652,7 @@ export default function IntegracoesPage() {
             ) : (
               <Save className="mr-2 h-4 w-4" />
             )}
-            Guardar Configurações
+            Guardar configurações
           </Button>
         </div>
       </form>
@@ -750,7 +751,7 @@ export default function IntegracoesPage() {
               ) : (
                 <Trash2 className="h-4 w-4" />
               )}
-              Eliminar Limpezas Futuras
+              Eliminar limpezas futuras
             </Button>
           </div>
 
@@ -763,7 +764,7 @@ export default function IntegracoesPage() {
                   {pendentes.candidatas.length > 0 && (
                     <>
                       <p className="font-medium">
-                        {pendentes.candidatas.length} limpeza(s) de reservas já canceladas ou bloqueadas no Smoobu:
+                        {plural(pendentes.candidatas.length, "limpeza")} de reservas já canceladas ou bloqueadas no Smoobu:
                       </p>
                       <ul className="max-h-56 list-disc space-y-0.5 overflow-y-auto pl-5">
                         {pendentes.candidatas.slice(0, 50).map((c) => (
@@ -778,13 +779,13 @@ export default function IntegracoesPage() {
                         onClick={handleAplicarCancelamentos}
                         disabled={verificando}
                       >
-                        Cancelar estas {pendentes.candidatas.length} limpeza(s)
+                        Cancelar estas {plural(pendentes.candidatas.length, "limpeza")}
                       </Button>
                     </>
                   )}
                   {pendentes.revisao_manual.length > 0 && (
                     <p className="text-muted-foreground">
-                      {pendentes.revisao_manual.length} limpeza(s) já em curso de reservas canceladas: revê-as manualmente (não são canceladas automaticamente).
+                      {plural(pendentes.revisao_manual.length, "limpeza")} já em curso de reservas canceladas: revê-as manualmente (não são canceladas automaticamente).
                     </p>
                   )}
                 </>
@@ -822,7 +823,7 @@ export default function IntegracoesPage() {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Trash2 className="h-5 w-5 text-destructive" />
-            Eliminar Limpezas Futuras
+            Eliminar limpezas futuras
           </DialogTitle>
           <DialogDescription>
             Isto vai eliminar todas as tarefas não concluídas de hoje para a frente.

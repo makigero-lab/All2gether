@@ -201,6 +201,29 @@ Tarefa (consulta/agendamento).
 
 ---
 
+### 3.2.1. Horário de trabalho e cálculo da hora de início (`utils/horario.js` + `utils/scheduler.js`)
+
+Um só sítio para as regras e para o cálculo; `planearAtribuicao`, Smoobu (criação e mudança de data), reatribuição do gestor, atribuição manual, preenchimento de vagas, ausências, cão de guarda, importação de Excel e o script `scripts/reagendar-horarios.js` usam o mesmo.
+
+**Regras** (constantes em `HORARIO`, fuso `Europe/Lisbon` com hora de verão):
+- dia de trabalho 09:00-17:30; nenhuma limpeza começa antes das 09:00 nem a partir das 17:30; uma limpeza acaba às 18:00 no máximo;
+- almoço de 1 h depois da primeira limpeza que acabe a partir das 12:00 (acabou às 12:00, almoça logo); o **início** do almoço é, no máximo, às 14:00 (a limpeza antes do almoço pode acabar às 14:00 e o almoço às 15:00); nenhuma limpeza empurra o almoço para depois das 14:00. Só há almoço se alguma limpeza acabar a partir das 12:00;
+- domingo é um dia normal (só contam folgas e ausências);
+- as viagens contam na agenda; a capacidade passa a ser a janela do dia (início, fim, almoço e viagens), já não os 480 min fixos. `CAPACIDADE_MAXIMA_MINUTOS` (480 = janela menos almoço) fica só como pré-filtro derivado; a decisão é `cabeNoDia`;
+- uma limpeza que nunca cabe (ex.: 480 min; o máximo é 300) não encrava o motor: `cabe=false`, sem hora, e a tarefa fica `nao_atribuida` com o motivo «Limpeza de N min demasiado longa para o horário».
+
+**Desenho.** `horario.js` é puro: recebe a agenda (itens `{ini, fim, coord, propId}` em minutos locais) e uma função de viagem síncrona. `primeiroInicio` gera os inícios possíveis (09:00, fim de cada limpeza + viagem, depois do almoço) e devolve o primeiro que `cabeNoDia` (janela + sem sobreposição com viagem + almoço válido). `primeiroInicioEquipa` devolve o primeiro início em que **todos** os membros cabem. O `scheduler.js` carrega a agenda (`carregarAgenda`: ignora canceladas, tarefas à meia-noite exata e horas antes das 09:00, que nunca servem de base à cadeia), prepara as viagens e converte para UTC (`utcDeMinutosLocais`, com verão/inverno e dias de mudança de hora). `calcularInicioTarefaUtilizador(id|[ids], dia, coord, minutos, excluirTarefaId, propId)` devolve `{ data|null, cabe, origem, tempoViagem, motivo }`.
+
+**Quem não cabe.** O load balancer (`loadBalancer.js`) exclui quem não tem hora no dia e ordena por início mais cedo, agrupamento, equidade e rotação; se ninguém cabe, `planearAtribuicao` devolve `nao_atribuida` com «Não cabe no horário de ninguém (09:00-18:00, com almoço e viagens)». Equipa sem hora comum também fica por atribuir. Mudança de data no Smoobu recalcula a hora; se a equipa não couber, a tarefa é libertada e o motor tenta outra pessoa.
+
+**Atribuição à mão (gestor).** Nunca bloqueia: sem hora real (00:00) a hora é calculada (ou 09:00 com aviso); com hora explícita respeita-se e a resposta traz `warning` se ficar fora do horário. A reatribuição já não dá 409 por capacidade (avisa).
+
+**Google Maps.** O cálculo da hora usa `calcularTempoViagemReal` (`utils/distancia.js`): cache de 5 min, Haversine para tarefas a mais de 48 h e para falhas, 30 min sem coordenadas. Cada par de coordenadas calcula-se uma vez por planeamento (o load balancer deixou de fazer uma segunda chamada). Nos testes é sempre simulado. Casas sem coordenadas aparecem na lista de propriedades do gestor com o selo «Sem localização» (viagem estimada em 30 min).
+
+**Sem hora real.** Tarefas à meia-noite exata (UTC) são «sem hora»; o frontend (`temHoraReal`) só trata assim essas e mostra qualquer outra hora, mesmo errada.
+
+**Causa das tarefas à madrugada (confirmada).** Até 4/11 o sync do Smoobu repunha `tarefa.data = 00:00 UTC` em cada atualização e o scheduler antigo encadeava a seguinte a partir dessa meia-noite (00:00, 02:08, 03:42...). Os dois pontos foram corrigidos em `fdbceab` e `805af75`. Os caminhos que ainda deixavam tarefas atribuídas à meia-noite eram a criação manual do gestor com utilizador e só a data (e, no verão, a data era convertida para as 23:00 do dia anterior), e `PATCH /tarefas/:id/atribuir` sobre uma tarefa sem hora; ambos usam agora o cálculo partilhado. O resto (tarefas já gravadas) repara-se com `scripts/reagendar-horarios.js` (docs/OPERACOES.md §5).
+
 ## 3.3. Cron Jobs (node-cron)
 
 O backend tem três cron jobs diários, todos iniciados no arranque (`server.js`, dentro de `if (require.main === module)` — não correm nos testes):
@@ -1018,6 +1041,7 @@ Lista os utilizadores com `role: 'parceiro'` da empresa do gestor.
 
 | Data       | Versão | Alteração                                                            |
 |------------|--------|---------------------------------------------------------------------|
+| 2026-11-06 | horário | Horário de trabalho 09:00-18:00 com almoço e viagens num só módulo (`utils/horario.js`), cálculo partilhado com Google Maps, tarefas nunca à meia-noite, script `reagendar-horarios.js`; validação de hóspedes e de datas (-2/+3 anos, 365 noites) nas reservas do parceiro; coluna «Tipo de limpeza» no Excel do parceiro; testes com `maxWorkers: 4` e arranque do mongod com 60 s. |
 | Inicial    | 1.0.0  | Criação da estrutura base: `package.json`, `server.js`, `.env.example`, `.gitignore`. Ligação ao MongoDB e rota de teste `GET /`. |
 | v1.1.0     | 1.1.0  | Lógica central: modelos `Propriedade`, `Utilizador`, `Ausencia`, `Tarefa`; fluxo estrito de atribuição com filtro de ausências + load balancing; resposta 200 imediata + processamento assíncrono; tratamento de erros robusto. |
 | v1.2.0     | 1.2.0  | Painel de Administração: modelo `Empresa` (nome, nif, plano_ativo); `controllers/adminController.js` (`getPropriedades`, `criarPropriedade`, `setupClienteZero`); `routes/adminRoutes.js` (`GET/POST /api/admin/propriedades`, `GET /api/admin/setup`); montagem em `server.js`. `empresa_id` via header `x-empresa-id` (sem JWT ainda). |

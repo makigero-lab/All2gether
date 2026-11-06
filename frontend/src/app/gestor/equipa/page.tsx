@@ -67,7 +67,7 @@ import {
 } from "@/lib/api";
 import { PaginationBar } from "@/components/admin/pagination-bar";
 import { Switch } from "@/components/ui/switch";
-import { parsearDataSegura, tarefasPorAtribuir, textoRedistribuicao, type RedistribuicaoDTO } from "@/lib/utils";
+import { parsearDataSegura, tarefasPorAtribuir, textoRedistribuicao, type RedistribuicaoDTO, plural } from "@/lib/utils";
 
 /**
  * Página de Equipa — Painel de Administração.
@@ -328,7 +328,7 @@ function EquipaPage() {
         `${prefixo} ` +
           (res.processadas === 0
             ? res.mensagem ?? "Não há tarefas por atribuir a partir de hoje."
-            : `Foram reatribuídas ${res.reatribuidas} tarefa(s). ` +
+            : `Foram reatribuídas ${plural(res.reatribuidas, "tarefa")}. ` +
               (res.orfas > 0
                 ? `${res.orfas} continuam por atribuir (sem staff disponível).`
                 : "Nenhuma ficou por atribuir."))
@@ -346,7 +346,7 @@ function EquipaPage() {
     }
   }
 
-  /** Aviso bem visível: limpeza(s) em curso continuam com a pessoa ausente. */
+  /** Aviso bem visível: limpezas em curso continuam com a pessoa ausente. */
   function avisoEmCurso(texto: string) {
     return (
       <div
@@ -370,7 +370,7 @@ function EquipaPage() {
         {(
           <>
             <p className="text-xs text-muted-foreground">
-              Sobraram {porAtribuir} tarefa(s) por atribuir (ninguém estava
+              Sobraram {plural(porAtribuir, "tarefa")} por atribuir (ninguém estava
               disponível ou a reatribuição falhou). Pode tentar de novo: o
               sistema distribui por colegas disponíveis TODAS as tarefas por
               atribuir a partir de hoje (não só as desta pessoa). Quem está
@@ -483,7 +483,7 @@ function EquipaPage() {
     setFormErro(null);
 
     if (!form.nome.trim() || !form.email.trim() || !form.password) {
-      setFormErro("Nome, Email e Password são obrigatórios.");
+      setFormErro("Nome, email e palavra-passe são obrigatórios.");
       return;
     }
     if (form.password.length < 10) {
@@ -736,7 +736,7 @@ function EquipaPage() {
             </Button>
             <Button onClick={() => setMostrarForm((v) => !v)}>
               <Plus className="h-4 w-4" />
-              Adicionar Funcionário
+              Adicionar funcionário
             </Button>
           </div>
 
@@ -777,7 +777,7 @@ function EquipaPage() {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-base">
                   <Users className="h-5 w-5 text-gold-text" />
-                  Novo Funcionário
+                  Novo funcionário
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -814,7 +814,7 @@ function EquipaPage() {
                     </div>
                     <div className="space-y-1.5">
                       <label htmlFor="password" className="text-sm font-medium">
-                        Password
+                        Palavra-passe
                       </label>
                       <div className="relative">
                         <Input
@@ -832,7 +832,7 @@ function EquipaPage() {
                           type="button"
                           onClick={() => setShowFormPassword((v) => !v)}
                           className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                          aria-label={showFormPassword ? "Ocultar password" : "Mostrar password"}
+                          aria-label={showFormPassword ? "Ocultar palavra-passe" : "Mostrar palavra-passe"}
                         >
                           {showFormPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                         </button>
@@ -1176,7 +1176,7 @@ function EquipaPage() {
                               )}
                               {ausenteTipo === "ferias" && (
                                 <Badge variant="destructive" className="text-xs">
-                                  De Férias
+                                  De férias
                                 </Badge>
                               )}
                               {ausenteTipo === "doenca" && (
@@ -1319,9 +1319,9 @@ function EquipaPage() {
           >
             <DialogHeader>
               <div>
-                <DialogTitle>Editar Utilizador</DialogTitle>
+                <DialogTitle>Editar utilizador</DialogTitle>
                 <DialogDescription>
-                  Atualiza os dados do funcionário. Deixa a password vazia para
+                  Atualiza os dados do funcionário. Deixa a palavra-passe vazia para
                   manter a atual.
                 </DialogDescription>
               </div>
@@ -1426,7 +1426,7 @@ function EquipaPage() {
                 )}
                 <div className="space-y-1.5">
                   <label htmlFor="edit-password" className="text-sm font-medium">
-                    Nova Password{" "}
+                    Nova palavra-passe{" "}
                     <span className="font-normal text-muted-foreground">
                       (opcional)
                     </span>
@@ -1446,13 +1446,13 @@ function EquipaPage() {
                       type="button"
                       onClick={() => setShowEditPassword((v) => !v)}
                       className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                      aria-label={showEditPassword ? "Ocultar password" : "Mostrar password"}
+                      aria-label={showEditPassword ? "Ocultar palavra-passe" : "Mostrar palavra-passe"}
                     >
                       {showEditPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Útil para redefinir a password se o funcionário se esquecer.
+                    Útil para redefinir a palavra-passe se o funcionário se esquecer.
                   </p>
                 </div>
 
@@ -1775,7 +1775,7 @@ function EquipaPage() {
           >
             <DialogHeader>
               <div>
-                <DialogTitle>Eliminar Utilizador</DialogTitle>
+                <DialogTitle>Eliminar utilizador</DialogTitle>
                 <DialogDescription>
                   Esta ação é permanente e não pode ser desfeita.
                 </DialogDescription>
@@ -1823,7 +1823,7 @@ function EquipaPage() {
                 ) : (
                   <>
                     <Trash2 className="h-4 w-4" />
-                    Eliminar Definitivamente
+                    Eliminar definitivamente
                   </>
                 )}
               </Button>
@@ -1839,7 +1839,7 @@ function EquipaPage() {
               <div>
                 <DialogTitle className="flex items-center gap-2">
                   <Siren className="h-5 w-5 text-amber-500" />
-                  Reportar Falta Súbita
+                  Reportar falta súbita
                 </DialogTitle>
                 <DialogDescription>
                   As tarefas de hoje são reatribuídas automaticamente a colegas disponíveis.
@@ -1890,7 +1890,7 @@ function EquipaPage() {
                   ) : (
                     <>
                       <Siren className="h-4 w-4" />
-                      Confirmar Falta
+                      Confirmar falta
                     </>
                   )}
                 </Button>
@@ -2020,7 +2020,7 @@ function EquipaPage() {
                   ) : (
                     <>
                       <CalendarOff className="h-4 w-4" />
-                      Confirmar Ausência
+                      Confirmar ausência
                     </>
                   )}
                 </Button>

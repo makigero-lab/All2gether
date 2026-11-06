@@ -21,7 +21,7 @@ import {
   CardContent,
 } from "@/components/ui/card";
 import { adminGet, adminPatch } from "@/lib/api";
-import { parsearDataSegura } from "@/lib/utils";
+import { dataPorExtenso, parsearDataSegura, plural } from "@/lib/utils";
 
 /**
  * /fornecedor/tarefas — Portal da Lavandaria (FIX: portal lavandaria).
@@ -170,7 +170,7 @@ export default function FornecedorTarefasPage() {
       if (!dataObj) continue;
       const dataKey = dataObj.toISOString().slice(0, 10); // YYYY-MM-DD
       // Formata a data de forma amigável: "Segunda-feira, 15 de Janeiro"
-      const dataLabel = format(dataObj, "EEEE, d 'de' MMMM", { locale: pt });
+      const dataLabel = dataPorExtenso(dataObj);
 
       let grupo = grupos.find((g) => g.dataKey === dataKey);
       if (!grupo) {
@@ -205,7 +205,7 @@ export default function FornecedorTarefasPage() {
             Tarefas dos próximos 7 dias. Marca a roupa entregue em cada propriedade.
           </p>
         </div>
-        <Button variant="outline" size="icon" onClick={carregar} disabled={loading} aria-label="Atualizar">
+        <Button variant="outline" size="icon" className="h-11 w-11 sm:h-9 sm:w-9" onClick={carregar} disabled={loading} aria-label="Atualizar">
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
         </Button>
       </div>
@@ -275,7 +275,7 @@ export default function FornecedorTarefasPage() {
               <h2 className="text-sm font-bold first-letter:uppercase text-gold-text">
                 {grupo.dataLabel}
                 <span className="ml-2 text-xs font-normal text-muted-foreground">
-                  {grupo.tarefas.length} tarefa(s)
+                  {plural(grupo.tarefas.length, "tarefa")}
                 </span>
               </h2>
               {grupo.tarefas.map((t) => (
@@ -317,7 +317,7 @@ function BotaoEntregue({
       variant={t.roupa_entregue ? "default" : "outline"}
       disabled={togglingId === t._id}
       onClick={() => onToggle(t)}
-      aria-label={t.roupa_entregue ? `Roupa entregue em ${nome}: desmarcar` : `Marcar roupa entregue em ${nome}`}
+      aria-label={t.roupa_entregue ? `Entregue (${nome}): desmarcar` : `Marcar entregue (${nome})`}
       aria-pressed={!!t.roupa_entregue}
       className={`h-11 min-w-[44px] gap-1.5 px-4 ${t.roupa_entregue ? "bg-status-conc text-status-foreground hover:bg-status-conc/90" : ""} ${className ?? ""}`}
     >
@@ -328,7 +328,7 @@ function BotaoEntregue({
       ) : (
         <Shirt className="h-4 w-4" />
       )}
-      {t.roupa_entregue ? "Entregue" : "Marcar Entregue"}
+      {t.roupa_entregue ? "Entregue" : "Marcar entregue"}
     </Button>
   );
 }
@@ -359,13 +359,13 @@ function CartaoTarefaLavandaria({
           {hospedesReal != null && hospedesReal > 0 && (
             <span className="inline-flex items-center gap-1">
               <Users className="h-3.5 w-3.5" />
-              {hospedesReal} hóspede(s){(!t.hospedes || t.hospedes === 0) && " (máx)"}
+              {plural(hospedesReal, "hóspede")}{(!t.hospedes || t.hospedes === 0) && " (máx)"}
             </span>
           )}
           {t.sacos_roupa_suja && t.sacos_roupa_suja > 0 ? (
             <span className="inline-flex items-center gap-1">
               <Shirt className="h-3.5 w-3.5" />
-              {t.sacos_roupa_suja} saco(s) de roupa suja
+              {plural(t.sacos_roupa_suja, "saco")} de roupa suja
             </span>
           ) : null}
         </div>
@@ -398,7 +398,7 @@ function GrupoTarefasLavandaria({
             {grupo.dataLabel}
           </span>
           <span className="ml-2 text-xs text-muted-foreground">
-            {grupo.tarefas.length} tarefa(s)
+            {plural(grupo.tarefas.length, "tarefa")}
           </span>
         </td>
       </tr>
@@ -437,7 +437,7 @@ function GrupoTarefasLavandaria({
               {t.sacos_roupa_suja && t.sacos_roupa_suja > 0 ? (
                 <Badge variant="secondary" className="gap-1">
                   <Shirt className="h-3 w-3" />
-                  {t.sacos_roupa_suja} saco(s)
+                  {plural(t.sacos_roupa_suja, "saco")}
                 </Badge>
               ) : (
                 <span className="text-muted-foreground text-xs">—</span>

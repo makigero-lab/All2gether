@@ -47,6 +47,19 @@ MONGODB_URI="<uri de produção>" node scripts/limpar-equipas-fantasma.js --apli
 Fazer um backup antes (secção 1). Consulta só de leitura equivalente (mongosh):
 `db.tarefas.countDocuments({ utilizador_id: null, "equipa_atribuida.0": { $exists: true }, estado: { $in: ["por_atribuir","nao_atribuida","cancelada"] } })`
 
-## 5. Verificação em produção dos índices novos (só leitura)
+## 5. Reagendar limpezas fora do horário (uma vez, depois do deploy)
+Corrige as limpezas futuras atribuídas com hora fora do horário (antes das 09:00, incluindo a meia-noite, ou a acabar depois das 18:00). Só toca em tarefas de hoje em diante no estado `atribuida`; nunca em `em_curso`, `concluida` ou `cancelada`. Recalcula pela ordem atual, respeitando 09:00-18:00, almoço (início entre 12:00 e 14:00) e viagens; o que não couber passa ao motor para outra pessoa; o que ninguém puder fica por atribuir com o motivo real. É idempotente.
+```
+cd backend
+# 1) só mostra números e a lista (tarefa, dia, pessoa, propriedade, antes, depois; sem dados de hóspedes)
+MONGODB_URI="<uri de produção>" node scripts/reagendar-horarios.js
+# 2) aplicar (sem notificações)
+MONGODB_URI="<uri de produção>" node scripts/reagendar-horarios.js --aplicar
+# 3) opcional: avisar só quem mudou (um aviso por pessoa; avisa os gestores se sobrar algo por atribuir)
+MONGODB_URI="<uri de produção>" node scripts/reagendar-horarios.js --aplicar --avisar
+```
+`--empresa <id>` limita a uma empresa. Sem `--aplicar`, as passagens para outra pessoa são uma estimativa (o motor vê a base como está). Fazer um backup antes (secção 1) e correr primeiro sem `--aplicar`.
+
+## 6. Verificação em produção dos índices novos (só leitura)
 Os índices novos são parciais e só abrangem documentos que tenham o campo novo, por isso não falham com dados antigos. Para confirmar depois do arranque:
 `db.reservamanuals.getIndexes()` deve listar `parceiro_id_1_chave_idempotencia_1` (unique, partialFilterExpression `chave_idempotencia: {$type: "string"}`). A coleção `lockempresas` é criada na primeira importação de Excel (lock com expiração de 2 min).

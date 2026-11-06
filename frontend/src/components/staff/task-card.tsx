@@ -123,8 +123,10 @@ export function TaskCard({ tarefa }: { tarefa: TarefaMock }) {
                 </Link>
               </CardTitle>
               <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                {tipoLabel[tarefa.tipo]}
-                {tarefa.tipo === "limpeza" && <TipoLimpezaBadge tipo={tarefa.tipo_limpeza} />}
+                {/* Só a etiqueta do tipo («Limpeza intermédia»), sem «Limpeza» a repetir. */}
+                {tarefa.tipo === "limpeza" && tarefa.tipo_limpeza && tarefa.tipo_limpeza !== "normal"
+                  ? <TipoLimpezaBadge tipo={tarefa.tipo_limpeza} />
+                  : tipoLabel[tarefa.tipo]}
               </div>
             </div>
           </div>

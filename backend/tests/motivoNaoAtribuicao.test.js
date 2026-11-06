@@ -59,17 +59,17 @@ describe('motivo de não atribuição', () => {
     const d = await Tarefa.findById(t._id);
     expect(d.estado).toBe('por_atribuir');
     expect(d.motivo_nao_atribuicao).toMatch(/ausente/i);
-    expect(d.motivo_nao_atribuicao).not.toMatch(/Lotação/);
+    expect(d.motivo_nao_atribuicao).not.toMatch(/horário/);
   });
 
-  test('há quem esteja disponível mas ninguém cabe no limite diário: nao_atribuida com motivo de lotação', async () => {
+  test('há quem esteja disponível mas ninguém cabe no horário: nao_atribuida com motivo real (demasiado longa)', async () => {
     const { token, tarefa } = await cenario();
     const t = await tarefa('2033-03-11', { tempo_limpeza_minutos: 900 });
     const r = await request(app).post('/api/gestor/tarefas/auto-atribuir').set(auth(token)).send({});
     expect(r.status).toBe(200);
     const d = await Tarefa.findById(t._id);
     expect(d.estado).toBe('nao_atribuida');
-    expect(d.motivo_nao_atribuicao).toMatch(/Lotação/);
+    expect(d.motivo_nao_atribuicao).toMatch(/horário/);
   });
 
   test('ao ser atribuída (automático), o motivo antigo é limpo', async () => {

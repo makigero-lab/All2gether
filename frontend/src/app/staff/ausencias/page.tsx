@@ -40,7 +40,12 @@ import { fazerLogout } from "@/lib/auth";
 /* ------------------------------------------------------------------ */
 
 // Prompt 131b — adicionado "cancelada" (soft cancel mantém histórico).
-type EstadoAusencia = "pendente" | "aprovada" | "rejeitada" | "cancelada";
+type EstadoAusencia =
+  | "pendente"
+  | "pendente_emergencia"
+  | "aprovada"
+  | "rejeitada"
+  | "cancelada";
 type TipoAusencia = "ferias" | "doenca" | "outro";
 
 interface AusenciaDTO {
@@ -68,10 +73,17 @@ const ESTADO_CONFIG: Record<
   { label: string; variant: "default" | "secondary" | "destructive" | "outline" }
 > = {
   pendente: { label: "Pendente", variant: "secondary" },
+  pendente_emergencia: { label: "Emergência", variant: "secondary" },
   aprovada: { label: "Aprovada", variant: "default" },
   rejeitada: { label: "Rejeitada", variant: "destructive" },
   cancelada: { label: "Cancelada", variant: "outline" },
 };
+
+/** Estado desconhecido (ex.: novo no backend) nunca rebenta a página. */
+const ESTADO_DESCONHECIDO = { label: "Desconhecido", variant: "outline" as const };
+function configEstado(estado: string) {
+  return (ESTADO_CONFIG as Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }>)[estado] ?? { ...ESTADO_DESCONHECIDO, label: estado || ESTADO_DESCONHECIDO.label };
+}
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -262,7 +274,7 @@ export default function StaffAusenciasPage() {
               </h1>
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
-              Pede férias ou reporta ausência. O admin aprova.
+              Pede férias ou reporta ausência. O gestor aprova.
             </p>
           </div>
           {/* HF15 — Logout sempre visível em mobile */}
@@ -270,7 +282,7 @@ export default function StaffAusenciasPage() {
             <Button
               variant="ghost"
               size="icon"
-              className="text-muted-foreground hover:text-destructive"
+              className="h-11 w-11 sm:h-9 sm:w-9 text-muted-foreground hover:text-destructive"
               onClick={() => fazerLogout()}
               aria-label="Terminar sessão"
               title="Terminar sessão"
@@ -349,7 +361,7 @@ export default function StaffAusenciasPage() {
         ) : (
           <div className="space-y-3">
             {ausencias.map((a) => {
-              const config = ESTADO_CONFIG[a.estado];
+              const config = configEstado(a.estado);
               return (
                 <Card key={a._id}>
                   <CardContent className="p-4">
@@ -378,11 +390,11 @@ export default function StaffAusenciasPage() {
                       </div>
                       {/* Prompt 131b — Botão Cancelar (soft cancel) visível
                           para pendentes E aprovadas (não rejeitadas/canceladas). */}
-                      {(a.estado === "pendente" || a.estado === "aprovada") && (
+                      {(a.estado === "pendente" || a.estado === "pendente_emergencia" || a.estado === "aprovada") && (
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-8 w-8 shrink-0 text-destructive hover:text-destructive"
+                          className="h-11 w-11 sm:h-9 sm:w-9 h-8 w-8 shrink-0 text-destructive hover:text-destructive"
                           onClick={() => setACancelar(a)}
                           aria-label="Cancelar pedido"
                           title="Cancelar pedido"
@@ -404,7 +416,7 @@ export default function StaffAusenciasPage() {
         <DialogHeader>
           <DialogTitle>Novo Pedido de Ausência</DialogTitle>
           <DialogDescription>
-            O teu pedido fica pendente até o admin aprovar.
+            O teu pedido fica pendente até o gestor aprovar.
           </DialogDescription>
           <DialogClose onClick={() => setMostrarForm(false)} />
         </DialogHeader>
@@ -499,7 +511,7 @@ export default function StaffAusenciasPage() {
               ) : (
                 <>
                   <CheckCircle2 className="mr-2 h-4 w-4" />
-                  Rever Pedido
+                  Rever pedido
                 </>
               )}
             </Button>
@@ -575,7 +587,7 @@ export default function StaffAusenciasPage() {
             ) : (
               <>
                 <Send className="mr-2 h-4 w-4" />
-                Confirmar Envio
+                Confirmar envio
               </>
             )}
           </Button>
@@ -609,8 +621,8 @@ export default function StaffAusenciasPage() {
               </div>
               <div className="flex items-center justify-between gap-2">
                 <span className="text-sm text-muted-foreground">Estado atual</span>
-                <Badge variant={ESTADO_CONFIG[aCancelar.estado].variant}>
-                  {ESTADO_CONFIG[aCancelar.estado].label}
+                <Badge variant={configEstado(aCancelar.estado).variant}>
+                  {configEstado(aCancelar.estado).label}
                 </Badge>
               </div>
               <div className="flex items-center justify-between gap-2">
@@ -657,7 +669,7 @@ export default function StaffAusenciasPage() {
             ) : (
               <>
                 <X className="mr-2 h-4 w-4" />
-                Cancelar Pedido
+                Cancelar pedido
               </>
             )}
           </Button>

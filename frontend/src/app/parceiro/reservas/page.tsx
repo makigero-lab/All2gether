@@ -72,6 +72,7 @@ import {
   type Valores,
 } from "@/lib/rascunho-reservas";
 
+import { plural } from "@/lib/utils";
 interface ReservaDTO {
   _id: string;
   propriedade_id: { nome: string; morada?: string } | null;
@@ -182,17 +183,21 @@ function LegendaCores() {
     </span>
   );
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground" aria-label="Legenda das cores">
-      <span className="font-medium">Tipo de limpeza:</span>
-      {item(COR_TIPO.normal.amostra, "Normal")}
-      {item(COR_TIPO.intermedia.amostra, "Intermédia")}
-      {item(COR_TIPO.profunda.amostra, "Profunda")}
-      {item(COR_TIPO.preparacao.amostra, "Preparação")}
-      <span className="font-medium">Estado (tem prioridade):</span>
-      {item("bg-amber-600", "Por gravar")}
-      {item("bg-destructive", "Erro / a eliminar")}
-      {item("bg-emerald-600", "Concluída")}
-      {item("bg-muted-foreground/50", "Cancelada")}
+    <div className="flex flex-col gap-y-1 text-xs text-muted-foreground sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-6" aria-label="Legenda das cores">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <span className="font-medium">Tipo de limpeza:</span>
+        {item(COR_TIPO.normal.amostra, "Normal")}
+        {item(COR_TIPO.intermedia.amostra, "Intermédia")}
+        {item(COR_TIPO.profunda.amostra, "Profunda")}
+        {item(COR_TIPO.preparacao.amostra, "Preparação")}
+      </div>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <span className="font-medium">Estado (tem prioridade):</span>
+        {item("bg-amber-600", "Por gravar")}
+        {item("bg-destructive", "Erro / a eliminar")}
+        {item("bg-emerald-600", "Concluída")}
+        {item("bg-muted-foreground/50", "Cancelada")}
+      </div>
     </div>
   );
 }
@@ -574,7 +579,7 @@ export default function ParceiroReservasPage() {
     if (Object.keys(r.edicoes).length === 0) {
       setConflitos({});
       if (recE.jaEliminadas.length > 0) {
-        setAviso(`${recE.jaEliminadas.length} reserva(s) marcadas para eliminar já tinham sido eliminadas no sistema.`);
+        setAviso(`${plural(recE.jaEliminadas.length, "reserva")} marcadas para eliminar já tinham sido eliminadas no sistema.`);
         setRascunho((prev) => ({ ...prev, eliminar: recE.eliminar }));
       }
       return;
@@ -583,7 +588,7 @@ export default function ParceiroReservasPage() {
     setConflitos(rec.conflitos);
     if (rec.desaparecidas.length > 0 || recE.jaEliminadas.length > 0) {
       setAviso(
-        `${rec.desaparecidas.length + recE.jaEliminadas.length} reserva(s) com alterações por gravar já não existem no sistema: o rascunho dessas linhas foi descartado.`
+        `${plural(rec.desaparecidas.length + recE.jaEliminadas.length, "reserva")} com alterações por gravar já não existem no sistema: o rascunho dessas linhas foi descartado.`
       );
     }
     setRascunho((prev) => ({ ...prev, edicoes: rec.edicoes, eliminar: recE.eliminar }));
@@ -866,15 +871,15 @@ export default function ParceiroReservasPage() {
     setErrosLinha(erros);
     const comErro = Object.keys(erros).length;
     const partes = [];
-    if (gravadas) partes.push(`${gravadas} reserva(s) atualizada(s)`);
-    if (criadas) partes.push(`${criadas} reserva(s) criada(s)`);
-    if (eliminadas) partes.push(`${eliminadas} reserva(s) eliminada(s)`);
+    if (gravadas) partes.push(`${plural(plural(gravadas, "reserva"), "atualizada")}`);
+    if (criadas) partes.push(`${plural(plural(criadas, "reserva"), "criada")}`);
+    if (eliminadas) partes.push(`${plural(plural(eliminadas, "reserva"), "eliminada")}`);
     const resultado = partes.length ? partes.join(", ") : "Nada foi gravado";
     setResumo(
       semRede || semSessao
         ? `${resultado}. O resto continua por gravar.`
         : comErro > 0
-        ? `${resultado}. ${comErro} linha(s) com erro continuam por gravar.`
+        ? `${resultado}. ${plural(comErro, "linha")} com erro continuam por gravar.`
         : criadas > 0 || gravadas > 0
         ? `${resultado}. As limpezas foram criadas/reatribuídas.`
         : `${resultado}.`
@@ -1078,7 +1083,7 @@ export default function ParceiroReservasPage() {
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
             <Table2 className="h-6 w-6 text-gold-text" />
-            Minhas Reservas
+            Minhas reservas
           </h1>
           <p className="text-sm text-muted-foreground">
             Clica num campo para editar. Sair do campo guarda só neste aparelho (rascunho): nada é enviado nem
@@ -1188,9 +1193,9 @@ export default function ParceiroReservasPage() {
                   <Cab chave="check_out" rotulo="Check-out" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[11rem]" />
                   <Cab chave="noites" rotulo="Noites" ordem={ordem} onOrdenar={ordenarPorColuna} direita />
                   <Cab chave="hospedes" rotulo="Hósp." ordem={ordem} onOrdenar={ordenarPorColuna} direita />
-                  <Cab chave="nome_hospede" rotulo="Hóspede" ordem={ordem} onOrdenar={ordenarPorColuna} />
+                  <Cab chave="nome_hospede" rotulo="Hóspede" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[11rem]" />
                   <Cab chave="plataforma" rotulo="Plataforma" ordem={ordem} onOrdenar={ordenarPorColuna} />
-                  <Cab chave="tipo_limpeza" rotulo="Tipo de limpeza" ordem={ordem} onOrdenar={ordenarPorColuna} />
+                  <Cab chave="tipo_limpeza" rotulo="Tipo de limpeza" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[11rem]" />
                   <Cab chave="data_limpeza" rotulo="Data da limpeza" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[11rem]" />
                   <Cab chave="horario_preferido" rotulo="Horário pref. limpeza" ordem={ordem} onOrdenar={ordenarPorColuna} />
                   <Cab chave="observacoes" rotulo="Notas" ordem={ordem} onOrdenar={ordenarPorColuna} />

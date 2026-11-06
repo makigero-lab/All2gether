@@ -1,54 +1,41 @@
 /**
  * Scheduler — All2gether
  *
- * Utilitário partilhado com a lógica de cálculo de horário de tarefas:
- *   - Tempo de viagem (Haversine, 30 km/h urbano)
- *   - Scheduler sequencial: nova tarefa após fim da última + viagem
- *   - Proteção de hora de almoço (13:00-14:00 local PT = 12:00-13:00 UTC)
+ * Carrega a agenda de cada pessoa e delega as regras de horário (09:00-18:00,
+ * almoço, viagens) em `horario.js`. Usado por: loadBalancer, atribuicaoAutomatica,
+ * Smoobu, reatribuição do gestor, ausências e script de reparação.
  *
- * Usado por:
- *   - loadBalancer.js (atribuição automática de tarefas)
- *   - tarefaController.js (reatribuição inteligente — Prompt 75)
- *
- * Extraído do webhookController.js em v1.53.0 para evitar duplicação.
+ * Viagens: `calcularTempoViagemReal` (Google Maps com cache e fallback de
+ * 30 min sem coordenadas). Cada par de coordenadas calcula-se UMA vez por
+ * planeamento (memória local) e a cache de `distancia.js` evita repetir
+ * chamadas pagas entre planeamentos.
  */
 
 const Tarefa = require('../models/Tarefa');
 const { comMembro } = require('./equipaTarefa');
+const { calcularTempoViagemReal } = require('./distancia');
+const H = require('./horario');
 
 /**
- * Capacidade máxima diária por utilizador (8 horas = 480 minutos).
- * Se a carga total (limpeza + viagem + nova tarefa) exceder este valor,
- * o utilizador é excluído do load balancer.
+ * Capacidade diária como «janela do dia menos almoço» (480 min). É só um
+ * pré-filtro: a decisão real é a agenda (início, fim, almoço e viagens).
  */
-const CAPACIDADE_MAXIMA_MINUTOS = 480;
+const CAPACIDADE_MAXIMA_MINUTOS = H.CAPACIDADE_MAXIMA_MINUTOS;
 
 /**
- * Calcula o tempo de viagem entre duas coordenadas usando a Fórmula de
- * Haversine (distância em linha reta) e uma velocidade média urbana de
- * 30 km/h.
- *
- * Prompt 138 (136 V2) — Cap de GPS:
- *   O motor de geocoding estava a devolver viagens de 5h (300 min) quando
- *   as coordenadas estavam erradas ou as propriedades ficavam muito longe.
- *   Impõe-se um teto máximo de 60 minutos (1h) — tempoViagem = Math.min(tempo, 60).
- *   Se o cálculo der erro (coordenadas inválidas/NaN), assume 30 min como
- *   fallback razoável (tempo médio de deslocação urbana).
+ * Tempo de viagem em LINHA RETA (Haversine, 30 km/h, teto de 60 min, 30 min sem
+ * coordenadas). Síncrono: serve para avisos e ecrãs; o cálculo da hora de início
+ * usa `calcularTempoViagemReal` (Google Maps).
  *
  * @param {{ lat: number, lng: number } | null} coordA
  * @param {{ lat: number, lng: number } | null} coordB
- * @returns {number} tempo de viagem em minutos (capped a 60, fallback 30)
+ * @returns {number} minutos
  */
 function calcularTempoViagem(coordA, coordB) {
-  // Prompt 138 (136 V2) — Se alguma coordenada for inválida, assume 30 min
-  // (fallback razoável para deslocação urbana). Antes devolvia 0, o que
-  // fazia o scheduler subestimar a carga e atribuir tarefas impossíveis.
   if (!coordA || !coordB || coordA.lat == null || coordA.lng == null ||
       coordB.lat == null || coordB.lng == null) {
     return 30;
   }
-
-  // Validação de NaN (coordenadas corrompidas).
   if (Number.isNaN(coordA.lat) || Number.isNaN(coordA.lng) ||
       Number.isNaN(coordB.lat) || Number.isNaN(coordB.lng)) {
     return 30;
@@ -66,177 +53,160 @@ function calcularTempoViagem(coordA, coordB) {
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   const distanciaKm = R * c;
 
-  // Velocidade média urbana: 30 km/h → tempo em minutos.
-  const velocidadeKmh = 30;
-  const tempoHoras = distanciaKm / velocidadeKmh;
-  let tempoMinutos = Math.round(tempoHoras * 60);
-
-  // Prompt 138 (136 V2) — Cap de GPS: teto máximo de 60 min (1h).
-  // Evita viagens absurdas de 5h causadas por coordenadas erradas.
+  let tempoMinutos = Math.round((distanciaKm / 30) * 60);
   tempoMinutos = Math.min(tempoMinutos, 60);
-
-  // Garante que é um número finito válido (fallback 30).
-  if (!Number.isFinite(tempoMinutos) || tempoMinutos < 0) {
-    return 30;
-  }
-
+  if (!Number.isFinite(tempoMinutos) || tempoMinutos < 0) return 30;
   return tempoMinutos;
 }
 
 /**
- * Calcula o intervalo do dia (UTC meia-noite a meia-noite) de uma data.
- *
- * Aceita tanto um objeto Date como uma string de data (ex: "YYYY-MM-DD"
- * vinda do payload do Smoobu). Se for string, envolve-a em new Date()
- * antes de chamar métodos getUTC* (senão: "getUTCFullYear is not a function").
- *
- * @param {Date|string} data
+ * Intervalo do dia (UTC meia-noite a meia-noite) de uma data (Date ou 'YYYY-MM-DD').
  * @returns {{ start: Date, end: Date }|null} null se a data for inválida.
  */
 function obterRangeDia(data) {
-  // Garante que data é um objeto Date (aceita strings "YYYY-MM-DD").
   const d = data instanceof Date ? data : new Date(data);
   if (isNaN(d.getTime())) return null;
-
-  const start = new Date(
-    Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
-  );
+  const start = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
   const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
   return { start, end };
 }
 
-/**
- * Proteção de hora de almoço (13:00-14:00 local PT = UTC+1 = 12:00-13:00 UTC).
- *
- * Regra A: se o início cair no almoço, empurra para 14:00 local (13:00 UTC).
- * Regra B: se o início for antes do almoço mas o fim previsto (início +
- *   duração) ultrapassar 13:15 local, empurra para 14:00 (não partir a
- *   limpeza a meio).
- *
- * @param {Date} dataAgendada - data de início (mutada in-place)
- * @param {number} duracaoMin - duração da tarefa em minutos
- * @returns {Date} a mesma dataAgendada (eventualmente ajustada)
- */
-function aplicarProtecaoAlmoco(dataAgendada, duracaoMin) {
-  const inicioUTC = dataAgendada.getUTCHours() * 60 + dataAgendada.getUTCMinutes();
-  const ALMOCO_INICIO = 12 * 60;          // 13:00 local = 12:00 UTC
-  const ALMOCO_FIM = 13 * 60;             // 14:00 local = 13:00 UTC
-  const ALMOCO_TOLERANCIA = 12 * 60 + 15; // 13:15 local = 12:15 UTC
-  const fimPrevistoMin = inicioUTC + duracaoMin;
-
-  // Regra A: início dentro do almoço → empurra para 14:00 (13:00 UTC).
-  if (inicioUTC >= ALMOCO_INICIO && inicioUTC < ALMOCO_FIM) {
-    dataAgendada.setUTCHours(13, 0, 0, 0);
-    console.log(`🍽️ Scheduler: início no almoço → empurrado para 14:00 local`);
-  }
-  // Regra B: início antes do almoço mas fim ultrapassa 13:15 → empurra para 14:00.
-  else if (inicioUTC < ALMOCO_INICIO && fimPrevistoMin > ALMOCO_TOLERANCIA) {
-    dataAgendada.setUTCHours(13, 0, 0, 0);
-    console.log(`🍽️ Scheduler: fim ultrapassa 13:15 → empurrado para 14:00 local`);
-  }
-
-  return dataAgendada;
-}
+const COORD_OK = (c) => c && c.lat != null && c.lng != null && !Number.isNaN(c.lat) && !Number.isNaN(c.lng);
+const chaveCoord = (c) => (COORD_OK(c) ? `${Number(c.lat).toFixed(5)},${Number(c.lng).toFixed(5)}` : 'sem');
 
 /**
- * Calcula a data/hora de início de uma tarefa para um utilizador específico
- * num determinado dia, aplicando o scheduler sequencial + proteção de almoço.
- *
- * Lógica (idêntica ao webhookController.js):
- *   1. Hora base = 11:00 local (10:00 UTC) se o utilizador não tiver tarefas
- *      nesse dia.
- *   2. Se tiver tarefas, nova hora = fim da última tarefa + tempo de viagem
- *      (Haversine entre a propriedade anterior e a nova).
- *   3. Aplica proteção de almoço (13:00-14:00 local).
- *
- * @param {string|import('mongoose').Types.ObjectId} utilizadorId
- * @param {Date} dataBase - data do dia da tarefa (qualquer hora; é normalizada para o dia)
- * @param {{ lat: number, lng: number } | null} coordNovaPropriedade
- * @param {number} tempoLimpezaMin - duração da nova tarefa em minutos
- * @param {*} [excluirTarefaId] - tarefa a ignorar (a que está a ser reatribuída)
- * @returns {Promise<{ data: Date, origem: string, tempoViagem: number }>}
+ * Cria a função de viagem (síncrona) para planear `nova` contra `itens`, depois
+ * de calcular, com Google Maps (ou fallback), cada coordenada distinta UMA vez.
  */
-async function calcularInicioTarefaUtilizador(utilizadorId, dataBase, coordNovaPropriedade, tempoLimpezaMin, excluirTarefaId = null) {
-  const { start, end } = obterRangeDia(dataBase);
-
-  // Hora padrão: 11:00 local (10:00 UTC).
-  let dataAgendada = new Date(start);
-  dataAgendada.setUTCHours(10, 0, 0, 0);
-
-  let origem = 'padrao_11h';
-  let tempoViagem = 0;
-
-  // Procura a última tarefa do utilizador nesse dia (com coordenadas),
-  // excluindo a própria tarefa em caso de reatribuição (a tarefa original
-  // ainda existe na BD quando este cálculo corre — o caller pode passar
-  // excluirTarefaId para a ignorar).
-  // Nota: o caller deve passar já sem a tarefa atual na BD, ou usar
-  // excluirTarefaId. Aqui mantemos simples: quem reatribui deve primeiro
-  // desatribuir (utilizador_id = null) e depois chamar este cálculo.
-  // Tarefas exatamente a 00:00 UTC são placeholders sem hora real (ex.: manutenção
-  // criada sem horário): não contam como "última tarefa", senão empurravam a nova
-  // limpeza para as 01:xx UTC.
-  const filtroDia = {
-    data: { $gte: start, $lt: end },
-    estado: { $nin: ['cancelada'] },
+async function prepararViagens(itens, nova, dataRef) {
+  const memo = new Map();
+  for (const x of itens) {
+    if (x.propId && nova.propId && String(x.propId) === String(nova.propId)) continue;
+    const k = chaveCoord(x.coord);
+    if (memo.has(k)) continue;
+    const r = await calcularTempoViagemReal(
+      COORD_OK(x.coord) ? x.coord : null,
+      COORD_OK(nova.coord) ? nova.coord : null,
+      dataRef
+    );
+    memo.set(k, Math.max(0, Number(r && r.minutos) || 0));
+  }
+  return (a, b) => {
+    const outro = a.nova ? b : b.nova ? a : null;
+    if (!outro) return Number(b.viagem) || 0; // par já existente: viagem gravada
+    const novaRef = a.nova ? a : b;
+    if (outro.propId && novaRef.propId && String(outro.propId) === String(novaRef.propId)) return 0;
+    const v = memo.get(chaveCoord(outro.coord));
+    return v === undefined ? 30 : v;
   };
-  // Reatribuição: a própria tarefa não conta (sem a desatribuir antes na BD).
-  if (excluirTarefaId) filtroDia._id = { $ne: excluirTarefaId };
-  const candidatas = await Tarefa.find(comMembro(filtroDia, utilizadorId))
-    .populate({ path: 'propriedade_id', select: 'coordenadas nome' })
-    .sort({ data: -1 })
-    .limit(20)
-    .lean();
-  const ultimaTarefa =
-    candidatas.find((t) => new Date(t.data).getTime() !== start.getTime()) || null;
-
-  if (ultimaTarefa && ultimaTarefa.propriedade_id) {
-    const fimAnterior = new Date(ultimaTarefa.data);
-    fimAnterior.setMinutes(
-      fimAnterior.getMinutes() + (ultimaTarefa.tempo_limpeza_minutos || 45)
-    );
-
-    const coordAnterior = ultimaTarefa.propriedade_id.coordenadas;
-    tempoViagem = calcularTempoViagem(coordAnterior, coordNovaPropriedade);
-
-    dataAgendada = new Date(fimAnterior.getTime() + tempoViagem * 60000);
-    origem = 'apos_ultima_tarefa';
-
-    console.log(
-      `📅 Scheduler: tarefa agendada para ${dataAgendada.toISOString()} ` +
-        `(fim anterior: ${fimAnterior.toISOString()}, viagem: ${tempoViagem}min)`
-    );
-  }
-
-  // Proteção de almoço.
-  aplicarProtecaoAlmoco(dataAgendada, Number(tempoLimpezaMin) || 45);
-
-  return { data: dataAgendada, origem, tempoViagem };
 }
 
 /**
- * Calcula a carga total (minutos) de um utilizador num dia, somando
- * tempo_limpeza_minutos de todas as tarefas não-canceladas/não-concluídas.
+ * Agenda real de uma pessoa num dia: limpezas com hora real (não a meia-noite)
+ * e que começam a partir das 09:00. Horas inválidas (ex.: 02:08) não contam
+ * como base de cadeia. Cancelada nunca conta.
+ */
+async function carregarAgenda(utilizadorId, dia, excluirTarefaId = null) {
+  const { start, end } = obterRangeDia(dia);
+  const filtro = { data: { $gte: start, $lt: end }, estado: { $nin: ['cancelada'] } };
+  if (excluirTarefaId) filtro._id = { $ne: excluirTarefaId };
+  const tarefas = await Tarefa.find(comMembro(filtro, utilizadorId))
+    .populate({ path: 'propriedade_id', select: 'coordenadas nome' })
+    .sort({ data: 1 })
+    .limit(50)
+    .lean();
+  return tarefas.map(itemDeTarefa).filter(Boolean);
+}
+
+/**
+ * Tarefa (lean, com propriedade_id populado) -> item de agenda, ou null se não tem hora
+ * real (meia-noite) ou começa antes das 09:00 (hora inválida: não serve de base de cadeia).
+ */
+function itemDeTarefa(t) {
+  if (!H.temHoraReal(t.data)) return null;
+  const ini = H.minutosLocais(t.data);
+  if (ini < H.HORARIO.INICIO_DIA) return null;
+  return {
+    ini,
+    fim: ini + (Number(t.tempo_limpeza_minutos) || 45),
+    coord: t.propriedade_id && t.propriedade_id.coordenadas,
+    propId: t.propriedade_id && t.propriedade_id._id,
+    viagem: Number(t.tempo_viagem_minutos) || 0,
+    tarefaId: t._id,
+  };
+}
+
+function motivoNaoCabe(tempo) {
+  return H.duracaoCabeNoHorario(tempo)
+    ? 'Não cabe no horário (09:00-18:00, com almoço e viagens)'
+    : `Limpeza de ${tempo} min demasiado longa para o horário (09:00-18:00, com almoço)`;
+}
+
+/**
+ * Hora de início de uma limpeza para UMA pessoa (ou, com uma lista de ids, para
+ * uma equipa: começa quando todos conseguem).
  *
- * Usado para validar o SLA de 480 min antes de aceitar a reatribuição.
- *
- * @param {string|import('mongoose').Types.ObjectId} utilizadorId
- * @param {Date} dataBase - data do dia
- * @param {string|null} excluirTarefaId - ID de tarefa a excluir do cálculo (a que está a ser reatribuída)
- * @returns {Promise<number>} carga total em minutos
+ * @param {*|Array} utilizadorId - id, ou lista de ids (equipa)
+ * @param {Date} dataBase - qualquer instante do dia
+ * @param {{lat,lng}|null} coord - coordenadas da propriedade nova
+ * @param {number} tempoLimpezaMin
+ * @param {*} [excluirTarefaId] - tarefa a ignorar (a que está a ser reatribuída)
+ * @param {*} [propId] - propriedade nova (viagem 0 entre limpezas da mesma casa)
+ * @returns {Promise<{ data: Date|null, cabe: boolean, origem: string, tempoViagem: number, motivo: string|null }>}
+ *   `data` é null quando não cabe no horário (nunca se inventa uma hora).
+ */
+async function calcularInicioTarefaUtilizador(utilizadorId, dataBase, coord, tempoLimpezaMin, excluirTarefaId = null, propId = null) {
+  const range = obterRangeDia(dataBase);
+  const ids = Array.isArray(utilizadorId) ? utilizadorId : [utilizadorId];
+  const tempo = Number(tempoLimpezaMin) || 45;
+  const dia = range.start.toISOString().slice(0, 10);
+  const nova = { duracao: tempo, coord, propId };
+
+  const agendas = [];
+  for (const id of ids) agendas.push(await carregarAgenda(id, range.start, excluirTarefaId));
+  const viagemFn = await prepararViagens(agendas.flat(), { ...nova, nova: true }, range.start);
+
+  const ini = ids.length > 1
+    ? H.primeiroInicioEquipa(agendas, nova, viagemFn)
+    : H.primeiroInicio(agendas[0], nova, viagemFn);
+  if (ini === null) {
+    return { data: null, cabe: false, origem: 'sem_horario', tempoViagem: 0, motivo: motivoNaoCabe(tempo) };
+  }
+  // Viagem até esta limpeza: a maior, entre os membros, da limpeza anterior à nova.
+  let tempoViagem = 0;
+  let houveAnterior = false;
+  for (const ag of agendas) {
+    const ant = [...ag].sort((a, b) => b.fim - a.fim).find((x) => x.fim <= ini);
+    if (ant) {
+      houveAnterior = true;
+      tempoViagem = Math.max(tempoViagem, viagemFn(ant, { ...nova, nova: true }));
+    }
+  }
+  return {
+    data: H.utcDeMinutosLocais(dia, ini),
+    cabe: true,
+    origem: houveAnterior ? 'apos_ultima_tarefa' : 'inicio_do_dia',
+    tempoViagem,
+    motivo: null,
+  };
+}
+
+/** Equipa: começa quando todos os membros conseguem. */
+function calcularInicioEquipa(ids, dataBase, coord, tempoLimpezaMin, excluirTarefaId = null, propId = null) {
+  return calcularInicioTarefaUtilizador(ids, dataBase, coord, tempoLimpezaMin, excluirTarefaId, propId);
+}
+
+/**
+ * Carga (minutos de limpeza) de um utilizador num dia. Só informativa: a decisão
+ * de «cabe» é `calcularInicioTarefaUtilizador`.
  */
 async function calcularCargaDiaUtilizador(utilizadorId, dataBase, excluirTarefaId = null) {
   const { start, end } = obterRangeDia(dataBase);
-
-  // A carga conta para cada membro da equipa, não só para o responsável.
   const filtro = comMembro({
     data: { $gte: start, $lt: end },
     estado: { $nin: ['cancelada', 'concluida'] },
   }, utilizadorId);
-  if (excluirTarefaId) {
-    filtro._id = { $ne: excluirTarefaId };
-  }
-
+  if (excluirTarefaId) filtro._id = { $ne: excluirTarefaId };
   const tarefas = await Tarefa.find(filtro).select('tempo_limpeza_minutos').lean();
   return tarefas.reduce((acc, t) => acc + (t.tempo_limpeza_minutos || 0), 0);
 }
@@ -245,7 +215,11 @@ module.exports = {
   CAPACIDADE_MAXIMA_MINUTOS,
   calcularTempoViagem,
   obterRangeDia,
-  aplicarProtecaoAlmoco,
+  carregarAgenda,
+  itemDeTarefa,
+  prepararViagens,
   calcularInicioTarefaUtilizador,
+  calcularInicioEquipa,
   calcularCargaDiaUtilizador,
+  motivoNaoCabe,
 };

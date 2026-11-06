@@ -38,7 +38,7 @@ import {
   type ModeloChecklistDTO,
 } from "@/lib/api";
 import { lerUtilizador, type Role } from "@/lib/auth";
-import { googleMapsUrl } from "@/lib/utils";
+import { googleMapsUrl, plural } from "@/lib/utils";
 
 /** Tipos de limpeza configuráveis por casa (normal usa os valores base da casa). */
 const TIPOS_CONFIG = [
@@ -267,7 +267,7 @@ export default function PropriedadesPage() {
         const n = res.tarefasDesatribuidas;
         setFeedbackOk(
           n > 0
-            ? `Propriedade desativada. ${n} tarefa(s) futura(s) não concluída(s) foram desatribuída(s) (por atribuir).`
+            ? `Propriedade desativada. ${plural(plural(n, "tarefa"), "futura")} não concluída(s) foram desatribuída(s) (por atribuir).`
             : `Propriedade desativada. Não havia tarefas futuras por executar.`
         );
       }
@@ -460,7 +460,7 @@ export default function PropriedadesPage() {
         "/api/gestor/propriedades/default-checklist",
         {}
       );
-      setFeedbackOk(res.message || `Checklist aplicada a ${res.modificadas} propriedade(s).`);
+      setFeedbackOk(res.message || `Checklist aplicada a ${plural(res.modificadas, "propriedade")}.`);
       await carregar();
     } catch (e) {
       setErro(
@@ -823,7 +823,7 @@ export default function PropriedadesPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <Building2 className="h-5 w-5 text-gold-text" />
-              Nova Propriedade
+              Nova propriedade
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -904,7 +904,7 @@ export default function PropriedadesPage() {
                 </div>
                 <div className="space-y-1.5 sm:col-span-2">
                   <label htmlFor="morada" className="text-sm font-medium">
-                    Morada Completa
+                    Morada completa
                   </label>
                   <Input
                     id="morada"
@@ -1131,6 +1131,15 @@ export default function PropriedadesPage() {
                               ⚠️ Morada por definir
                             </Badge>
                           )}
+                          {/* Sem coordenadas o tempo de viagem é estimado em 30 min (não há Google Maps). */}
+                          {(p.coordenadas?.lat == null || p.coordenadas?.lng == null) && (
+                            <Badge
+                              className="bg-amber-500/15 text-amber-700 border-amber-500/30 hover:bg-amber-500/20"
+                              title="Sem coordenadas: a viagem até esta casa é estimada em 30 min. Edita a morada para a localizar."
+                            >
+                              Sem localização
+                            </Badge>
+                          )}
                         </div>
                         {/* FIX (morada estruturada) — Mostra morada estruturada
                             se existir, senão usa moradaCompleta (virtual do
@@ -1247,7 +1256,7 @@ export default function PropriedadesPage() {
           <div>
             <DialogTitle className="flex items-center gap-2">
               <Building2 className="h-5 w-5 text-gold-text" />
-              Adicionar Propriedade Manual
+              Adicionar propriedade manual
             </DialogTitle>
             <DialogDescription>
               Cria uma propriedade que não está sincronizada com o Smoobu
@@ -1561,7 +1570,7 @@ export default function PropriedadesPage() {
       >
         <DialogHeader>
           <div>
-            <DialogTitle>Editar Propriedade</DialogTitle>
+            <DialogTitle>Editar propriedade</DialogTitle>
             <DialogDescription>
               Atualiza os dados da propriedade. Se mudares a morada, as
               coordenadas são re-calculadas automaticamente (para o load
@@ -1692,7 +1701,7 @@ export default function PropriedadesPage() {
                 {/* FIX (parceiro associado relacional) — Select de parceiro B2B. */}
                 <div className="space-y-1.5">
                   <label htmlFor="edit-parceiro" className="text-sm font-medium">
-                    Parceiro Associado
+                    Parceiro associado
                   </label>
                   <select
                     id="edit-parceiro"
@@ -1714,7 +1723,7 @@ export default function PropriedadesPage() {
                 {/* FIX (restrição lavandaria) — Select de lavandaria atribuída (edição). */}
                 <div className="space-y-1.5">
                   <label htmlFor="edit-fornecedor" className="text-sm font-medium">
-                    Lavandaria Atribuída
+                    Lavandaria atribuída
                   </label>
                   <select
                     id="edit-fornecedor"
@@ -2029,7 +2038,7 @@ export default function PropriedadesPage() {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-destructive">
             <Trash2 className="h-5 w-5" />
-            Eliminar Definitivamente
+            Eliminar definitivamente
           </DialogTitle>
           <DialogDescription>
             Tens a certeza que queres eliminar definitivamente a propriedade{" "}

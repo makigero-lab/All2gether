@@ -115,7 +115,7 @@ describe('Load balancer / Smoobu', () => {
     await Tarefa.create({ empresa_id: e._id, propriedade_id: p2._id, utilizador_id: a._id, data: new Date('2031-05-07T00:00:00Z'), estado: 'atribuida', tipo: 'manutencao' });
     await wh('newReservation', reserva(nid(), p.smoobu_id, { departure: '2031-05-07' }));
     const t = await Tarefa.findOne({ propriedade_id: p._id });
-    expect(t.data.toISOString()).toBe('2031-05-07T10:00:00.000Z');
+    expect(t.data.toISOString()).toBe('2031-05-07T08:00:00.000Z'); // 09:00 de Lisboa (verão); a de 00:00 não conta
   });
 
   test('VIP sobrecarregado só liberta tarefa do mesmo dia e nunca em_curso', async () => {

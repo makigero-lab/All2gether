@@ -200,7 +200,7 @@ export function PerfilContent({ portalLabel }: { portalLabel: string }) {
               className="w-full gap-2 text-destructive hover:bg-destructive/5"
               onClick={() => fazerLogout()}
             >
-              Terminar Sessão
+              Terminar sessão
             </Button>
           </div>
         </CardContent>

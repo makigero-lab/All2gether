@@ -36,7 +36,7 @@
  *   - Filtro de ausências aprovadas (bloqueiam atribuição)
  *   - Filtro de folgas fixas semanais (dias_folga) e rotativas
  *   - Algoritmo VIP (funcionário preferencial) — com SLA
- *   - SLA de capacidade máxima (480 min = 8h/dia) — exclui quem excede
+ *   - Janela do dia (09:00-18:00, almoço e viagens, ver horario.js) — exclui quem não cabe
  *
  * Devolve { utilizadorId, tempoViagem } ou null se ninguém couber no SLA.
  */
@@ -47,11 +47,10 @@ const Ausencia = require('../models/Ausencia');
 const Tarefa = require('../models/Tarefa');
 const Propriedade = require('../models/Propriedade');
 const {
-  CAPACIDADE_MAXIMA_MINUTOS,
   obterRangeDia,
   calcularInicioTarefaUtilizador,
 } = require('./scheduler');
-const { calcularTempoViagemReal } = require('./distancia');
+const { minutosLocais } = require('./horario');
 const { comMembro, EXPR_MEMBROS, retirarMembroDoc } = require('./equipaTarefa');
 
 // Pesos do score (em minutos — quanto menor o score, melhor).
@@ -85,6 +84,16 @@ async function calcularCargaLimpezaDia(empresaId, utilizadorId, range) {
     { $group: { _id: null, total: { $sum: '$tempo_limpeza_minutos' } } },
   ]);
   return res.length > 0 ? res[0].total : 0;
+}
+
+/** A limpeza cabe na agenda desta pessoa neste dia (janela, almoço e viagens)? */
+async function cabeNoHorario(utilizadorId, range, coord, tempo, propriedadeId = null) {
+  try {
+    const r = await calcularInicioTarefaUtilizador(utilizadorId, range.start, coord, Number(tempo) || 45, null, propriedadeId);
+    return !!r.cabe;
+  } catch (e) {
+    return false;
+  }
 }
 
 /**
@@ -357,16 +366,15 @@ async function determinarUtilizadorAtribuido(
         const equipaIdStr = String(equipaId);
         const vip = disponiveis.find((s) => String(s._id) === equipaIdStr);
         if (vip) {
-          let cargaLimpezaVIP = Number(await calcularCargaLimpezaDia(empresaId, vip._id, range)) || 0;
-          let cargaTotalVIP = cargaLimpezaVIP + Number(tempoNovaTarefa);
+          let cabeVIP = await cabeNoHorario(vip._id, range, coordenadasNovaPropriedade, tempoNovaTarefa, propriedadeId);
 
-          // FIX (prioridade equipa) — Se o VIP excede o SLA, tenta libertar
+          // FIX (prioridade equipa) — Se o VIP não cabe no horário, tenta libertar
           // capacidade desatribuindo a tarefa futura mais distante desse VIP.
           // Isto garante que a equipa preferencial é priorizada mesmo que
           // tenha tarefas futuras que possam ser reatribuídas a outro staff.
-          if (cargaTotalVIP > CAPACIDADE_MAXIMA_MINUTOS) {
+          if (!cabeVIP) {
             console.log(
-              `⭐ VIP (equipa): ${equipaIdStr} excede SLA (${cargaTotalVIP}min). A tentar libertar capacidade...`
+              `⭐ VIP (equipa): ${equipaIdStr} não cabe no horário. A tentar libertar capacidade...`
             );
             // Procura a tarefa futura mais distante do VIP (maior data) que
             // não seja a tarefa atual e que esteja 'atribuida' ou 'em_curso'.
@@ -386,17 +394,13 @@ async function determinarUtilizadorAtribuido(
               console.log(
                 `⭐ VIP (equipa): tarefa ${tarefaParaLibertar._id} desatribuída do VIP ${equipaIdStr} para libertar capacidade.`
               );
-              // Recalcula a carga do VIP (a tarefa libertada já não conta).
-              cargaLimpezaVIP = Number(await calcularCargaLimpezaDia(empresaId, vip._id, range)) || 0;
-              cargaTotalVIP = cargaLimpezaVIP + Number(tempoNovaTarefa);
+              // Volta a verificar (a tarefa libertada já não conta).
+              cabeVIP = await cabeNoHorario(vip._id, range, coordenadasNovaPropriedade, tempoNovaTarefa, propriedadeId);
             }
           }
 
-          if (cargaTotalVIP <= CAPACIDADE_MAXIMA_MINUTOS) {
-            console.log(
-              `⭐ VIP (equipa): tarefa atribuída ao preferencial ${equipaIdStr} ` +
-                `(carga ${cargaTotalVIP}min ≤ ${CAPACIDADE_MAXIMA_MINUTOS}min).`
-            );
+          if (cabeVIP) {
+            console.log(`⭐ VIP (equipa): tarefa atribuída ao preferencial ${equipaIdStr} (cabe no horário).`);
             return { utilizadorId: vip._id, tempoViagem: 0 };
           }
         }
@@ -412,19 +416,11 @@ async function determinarUtilizadorAtribuido(
       const vipIdStr = String(vipId);
       const vip = disponiveis.find((s) => String(s._id) === vipIdStr);
       if (vip) {
-        const cargaLimpezaVIP = Number(await calcularCargaLimpezaDia(empresaId, vip._id, range)) || 0;
-        const cargaTotalVIP = cargaLimpezaVIP + Number(tempoNovaTarefa);
-        if (cargaTotalVIP <= CAPACIDADE_MAXIMA_MINUTOS) {
-          console.log(
-            `⭐ VIP (legacy): tarefa atribuída ao preferencial ${vipIdStr} ` +
-              `(carga ${cargaTotalVIP}min ≤ ${CAPACIDADE_MAXIMA_MINUTOS}min).`
-          );
+        if (await cabeNoHorario(vip._id, range, coordenadasNovaPropriedade, tempoNovaTarefa, propriedadeId)) {
+          console.log(`⭐ VIP (legacy): tarefa atribuída ao preferencial ${vipIdStr} (cabe no horário).`);
           return { utilizadorId: vip._id, tempoViagem: 0 };
         }
-        console.log(
-          `⭐ VIP (legacy): preferencial ${vipIdStr} excede SLA ` +
-            `(${cargaTotalVIP}min > ${CAPACIDADE_MAXIMA_MINUTOS}min) — fallback para LB.`
-        );
+        console.log(`⭐ VIP (legacy): preferencial ${vipIdStr} não cabe no horário — fallback para LB.`);
       }
     }
   }
@@ -434,87 +430,34 @@ async function determinarUtilizadorAtribuido(
   // ----------------------------------------------------------------
   const disponiveisIds = disponiveis.map((s) => s._id);
 
-  // Pré-busca agregada (1 query para cargas + contagens do dia).
-  // A carga conta para CADA membro da equipa (não só para o responsável).
-  const cargasLimpeza = await Tarefa.aggregate([
-    {
-      $match: {
-        empresa_id: oid(empresaId),
-        $or: [{ utilizador_id: { $in: disponiveisIds } }, { utilizador_id: { $ne: null }, equipa_atribuida: { $in: disponiveisIds } }],
-        data: { $gte: range.start, $lt: range.end },
-        estado: { $nin: ['cancelada', 'concluida'] },
-      },
-    },
-    { $addFields: { _membros: EXPR_MEMBROS } },
-    { $unwind: '$_membros' },
-    { $match: { _membros: { $in: disponiveisIds } } },
-    { $group: { _id: '$_membros', total: { $sum: '$tempo_limpeza_minutos' } } },
-  ]);
-  const cargaLimpezaMap = new Map();
-  for (const c of cargasLimpeza) cargaLimpezaMap.set(String(c._id), c.total);
-
   // Para cada staff, calcula os 4 fatores e o score final.
   const candidatos = [];
 
   for (const u of disponiveis) {
-    const cargaLimpeza = cargaLimpezaMap.get(String(u._id)) ?? 0;
-
-    // SLA: exclui quem excede 480min com a nova tarefa.
-    const cargaComNova = Number(cargaLimpeza) + Number(tempoNovaTarefa);
-    if (!Number.isFinite(cargaComNova) || cargaComNova > CAPACIDADE_MAXIMA_MINUTOS) {
-      console.log(
-        `⚠️  SLA: staff ${u._id} excede ${CAPACIDADE_MAXIMA_MINUTOS}min ` +
-          `(${cargaComNova}min) — excluído.`
+    // Janela do dia: início, fim, almoço e viagens (horario.js). Quem não cabe
+    // fica de fora; o início mais cedo vem do mesmo cálculo.
+    let resultadoScheduler;
+    try {
+      resultadoScheduler = await calcularInicioTarefaUtilizador(
+        u._id, range.start, coordenadasNovaPropriedade, Number(tempoNovaTarefa) || 45, null, propriedadeId
       );
+    } catch (err) {
+      console.warn(`⚠️  scheduler falhou para staff ${u._id}: ${err.message} — excluído.`);
       continue;
     }
+    if (!resultadoScheduler.cabe) {
+      console.log(`⚠️  Horário: staff ${u._id} não tem lugar neste dia (${resultadoScheduler.motivo}) — excluído.`);
+      continue;
+    }
+    const earliestStart = resultadoScheduler.data;
+    const tempoViagem = Number(resultadoScheduler.tempoViagem) || 0;
+    const origemViagem = 'maps';
 
     // FATOR 1: Agrupamento Diário (Same-Day Clustering).
     const jaNaPropriedade = propriedadeId
       ? await temTarefaNaMesmaPropriedade(u._id, propriedadeId, range)
       : false;
     const bonusClustering = jaNaPropriedade ? PESO_CLUSTERING : 0;
-
-    // FATOR 2: Earliest Start Time (via scheduler).
-    let earliestStart;
-    let tempoViagem = 0;
-    let origemViagem = 'haversine';
-    try {
-      const resultadoScheduler = await calcularInicioTarefaUtilizador(
-        u._id,
-        range.start,
-        coordenadasNovaPropriedade,
-        Number(tempoNovaTarefa) || 45
-      );
-      earliestStart = resultadoScheduler.data;
-
-      // HF16 — Usa Google Maps (com fallback Haversine) para o tempo de viagem.
-      if (coordenadasNovaPropriedade) {
-        // Busca a última tarefa para obter coordenadas da propriedade anterior.
-        const ultimaTarefa = await Tarefa.findOne(comMembro({
-          data: { $gte: range.start, $lt: range.end },
-          estado: { $nin: ['cancelada'] },
-        }, u._id))
-          .populate({ path: 'propriedade_id', select: 'coordenadas' })
-          .sort({ data: -1 })
-          .lean();
-
-        if (ultimaTarefa?.propriedade_id?.coordenadas) {
-          // HF24 — Passa a data da tarefa para otimização de custos Google Maps.
-          const resultadoViagem = await calcularTempoViagemReal(
-            ultimaTarefa.propriedade_id.coordenadas,
-            coordenadasNovaPropriedade,
-            range.start // data da tarefa
-          );
-          tempoViagem = resultadoViagem.minutos;
-          origemViagem = resultadoViagem.origem;
-        }
-      }
-    } catch (err) {
-      console.warn(`⚠️  scheduler falhou para staff ${u._id}: ${err.message} — usa 10:00 UTC.`);
-      earliestStart = new Date(range.start);
-      earliestStart.setUTCHours(10, 0, 0, 0);
-    }
 
     // FATOR 3a: Equidade Semanal (carga horária da semana).
     const cargaSemanalMin = await calcularCargaSemanal(empresaId, u._id, range.start);
@@ -532,8 +475,7 @@ async function determinarUtilizadorAtribuido(
 
     // SCORE FINAL: menor = melhor.
     // Começa pelo timestamp do earliest start (em minutos desde meia-noite UTC).
-    const minutosDesdeMeiaNoite =
-      earliestStart.getUTCHours() * 60 + earliestStart.getUTCMinutes();
+    const minutosDesdeMeiaNoite = minutosLocais(earliestStart);
 
     const score =
       minutosDesdeMeiaNoite   // F2: início mais cedo
@@ -552,7 +494,6 @@ async function determinarUtilizadorAtribuido(
       cargaSemanalMin,
       horasSemana: Math.round(horasSemana * 10) / 10,
       limpouOntem,
-      cargaComNova,
     });
 
     console.log(
@@ -566,7 +507,7 @@ async function determinarUtilizadorAtribuido(
 
   if (candidatos.length === 0) {
     console.log(
-      `⚠️  determinarUtilizadorAtribuido: nenhum staff coube no SLA de ${CAPACIDADE_MAXIMA_MINUTOS}min.`
+      '⚠️  determinarUtilizadorAtribuido: nenhum staff coube no horário do dia.'
     );
     return null;
   }
@@ -699,6 +640,7 @@ async function determinarEquipaAtribuida(
 module.exports = {
   oid,
   calcularCargaLimpezaDia,
+  cabeNoHorario,
   determinarUtilizadorAtribuido,
   determinarEquipaAtribuida,
   obterStaffDisponivel,

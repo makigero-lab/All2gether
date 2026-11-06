@@ -51,7 +51,9 @@ const { idsEquipa: idsEquipaTarefa, retirarMembroDoc: retirarMembroTarefa } = re
 const {
   obterRangeDia,
   calcularInicioTarefaUtilizador,
+  calcularInicioEquipa,
 } = require('../utils/scheduler');
+const { minutosLocais } = require('../utils/horario');
 
 // Constantes de ações do Smoobu (com variantes legacy).
 const ACOES_CRIAR = [
@@ -633,8 +635,8 @@ async function criarTarefaPorReserva(
 
   // HF12 — Limiar de hora para fallback do VIP. Se o VIP só conseguir começar
   // a tarefa depois desta hora, faz fallback ao LB para paralelizar.
-  // 14:00 local = 13:00 UTC (Portugal inverno UTC+1).
-  const VIP_LIMITE_HORA_UTC = 13; // 13:00 UTC = 14:00 local
+  // 14:00 locais (Europe/Lisbon, com hora de verão).
+  const VIP_LIMITE_MINUTOS_LOCAIS = 14 * 60;
 
   const staffExclusivoId = propriedade.funcionario_preferencial_id;
 
@@ -707,18 +709,19 @@ async function criarTarefaPorReserva(
             staffExclusivoId,
             range.start,
             propriedade.coordenadas,
-            Number(tempoLimpeza) || 45
+            Number(tempoLimpeza) || 45,
+            null,
+            propriedade._id
           );
           const inicioVIP = resultadoSchedulerVIP.data;
-          const horaUTC = inicioVIP.getUTCHours();
 
-          if (horaUTC >= VIP_LIMITE_HORA_UTC) {
-            // VIP sobrecarregado — só começaria depois das 14h local.
+          if (!resultadoSchedulerVIP.cabe || minutosLocais(inicioVIP) >= VIP_LIMITE_MINUTOS_LOCAIS) {
+            // VIP sobrecarregado — não cabe no horário ou só começaria depois das 14h locais.
             vipSobrecarregado = true;
             console.log(
-              `⏰ [HF12] staff exclusivo ${staffExclusivoId} só começaria às ` +
-                `${inicioVIP.toISOString()} (≥${VIP_LIMITE_HORA_UTC}:00 UTC = 14h local) ` +
-                `— fallback ao load balancer para paralelizar.`
+              `⏰ [HF12] staff exclusivo ${staffExclusivoId} ` +
+                (resultadoSchedulerVIP.cabe ? `só começaria às ${inicioVIP.toISOString()} (≥14h locais)` : 'não cabe no horário') +
+                ` — fallback ao load balancer para paralelizar.`
             );
           } else {
             // VIP disponível e começa cedo → atribui diretamente.
@@ -821,7 +824,7 @@ async function criarTarefaPorReserva(
       console.warn('⚠️  [Smoobu] não foi possível completar a equipa do staff exclusivo:', errEq.message);
     }
   }
-  const pessoasEmFalta = utilizadorAtribuido
+  let pessoasEmFalta = utilizadorAtribuido
     ? Math.max(0, staffNecessarioProp - Math.max(1, equipaCompleta.length))
     : 0;
   if (pessoasEmFalta > 0 && !alertaTarefa) {
@@ -844,23 +847,31 @@ async function criarTarefaPorReserva(
   // 6. Scheduler sequencial (hora de início) — só se há staff atribuído.
   let dataAgendada;
   let tempoViagemScheduler = 0;
+  let motivoSemHorario = null;
   if (utilizadorAtribuido) {
     try {
-      const resultadoScheduler = await calcularInicioTarefaUtilizador(
-        utilizadorAtribuido,
+      // Equipa de 2+: começa quando TODOS conseguem (mesmo cálculo de todos os caminhos).
+      const resultadoScheduler = await calcularInicioEquipa(
+        equipaCompleta.length > 0 ? equipaCompleta : [utilizadorAtribuido],
         range.start,
         propriedade.coordenadas,
-        Number(tempoLimpeza) || 45
+        Number(tempoLimpeza) || 45,
+        null,
+        propriedade._id
       );
-      dataAgendada = resultadoScheduler.data;
-      tempoViagemScheduler = Number(resultadoScheduler.tempoViagem) || 0;
-      // Equipa de 2+: começa quando o ÚLTIMO membro consegue (todos presentes).
-      for (const idM of equipaCompleta.slice(1)) {
-        try {
-          const rm = await calcularInicioTarefaUtilizador(idM, range.start, propriedade.coordenadas, Number(tempoLimpeza) || 45);
-          if (rm?.data && rm.data > dataAgendada) dataAgendada = rm.data;
-          tempoViagemScheduler = Math.max(tempoViagemScheduler, Number(rm?.tempoViagem) || 0);
-        } catch (e) { /* mantém */ }
+      if (!resultadoScheduler.cabe) {
+        // Nunca se inventa uma hora: sem lugar no horário, fica por atribuir com o motivo real.
+        motivoSemHorario = resultadoScheduler.motivo;
+        utilizadorAtribuido = null;
+        pessoasEmFalta = 0;
+        equipaCompleta = [];
+        tentouLoadBalancer = true;
+        alertaTarefa = motivoSemHorario;
+        dataAgendada = new Date(range.start);
+        dataAgendada.setUTCHours(10, 0, 0, 0);
+      } else {
+        dataAgendada = resultadoScheduler.data;
+        tempoViagemScheduler = Number(resultadoScheduler.tempoViagem) || 0;
       }
     } catch (err) {
       // Fallback: 10:00 UTC (= 11:00 local UTC+1, Portugal inverno).
@@ -931,9 +942,9 @@ async function criarTarefaPorReserva(
   // 'nao_atribuida'; sem equipa / ausência / folga -> 'por_atribuir'.
   let estadoFinal = estadoInicial;
   if (!utilizadorAtribuido && tentouLoadBalancer) {
-    const diag = await diagnosticarFaltaDeStaff(empresaId, range, propriedade._id);
+    const diag = await diagnosticarFaltaDeStaff(empresaId, range, propriedade._id, null, Number(tempoLimpeza) || 45);
     estadoFinal = diag.estado;
-    motivoNaoAtribuicao = diag.motivo;
+    motivoNaoAtribuicao = motivoSemHorario || diag.motivo;
   }
 
   if (alertaCancelamentoPrevio) {
@@ -1183,6 +1194,31 @@ async function atualizarTarefaPorReserva(
     }
     if (saiuAlguem && !tarefa.utilizador_id && (tarefa.estado === 'atribuida' || tarefa.estado === 'em_curso')) {
       tarefa.estado = 'por_atribuir';
+    }
+  }
+
+  // 5. Dia novo, quem ficou: recalcula a hora pelo mesmo cálculo de todos os caminhos
+  //    (nunca fica a hora do dia antigo nem a meia-noite). Se não couber no horário,
+  //    liberta a tarefa para o motor procurar outra pessoa (a seguir) ou ficar por atribuir.
+  if (mudouData && novoRange && tarefa.estado === 'atribuida' && idsEquipaTarefa(tarefa).length > 0) {
+    try {
+      const propHora = await Propriedade.findById(tarefa.propriedade_id).select('coordenadas').lean();
+      const rh = await calcularInicioEquipa(
+        idsEquipaTarefa(tarefa), novoRange.start, propHora && propHora.coordenadas,
+        tarefa.tempo_limpeza_minutos || 45, tarefa._id, tarefa.propriedade_id
+      );
+      if (rh.cabe) {
+        tarefa.data = rh.data;
+        tarefa.tempo_viagem_minutos = Number(rh.tempoViagem) || 0;
+      } else {
+        tarefa.utilizador_id = null;
+        tarefa.equipa_atribuida = [];
+        tarefa.pessoas_em_falta = 0;
+        tarefa.estado = 'por_atribuir';
+        tarefa.motivo_nao_atribuicao = rh.motivo;
+      }
+    } catch (errHora) {
+      console.warn('⚠️ [Smoobu sync] hora do dia novo não calculada (mantém 10:00 UTC):', errHora.message);
     }
   }
 

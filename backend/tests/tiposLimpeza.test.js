@@ -599,17 +599,20 @@ describe('S3: limpeza mais longa é reavaliada pelo motor', () => {
     }
   });
 
-  it('se passa das 8h da pessoa e ninguém cabe: fica por atribuir com o motivo real e o gestor é avisado', async () => {
+  it('se deixa de caber no horário da pessoa e ninguém cabe: fica por atribuir com o motivo real e o gestor é avisado', async () => {
     const m = await mundo();
     const b = await m.reservaCom(m.bia, '10:00');
-    await m.outra(m.bia, 400, '14:00');
-    await m.outra(m.ana, 400, '08:00');
+    // Dias cheios dentro do horário (09:00-12:00 e 13:00-17:00): 150 min já não cabem a ninguém.
+    for (const p of [m.bia, m.ana]) {
+      await m.outra(p, 180, '09:00');
+      await m.outra(p, 240, '13:00');
+    }
     expect((await m.profunda(b)).status).toBe(200);
     const dep = await Tarefa.findById(b.tarefa._id).lean();
     expect(dep.utilizador_id).toBeNull();
     expect(dep.equipa_atribuida).toHaveLength(0);
     expect(dep.estado).toBe('nao_atribuida');
-    expect(dep.motivo_nao_atribuicao).toMatch(/Lotação/);
+    expect(dep.motivo_nao_atribuicao).toMatch(/horário/);
     expect(dep.tipo_limpeza).toBe('profunda');
     expect(await Notificacao.countDocuments({ utilizador_id: m.ges._id, mensagem: /já não cabe/ })).toBe(1);
   });
