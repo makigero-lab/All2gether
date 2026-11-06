@@ -58,8 +58,19 @@ const reservaManualSchema = new mongoose.Schema(
       ref: 'Tarefa',
       default: null,
     },
+    // Chave de idempotência enviada pelo cliente (o `tmp` da linha no rascunho do
+    // parceiro): se a resposta se perder, o "Gravar" seguinte reenvia a mesma
+    // chave e não cria uma segunda reserva/limpeza. Só existe em reservas novas.
+    chave_idempotencia: { type: String, default: undefined, maxlength: 100 },
   },
   { timestamps: true }
+);
+
+// Único por parceiro, parcial: só documentos que têm a chave (os antigos não têm
+// o campo, por isso a criação do índice nunca falha com dados já existentes).
+reservaManualSchema.index(
+  { parceiro_id: 1, chave_idempotencia: 1 },
+  { unique: true, partialFilterExpression: { chave_idempotencia: { $type: 'string' } } }
 );
 
 module.exports = mongoose.model('ReservaManual', reservaManualSchema);

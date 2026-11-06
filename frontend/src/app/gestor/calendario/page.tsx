@@ -47,6 +47,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { adminGet, adminPost, adminPatch, type PropriedadeDTO, type UtilizadorDTO } from "@/lib/api";
+import { textoEquipaGestor, textoFalta } from "@/lib/equipa";
 
 /* ------------------------------------------------------------------ */
 /* Tipos                                                               */
@@ -56,6 +57,8 @@ interface TarefaCalendario {
   _id: string;
   propriedade_id: { _id: string; nome: string; morada?: string } | null;
   utilizador_id: { _id: string; nome: string } | null;
+  equipa_atribuida?: { _id?: string; nome: string }[] | null;
+  pessoas_em_falta?: number;
   data: string;
   tempo_limpeza_minutos: number;
   tipo: string;
@@ -299,6 +302,8 @@ export default function CalendarioOperacionalPage() {
 
   // SSR-safe mount: FullCalendar só pode ser renderizado no cliente.
   const [mounted, setMounted] = useState(false);
+  // Telemóvel: abre na vista Dia (a semana não cabe). O utilizador pode mudar; desktop inalterado.
+  const [vistaInicialCal, setVistaInicialCal] = useState<"timeGridWeek" | "timeGridDay">("timeGridWeek");
 
   // Período atual do calendário (definido via datesSet do FullCalendar).
   const [periodo, setPeriodo] = useState<PeriodoState | null>(null);
@@ -322,6 +327,9 @@ export default function CalendarioOperacionalPage() {
 
   /* --- Marca montação no cliente (inibe o SSR do FullCalendar) --- */
   useEffect(() => {
+    if (typeof window !== "undefined" && window.matchMedia("(max-width: 639px)").matches) {
+      setVistaInicialCal("timeGridDay");
+    }
     setMounted(true);
   }, []);
 
@@ -704,14 +712,16 @@ export default function CalendarioOperacionalPage() {
             aria-hidden
           />
           <span className="fc-evt-month__time">{arg.timeText}</span>
-          <span className="fc-evt-month__title" title={titulo}>
-            {emoji} {titulo}
+          <span className="fc-evt-month__title" title={textoFalta(t.pessoas_em_falta) ? `${titulo} · ${textoFalta(t.pessoas_em_falta)}` : titulo}>
+            {emoji} {titulo}{(t.pessoas_em_falta ?? 0) > 0 ? " ⚠" : ""}
           </span>
         </div>
       );
     }
 
     // --- Vistas semanal/diária: bloco rico com título + subtítulo ---
+    const equipaTexto = textoEquipaGestor(t.utilizador_id, t.equipa_atribuida);
+    const faltaTexto = textoFalta(t.pessoas_em_falta);
     const blockClass = t.alerta_orfao
       ? "fc-evt-block fc-evt-block--orfao"
       : isPorAtribuir
@@ -741,7 +751,8 @@ export default function CalendarioOperacionalPage() {
           ) : staff ? (
             <>
               <User className="fc-evt-block__icon" />
-              <span>{primeiroNome(staff)}</span>
+              <span title={equipaTexto ?? undefined}>{equipaTexto ?? primeiroNome(staff)}</span>
+              {faltaTexto && <span className="fc-evt-block__unassigned"> · {faltaTexto}</span>}
             </>
           ) : (
             <span className="fc-evt-block__unassigned">⚠️ {rotuloEstado}</span>
@@ -887,8 +898,8 @@ export default function CalendarioOperacionalPage() {
           ? res.mensagem ?? "Não há tarefas por atribuir a partir de hoje."
           : `Foram reatribuídas ${res.reatribuidas} tarefa(s). ` +
             (res.orfas > 0
-              ? `${res.orfas} continuam órfãs (sem staff disponível).`
-              : "Nenhuma ficou órfã. ✅");
+              ? `${res.orfas} continuam por atribuir (sem staff disponível).`
+              : "Nenhuma ficou por atribuir. ✅");
       setAutoAtribuirResultado(msg);
 
       // Atualiza o calendário para mostrar os blocos a mudarem de vermelho para as cores dos funcionários.
@@ -1333,7 +1344,7 @@ export default function CalendarioOperacionalPage() {
           {mounted ? (
             <FullCalendar
               plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
-              initialView="timeGridWeek"
+              initialView={vistaInicialCal}
               locale={ptLocale}
               timeZone="local"
               headerToolbar={{
@@ -1430,8 +1441,11 @@ export default function CalendarioOperacionalPage() {
                         {formatarReserva(t.detalhes_reserva, t.data)}
                       </td>
                       <td className="px-4 py-3">
-                        {t.utilizador_id?.nome ?? (
+                        {textoEquipaGestor(t.utilizador_id, t.equipa_atribuida) ?? (
                           <span className="text-amber-600 dark:text-amber-400">Por Atribuir</span>
+                        )}
+                        {textoFalta(t.pessoas_em_falta) && (
+                          <span className="block text-xs font-medium text-amber-700 dark:text-amber-400">{textoFalta(t.pessoas_em_falta)}</span>
                         )}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
@@ -1887,7 +1901,7 @@ export default function CalendarioOperacionalPage() {
                 onChange={(e) => setNovaForm((f) => ({ ...f, utilizador_id: e.target.value }))}
                 className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
               >
-                <option value="">— Por atribuir (deixar órfã) —</option>
+                <option value="">— Por atribuir (sem responsável) —</option>
                 {equipa.map((u) => (
                   <option key={u._id} value={u._id}>{u.nome}</option>
                 ))}

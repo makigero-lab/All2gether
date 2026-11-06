@@ -18,6 +18,8 @@ const Propriedade = require('../models/Propriedade');
 const Tarefa = require('../models/Tarefa');
 const Utilizador = require('../models/Utilizador');
 const Ausencia = require('../models/Ausencia');
+const { diagnosticarFaltaDeStaff } = require('../utils/atribuicaoAutomatica');
+const { autoAtribuicaoEmergencia } = require('../jobs/caoGuarda');
 
 let mongod;
 let n = 0;
@@ -103,5 +105,46 @@ describe('dashboard: tarefasPorAtribuir', () => {
     expect(r.status).toBe(200);
     expect(r.body.tarefasPorAtribuir).toBe(2);
     expect(r.body.checkinsEmRisco.total).toBeLessThanOrEqual(2);
+  });
+});
+
+describe('diagnóstico partilhado e outros caminhos', () => {
+  const range = (dia) => ({ start: new Date(`${dia}T00:00:00Z`), end: new Date(new Date(`${dia}T00:00:00Z`).getTime() + 86400000) });
+
+  test('diagnosticarFaltaDeStaff distingue sem equipa, ausência e lotação', async () => {
+    const vazia = await Empresa.create({ nome: 'Vazia' + ++n });
+    expect((await diagnosticarFaltaDeStaff(vazia._id, range('2033-04-01'))).causa).toBe('sem_equipa');
+
+    const { e, ana } = await cenario();
+    expect((await diagnosticarFaltaDeStaff(e._id, range('2033-04-01'))).causa).toBe('lotacao');
+    await Ausencia.create({ utilizador_id: ana._id, empresa_id: e._id, data_inicio: new Date('2033-04-01T00:00:00Z'), data_fim: new Date('2033-04-01T00:00:00Z'), tipo: 'ferias', estado: 'aprovada' });
+    const d = await diagnosticarFaltaDeStaff(e._id, range('2033-04-01'));
+    expect(d.causa).toBe('indisponivel');
+    expect(d.estado).toBe('por_atribuir');
+  });
+
+  test('parceiro: reserva com toda a equipa ausente fica por atribuir com o motivo real', async () => {
+    const { e, ana, p } = await cenario();
+    const parceiro = await Utilizador.create({ nome: 'Par', email: `par${++n}@x.pt`, password_hash: hash, empresa_id: e._id, role: 'parceiro', ativo: true });
+    await Propriedade.updateOne({ _id: p._id }, { parceiro_id: parceiro._id });
+    await Ausencia.create({ utilizador_id: ana._id, empresa_id: e._id, data_inicio: new Date('2033-05-10T00:00:00Z'), data_fim: new Date('2033-05-10T00:00:00Z'), tipo: 'ferias', estado: 'aprovada' });
+    const tk = (await request(app).post('/api/auth/login').send({ email: parceiro.email, password: 'p-de-teste-123' })).body.token;
+    const r = await request(app).post('/api/parceiro/reservas').set(auth(tk)).send({ propriedade_id: String(p._id), check_in: '2033-05-08', check_out: '2033-05-10' });
+    expect(r.status).toBe(201);
+    const t = await Tarefa.findOne({ propriedade_id: p._id });
+    expect(t.estado).toBe('por_atribuir');
+    expect(t.motivo_nao_atribuicao).toMatch(/ausente, de folga/);
+    expect(t.motivo_nao_atribuicao).not.toMatch(/lotação/i);
+  });
+
+  test('cão de guarda: equipa ausente amanhã não vira nao_atribuida e grava o motivo real', async () => {
+    const { e, ana, tarefa } = await cenario();
+    const amanha = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+    await Ausencia.create({ utilizador_id: ana._id, empresa_id: e._id, data_inicio: new Date(`${amanha}T00:00:00Z`), data_fim: new Date(`${amanha}T00:00:00Z`), tipo: 'ferias', estado: 'aprovada' });
+    const t = await tarefa(amanha);
+    await autoAtribuicaoEmergencia();
+    const d = await Tarefa.findById(t._id);
+    expect(d.estado).toBe('por_atribuir');
+    expect(d.motivo_nao_atribuicao).toMatch(/ausente, de folga/);
   });
 });

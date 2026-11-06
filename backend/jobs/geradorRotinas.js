@@ -24,8 +24,8 @@ const cron = require('node-cron');
 const mongoose = require('mongoose');
 const Propriedade = require('../models/Propriedade');
 const Tarefa = require('../models/Tarefa');
-const { obterRangeDia, calcularInicioTarefaUtilizador } = require('../utils/scheduler');
-const { determinarUtilizadorAtribuido, determinarEquipaAtribuida } = require('../utils/loadBalancer');
+const { obterRangeDia } = require('../utils/scheduler');
+const { planearAtribuicao } = require('../utils/atribuicaoAutomatica');
 
 const DIAS_SEMANA = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 
@@ -122,77 +122,33 @@ async function executarGeradorRotinas() {
           `(staff_necessario=${staffNecessario}).`
       );
 
-      // Submete ao Load Balancer.
+      // Atribuição com o motor partilhado (staff_necessario, scheduler, motivo real).
       try {
-        if (staffNecessario > 1) {
-          // Múltiplos staff — usar determinarEquipaAtribuida.
-          const resultadoEquipa = await determinarEquipaAtribuida(
-            empresaId,
-            rangeAmanha,
-            propriedade.coordenadas,
-            tempoLimpeza,
-            propriedade._id,
-            staffNecessario
-          );
-
-          if (resultadoEquipa && resultadoEquipa.equipa.length > 0) {
-            const equipaIds = resultadoEquipa.equipa.map((e) => e.utilizadorId);
-            const vencedorId = equipaIds[0];
-
-            novaTarefa.utilizador_id = vencedorId;
-            novaTarefa.equipa_atribuida = equipaIds;
-            novaTarefa.estado = 'atribuida';
-            novaTarefa.tempo_viagem_minutos = Number(resultadoEquipa.equipa[0].tempoViagem) || 0;
-
-            if (resultadoEquipa.insuficiente) {
-              novaTarefa.alerta = `Equipa parcial: ${equipaIds.length}/${staffNecessario} elementos disponíveis`;
-            }
-
-            await novaTarefa.save();
-            atribuidas++;
-            console.log(
-              `✅ [GeradorRotinas] "${propriedade.nome}" atribuída a equipa de ${equipaIds.length} staff.`
-            );
-          } else {
-            console.log(
-              `⚠️  [GeradorRotinas] "${propriedade.nome}" — LB não encontrou equipa. Tarefa por_atribuir.`
-            );
+        const plano = await planearAtribuicao({
+          empresaId, propriedade, dia: rangeAmanha.start, tempoLimpeza,
+        });
+        if (plano.estado === 'atribuida') {
+          novaTarefa.utilizador_id = plano.utilizador_id;
+          novaTarefa.equipa_atribuida = plano.equipa_atribuida;
+          novaTarefa.data = plano.data;
+          novaTarefa.tempo_viagem_minutos = plano.tempo_viagem_minutos;
+          novaTarefa.estado = 'atribuida';
+          novaTarefa.pessoas_em_falta = plano.faltam;
+          if (plano.faltam > 0) {
+            novaTarefa.alerta = `Equipa parcial: ${plano.equipa_atribuida.length}/${staffNecessario} elementos disponíveis`;
           }
+          await novaTarefa.save();
+          atribuidas++;
+          console.log(
+            `✅ [GeradorRotinas] "${propriedade.nome}" atribuída a ${plano.equipa_atribuida.length} staff.`
+          );
         } else {
-          // 1 staff — usar determinarUtilizadorAtribuido.
-          const resultadoLB = await determinarUtilizadorAtribuido(
-            empresaId,
-            rangeAmanha,
-            propriedade.coordenadas,
-            tempoLimpeza,
-            propriedade._id
+          novaTarefa.estado = plano.estado;
+          novaTarefa.motivo_nao_atribuicao = plano.motivo_nao_atribuicao;
+          await novaTarefa.save();
+          console.log(
+            `⚠️  [GeradorRotinas] "${propriedade.nome}" — sem staff (${plano.motivo_nao_atribuicao}). Tarefa ${plano.estado}.`
           );
-
-          if (resultadoLB) {
-            novaTarefa.utilizador_id = resultadoLB.utilizadorId;
-            novaTarefa.equipa_atribuida = [resultadoLB.utilizadorId];
-            try {
-              // Hora sequencial (antes todas as rotinas do mesmo staff ficavam às 10:00 UTC).
-              const ini = await calcularInicioTarefaUtilizador(
-                resultadoLB.utilizadorId, rangeAmanha.start, propriedade.coordenadas, tempoLimpeza
-              );
-              if (ini?.data) {
-                novaTarefa.data = ini.data;
-                if (ini.tempoViagem) novaTarefa.tempo_viagem_minutos = Number(ini.tempoViagem) || 0;
-              }
-            } catch (e) { /* mantém 10:00 UTC */ }
-            novaTarefa.estado = 'atribuida';
-            novaTarefa.tempo_viagem_minutos = Number(resultadoLB.tempoViagem) || 0;
-            await novaTarefa.save();
-            atribuidas++;
-            console.log(
-              `✅ [GeradorRotinas] "${propriedade.nome}" atribuída a staff ${resultadoLB.utilizadorId}.`
-            );
-          } else {
-            console.log(
-              `⚠️  [GeradorRotinas] "${propriedade.nome}" — LB não encontrou staff. Tarefa por_atribuir.`
-            );
-          }
         }
       } catch (lbErr) {
         console.error(

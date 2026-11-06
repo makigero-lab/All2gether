@@ -16,9 +16,31 @@ const Tarefa = require('../models/Tarefa');
 const Ausencia = require('../models/Ausencia');
 const Propriedade = require('../models/Propriedade');
 const { JWT_SECRET } = require('../middleware/auth');
+const { comMembro } = require('../utils/equipaTarefa');
 
 // Tempo de expiração do token (pode ser overridden por env).
 const TOKEN_EXPIRACAO = process.env.JWT_EXPIRACAO || '7d';
+
+/**
+ * Junta `equipa_nomes` a cada tarefa: [{ _id, nome, responsavel }] (responsável
+ * primeiro). Só o nome (sem contactos): é para o staff saber com quem trabalha.
+ */
+async function juntarNomesEquipa(tarefas, meuId = null) {
+  const { idsEquipa } = require('../utils/equipaTarefa');
+  const Utilizador = require('../models/Utilizador');
+  const todos = new Set();
+  for (const t of tarefas) idsEquipa(t).forEach((i) => todos.add(i));
+  if (todos.size === 0) return tarefas.map((t) => ({ ...t, equipa_nomes: [] }));
+  const us = await Utilizador.find({ _id: { $in: [...todos] } }).select('nome').lean();
+  const nomes = new Map(us.map((u) => [String(u._id), u.nome]));
+  return tarefas.map((t) => {
+    const ids = idsEquipa(t);
+    return {
+      ...t,
+      equipa_nomes: ids.map((id, i) => ({ _id: id, nome: nomes.get(id) || 'Colega', responsavel: i === 0, eu: !!meuId && String(meuId) === id })),
+    };
+  });
+}
 
 /**
  * POST /api/auth/login
@@ -173,11 +195,10 @@ exports.meuCalendario = async (req, res) => {
     );
 
     // Tarefas do utilizador a partir de hoje (não canceladas).
-    const tarefas = await Tarefa.find({
-      utilizador_id: utilizadorId,
+    const tarefas = await Tarefa.find(comMembro({
       data: { $gte: hoje },
       estado: { $ne: 'cancelada' },
-    })
+    }, utilizadorId))
       .populate({ path: 'propriedade_id', select: 'nome' })
       .sort({ data: 1 })
       .lean();
@@ -190,7 +211,7 @@ exports.meuCalendario = async (req, res) => {
       .sort({ data_inicio: 1 })
       .lean();
 
-    return res.status(200).json({ tarefas, ausencias });
+    return res.status(200).json({ tarefas: await juntarNomesEquipa(tarefas, utilizadorId), ausencias });
   } catch (err) {
     console.error('❌ meuCalendario:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
@@ -220,11 +241,10 @@ exports.minhasTarefas = async (req, res) => {
     // poder navegar para dias anteriores e rever tarefas concluídas.
     const limitePassado = new Date(hoje.getTime() - 30 * 24 * 60 * 60 * 1000);
 
-    const tarefas = await Tarefa.find({
-      utilizador_id: req.user.id,
+    const tarefas = await Tarefa.find(comMembro({
       data: { $gte: limitePassado },
       estado: { $ne: 'cancelada' },
-    })
+    }, req.user.id))
       .populate({ path: 'propriedade_id', select: 'nome morada coordenadas checklist capacidade_hospedes observacoes' })
       .sort({ data: 1 })
       .lean();
@@ -244,7 +264,7 @@ exports.minhasTarefas = async (req, res) => {
       const tarefaAnterior = tarefas.find((outra) => {
         if (String(outra._id) === String(t._id)) return false;
         if (!outra.utilizador_id || !outra.propriedade_id) return false;
-        if (String(outra.utilizador_id) !== String(t.utilizador_id)) return false;
+        // (todas as tarefas desta lista são do próprio utilizador, responsável ou não)
         const diaOutra = new Date(outra.data).toISOString().slice(0, 10);
         return diaOutra === diaStr && new Date(outra.data).getTime() < diaTarefa.getTime();
       });
@@ -258,7 +278,7 @@ exports.minhasTarefas = async (req, res) => {
       return { ...t, tempo_viagem_minutos: 0 };
     });
 
-    return res.status(200).json({ tarefas: tarefasComViagem });
+    return res.status(200).json({ tarefas: await juntarNomesEquipa(tarefasComViagem, req.user.id) });
   } catch (err) {
     console.error('❌ minhasTarefas:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
@@ -285,10 +305,7 @@ exports.minhaTarefaDetalhe = async (req, res) => {
       return res.status(400).json({ erro: 'ID inválido.' });
     }
 
-    const tarefa = await Tarefa.findOne({
-      _id: id,
-      utilizador_id: req.user.id,
-    })
+    const tarefa = await Tarefa.findOne(comMembro({ _id: id }, req.user.id))
       // Prompt 114 — Inclui capacidade_hospedes para destaque no detalhe.
       // Prompt 133 — Inclui modelo_checklist_id e observacoes.
       .populate({ path: 'propriedade_id', select: 'nome morada coordenadas checklist capacidade_hospedes observacoes modelo_checklist_id' })
@@ -340,11 +357,10 @@ exports.minhaTarefaDetalhe = async (req, res) => {
       try {
         const { calcularTempoViagem, obterRangeDia } = require('../utils/scheduler');
         const range = obterRangeDia(new Date(tarefa.data));
-        const tarefaAnterior = await Tarefa.findOne({
-          utilizador_id: tarefa.utilizador_id,
+        const tarefaAnterior = await Tarefa.findOne(comMembro({
           data: { $gte: range.start, $lt: tarefa.data },
           estado: { $nin: ['cancelada'] },
-        })
+        }, req.user.id))
           .populate({ path: 'propriedade_id', select: 'coordenadas' })
           .sort({ data: -1 })
           .lean();
@@ -362,7 +378,8 @@ exports.minhaTarefaDetalhe = async (req, res) => {
       }
     }
 
-    return res.status(200).json({ tarefa });
+    const [comEquipa] = await juntarNomesEquipa([tarefa], req.user.id);
+    return res.status(200).json({ tarefa: comEquipa });
   } catch (err) {
     console.error('❌ minhaTarefaDetalhe:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
@@ -391,10 +408,7 @@ exports.concluirMinhaTarefa = async (req, res) => {
       return res.status(400).json({ erro: 'ID inválido.' });
     }
 
-    const tarefa = await Tarefa.findOne({
-      _id: id,
-      utilizador_id: req.user.id,
-    });
+    const tarefa = await Tarefa.findOne(comMembro({ _id: id }, req.user.id));
 
     if (!tarefa) {
       return res.status(404).json({ erro: 'Tarefa não encontrada.' });
@@ -403,17 +417,23 @@ exports.concluirMinhaTarefa = async (req, res) => {
     if (tarefa.estado === 'concluida') {
       return res.status(400).json({ erro: 'Tarefa já concluída.' });
     }
-
-    // Atualiza estado e guarda observações.
-    tarefa.estado = 'concluida';
-    tarefa.concluida_em = new Date();
-    if (req.body?.observacoes !== undefined) {
-      tarefa.observacoes = String(req.body.observacoes || '');
+    if (tarefa.estado === 'cancelada') {
+      return res.status(400).json({ erro: 'Não podes concluir uma tarefa cancelada.' });
     }
 
-    await tarefa.save();
+    // Atómico: conclusão simultânea dá 400 "já concluída" em vez de 500.
+    const set = { estado: 'concluida', concluida_em: new Date() };
+    if (req.body?.observacoes !== undefined) set.observacoes = String(req.body.observacoes || '');
+    const atualizada = await Tarefa.findOneAndUpdate(
+      comMembro({ _id: id, estado: { $nin: ['concluida', 'cancelada'] } }, req.user.id),
+      { $set: set },
+      { new: true }
+    );
+    if (!atualizada) {
+      return res.status(400).json({ erro: 'Tarefa já concluída (ou entretanto cancelada).' });
+    }
 
-    const resp = tarefa.toObject();
+    const resp = atualizada.toObject();
     delete resp.password_hash;
 
     return res.status(200).json({ tarefa: resp });

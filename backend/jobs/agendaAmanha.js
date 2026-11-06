@@ -24,6 +24,7 @@
 
 const cron = require('node-cron');
 const Tarefa = require('../models/Tarefa');
+const { membrosPopulados } = require('../utils/equipaTarefa');
 // Nota: notificarUtilizador é carregado via require lazy dentro da função
 // (e não no topo) para permitir que os testes façam jest.spyOn do módulo
 // 'utils/notificar' e interceptem as chamadas. Se fosse importado no topo,
@@ -61,6 +62,10 @@ async function executarAgendaAmanha() {
         path: 'utilizador_id',
         select: 'nome ativo eliminado_em',
       })
+      .populate({
+        path: 'equipa_atribuida',
+        select: 'nome ativo eliminado_em',
+      })
       .lean();
 
     if (tarefas.length === 0) {
@@ -73,16 +78,18 @@ async function executarAgendaAmanha() {
     //    (utilizador_id = null) não têm destinatário → não geram push.
     const porUtilizador = new Map();
 
+    // Todos os membros da equipa (não só o responsável) recebem a agenda.
     for (const t of tarefas) {
-      const u = t.utilizador_id;
-      // Ignora tarefas sem utilizador, eliminados ou inativos.
-      if (!u || u.eliminado_em || !u.ativo) continue;
+      for (const u of membrosPopulados(t)) {
+        // Ignora eliminados ou inativos.
+        if (u.eliminado_em || !u.ativo) continue;
 
-      const key = String(u._id);
-      if (!porUtilizador.has(key)) {
-        porUtilizador.set(key, { utilizador: u, tarefas: [] });
+        const key = String(u._id);
+        if (!porUtilizador.has(key)) {
+          porUtilizador.set(key, { utilizador: u, tarefas: [] });
+        }
+        porUtilizador.get(key).tarefas.push(t);
       }
-      porUtilizador.get(key).tarefas.push(t);
     }
 
     if (porUtilizador.size === 0) {

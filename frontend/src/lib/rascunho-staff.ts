@@ -9,7 +9,8 @@
 
 export const MSG_SEM_LIGACAO = "Sem ligação. Os dados continuam aqui, tenta outra vez.";
 
-const PREFIXO = "a2g_rascunho_tarefa_";
+export const PREFIXO_RASCUNHO = "a2g_rascunho_tarefa_";
+const PREFIXO = PREFIXO_RASCUNHO;
 
 /** True se o erro parece falha de rede (fetch rejeitado / offline). */
 export function eErroDeRede(e: unknown): boolean {
@@ -57,6 +58,39 @@ export function limparRascunho(tarefaId: string): void {
     localStorage.removeItem(PREFIXO + tarefaId);
   } catch {
     // ignora
+  }
+}
+
+/** Rascunho do texto de uma avaria (nunca as fotos), por tarefa. */
+export function lerRascunhoAvaria(tarefaId: string): string {
+  try {
+    const t = localStorage.getItem(PREFIXO + "avaria_" + tarefaId);
+    return typeof t === "string" ? t.slice(0, 2000) : "";
+  } catch {
+    return "";
+  }
+}
+
+export function guardarRascunhoAvaria(tarefaId: string, texto: string): void {
+  try {
+    if (!texto.trim()) localStorage.removeItem(PREFIXO + "avaria_" + tarefaId);
+    else localStorage.setItem(PREFIXO + "avaria_" + tarefaId, texto.slice(0, 2000));
+  } catch {
+    // ignora
+  }
+}
+
+/** Quantos rascunhos há guardados neste aparelho (para avisar antes de sair). */
+export function contarRascunhos(): number {
+  try {
+    let n = 0;
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(PREFIXO)) n++;
+    }
+    return n;
+  } catch {
+    return 0;
   }
 }
 

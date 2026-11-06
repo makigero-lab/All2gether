@@ -68,7 +68,9 @@ export interface TarefaDetalheGestor {
   // Prompt 137 — Tempo de viagem (para mostrar badge no detalhe).
   tempo_viagem_minutos?: number | null;
   propriedade_id?: { nome: string; morada?: string; capacidade_hospedes?: number | null } | null;
-  utilizador_id?: { nome: string } | null;
+  utilizador_id?: { _id?: string; nome: string } | null;
+  equipa_atribuida?: { _id?: string; nome: string }[] | null;
+  pessoas_em_falta?: number;
 }
 
 /**
@@ -230,12 +232,28 @@ export function DetalheTarefaModal({
                   {tarefa.propriedade_id.morada}
                 </span>
               )}
-              {tarefa.utilizador_id?.nome && (
-                <span className="flex items-center gap-1">
-                  <User className="h-4 w-4" />
-                  {tarefa.utilizador_id.nome}
-                </span>
-              )}
+              {(() => {
+                // Equipa completa (responsável primeiro, sem repetidos).
+                const vistos = new Set<string>();
+                const nomes: string[] = [];
+                for (const m of [tarefa.utilizador_id, ...(tarefa.equipa_atribuida ?? [])]) {
+                  if (!m?.nome || vistos.has(m._id ?? m.nome)) continue;
+                  vistos.add(m._id ?? m.nome);
+                  nomes.push(m.nome);
+                }
+                if (nomes.length === 0) return null;
+                return (
+                  <span className="flex items-center gap-1">
+                    <User className="h-4 w-4" />
+                    {nomes.length > 1 ? `${nomes[0]} (resp.) + ${nomes.slice(1).join(" + ")}` : nomes[0]}
+                    {(tarefa.pessoas_em_falta ?? 0) > 0 && (
+                      <span className="font-medium text-amber-700 dark:text-amber-400">
+                        {" "}· falta {tarefa.pessoas_em_falta} {tarefa.pessoas_em_falta === 1 ? "pessoa" : "pessoas"}
+                      </span>
+                    )}
+                  </span>
+                );
+              })()}
             </div>
 
             {/* Prompt 137 — Badge de tempo de viagem estimado.

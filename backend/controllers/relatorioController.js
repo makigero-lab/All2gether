@@ -11,6 +11,7 @@ const mongoose = require('mongoose');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const crypto = require('crypto');
 const Tarefa = require('../models/Tarefa');
+const { EXPR_MEMBROS } = require('../utils/equipaTarefa');
 const Utilizador = require('../models/Utilizador');
 const Propriedade = require('../models/Propriedade');
 const { obterEmpresaId } = require('./gestorController');
@@ -170,9 +171,12 @@ exports.getRelatorioProdutividade = async (req, res) => {
     /* ---- Por staff (produtividade individual) ---- */
     const porStaffAgg = await Tarefa.aggregate([
       { $match: { ...matchBase, estado: { $ne: 'cancelada' } } },
+      // Produtividade por pessoa: cada membro da equipa conta a tarefa e a carga.
+      { $addFields: { _membros: EXPR_MEMBROS } },
+      { $unwind: { path: '$_membros', preserveNullAndEmptyArrays: true } },
       {
         $group: {
-          _id: '$utilizador_id',
+          _id: '$_membros',
           total: { $sum: 1 },
           concluidas: {
             $sum: { $cond: [{ $eq: ['$estado', 'concluida'] }, 1, 0] },

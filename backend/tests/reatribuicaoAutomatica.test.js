@@ -140,7 +140,8 @@ describe('reatribuição automática após ausência', () => {
     const original = Tarefa.find.bind(Tarefa);
     jest.spyOn(Tarefa, 'find').mockImplementation((filtro, ...resto) => {
       // a pesquisa de "por atribuir" da reatribuição rebenta; as restantes seguem normalmente
-      if (filtro && filtro.estado && Array.isArray(filtro.estado.$in) && filtro.estado.$in.includes('nao_atribuida')) {
+      const buscaPorAtribuir = (c) => c && c.estado && Array.isArray(c.estado.$in) && c.estado.$in.includes('nao_atribuida');
+      if (buscaPorAtribuir(filtro) || (filtro && Array.isArray(filtro.$or) && filtro.$or.some(buscaPorAtribuir))) {
         throw new Error('falha simulada');
       }
       return original(filtro, ...resto);

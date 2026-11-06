@@ -14,7 +14,9 @@ const Ausencia = require('../models/Ausencia');
 const Utilizador = require('../models/Utilizador');
 const Tarefa = require('../models/Tarefa');
 const Propriedade = require('../models/Propriedade');
-const { notificarUtilizador } = require('../utils/notificar');
+const { notificarUtilizador, avisarGestores } = require('../utils/notificar');
+const { preencherVagaTarefa } = require('../utils/atribuicaoAutomatica');
+const { comMembro, retirarMembroDoc } = require('../utils/equipaTarefa');
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -485,10 +487,7 @@ exports.concluirTarefa = async (req, res) => {
     }
 
     // Verifica se a tarefa pertence ao utilizador logado.
-    const tarefa = await Tarefa.findOne({
-      _id: id,
-      utilizador_id: utilizadorId,
-    });
+    const tarefa = await Tarefa.findOne(comMembro({ _id: id }, utilizadorId));
 
     if (!tarefa) {
       return res.status(404).json({
@@ -524,31 +523,40 @@ exports.concluirTarefa = async (req, res) => {
     }
 
     // Atualiza estado + timestamps + observações do staff + fotos.
+    // Atómico: com dois membros a concluir ao mesmo tempo só o primeiro grava;
+    // o segundo recebe 400 "já concluída" (e não 500 por VersionError).
     const agora = new Date();
-    tarefa.estado = 'concluida';
-    tarefa.concluida_em = agora;
-    tarefa.hora_conclusao = agora;
-    tarefa.data_conclusao = agora; // HF19 — para o cron job de limpeza
-    tarefa.fotos_conclusao = fotosNormalizadas; // HF19 — fotos da conclusão
+    const set = {
+      estado: 'concluida',
+      concluida_em: agora,
+      hora_conclusao: agora,
+      data_conclusao: agora, // HF19 — para o cron job de limpeza
+      fotos_conclusao: fotosNormalizadas, // HF19 — fotos da conclusão
+    };
 
     if (req.body?.observacoes_staff !== undefined) {
-      tarefa.observacoes_staff = String(req.body.observacoes_staff || '');
+      set.observacoes_staff = String(req.body.observacoes_staff || '');
     }
     // Retrocompatibilidade: também aceita "observacoes" (campo legacy).
     if (req.body?.observacoes !== undefined) {
-      tarefa.observacoes = String(req.body.observacoes || '');
+      set.observacoes = String(req.body.observacoes || '');
     }
     // FIX (portal lavandaria) — Sacos de roupa suja recolhidos pelo staff.
-    // Preenchido no modal de conclusão; usado pelo portal do fornecedor para
-    // saber quantos sacos de roupa suja irão para a lavandaria.
     if (req.body?.sacos_roupa_suja !== undefined) {
       const n = Number(req.body.sacos_roupa_suja);
-      tarefa.sacos_roupa_suja = Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
+      set.sacos_roupa_suja = Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
     }
 
-    await tarefa.save();
+    const atualizada = await Tarefa.findOneAndUpdate(
+      comMembro({ _id: id, estado: { $nin: ['concluida', 'cancelada'] } }, utilizadorId),
+      { $set: set },
+      { new: true }
+    );
+    if (!atualizada) {
+      return res.status(400).json({ erro: 'Tarefa já concluída (ou entretanto cancelada).' });
+    }
 
-    return res.status(200).json({ tarefa });
+    return res.status(200).json({ tarefa: atualizada });
   } catch (err) {
     console.error('❌ concluirTarefa:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
@@ -603,10 +611,7 @@ exports.reportarAvaria = async (req, res) => {
         .map((f) => f.trim());
     }
 
-    const tarefa = await Tarefa.findOne({
-      _id: id,
-      utilizador_id: utilizadorId,
-    });
+    const tarefa = await Tarefa.findOne(comMembro({ _id: id }, utilizadorId));
 
     if (!tarefa) {
       return res.status(404).json({
@@ -753,10 +758,7 @@ exports.reportarAtraso = async (req, res) => {
     // --- Validação de pertença (Prompt 77, ponto 3) ---
     // A tarefa tem de pertencer ao req.user.id.findOne com utilizador_id
     // garante que staff só mexe nas suas tarefas (404 se não for dele).
-    const tarefa = await Tarefa.findOne({
-      _id: id,
-      utilizador_id: utilizadorId,
-    });
+    const tarefa = await Tarefa.findOne(comMembro({ _id: id }, utilizadorId));
     if (!tarefa) {
       return res.status(404).json({
         erro: 'Tarefa não encontrada (ou não te está atribuída).',
@@ -780,11 +782,10 @@ exports.reportarAtraso = async (req, res) => {
     );
     const fimDia = new Date(inicioDia.getTime() + 24 * 60 * 60 * 1000);
 
-    const tarefasDoDia = await Tarefa.find({
-      utilizador_id: utilizadorId,
+    const tarefasDoDia = await Tarefa.find(comMembro({
       data: { $gte: inicioDia, $lt: fimDia },
       estado: { $nin: ['cancelada', 'concluida'] },
-    }).lean();
+    }, utilizadorId)).lean();
 
     const cargaTotal = tarefasDoDia.reduce(
       (acc, t) => acc + t.tempo_limpeza_minutos,
@@ -796,19 +797,44 @@ exports.reportarAtraso = async (req, res) => {
     let tarefaDesatribuidaId = null;
 
     if (cargaTotal > CAPACIDADE_ATRASO_MINUTOS) {
-      const ultimaTarefa = await Tarefa.findOne({
-        utilizador_id: utilizadorId,
+      // Só 'atribuida' (nunca 'em_curso') e só sai quem atrasou: os restantes
+      // membros da equipa ficam na tarefa.
+      const ultimaTarefa = await Tarefa.findOne(comMembro({
         data: { $gte: inicioDia, $lt: fimDia },
-        estado: { $nin: ['cancelada', 'concluida'] },
+        estado: 'atribuida',
         _id: { $ne: tarefa._id },
-      }).sort({ createdAt: -1 });
+      }, utilizadorId)).sort({ createdAt: -1 });
 
       if (ultimaTarefa) {
-        ultimaTarefa.utilizador_id = null;
-        ultimaTarefa.estado = 'por_atribuir';
+        const ficouSemEquipa = retirarMembroDoc(ultimaTarefa, utilizadorId);
         await ultimaTarefa.save();
         cascataDesatribuida = true;
         tarefaDesatribuidaId = String(ultimaTarefa._id);
+
+        // Avisa o gestor e (se a equipa não ficou vazia) procura substituto só para a vaga.
+        try {
+          const prop = await Propriedade.findById(ultimaTarefa.propriedade_id)
+            .select('nome coordenadas staff_necessario')
+            .lean();
+          const nomeProp = prop?.nome ?? 'uma propriedade';
+          let texto;
+          if (ficouSemEquipa) {
+            texto = `${req.user.nome || 'Um membro da equipa'} reportou atraso e saiu da limpeza de ${nomeProp}, que ficou por atribuir.`;
+          } else {
+            const v = prop
+              ? await preencherVagaTarefa({ empresaId, tarefa: ultimaTarefa.toObject(), propriedade: prop, excluirExtra: [String(utilizadorId)] })
+              : { novos: [], faltam: 1 };
+            for (const id of v.novos) {
+              notificarUtilizador(String(id), '🧹 Nova Limpeza Atribuída', `Foste escalado para ${nomeProp}.`, '/staff');
+            }
+            texto = v.novos.length > 0 && v.faltam === 0
+              ? `Um membro reportou atraso e saiu da limpeza de ${nomeProp}; já foi substituído automaticamente.`
+              : `Um membro reportou atraso e saiu da limpeza de ${nomeProp}; sem substituto disponível, falta ${v.faltam} ${v.faltam === 1 ? 'pessoa' : 'pessoas'}.`;
+          }
+          await avisarGestores(empresaId, '⚠️ Equipa incompleta por atraso', texto, '/gestor/tarefas');
+        } catch (errAviso) {
+          console.error('⚠️  reportarAtraso: aviso/substituto:', errAviso.message);
+        }
       }
     }
 
@@ -862,10 +888,7 @@ exports.toggleChecklistItem = async (req, res) => {
     }
 
     // Busca a tarefa — só do próprio utilizador.
-    const tarefa = await Tarefa.findOne({
-      _id: id,
-      utilizador_id: utilizadorId,
-    });
+    const tarefa = await Tarefa.findOne(comMembro({ _id: id }, utilizadorId));
 
     if (!tarefa) {
       return res.status(404).json({ erro: 'Tarefa não encontrada.' });

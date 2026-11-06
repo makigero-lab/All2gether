@@ -19,6 +19,8 @@ const Auditoria = require('../models/Auditoria');
 const WebhookLog = require('../models/WebhookLog');
 const { obterCoordenadas } = require('../utils/geocoding');
 const { registarAuditoria } = require('../utils/auditoria');
+const { comMembro, filtroMembro, retirarMembroDoc, membrosPopulados, EXPR_MEMBROS } = require('../utils/equipaTarefa');
+const { FILTRO_SEM_PESSOA } = require('../utils/atribuicaoAutomatica');
 
 /* ------------------------------------------------------------------ */
 /* Helper — obter empresa_id do JWT (req.user)                        */
@@ -105,8 +107,12 @@ exports.getDashboard = async (req, res) => {
       Tarefa.countDocuments({
         empresa_id: empresaId,
         data: { $gte: hojeInicio, $lt: amanhaInicio },
-        // 'nao_atribuida' (nenhuma pessoa coube) também precisa de atenção do gestor.
-        estado: { $in: ['por_atribuir', 'nao_atribuida'] },
+        // 'nao_atribuida' (nenhuma pessoa coube) também precisa de atenção do gestor,
+        // tal como as 'atribuida'/'em_curso' sem ninguém (estado incoerente).
+        $or: [
+          { estado: { $in: ['por_atribuir', 'nao_atribuida'] } },
+          FILTRO_SEM_PESSOA,
+        ],
       }),
       Tarefa.countDocuments({
         empresa_id: empresaId,
@@ -114,6 +120,14 @@ exports.getDashboard = async (req, res) => {
         estado: 'concluida',
       }),
     ]);
+
+    // Limpezas (de hoje em diante) a que falta pelo menos uma pessoa e não houve substituto.
+    const tarefasEquipaIncompleta = await Tarefa.countDocuments({
+      empresa_id: empresaId,
+      data: { $gte: hojeInicio },
+      estado: { $in: ['atribuida', 'em_curso'] },
+      pessoas_em_falta: { $gt: 0 },
+    });
 
     // Carga por staff (aggregate).
     const cargasPorStaff = await Tarefa.aggregate([
@@ -125,9 +139,12 @@ exports.getDashboard = async (req, res) => {
           utilizador_id: { $ne: null },
         },
       },
+      // Cada membro da equipa conta a tarefa e a carga (não só o responsável).
+      { $addFields: { _membros: EXPR_MEMBROS } },
+      { $unwind: '$_membros' },
       {
         $group: {
-          _id: '$utilizador_id',
+          _id: '$_membros',
           tarefas: { $sum: 1 },
           carga_minutos: { $sum: '$tempo_limpeza_minutos' },
         },
@@ -180,6 +197,7 @@ exports.getDashboard = async (req, res) => {
       membrosEquipaAtivos,
       tarefasHoje,
       tarefasPorAtribuir,
+      tarefasEquipaIncompleta,
       tarefasConcluidasHoje,
       tarefasPorStaff,
       checkinsEmRisco,
@@ -478,6 +496,7 @@ exports.getTarefas = async (req, res) => {
       // populam o nome do staff — utilizador_id fica null no resultado,
       // e o frontend trata a tarefa como 'Por Atribuir'.
       .populate({ path: 'utilizador_id', select: 'nome', match: { ativo: true, eliminado_em: null } })
+      .populate({ path: 'equipa_atribuida', select: 'nome', match: { ativo: true, eliminado_em: null } })
       .sort({ data: 1 })
       .lean();
 
@@ -592,11 +611,14 @@ exports.getDadosCalendario = async (req, res) => {
 
     // Filtro opcional por utilizador (funcionário).
     // Nota: utilizadorId pode ser 'null' (string) para filtrar tarefas por atribuir.
+    let utilizadorFiltrado = null;
     if (utilizadorId !== undefined && utilizadorId !== null && utilizadorId !== '') {
       if (utilizadorId === 'null' || utilizadorId === 'sem_atribuicao') {
         filtro.utilizador_id = null;
       } else if (mongoose.isValidObjectId(utilizadorId)) {
-        filtro.utilizador_id = utilizadorId;
+        // Responsável OU membro da equipa.
+        filtro.$or = filtroMembro(utilizadorId).$or;
+        utilizadorFiltrado = utilizadorId;
       }
     }
 
@@ -623,6 +645,7 @@ exports.getDadosCalendario = async (req, res) => {
       .populate({ path: 'propriedade_id', select: 'nome morada coordenadas capacidade_hospedes' })
       // FIX (fantasmas de inativos) — match: { ativo: true, eliminado_em: null }
       .populate({ path: 'utilizador_id', select: 'nome', match: { ativo: true, eliminado_em: null } })
+      .populate({ path: 'equipa_atribuida', select: 'nome', match: { ativo: true, eliminado_em: null } })
       .sort({ data: 1 })
       .lean();
 
@@ -686,8 +709,8 @@ exports.getDadosCalendario = async (req, res) => {
         .lean();
 
       // Se o filtro utilizadorId for específico, filtra só esse staff.
-      const staffFiltrados = (filtro.utilizador_id && filtro.utilizador_id !== null)
-        ? staffComFolgas.filter((s) => String(s._id) === String(filtro.utilizador_id))
+      const staffFiltrados = utilizadorFiltrado
+        ? staffComFolgas.filter((s) => String(s._id) === String(utilizadorFiltrado))
         : staffComFolgas;
 
       // Gera objetos virtuais de folga para cada dia do intervalo.
@@ -743,8 +766,8 @@ exports.getDadosCalendario = async (req, res) => {
         data_fim: { $gte: dataInicio },
       };
       // Se o filtro utilizadorId for específico, filtra só esse staff.
-      if (filtro.utilizador_id && filtro.utilizador_id !== null) {
-        filtroAusencias.utilizador_id = filtro.utilizador_id;
+      if (utilizadorFiltrado) {
+        filtroAusencias.utilizador_id = utilizadorFiltrado;
       }
 
       const ausenciasAprovadas = await Ausencia.find(filtroAusencias)
@@ -862,18 +885,18 @@ exports.getDadosCalendario = async (req, res) => {
         }
         // Marca tarefas atribuídas cujo staff está de férias nesse dia.
         for (const t of tarefasComViagem) {
-          if (!t.utilizador_id || !t.utilizador_id._id) continue;
-          const uid = String(t.utilizador_id._id);
-          const intervalos = mapaAusencias.get(uid);
-          if (!intervalos || intervalos.length === 0) continue;
+          // Qualquer membro da equipa ausente conta (não só o responsável).
           const instante = new Date(t.data).getTime();
-          const estaAusente = intervalos.some(
-            (iv) => instante >= iv.inicio && instante < iv.fim
-          );
-          if (estaAusente) {
-            t.alerta_orfao = true;
-            t.alerta_mensagem = 'Equipa de férias nesta data — tarefa órfã';
-          }
+          const ausentes = membrosPopulados(t).filter((m) => {
+            const intervalos = mapaAusencias.get(String(m._id));
+            return intervalos && intervalos.some((iv) => instante >= iv.inicio && instante < iv.fim);
+          });
+          if (ausentes.length === 0) continue;
+          t.alerta_orfao = true;
+          const todos = membrosPopulados(t).length;
+          t.alerta_mensagem = ausentes.length >= todos
+            ? 'Equipa de férias nesta data — tarefa órfã'
+            : `${ausentes.map((m) => m.nome).join(', ')} ausente nesta data — falta pessoa na equipa`;
         }
       }
 
@@ -970,7 +993,7 @@ exports.alternarEstadoPropriedade = async (req, res) => {
           data: { $gte: hojeInicio },
           estado: { $nin: ['concluida', 'cancelada'] },
         },
-        { $set: { utilizador_id: null, estado: 'por_atribuir' } }
+        { $set: { utilizador_id: null, equipa_atribuida: [], pessoas_em_falta: 0, estado: 'por_atribuir' } }
       );
 
       tarefasDesatribuidas = resultado?.modifiedCount || 0;
@@ -1090,7 +1113,7 @@ exports.eliminarPropriedade = async (req, res) => {
         data: { $gte: hojeInicio },
         estado: { $in: ['atribuida', 'em_curso'] },
       },
-      { $set: { utilizador_id: null, estado: 'por_atribuir' } }
+      { $set: { utilizador_id: null, equipa_atribuida: [], pessoas_em_falta: 0, estado: 'por_atribuir' } }
     );
 
     registarAuditoria({
@@ -2237,10 +2260,13 @@ exports.eliminarMembroEquipa = async (req, res) => {
     try {
       const hojeUTC = new Date();
       hojeUTC.setUTCHours(0, 0, 0, 0);
-      await Tarefa.updateMany(
-        { utilizador_id: utilizador._id, data: { $gte: hojeUTC }, estado: 'atribuida' },
-        { $set: { utilizador_id: null, equipa_atribuida: [], estado: 'por_atribuir' } }
+      const tarefasDele = await Tarefa.find(
+        comMembro({ data: { $gte: hojeUTC }, estado: 'atribuida' }, utilizador._id)
       );
+      for (const td of tarefasDele) {
+        retirarMembroDoc(td, utilizador._id); // equipa de 2+: sai só ele
+        await td.save();
+      }
       await Propriedade.updateMany(
         { empresa_id: empresaId },
         { $pull: { equipa_preferencial: utilizador._id } }
@@ -2379,11 +2405,10 @@ exports.reportarFaltaSubita = async (req, res) => {
     }
 
     // 3) Procura tarefas de hoje do utilizador (atribuida ou por_atribuir).
-    const tarefas = await Tarefa.find({
-      utilizador_id: id,
+    const tarefas = await Tarefa.find(comMembro({
       data: { $gte: hojeInicio, $lt: amanhaInicio },
       estado: { $in: ['atribuida', 'por_atribuir'] },
-    }).populate({ path: 'propriedade_id', select: 'nome' });
+    }, id)).populate({ path: 'propriedade_id', select: 'nome' });
 
     // Limpezas 'em_curso' NÃO são desatribuídas: ficam com a pessoa e o
     // gestor é avisado (resposta + sino/push a todos os gestores).
@@ -2413,17 +2438,20 @@ exports.reportarFaltaSubita = async (req, res) => {
 
     // 4) Desatribui cada tarefa; a reatribuição vem logo a seguir.
     let desatribuidas = 0;
+    let parciais = 0;
     const detalhes = [];
 
     for (const tarefa of tarefas) {
-      tarefa.utilizador_id = null;
-      tarefa.equipa_atribuida = [];
-      tarefa.estado = 'por_atribuir';
+      // Equipa de 2+: sai só esta pessoa (a tarefa fica com os restantes e
+      // `pessoas_em_falta` sobe); equipa de 1: volta a por_atribuir.
+      const vazia = retirarMembroDoc(tarefa, id);
       await tarefa.save();
-      desatribuidas++;
+      if (vazia) desatribuidas++;
+      else parciais++;
       detalhes.push({
         tarefa_id: String(tarefa._id),
         propriedade: tarefa.propriedade_id?.nome ?? '?',
+        ...(vazia ? {} : { parcial: true }),
       });
     }
 
@@ -2447,6 +2475,7 @@ exports.reportarFaltaSubita = async (req, res) => {
         `Falta súbita processada: ${desatribuidas} tarefa(s) desatribuída(s). ${textoReatribuicao(reatribuicao)}` +
         (avisoEmCurso ? ` ${avisoEmCurso}` : ''),
       desatribuidas,
+      parciais,
       total: tarefas.length,
       detalhes,
       reatribuicao,
@@ -2561,11 +2590,10 @@ exports.registarBaixaProlongada = async (req, res) => {
     }
 
     // 2) Procura tarefas atribuídas no período.
-    const tarefas = await Tarefa.find({
-      utilizador_id: id,
+    const tarefas = await Tarefa.find(comMembro({
       data: { $gte: inicio, $lt: fimDia },
       estado: 'atribuida',
-    }).populate({ path: 'propriedade_id', select: 'nome' });
+    }, id)).populate({ path: 'propriedade_id', select: 'nome' });
 
     // Limpezas 'em_curso' NÃO são desatribuídas: ficam com a pessoa e o
     // gestor é avisado (resposta + sino/push a todos os gestores).
@@ -2595,16 +2623,17 @@ exports.registarBaixaProlongada = async (req, res) => {
 
     // 3) Desatribui cada tarefa; a reatribuição vem logo a seguir.
     let desatribuidas = 0;
+    let parciais = 0;
     const detalhes = [];
 
     for (const tarefa of tarefas) {
-      tarefa.utilizador_id = null;
-      tarefa.equipa_atribuida = [];
-      tarefa.estado = 'por_atribuir';
+      const vazia = retirarMembroDoc(tarefa, id);
       await tarefa.save();
-      desatribuidas++;
+      if (vazia) desatribuidas++;
+      else parciais++;
       detalhes.push({
         tarefa_id: String(tarefa._id),
+        ...(vazia ? {} : { parcial: true }),
         data: tarefa.data,
         propriedade: tarefa.propriedade_id?.nome ?? '?',
       });
@@ -2630,6 +2659,7 @@ exports.registarBaixaProlongada = async (req, res) => {
         `Baixa processada: ${desatribuidas} tarefa(s) desatribuída(s). ${textoReatribuicao(reatribuicao)}` +
         (avisoEmCurso ? ` ${avisoEmCurso}` : ''),
       desatribuidas,
+      parciais,
       total: tarefas.length,
       detalhes,
       reatribuicao,
@@ -2675,6 +2705,7 @@ exports.exportarTarefasCSV = async (req, res) => {
     const tarefas = await Tarefa.find(filtro)
       .populate({ path: 'propriedade_id', select: 'nome' })
       .populate({ path: 'utilizador_id', select: 'nome' })
+      .populate({ path: 'equipa_atribuida', select: 'nome' })
       .sort({ data: 1 })
       .lean();
 
@@ -2683,7 +2714,8 @@ exports.exportarTarefasCSV = async (req, res) => {
     const linhas = tarefas.map((t) => {
       const data = new Date(t.data).toLocaleDateString('pt-PT');
       const prop = (t.propriedade_id?.nome || '').replace(/,/g, ';');
-      const func = (t.utilizador_id?.nome || 'Por atribuir').replace(/,/g, ';');
+      const nomes = membrosPopulados(t).map((m) => m.nome).filter(Boolean);
+      const func = (nomes.length ? nomes.join(' + ') : 'Por atribuir').replace(/,/g, ';');
       const obs = (t.observacoes || '').replace(/[\n\r,]/g, ' ');
       return `${data},${prop},${func},${t.tipo},${t.estado},${t.tempo_limpeza_minutos},${obs}`;
     }).join('\n');

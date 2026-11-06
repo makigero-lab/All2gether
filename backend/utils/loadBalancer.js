@@ -41,6 +41,7 @@
  * Devolve { utilizadorId, tempoViagem } ou null se ninguém couber no SLA.
  */
 
+const mongoose = require('mongoose');
 const Utilizador = require('../models/Utilizador');
 const Ausencia = require('../models/Ausencia');
 const Tarefa = require('../models/Tarefa');
@@ -51,22 +52,32 @@ const {
   calcularInicioTarefaUtilizador,
 } = require('./scheduler');
 const { calcularTempoViagemReal } = require('./distancia');
+const { comMembro, EXPR_MEMBROS, retirarMembroDoc } = require('./equipaTarefa');
 
 // Pesos do score (em minutos — quanto menor o score, melhor).
 const PESO_CLUSTERING = 120;    // 2h de bónus se já está na mesma propriedade
 const PESO_ROTATIVIDADE = 30;   // 30 min de penalização se limpou ontem
 const PESO_EQUIDADE_HORA = 10;  // 10 min de penalização por hora semanal acumulada
 
+// Os `aggregate` NÃO fazem cast automático: um id em string (ex.: do JWT)
+// nunca casaria e a carga daria 0 (limite de 8h ignorado). Cast aqui, uma vez.
+function oid(v) {
+  if (v && typeof v === 'object' && v._bsontype) return v;
+  if (v && typeof v === 'object' && v._id) return oid(v._id);
+  return mongoose.Types.ObjectId.isValid(String(v)) ? new mongoose.Types.ObjectId(String(v)) : v;
+}
+
 /**
  * Soma o tempo_limpeza_minutos de todas as tarefas não-canceladas/não-concluídas
  * de um utilizador num dia (range).
  */
 async function calcularCargaLimpezaDia(empresaId, utilizadorId, range) {
+  // Conta as tarefas em que é responsável OU membro da equipa.
   const res = await Tarefa.aggregate([
     {
       $match: {
-        empresa_id: empresaId,
-        utilizador_id: utilizadorId,
+        empresa_id: oid(empresaId),
+        $or: [{ utilizador_id: oid(utilizadorId) }, { utilizador_id: { $ne: null }, equipa_atribuida: oid(utilizadorId) }],
         data: { $gte: range.start, $lt: range.end },
         estado: { $nin: ['cancelada', 'concluida'] },
       },
@@ -87,12 +98,11 @@ async function calcularCargaLimpezaDia(empresaId, utilizadorId, range) {
  */
 async function temTarefaNaMesmaPropriedade(utilizadorId, propriedadeId, range) {
   if (!propriedadeId) return false;
-  const count = await Tarefa.countDocuments({
-    utilizador_id: utilizadorId,
+  const count = await Tarefa.countDocuments(comMembro({
     propriedade_id: propriedadeId,
     data: { $gte: range.start, $lt: range.end },
     estado: { $nin: ['cancelada'] },
-  });
+  }, utilizadorId));
   return count > 0;
 }
 
@@ -121,8 +131,8 @@ async function calcularCargaSemanal(empresaId, utilizadorId, dataReferencia) {
   const res = await Tarefa.aggregate([
     {
       $match: {
-        empresa_id: empresaId,
-        utilizador_id: utilizadorId,
+        empresa_id: oid(empresaId),
+        $or: [{ utilizador_id: oid(utilizadorId) }, { utilizador_id: { $ne: null }, equipa_atribuida: oid(utilizadorId) }],
         data: { $gte: inicioSemana, $lt: fimSemana },
         estado: { $nin: ['cancelada'] },
       },
@@ -148,12 +158,11 @@ async function limpouPropriedadeOntem(utilizadorId, propriedadeId, dataReferenci
   const rangeOntem = obterRangeDia(ontem);
   if (!rangeOntem) return false;
 
-  const count = await Tarefa.countDocuments({
-    utilizador_id: utilizadorId,
+  const count = await Tarefa.countDocuments(comMembro({
     propriedade_id: propriedadeId,
     data: { $gte: rangeOntem.start, $lt: rangeOntem.end },
     estado: { $nin: ['cancelada'] },
-  });
+  }, utilizadorId));
   return count > 0;
 }
 
@@ -361,21 +370,19 @@ async function determinarUtilizadorAtribuido(
             );
             // Procura a tarefa futura mais distante do VIP (maior data) que
             // não seja a tarefa atual e que esteja 'atribuida' ou 'em_curso'.
-            const tarefaParaLibertar = await Tarefa.findOne({
-              utilizador_id: vip._id,
+            const tarefaParaLibertar = await Tarefa.findOne(comMembro({
               empresa_id: empresaId,
               // Só liberta uma tarefa do MESMO dia e ainda não iniciada: libertar outro
               // dia não reduz a carga deste e libertar 'em_curso' tira trabalho a quem já está a fazê-lo.
               data: { $gte: range.start, $lt: range.end },
               estado: 'atribuida',
-            }).sort({ data: -1 }).lean();
+            }, vip._id)).sort({ data: -1 });
 
             if (tarefaParaLibertar) {
-              // Desatribui a tarefa futura (coloca 'por_atribuir').
-              await Tarefa.updateOne(
-                { _id: tarefaParaLibertar._id },
-                { $set: { utilizador_id: null, estado: 'por_atribuir', motivo_nao_atribuicao: 'Desatribuída para libertar equipa preferencial' } }
-              );
+              // Sai só o VIP; se a equipa ficar vazia a tarefa volta a 'por_atribuir'.
+              const vazia = retirarMembroDoc(tarefaParaLibertar, vip._id);
+              if (vazia) tarefaParaLibertar.motivo_nao_atribuicao = 'Desatribuída para libertar equipa preferencial';
+              await tarefaParaLibertar.save();
               console.log(
                 `⭐ VIP (equipa): tarefa ${tarefaParaLibertar._id} desatribuída do VIP ${equipaIdStr} para libertar capacidade.`
               );
@@ -428,16 +435,20 @@ async function determinarUtilizadorAtribuido(
   const disponiveisIds = disponiveis.map((s) => s._id);
 
   // Pré-busca agregada (1 query para cargas + contagens do dia).
+  // A carga conta para CADA membro da equipa (não só para o responsável).
   const cargasLimpeza = await Tarefa.aggregate([
     {
       $match: {
-        empresa_id: empresaId,
-        utilizador_id: { $in: disponiveisIds },
+        empresa_id: oid(empresaId),
+        $or: [{ utilizador_id: { $in: disponiveisIds } }, { utilizador_id: { $ne: null }, equipa_atribuida: { $in: disponiveisIds } }],
         data: { $gte: range.start, $lt: range.end },
         estado: { $nin: ['cancelada', 'concluida'] },
       },
     },
-    { $group: { _id: '$utilizador_id', total: { $sum: '$tempo_limpeza_minutos' } } },
+    { $addFields: { _membros: EXPR_MEMBROS } },
+    { $unwind: '$_membros' },
+    { $match: { _membros: { $in: disponiveisIds } } },
+    { $group: { _id: '$_membros', total: { $sum: '$tempo_limpeza_minutos' } } },
   ]);
   const cargaLimpezaMap = new Map();
   for (const c of cargasLimpeza) cargaLimpezaMap.set(String(c._id), c.total);
@@ -480,11 +491,10 @@ async function determinarUtilizadorAtribuido(
       // HF16 — Usa Google Maps (com fallback Haversine) para o tempo de viagem.
       if (coordenadasNovaPropriedade) {
         // Busca a última tarefa para obter coordenadas da propriedade anterior.
-        const ultimaTarefa = await Tarefa.findOne({
-          utilizador_id: u._id,
+        const ultimaTarefa = await Tarefa.findOne(comMembro({
           data: { $gte: range.start, $lt: range.end },
           estado: { $nin: ['cancelada'] },
-        })
+        }, u._id))
           .populate({ path: 'propriedade_id', select: 'coordenadas' })
           .sort({ data: -1 })
           .lean();
@@ -609,8 +619,11 @@ async function determinarEquipaAtribuida(
   coordenadasNovaPropriedade,
   tempoNovaTarefa,
   propriedadeId = null,
-  numStaffNecessario = 1
+  numStaffNecessario = 1,
+  excluirInicial = null
 ) {
+  // `excluirInicial` (Set de ids string): pessoas que não podem entrar (ex.:
+  // o ausente e os membros que já estão na tarefa).
   if (numStaffNecessario <= 1) {
     // Caso normal: 1 staff = comportamento original.
     const resultado = await determinarUtilizadorAtribuido(
@@ -618,7 +631,8 @@ async function determinarEquipaAtribuida(
       range,
       coordenadasNovaPropriedade,
       tempoNovaTarefa,
-      propriedadeId
+      propriedadeId,
+      excluirInicial instanceof Set ? excluirInicial : null
     );
     if (!resultado) return null;
     return { equipa: [resultado], insuficiente: false };
@@ -635,7 +649,7 @@ async function determinarEquipaAtribuida(
   // mesmo rigor de filtragem da versão de 1 staff.
 
   const equipa = [];
-  const staffExcluidos = new Set();
+  const staffExcluidos = new Set(excluirInicial instanceof Set ? [...excluirInicial] : []);
 
   for (let i = 0; i < numStaffNecessario; i++) {
     const resultado = await determinarUtilizadorAtribuido(
@@ -683,6 +697,7 @@ async function determinarEquipaAtribuida(
 }
 
 module.exports = {
+  oid,
   calcularCargaLimpezaDia,
   determinarUtilizadorAtribuido,
   determinarEquipaAtribuida,

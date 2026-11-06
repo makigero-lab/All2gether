@@ -14,6 +14,7 @@
  */
 
 const Tarefa = require('../models/Tarefa');
+const { comMembro } = require('./equipaTarefa');
 
 /**
  * Capacidade máxima diária por utilizador (8 horas = 480 minutos).
@@ -152,9 +153,10 @@ function aplicarProtecaoAlmoco(dataAgendada, duracaoMin) {
  * @param {Date} dataBase - data do dia da tarefa (qualquer hora; é normalizada para o dia)
  * @param {{ lat: number, lng: number } | null} coordNovaPropriedade
  * @param {number} tempoLimpezaMin - duração da nova tarefa em minutos
+ * @param {*} [excluirTarefaId] - tarefa a ignorar (a que está a ser reatribuída)
  * @returns {Promise<{ data: Date, origem: string, tempoViagem: number }>}
  */
-async function calcularInicioTarefaUtilizador(utilizadorId, dataBase, coordNovaPropriedade, tempoLimpezaMin) {
+async function calcularInicioTarefaUtilizador(utilizadorId, dataBase, coordNovaPropriedade, tempoLimpezaMin, excluirTarefaId = null) {
   const { start, end } = obterRangeDia(dataBase);
 
   // Hora padrão: 11:00 local (10:00 UTC).
@@ -174,11 +176,13 @@ async function calcularInicioTarefaUtilizador(utilizadorId, dataBase, coordNovaP
   // Tarefas exatamente a 00:00 UTC são placeholders sem hora real (ex.: manutenção
   // criada sem horário): não contam como "última tarefa", senão empurravam a nova
   // limpeza para as 01:xx UTC.
-  const candidatas = await Tarefa.find({
-    utilizador_id: utilizadorId,
+  const filtroDia = {
     data: { $gte: start, $lt: end },
     estado: { $nin: ['cancelada'] },
-  })
+  };
+  // Reatribuição: a própria tarefa não conta (sem a desatribuir antes na BD).
+  if (excluirTarefaId) filtroDia._id = { $ne: excluirTarefaId };
+  const candidatas = await Tarefa.find(comMembro(filtroDia, utilizadorId))
     .populate({ path: 'propriedade_id', select: 'coordenadas nome' })
     .sort({ data: -1 })
     .limit(20)
@@ -224,11 +228,11 @@ async function calcularInicioTarefaUtilizador(utilizadorId, dataBase, coordNovaP
 async function calcularCargaDiaUtilizador(utilizadorId, dataBase, excluirTarefaId = null) {
   const { start, end } = obterRangeDia(dataBase);
 
-  const filtro = {
-    utilizador_id: utilizadorId,
+  // A carga conta para cada membro da equipa, não só para o responsável.
+  const filtro = comMembro({
     data: { $gte: start, $lt: end },
     estado: { $nin: ['cancelada', 'concluida'] },
-  };
+  }, utilizadorId);
   if (excluirTarefaId) {
     filtro._id = { $ne: excluirTarefaId };
   }

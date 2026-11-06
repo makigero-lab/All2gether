@@ -9,12 +9,14 @@ import {
   Wrench,
   ChevronRight,
   User,
+  Users,
   Navigation,
 } from "lucide-react";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 
 import { cn, parsearDataSegura, googleMapsUrl } from "@/lib/utils";
+import { textoEquipa } from "@/lib/equipa";
 import { EstadoTarefaBadge } from "@/components/ui/estado-tarefa-badge";
 import { buttonVariants } from "@/components/ui/button";
 import {
@@ -86,6 +88,7 @@ export function TaskCard({ tarefa }: { tarefa: TarefaMock }) {
   const nomeHospede = tarefa.detalhes_reserva?.nome_hospede;
   // Prompt 137 — tempo de viagem estimado (para badge no cartão).
   const tempoViagem = Number(tarefa.tempo_viagem_minutos) || 0;
+  const equipa = textoEquipa(tarefa.equipa_nomes);
 
   return (
     <div className="block">
@@ -183,6 +186,14 @@ export function TaskCard({ tarefa }: { tarefa: TarefaMock }) {
             <p className="flex items-center gap-1.5 rounded-md bg-primary/5 px-2 py-1.5 text-xs">
               <User className="h-3.5 w-3.5 shrink-0 text-gold-text" />
               <span className="font-medium text-foreground">{nomeHospede}</span>
+            </p>
+          )}
+
+          {/* Equipa da limpeza (2+ pessoas): com quem trabalhas. */}
+          {equipa && (
+            <p className="flex items-center gap-1.5 rounded-md bg-primary/5 px-2 py-1.5 text-xs">
+              <Users className="h-3.5 w-3.5 shrink-0 text-gold-text" />
+              <span className="font-medium text-foreground">Equipa: {equipa}</span>
             </p>
           )}
 

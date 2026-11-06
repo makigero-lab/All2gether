@@ -29,13 +29,16 @@ import {
   Navigation,
   Shirt,
 } from "lucide-react";
+import { textoEquipa } from "@/lib/equipa";
 
 import { cn, parsearDataSegura, googleMapsUrl } from "@/lib/utils";
 import {
   MSG_SEM_LIGACAO,
   eErroDeRede,
   guardarRascunho,
+  guardarRascunhoAvaria,
   lerRascunho,
+  lerRascunhoAvaria,
   limparRascunho,
   mensagemErro,
 } from "@/lib/rascunho-staff";
@@ -162,10 +165,15 @@ export function DetalheTarefaClient({
   const [minutosAtraso, setMinutosAtraso] = useState<number | null>(null);
   const [atrasoSubmitting, setAtrasoSubmitting] = useState(false);
   const [atrasoResultado, setAtrasoResultado] = useState<string | null>(null);
+  // Erro (ex.: sem rede): NUNCA vai para o estado de sucesso; o formulário mantém-se.
+  const [atrasoErro, setAtrasoErro] = useState<string | null>(null);
 
   // Modal de reportar avaria (v1.38.0 / HF13 enriquecido com fotos)
   const [mostrarAvaria, setMostrarAvaria] = useState(false);
-  const [avariaDesc, setAvariaDesc] = useState("");
+  const [avariaDesc, setAvariaDesc] = useState(() =>
+    typeof window === "undefined" ? "" : lerRascunhoAvaria(String(tarefa.id))
+  );
+  const [avariaErro, setAvariaErro] = useState<string | null>(null);
   // HF13 — fotos em base64 (upload simplificado, sem object storage).
   // O input type="file" lê o ficheiro e converte para base64 via FileReader.
   const [avariaFotos, setAvariaFotos] = useState<string[]>([]);
@@ -190,11 +198,31 @@ export function DetalheTarefaClient({
   // Se a checklist estiver vazia, o botão fica sempre ativo (não há itens para marcar).
   const todasMarcadas = totalItens === 0 || itensConcluidos === totalItens;
 
+  // O texto da avaria sobrevive a fechar/reabrir e a recarregar (fotos não: RGPD).
+  useEffect(() => {
+    guardarRascunhoAvaria(String(tarefa.id), avariaDesc);
+  }, [tarefa.id, avariaDesc]);
+
   // Guarda o rascunho sempre que muda (nunca fotos nem dados do hóspede).
   useEffect(() => {
     if (concluida) return;
     guardarRascunho(String(tarefa.id), { observacoes, itens: itensMarcados });
   }, [tarefa.id, observacoes, itensMarcados, concluida]);
+
+  // Se o envio falhou por falta de rede e o diálogo continua aberto, volta a
+  // tentar sozinho quando a rede regressa (o botão "Tentar de novo" também serve).
+  useEffect(() => {
+    const aoVoltarRede = () => {
+      if (mostrarAvaria && avariaErro === MSG_SEM_LIGACAO && !avariaSubmitting) {
+        void handleReportarAvaria();
+      } else if (mostrarAtraso && atrasoErro === MSG_SEM_LIGACAO && !atrasoSubmitting) {
+        void handleReportarAtraso();
+      }
+    };
+    window.addEventListener("online", aoVoltarRede);
+    return () => window.removeEventListener("online", aoVoltarRede);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mostrarAvaria, mostrarAtraso, avariaErro, atrasoErro, avariaSubmitting, atrasoSubmitting]);
 
   const toggleItem = (index: number, value: boolean) => {
     setItensMarcados((prev) => {
@@ -318,6 +346,7 @@ export function DetalheTarefaClient({
     if (minutosAtraso === null) return;
     setAtrasoSubmitting(true);
     setAtrasoResultado(null);
+    setAtrasoErro(null);
     try {
       // v1.55.0 (Prompt 77) — usa o endpoint do staff (não do gestor) para
       // evitar 403. O backend valida que a tarefa pertence ao req.user.id.
@@ -335,7 +364,7 @@ export function DetalheTarefaClient({
         );
       }
     } catch (e) {
-      setAtrasoResultado(mensagemErro(e, "Erro ao reportar atraso."));
+      setAtrasoErro(mensagemErro(e, "Erro ao reportar atraso."));
     } finally {
       setAtrasoSubmitting(false);
     }
@@ -346,6 +375,7 @@ export function DetalheTarefaClient({
     if (!avariaDesc.trim()) return;
     setAvariaSubmitting(true);
     setAvariaResultado(null);
+    setAvariaErro(null);
     try {
       const res = await fetch(`/api/staff/tarefas/${tarefa.id}/avaria`, {
         method: "POST",
@@ -362,13 +392,15 @@ export function DetalheTarefaClient({
       setAvariaResultado("Avaria reportada com sucesso. O gestor será notificado.");
       setAvariaDesc("");
       setAvariaFotos([]);
+      guardarRascunhoAvaria(String(tarefa.id), "");
       // Fecha o dialog após 1.5s.
       setTimeout(() => {
         setMostrarAvaria(false);
         setAvariaResultado(null);
       }, 1500);
     } catch (e) {
-      setAvariaResultado(mensagemErro(e, "Erro ao reportar avaria."));
+      // Erro: o formulário (texto e fotos) mantém-se e pode tentar-se de novo.
+      setAvariaErro(mensagemErro(e, "Erro ao reportar avaria."));
     } finally {
       setAvariaSubmitting(false);
     }
@@ -441,6 +473,12 @@ export function DetalheTarefaClient({
             <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
               <MapPin className="h-3.5 w-3.5" />
               +{formatarMinutos(tarefa.tempo_viagem_minutos)} viagem
+            </span>
+          )}
+          {textoEquipa(tarefa.equipa_nomes) && (
+            <span className="flex items-center gap-1 font-medium text-foreground">
+              <Users className="h-3.5 w-3.5" />
+              Equipa: {textoEquipa(tarefa.equipa_nomes)}
             </span>
           )}
           {tarefa.endereco && (
@@ -717,6 +755,7 @@ export function DetalheTarefaClient({
                 setMostrarAtraso(true);
                 setMinutosAtraso(null);
                 setAtrasoResultado(null);
+                setAtrasoErro(null);
               }}
             >
               <AlertTriangle className="h-4 w-4" />
@@ -727,9 +766,10 @@ export function DetalheTarefaClient({
               variant="outline"
               className="flex-1 gap-2 text-destructive border-destructive/40 hover:bg-destructive/10"
               onClick={() => {
+                // Mantém o texto e as fotos já escritos (rascunho).
                 setMostrarAvaria(true);
-                setAvariaDesc("");
                 setAvariaResultado(null);
+                setAvariaErro(null);
               }}
             >
               <AlertTriangle className="h-4 w-4" />
@@ -809,6 +849,11 @@ export function DetalheTarefaClient({
                   </button>
                 ))}
               </div>
+              {atrasoErro && (
+                <p role="alert" className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+                  {atrasoErro}
+                </p>
+              )}
             </>
           ) : (
             <div className="rounded-md bg-amber-50 dark:bg-amber-950/20 p-3 text-sm text-amber-800 dark:text-amber-200">
@@ -840,7 +885,7 @@ export function DetalheTarefaClient({
               ) : (
                 <>
                   <AlertTriangle className="h-4 w-4" />
-                  Confirmar Atraso
+                  {atrasoErro ? "Tentar de novo" : "Confirmar Atraso"}
                 </>
               )}
             </Button>
@@ -852,14 +897,8 @@ export function DetalheTarefaClient({
       <Dialog
         open={mostrarAvaria}
         onOpenChange={(o) => {
-          if (!o) {
-            setMostrarAvaria(false);
-            // Reseta estado ao fechar.
-            if (!avariaResultado) {
-              setAvariaDesc("");
-              setAvariaFotos([]);
-            }
-          }
+          // Fechar não apaga o que foi escrito: só o envio com sucesso limpa.
+          if (!o) setMostrarAvaria(false);
         }}
       >
         <DialogHeader>
@@ -948,6 +987,11 @@ export function DetalheTarefaClient({
                   Máx. 5 fotos (são reduzidas automaticamente).
                 </p>
               </div>
+              {avariaErro && (
+                <p role="alert" className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+                  {avariaErro}
+                </p>
+              )}
             </>
           ) : (
             <div className="rounded-md bg-emerald-50 dark:bg-emerald-950/20 p-3 text-sm text-emerald-800 dark:text-emerald-200">
@@ -979,7 +1023,7 @@ export function DetalheTarefaClient({
               ) : (
                 <>
                   <AlertTriangle className="mr-2 h-4 w-4" />
-                  Reportar Avaria
+                  {avariaErro ? "Tentar de novo" : "Reportar Avaria"}
                 </>
               )}
             </Button>

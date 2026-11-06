@@ -18,6 +18,9 @@ const Ausencia = require('../models/Ausencia');
 const Utilizador = require('../models/Utilizador');
 const Tarefa = require('../models/Tarefa');
 const { registarAuditoria } = require('../utils/auditoria');
+const { avisarGestores } = require('../utils/notificar');
+const { diagnosticarFaltaDeStaff, planearVaga, avisarColegasDoSubstituto } = require('../utils/atribuicaoAutomatica');
+const { comMembro, idsEquipa, normalizarEquipa, retirarMembroDoc } = require('../utils/equipaTarefa');
 
 /**
  * Lê o `empresa_id` do JWT (req.user.empresa_id).
@@ -611,11 +614,10 @@ exports.cancelarAusencia = async (req, res) => {
  * @returns {Promise<Array<{ tarefa_id, propriedade, data }>>}
  */
 async function listarEmCurso(utilizadorId, inicio, fimDia) {
-  const docs = await Tarefa.find({
-    utilizador_id: utilizadorId,
+  const docs = await Tarefa.find(comMembro({
     data: { $gte: inicio, $lt: fimDia },
     estado: 'em_curso',
-  })
+  }, utilizadorId))
     .populate({ path: 'propriedade_id', select: 'nome' })
     .select('data propriedade_id')
     .lean();
@@ -652,24 +654,28 @@ async function desatribuirTarefasPeriodo(utilizadorId, inicio, fim, opts = {}) {
   // fim do dia = meia-noite do dia seguinte (para query <).
   const fimDia = new Date(fim.getTime() + 24 * 60 * 60 * 1000);
 
-  const filtroBase = { utilizador_id: utilizadorId, data: { $gte: inicio, $lt: fimDia } };
+  // Responsável OU membro da equipa: sai só esta pessoa (ver retirarMembroDoc).
+  const filtroBase = { data: { $gte: inicio, $lt: fimDia } };
 
   // Só 'atribuida' é desatribuída (decisão do gestor: 'em_curso' mantém-se).
-  const tarefas = await Tarefa.find({
+  const tarefas = await Tarefa.find(comMembro({
     ...filtroBase,
     estado: incluirEmCurso ? { $in: ['atribuida', 'em_curso'] } : 'atribuida',
-  });
+  }, utilizadorId));
 
   // Tarefas em curso que ficam com a pessoa (só leitura).
   const em_curso = incluirEmCurso ? [] : await listarEmCurso(utilizadorId, inicio, fimDia);
 
   let desatribuidas = 0;
+  let parciais = 0;
   for (const tarefa of tarefas) {
-    tarefa.utilizador_id = null;
-    tarefa.equipa_atribuida = [];
-    tarefa.estado = 'por_atribuir';
+    // Equipa de 1 (ou antiga sem equipa): fica por_atribuir. Equipa de 2+: sai só
+    // esta pessoa, outro membro passa a responsável se for preciso, e a tarefa
+    // fica com os restantes e `pessoas_em_falta` + 1 até haver substituto.
+    const vazia = retirarMembroDoc(tarefa, utilizadorId);
     await tarefa.save();
-    desatribuidas++;
+    if (vazia) desatribuidas++;
+    else parciais++;
   }
 
   console.log(
@@ -679,7 +685,7 @@ async function desatribuirTarefasPeriodo(utilizadorId, inicio, fim, opts = {}) {
       `a ${fim.toISOString().slice(0, 10)}).`
   );
 
-  return { total: tarefas.length, desatribuidas, em_curso_mantidas: em_curso.length, em_curso };
+  return { total: tarefas.length, desatribuidas, parciais, em_curso_mantidas: em_curso.length, em_curso };
 }
 
 /**
@@ -705,32 +711,6 @@ async function avisarGestoresEmCurso(empresaId, nomeStaff, resultado) {
   const texto = textoEmCurso(resultado, nomeStaff);
   if (!texto) return;
   await avisarGestores(empresaId, '⚠️ Limpeza em curso', texto);
-}
-
-/**
- * Push + sino in-app a todos os gestores/admins ativos da empresa.
- * Best-effort: nunca lança.
- */
-async function avisarGestores(empresaId, titulo, texto, url = '/gestor/calendario') {
-  try {
-    const { notificarUtilizador } = require('../utils/notificar');
-    const gestores = await Utilizador.find({
-      empresa_id: empresaId,
-      role: { $in: ['gestor', 'admin'] },
-      ativo: true,
-      eliminado_em: null,
-    })
-      .select('_id')
-      .lean();
-    for (const g of gestores) {
-      await notificarUtilizador(String(g._id), titulo, texto, url, {
-        criarInApp: true,
-        tipo: 'aviso',
-      });
-    }
-  } catch (e) {
-    console.error('⚠️  avisarGestores:', e.message);
-  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -765,17 +745,22 @@ async function reatribuirTarefasPeriodo(empresaId, utilizadorId, inicio, fim) {
   const fimDia = new Date(fim.getTime() + 24 * 60 * 60 * 1000);
 
   // Lazy imports para evitar dependência circulares no carregamento do módulo.
-  const { determinarUtilizadorAtribuido } = require('../utils/loadBalancer');
+  const { determinarEquipaAtribuida } = require('../utils/loadBalancer');
   const { calcularInicioTarefaUtilizador } = require('../utils/scheduler');
 
-  // Procura as tarefas que estão 'por_atribuir' no período (acabaram de ser
-  // desatribuídas por desatribuirTarefasPeriodo, ou já estavam por atribuir).
+  // Tarefas a tratar no período:
+  //   (a) 'por_atribuir'/'nao_atribuida': equipa toda por preencher;
+  //   (b) 'atribuida' com pessoas_em_falta > 0: ficou equipa parcial (saiu um
+  //       membro) e procura-se substituto SÓ para a vaga.
   const tarefas = await Tarefa.find({
     empresa_id: empresaId,
     data: { $gte: inicio, $lt: fimDia },
-    estado: { $in: ['por_atribuir', 'nao_atribuida'] },
+    $or: [
+      { estado: { $in: ['por_atribuir', 'nao_atribuida'] } },
+      { estado: 'atribuida', pessoas_em_falta: { $gt: 0 } },
+    ],
   })
-    .populate({ path: 'propriedade_id', select: 'nome coordenadas' })
+    .populate({ path: 'propriedade_id', select: 'nome coordenadas staff_necessario' })
     .lean();
 
   if (tarefas.length === 0) {
@@ -784,13 +769,17 @@ async function reatribuirTarefasPeriodo(empresaId, utilizadorId, inicio, fim) {
         `(empresa=${empresaId}, período=${inicio.toISOString().slice(0, 10)} ` +
         `a ${fim.toISOString().slice(0, 10)}).`
     );
-    return { total: 0, reatribuidas: 0, orfas: 0 };
+    return { total: 0, reatribuidas: 0, orfas: 0, parciais: 0, faltam: [] };
   }
 
   let reatribuidas = 0;
   let orfas = 0;
+  // Tarefas que continuam com equipa incompleta: [{ propriedade, faltam }].
+  const faltam = [];
   // Quantas tarefas recebeu cada pessoa (para uma só notificação por pessoa).
   const recebidas = new Map();
+  // Vagas em que havia candidatos mas todos com a agenda ocupada à hora da tarefa.
+  const conflitosAgenda = [];
 
   for (const tarefa of tarefas) {
     try {
@@ -804,69 +793,96 @@ async function reatribuirTarefasPeriodo(empresaId, utilizadorId, inicio, fim) {
       const coordenadas = tarefa.propriedade_id?.coordenadas ?? null;
       const tempoNovaTarefa = tarefa.tempo_limpeza_minutos || 45;
       const propriedadeId = tarefa.propriedade_id?._id ?? null;
+      const nomeProp = tarefa.propriedade_id?.nome ?? 'Propriedade';
 
-      // Invoca o load balancer. Ele filtra automaticamente:
-      //   - staff ativo (ativo: true, eliminado_em: null)
-      //   - sem folga fixa nesse dia (dias_folga)
-      //   - sem ausência aprovada/pendente_emergencia (query Ausencia)
-      //   - exclui o utilizadorId passado via excluirStaffIds (o ausente)
-      const staffExcluidos = new Set([String(utilizadorId)]);
-      const resultadoLB = await determinarUtilizadorAtribuido(
-        empresaId,
-        range,
-        coordenadas,
-        tempoNovaTarefa,
-        propriedadeId,
-        staffExcluidos
-      );
+      const parcial = tarefa.estado === 'atribuida';
+      const membrosAtuais = idsEquipa(tarefa);
+      const staffNecessario = Math.max(1, Number(tarefa.propriedade_id?.staff_necessario) || 1);
+      let precisa = staffNecessario;
+      let novos = [];
+      let staffExcluidos = new Set([String(utilizadorId), ...membrosAtuais]);
 
-      const utilizadorAtribuido = resultadoLB?.utilizadorId ?? null;
-
-      if (utilizadorAtribuido) {
-        // Recalcula hora de início via scheduler sequencial.
-        let novaData = tarefa.data;
-        let tempoViagemScheduler = 0;
-        try {
-          const resultadoScheduler = await calcularInicioTarefaUtilizador(
-            utilizadorAtribuido,
-            start,
-            coordenadas,
-            tempoNovaTarefa
-          );
-          novaData = resultadoScheduler.data;
-          tempoViagemScheduler = Number(resultadoScheduler.tempoViagem) || 0;
-        } catch (errScheduler) {
-          console.warn(
-            `⚠️ [reatribuirTarefasPeriodo] scheduler falhou para tarefa ${tarefa._id}:`,
-            errScheduler.message
-          );
+      if (parcial) {
+        // Só a vaga, com o staff_necessario ATUAL (se baixou, não pede mais gente) e
+        // sem candidatos cuja agenda choque com a hora da tarefa (sem sobreposições).
+        const v = await planearVaga({
+          empresaId, tarefa, propriedade: tarefa.propriedade_id, excluirExtra: [String(utilizadorId)],
+        });
+        precisa = v.precisa;
+        novos = v.novos;
+        if (precisa === 0) {
+          // Vaga já não existe (necessidade desceu): limpa o contador antigo.
+          await Tarefa.updateOne({ _id: tarefa._id }, { $set: { pessoas_em_falta: 0 } });
+          continue;
         }
-
-        await Tarefa.updateOne(
-          { _id: tarefa._id },
-          {
-            $set: {
-              utilizador_id: utilizadorAtribuido,
-              estado: 'atribuida',
-              data: novaData,
-              tempo_viagem_minutos: tempoViagemScheduler,
-              motivo_nao_atribuicao: null,
-            },
-          }
+        if (v.conflitos > 0 && novos.length === 0) {
+          conflitosAgenda.push({ propriedade: nomeProp, faltam: precisa });
+        }
+      } else {
+        // O ausente e quem já está na tarefa nunca entram (sem repetir membros).
+        // O load balancer filtra ainda ausências, folgas e lotação.
+        const r = await determinarEquipaAtribuida(
+          empresaId, range, coordenadas, tempoNovaTarefa, propriedadeId, precisa, staffExcluidos
         );
+        novos = (r?.equipa || []).map((m) => m.utilizadorId);
+      }
+
+      if (novos.length > 0) {
+        const eq = normalizarEquipa(membrosAtuais[0] || novos[0], [...membrosAtuais, ...novos]);
+        const set = {
+          utilizador_id: eq.utilizador_id,
+          equipa_atribuida: eq.equipa_atribuida,
+          estado: 'atribuida',
+          motivo_nao_atribuicao: null,
+          pessoas_em_falta: Math.max(0, precisa - novos.length),
+        };
+        if (!parcial) {
+          // Equipa nova: recalcula a hora (todos têm de estar presentes).
+          let novaData = null;
+          let viagem = 0;
+          for (const id of novos) {
+            try {
+              const rs = await calcularInicioTarefaUtilizador(id, start, coordenadas, tempoNovaTarefa);
+              if (!novaData || rs.data > novaData) novaData = rs.data;
+              viagem = Math.max(viagem, Number(rs.tempoViagem) || 0);
+            } catch (errScheduler) {
+              console.warn(
+                `⚠️ [reatribuirTarefasPeriodo] scheduler falhou para tarefa ${tarefa._id}:`,
+                errScheduler.message
+              );
+            }
+          }
+          set.data = novaData || tarefa.data;
+          set.tempo_viagem_minutos = viagem;
+        }
+        await Tarefa.updateOne({ _id: tarefa._id }, { $set: set });
 
         reatribuidas++;
-        const nomeProp = tarefa.propriedade_id?.nome ?? 'Propriedade';
-        const idStr = String(utilizadorAtribuido);
-        const ant = recebidas.get(idStr) || [];
-        ant.push(nomeProp);
-        recebidas.set(idStr, ant);
+        if (parcial) avisarColegasDoSubstituto(membrosAtuais, novos, nomeProp);
+        for (const id of novos) {
+          const idStr = String(id);
+          const ant = recebidas.get(idStr) || [];
+          ant.push(nomeProp);
+          recebidas.set(idStr, ant);
+        }
+        if (set.pessoas_em_falta > 0) faltam.push({ propriedade: nomeProp, faltam: set.pessoas_em_falta });
         console.log(
-          `✅ [reatribuirTarefasPeriodo] Tarefa ${tarefa._id} reatribuída a staff ${utilizadorAtribuido}.`
+          `✅ [reatribuirTarefasPeriodo] Tarefa ${tarefa._id} ${parcial ? 'completada' : 'reatribuída'} com ${novos.length} pessoa(s).`
+        );
+      } else if (parcial) {
+        // Sem substituto: a tarefa fica com os restantes e o gestor é avisado.
+        faltam.push({ propriedade: nomeProp, faltam: precisa });
+        console.log(
+          `⚠️ [reatribuirTarefasPeriodo] Tarefa ${tarefa._id} sem substituto (falta ${precisa}).`
         );
       } else {
-        // Ninguém disponível — mantém 'por_atribuir'.
+        // Ninguém disponível — mantém 'por_atribuir' com o motivo real.
         orfas++;
+        const diag = await diagnosticarFaltaDeStaff(empresaId, range, propriedadeId, staffExcluidos);
+        await Tarefa.updateOne(
+          { _id: tarefa._id },
+          { $set: { estado: diag.estado, motivo_nao_atribuicao: diag.motivo } }
+        );
         console.log(
           `⚠️ [reatribuirTarefasPeriodo] Tarefa ${tarefa._id} sem staff disponível (permanece por_atribuir).`
         );
@@ -901,11 +917,11 @@ async function reatribuirTarefasPeriodo(empresaId, utilizadorId, inicio, fim) {
 
   console.log(
     `🤖 [reatribuirTarefasPeriodo] ${tarefas.length} processada(s), ` +
-      `${reatribuidas} reatribuída(s), ${orfas} órfã(s) ` +
+      `${reatribuidas} reatribuída(s), ${orfas} órfã(s), ${faltam.length} com equipa incompleta ` +
       `(empresa=${empresaId}, período=${inicio.toISOString().slice(0, 10)} a ${fim.toISOString().slice(0, 10)}).`
   );
 
-  return { total: tarefas.length, reatribuidas, orfas };
+  return { total: tarefas.length, reatribuidas, orfas, parciais: faltam.length, faltam, conflitosAgenda };
 }
 
 /**
@@ -951,6 +967,20 @@ async function reatribuirAutomaticamente(empresaId, utilizadorId, inicio, fim) {
       `${resultado.orfas} tarefa(s) ficaram por atribuir ${periodo}: ninguém está disponível. Atribui-as manualmente.`
     );
   }
+  if (resultado.faltam && resultado.faltam.length > 0) {
+    const linhas = resultado.faltam
+      .map((f) => `${f.propriedade}: falta ${f.faltam} ${f.faltam === 1 ? 'pessoa' : 'pessoas'}`)
+      .join('; ');
+    await avisarGestores(
+      empresaId,
+      '⚠️ Equipa incompleta',
+      `Sem substituto disponível, a limpeza fica com os restantes. ${linhas}.` +
+        (resultado.conflitosAgenda && resultado.conflitosAgenda.length > 0
+          ? ' Havia pessoas livres no dia, mas com outra limpeza à mesma hora (não foram escaladas para não ficarem sobrepostas).'
+          : ''),
+      '/gestor/tarefas'
+    );
+  }
   return resultado;
 }
 
@@ -961,6 +991,7 @@ function textoReatribuicao(re) {
   const partes = [];
   if (re.reatribuidas > 0) partes.push(`${re.reatribuidas} tarefa(s) reatribuída(s) automaticamente`);
   if (re.orfas > 0) partes.push(`${re.orfas} por atribuir (ninguém disponível)`);
+  if (re.parciais > 0) partes.push(`${re.parciais} com equipa incompleta (falta pessoa)`);
   return partes.length ? `${partes.join('; ')}.` : '';
 }
 
@@ -1119,11 +1150,10 @@ exports.diagnosticoAusencia = async (req, res) => {
     const ausenciasComTarefas = await Promise.all(
       ausencias.map(async (a) => {
         const fimDia = new Date(a.data_fim.getTime() + 24 * 60 * 60 * 1000);
-        const tarefasAtribuidas = await Tarefa.countDocuments({
-          utilizador_id: utilizadorId,
+        const tarefasAtribuidas = await Tarefa.countDocuments(comMembro({
           data: { $gte: a.data_inicio, $lt: fimDia },
           estado: { $in: ['atribuida', 'em_curso'] },
-        });
+        }, utilizadorId));
         return {
           ...a,
           data_inicio: a.data_inicio.toISOString().slice(0, 10),

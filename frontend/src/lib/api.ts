@@ -94,7 +94,9 @@ async function handleResponse<T>(res: Response): Promise<T> {
     } catch {
       /* corpo não-JSON, manter mensagem padrão */
     }
-    throw new Error(mensagem);
+    const err = new Error(mensagem) as Error & { status?: number };
+    err.status = res.status;
+    throw err;
   }
   return (await res.json()) as T;
 }
@@ -147,6 +149,8 @@ export interface TarefaMock {
   // anterior do staff e esta. Guardado pelo scheduler para o frontend
   // poder desenhar rotas e mostrar o itinerário.
   tempo_viagem_minutos?: number | null;
+  // Equipa da limpeza (2+ pessoas): nomes, responsável primeiro. `eu` = a própria pessoa.
+  equipa_nomes?: Array<{ _id: string; nome: string; responsavel: boolean; eu?: boolean }> | null;
 }
 
 /**

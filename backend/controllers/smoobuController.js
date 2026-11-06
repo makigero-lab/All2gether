@@ -46,6 +46,8 @@ const Ausencia = require('../models/Ausencia');
 const TarefaArquivo = require('../models/TarefaArquivo');
 const Utilizador = require('../models/Utilizador');
 const { determinarUtilizadorAtribuido, determinarEquipaAtribuida } = require('../utils/loadBalancer');
+const { diagnosticarFaltaDeStaff, planearAtribuicao, preencherVagaTarefa } = require('../utils/atribuicaoAutomatica');
+const { idsEquipa: idsEquipaTarefa, retirarMembroDoc: retirarMembroTarefa } = require('../utils/equipaTarefa');
 const {
   obterRangeDia,
   calcularInicioTarefaUtilizador,
@@ -804,6 +806,28 @@ async function criarTarefaPorReserva(
     }
   }
 
+  // staff_necessario > 1 com staff exclusivo atribuído direto: completa a equipa com o
+  // motor partilhado (antes ficava só o VIP e ninguém sabia que faltava gente).
+  const staffNecessarioProp = Math.max(1, Number(propriedade.staff_necessario) || 1);
+  if (utilizadorAtribuido && staffNecessarioProp > 1 && !tentouLoadBalancer) {
+    equipaCompleta = [utilizadorAtribuido];
+    try {
+      const extra = await determinarEquipaAtribuida(
+        empresaId, range, propriedade.coordenadas, Number(tempoLimpeza) || 45, propriedade._id,
+        staffNecessarioProp - 1, new Set([String(utilizadorAtribuido)])
+      );
+      for (const m of extra?.equipa || []) equipaCompleta.push(m.utilizadorId);
+    } catch (errEq) {
+      console.warn('⚠️  [Smoobu] não foi possível completar a equipa do staff exclusivo:', errEq.message);
+    }
+  }
+  const pessoasEmFalta = utilizadorAtribuido
+    ? Math.max(0, staffNecessarioProp - Math.max(1, equipaCompleta.length))
+    : 0;
+  if (pessoasEmFalta > 0 && !alertaTarefa) {
+    alertaTarefa = `Equipa parcial: ${staffNecessarioProp - pessoasEmFalta}/${staffNecessarioProp} elementos disponíveis`;
+  }
+
   // (c) Se mesmo após o LB não há utilizador atribuído, define o alerta final.
   if (!utilizadorAtribuido) {
     if (tentouLoadBalancer && !alertaTarefa) {
@@ -830,6 +854,14 @@ async function criarTarefaPorReserva(
       );
       dataAgendada = resultadoScheduler.data;
       tempoViagemScheduler = Number(resultadoScheduler.tempoViagem) || 0;
+      // Equipa de 2+: começa quando o ÚLTIMO membro consegue (todos presentes).
+      for (const idM of equipaCompleta.slice(1)) {
+        try {
+          const rm = await calcularInicioTarefaUtilizador(idM, range.start, propriedade.coordenadas, Number(tempoLimpeza) || 45);
+          if (rm?.data && rm.data > dataAgendada) dataAgendada = rm.data;
+          tempoViagemScheduler = Math.max(tempoViagemScheduler, Number(rm?.tempoViagem) || 0);
+        } catch (e) { /* mantém */ }
+      }
     } catch (err) {
       // Fallback: 10:00 UTC (= 11:00 local UTC+1, Portugal inverno).
       dataAgendada = new Date(range.start);
@@ -895,6 +927,15 @@ async function criarTarefaPorReserva(
     }
   }
 
+  // Estado e motivo REAIS (mesmo diagnóstico dos outros caminhos): lotação ->
+  // 'nao_atribuida'; sem equipa / ausência / folga -> 'por_atribuir'.
+  let estadoFinal = estadoInicial;
+  if (!utilizadorAtribuido && tentouLoadBalancer) {
+    const diag = await diagnosticarFaltaDeStaff(empresaId, range, propriedade._id);
+    estadoFinal = diag.estado;
+    motivoNaoAtribuicao = diag.motivo;
+  }
+
   if (alertaCancelamentoPrevio) {
     alertaTarefa = alertaTarefa
       ? `${alertaCancelamentoPrevio} | ${alertaTarefa}`
@@ -920,7 +961,8 @@ async function criarTarefaPorReserva(
     tempo_limpeza_minutos: Number(tempoLimpeza) || 45,
     tempo_viagem_minutos: tempoViagemFinal, // HF11: LB + scheduler restaurados.
     tipo: 'limpeza',
-    estado: estadoInicial,
+    estado: estadoFinal,
+    pessoas_em_falta: pessoasEmFalta,
     alerta: alertaTarefa, // HF11: alerta se LB não encontrou substituto.
     motivo_nao_atribuicao: motivoNaoAtribuicao, // HF24: motivo detalhado
     checklist: propriedade.checklist || [],
@@ -1110,38 +1152,37 @@ async function atualizarTarefaPorReserva(
     mudou = true;
   }
 
-  // 4. Se a data mudou E tem utilizador, revalida disponibilidade.
-  if (mudouData && tarefa.utilizador_id && novoRange) {
-    const utilizador = await Utilizador.findById(tarefa.utilizador_id).lean();
+  // 4. Se a data mudou, revalida TODOS os membros da equipa (não só o responsável).
+  //    Quem não puder sai da equipa (o responsável passa ao seguinte); depois
+  //    procura-se substituto para as vagas.
+  let saiuAlguem = false;
+  if (mudouData && novoRange) {
     const diaSemana = novoRange.start.getDay();
+    for (const idM of idsEquipaTarefa(tarefa)) {
+      const utilizador = await Utilizador.findById(idM).lean();
+      let disponivel = !!(utilizador && utilizador.ativo && !utilizador.eliminado_em);
 
-    let disponivel = !!(utilizador && utilizador.ativo && !utilizador.eliminado_em);
-
-    // Folgas fixas semanais.
-    if (
-      disponivel &&
-      Array.isArray(utilizador.dias_folga) &&
-      utilizador.dias_folga.includes(diaSemana)
-    ) {
-      disponivel = false;
-    }
-
-    // Ausências aprovadas.
-    if (disponivel) {
-      const ausente = await Ausencia.exists({
-        utilizador_id: tarefa.utilizador_id,
-        estado: 'aprovada',
-        data_inicio: { $lte: novoRange.start },
-        data_fim: { $gte: novoRange.start },
-      });
-      if (ausente) disponivel = false;
-    }
-
-    if (!disponivel) {
-      tarefa.utilizador_id = null;
-      if (tarefa.estado === 'atribuida' || tarefa.estado === 'em_curso') {
-        tarefa.estado = 'por_atribuir';
+      // Folgas fixas semanais.
+      if (disponivel && Array.isArray(utilizador.dias_folga) && utilizador.dias_folga.includes(diaSemana)) {
+        disponivel = false;
       }
+      // Ausências aprovadas.
+      if (disponivel) {
+        const ausente = await Ausencia.exists({
+          utilizador_id: idM,
+          estado: 'aprovada',
+          data_inicio: { $lte: novoRange.start },
+          data_fim: { $gte: novoRange.start },
+        });
+        if (ausente) disponivel = false;
+      }
+      if (!disponivel) {
+        retirarMembroTarefa(tarefa, idM);
+        saiuAlguem = true;
+      }
+    }
+    if (saiuAlguem && !tarefa.utilizador_id && (tarefa.estado === 'atribuida' || tarefa.estado === 'em_curso')) {
+      tarefa.estado = 'por_atribuir';
     }
   }
 
@@ -1152,58 +1193,58 @@ async function atualizarTarefaPorReserva(
       `📝 [Smoobu] tarefa ${tarefa._id} atualizada (reserva ${reservaId}).`
     );
 
+    // Equipa que ficou incompleta ao mudar a data: procura substituto só para a vaga.
+    if (saiuAlguem && tarefa.utilizador_id && (Number(tarefa.pessoas_em_falta) || 0) > 0) {
+      try {
+        const propVaga = await Propriedade.findById(tarefa.propriedade_id)
+          .select('nome coordenadas staff_necessario')
+          .lean();
+        if (propVaga) {
+          await preencherVagaTarefa({ empresaId: tarefa.empresa_id, tarefa: tarefa.toObject(), propriedade: propVaga });
+        }
+      } catch (errVaga) {
+        console.error('⚠️ [Smoobu sync] Erro a procurar substituto após update de data:', errVaga.message);
+      }
+    }
+
     // FIX (sync smoobu — reatribuição automática) — Se a data mudou e a
     // tarefa ficou 'por_atribuir' (staff desatribuído por indisponibilidade
     // na nova data), tenta reatribuir automaticamente via load balancer.
     if ((mudouData || reativada) && tarefa.estado === 'por_atribuir') {
       try {
-        const { determinarUtilizadorAtribuido } = require('../utils/loadBalancer');
-        const { calcularInicioTarefaUtilizador } = require('../utils/scheduler');
         const propriedade = await Propriedade.findById(tarefa.propriedade_id)
-          .select('nome coordenadas empresa_id')
+          .select('nome coordenadas empresa_id staff_necessario')
           .lean();
         if (propriedade && novoRange) {
-          const resultadoLB = await determinarUtilizadorAtribuido(
-            propriedade.empresa_id,
-            novoRange,
-            propriedade.coordenadas,
-            tarefa.tempo_limpeza_minutos || 45,
-            tarefa.propriedade_id
-          );
-          if (resultadoLB?.utilizadorId) {
-            // Recalcula hora de início via scheduler.
-            let novaData = novoRange.start;
-            try {
-              const resultadoScheduler = await calcularInicioTarefaUtilizador(
-                resultadoLB.utilizadorId,
-                novoRange.start,
-                propriedade.coordenadas,
-                tarefa.tempo_limpeza_minutos || 45
-              );
-              novaData = resultadoScheduler.data;
-            } catch (e) {
-              // Mantém a data original se o scheduler falhar.
-            }
+          // Motor partilhado: respeita staff_necessario e dá o motivo real.
+          const plano = await planearAtribuicao({
+            empresaId: propriedade.empresa_id,
+            propriedade: { ...propriedade, _id: tarefa.propriedade_id },
+            dia: novoRange.start,
+            tempoLimpeza: tarefa.tempo_limpeza_minutos || 45,
+          });
+          if (plano.estado === 'atribuida') {
             await Tarefa.updateOne(
               { _id: tarefa._id },
               {
                 $set: {
-                  utilizador_id: resultadoLB.utilizadorId,
+                  utilizador_id: plano.utilizador_id,
+                  equipa_atribuida: plano.equipa_atribuida,
                   estado: 'atribuida',
-                  data: novaData,
-                  tempo_viagem_minutos: resultadoLB.tempoViagem || 0,
+                  data: plano.data,
+                  tempo_viagem_minutos: plano.tempo_viagem_minutos || 0,
                   motivo_nao_atribuicao: null,
+                  pessoas_em_falta: plano.faltam,
                 },
               }
             );
             console.log(
-              `🤖 [Smoobu sync] tarefa ${tarefa._id} reatribuída a staff ${resultadoLB.utilizadorId} após update de data.`
+              `🤖 [Smoobu sync] tarefa ${tarefa._id} reatribuída (${plano.equipa_atribuida.length} pessoa(s)) após update de data.`
             );
           } else {
-            // Marca motivo de falha.
             await Tarefa.updateOne(
               { _id: tarefa._id },
-              { $set: { motivo_nao_atribuicao: 'Sem equipa disponível após update de data (Smoobu)' } }
+              { $set: { estado: plano.estado, motivo_nao_atribuicao: plano.motivo_nao_atribuicao || 'Sem equipa disponível após update de data (Smoobu)' } }
             );
           }
         }

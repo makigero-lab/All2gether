@@ -242,17 +242,28 @@ export function escaparHtml(valor: unknown): string {
 export type RedistribuicaoDTO = {
   total: number;
   desatribuidas: number;
-  reatribuicao?: { total?: number; reatribuidas?: number; orfas?: number; erro?: string } | null;
+  reatribuicao?: {
+    total?: number;
+    reatribuidas?: number;
+    orfas?: number;
+    /** Limpezas que continuam com equipa incompleta (falta pelo menos 1 pessoa). */
+    parciais?: number;
+    faltam?: { propriedade?: string; faltam?: number }[];
+    erro?: string;
+  } | null;
   aviso?: string;
 };
 
 /** Resultado da reatribuição só é fiável se não houve erro e os números existem. */
 function reatribuicaoFiavel(
   r: RedistribuicaoDTO | null | undefined
-): { reatribuidas: number; orfas: number } | null {
+): { reatribuidas: number; orfas: number; vagasTarefas: number; vagas: number } | null {
   const re = r?.reatribuicao;
   if (re && !re.erro && typeof re.reatribuidas === "number" && typeof re.orfas === "number") {
-    return { reatribuidas: re.reatribuidas, orfas: re.orfas };
+    const lista = Array.isArray(re.faltam) ? re.faltam : [];
+    const vagas = lista.reduce((acc, f) => acc + (Number(f?.faltam) || 0), 0);
+    const vagasTarefas = Math.max(Number(re.parciais) || 0, lista.length);
+    return { reatribuidas: re.reatribuidas, orfas: re.orfas, vagasTarefas, vagas: vagas || vagasTarefas };
   }
   return null;
 }
@@ -264,7 +275,8 @@ function reatribuicaoFiavel(
  */
 export function tarefasPorAtribuir(r: RedistribuicaoDTO | null | undefined): number {
   const re = reatribuicaoFiavel(r);
-  if (re) return re.orfas;
+  // Inclui as limpezas com equipa incompleta: também precisam de "Reatribuir automaticamente".
+  if (re) return re.orfas + re.vagasTarefas;
   return Math.max(0, r?.desatribuidas ?? 0);
 }
 
@@ -288,9 +300,16 @@ export function textoRedistribuicao(
     const partes: string[] = [];
     if (re.reatribuidas > 0) partes.push(`${re.reatribuidas} tarefa(s) reatribuída(s) automaticamente`);
     if (re.orfas > 0) partes.push(`${re.orfas} por atribuir (ninguém disponível)`);
+    if (re.vagasTarefas > 0) {
+      partes.push(
+        re.vagasTarefas === 1
+          ? `1 limpeza ficou a faltar ${re.vagas} ${re.vagas === 1 ? "pessoa" : "pessoas"}`
+          : `${re.vagasTarefas} limpezas ficaram a faltar pessoas (${re.vagas} vagas)`
+      );
+    }
     if (partes.length === 0) return `${prefixo} ${semTarefas}`;
     const extra =
-      re.reatribuidas + re.orfas > desatribuidas
+      re.reatribuidas + re.orfas > desatribuidas + re.vagasTarefas
         ? " Inclui outras tarefas do período que já estavam por atribuir."
         : "";
     return `${prefixo} ${partes.join("; ")}.${extra}`;

@@ -29,6 +29,7 @@ import type { UtilizadorAuth } from "@/lib/auth";
 import { NotificationBell } from "@/components/notification-bell";
 // Prompt Extra — parsearDataSegura para compatibilidade Safari/iOS.
 import { parsearDataSegura } from "@/lib/utils";
+import { mensagemErro } from "@/lib/rascunho-staff";
 
 /**
  * Interface para a tarefa real vinda da API.
@@ -50,6 +51,7 @@ interface TarefaReal {
   } | null;
   // Prompt 137 — tempo de viagem (para badge no cartão).
   tempo_viagem_minutos?: number | null;
+  equipa_nomes?: Array<{ _id: string; nome: string; responsavel: boolean; eu?: boolean }> | null;
 }
 
 /**
@@ -72,6 +74,7 @@ function adaptarTarefa(t: TarefaReal) {
     detalhes_reserva: t.detalhes_reserva ?? null,
     // Prompt 137 — repassa tempo_viagem_minutos para o badge no cartão.
     tempo_viagem_minutos: t.tempo_viagem_minutos ?? null,
+    equipa_nomes: t.equipa_nomes ?? null,
   };
 }
 
@@ -174,7 +177,7 @@ export default function StaffPage() {
       setJustificacao("");
       setFaltaPendente(true);
     } catch (e) {
-      setErroFalta(e instanceof Error ? e.message : "Erro ao reportar falta.");
+      setErroFalta(mensagemErro(e, "Erro ao reportar falta."));
     } finally {
       setSubmetendoFalta(false);
     }
