@@ -13,6 +13,7 @@ const ReservaManual = require('../models/ReservaManual');
 const { notificarSino } = require('./notificar');
 const { resolverAvariaDaManutencao } = require('./avarias');
 const H = require('./horario');
+const Notificacao = require('../models/Notificacao');
 
 const FUSO = 'Europe/Lisbon';
 
@@ -55,6 +56,7 @@ async function avisarParceiro(tarefa, evento) {
     const url = '/parceiro/reservas';
     let mensagem;
     let chave;
+    let substituir = null;
     if (evento === 'concluida') {
       const quando = tarefa.hora_conclusao || tarefa.concluida_em || new Date();
       mensagem = `Limpeza concluída às ${horaLisboa(quando)}: ${casa} (${diaCurto(tarefa.data)}).`;
@@ -65,7 +67,16 @@ async function avisarParceiro(tarefa, evento) {
     } else {
       const hora = H.temHoraReal(tarefa.data) ? ` às ${horaLisboa(tarefa.data)}` : '';
       mensagem = `Limpeza alterada pelo gestor: ${casa}, agora a ${diaCurto(tarefa.data)}${hora}.`;
+      // A chave leva a hora; a notificação é substituída (ver abaixo) para o sino mostrar sempre a atual.
       chave = `limpeza_alterada:${tarefa._id}:${new Date(tarefa.data).toISOString()}`;
+      substituir = `limpeza_alterada:${tarefa._id}:`;
+    }
+    if (substituir) {
+      // Remove avisos de alteração anteriores com outra hora (mantém o da hora atual, para não repetir em reenvios).
+      await Notificacao.deleteMany({
+        utilizador_id: parceiroId,
+        chave: { $regex: new RegExp('^' + substituir), $ne: chave },
+      });
     }
     return await notificarSino(parceiroId, mensagem, {
       tipo: evento === 'cancelada' ? 'tarefa_cancelada' : 'aviso',
@@ -92,4 +103,14 @@ async function aoConcluirTarefa(tarefa) {
   }
 }
 
-module.exports = { avisarParceiro, aoConcluirTarefa, parceiroDaTarefa, horaLisboa, diaCurto };
+/**
+ * Início automático que ninguém tocou (nem botão nem checklist): conta como limpeza NÃO iniciada
+ * (o job só presumiu que começou). Smoobu cancela/move-a como uma atribuída.
+ */
+function inicioAutomaticoSemToque(t) {
+  return !!t && t.estado === 'em_curso' && t.inicio_origem === 'automatico'
+    && !t.iniciada_por && !t.primeiro_item_checklist_em;
+}
+
+module.exports = {
+  inicioAutomaticoSemToque, avisarParceiro, aoConcluirTarefa, parceiroDaTarefa, horaLisboa, diaCurto };

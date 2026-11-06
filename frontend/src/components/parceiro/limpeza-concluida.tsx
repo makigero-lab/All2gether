@@ -70,7 +70,7 @@ export function LimpezaConcluida({
   const h = horaDe(hora);
   return (
     <>
-      <span className="inline-flex flex-wrap items-center gap-1">
+      <span className="inline-flex flex-nowrap items-center gap-1 whitespace-nowrap">
         <span className="inline-flex items-center gap-1 rounded bg-status-conc-bg px-1.5 py-0.5 text-xs font-medium text-status-conc">
           <CheckCircle2 className="h-3 w-3 shrink-0" aria-hidden="true" />
           {h ? `Concluída às ${h}` : "Concluída"}

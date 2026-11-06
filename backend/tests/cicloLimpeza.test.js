@@ -127,6 +127,42 @@ describe('Sino do parceiro (sem push, sem duplicar)', () => {
   });
 });
 
+describe('Aviso «alterada»: o sino reflete sempre a hora atual', () => {
+  test('A -> B -> A: fica um só aviso, com a hora atual; reenvio não repete', async () => {
+    const { avisarParceiro } = require('../utils/cicloTarefa');
+    const c = await cenario();
+    const t = await c.tarefa(new Date('2040-05-10T09:00:00Z'), { origem_parceiro: true, origem: 'manual' });
+    await c.reserva(t);
+    const mudar = async (iso) => { await Tarefa.updateOne({ _id: t._id }, { data: new Date(iso) }); await avisarParceiro(await Tarefa.findById(t._id), 'alterada'); };
+    await mudar('2040-05-10T09:00:00Z');
+    await mudar('2040-05-10T11:00:00Z');
+    let l = await Notificacao.find({ utilizador_id: c.parc._id });
+    expect(l.length).toBe(1);
+    expect(l[0].mensagem).toMatch(/12:00|11:00/);
+    await mudar('2040-05-10T09:00:00Z');
+    await mudar('2040-05-10T09:00:00Z');
+    l = await Notificacao.find({ utilizador_id: c.parc._id });
+    expect(l.length).toBe(1);
+    expect(l[0].mensagem).toMatch(/10:00|09:00/);
+  });
+});
+
+describe('Índice único parcial de Notificacao.chave', () => {
+  test('existe e impede duplicados por (utilizador, chave); createIndexes é seguro de repetir', async () => {
+    await Notificacao.createIndexes();
+    const idx = await Notificacao.collection.indexes();
+    const u = idx.find((i) => i.unique && i.key && i.key.chave === 1);
+    expect(u).toBeTruthy();
+    expect(u.partialFilterExpression).toBeTruthy();
+    const c = await cenario();
+    const base = { utilizador_id: c.g._id, mensagem: 'x', chave: 'k1' };
+    await Notificacao.create(base);
+    await expect(Notificacao.create(base)).rejects.toThrow(/E11000/);
+    await Notificacao.create({ utilizador_id: c.g._id, mensagem: 'a' });
+    await Notificacao.create({ utilizador_id: c.g._id, mensagem: 'b' });
+  });
+});
+
 describe('Sino da lavandaria: «Amanhã: N casas»', () => {
   test('o job da véspera avisa a lavandaria uma só vez por dia; sem limpezas amanhã não avisa', async () => {
     const c = await cenario();

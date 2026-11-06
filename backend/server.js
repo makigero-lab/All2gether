@@ -206,6 +206,15 @@ if (require.main === module) {
         console.error('⚠️  Falha na migração de retenção do WebhookLog (não bloqueia):', e.message);
       }
 
+      // Índice único parcial {utilizador_id, chave} das notificações (idempotência dos avisos).
+      // O autoIndex do mongoose está ativo por omissão; isto garante-o de forma explícita e
+      // nunca impede o arranque se falhar.
+      try {
+        await require('./models/Notificacao').createIndexes();
+      } catch (e) {
+        console.error('⚠️  Falha ao criar índices de Notificacao (não bloqueia):', e.message);
+      }
+
       // Prompt 131 — Remove o índice único antigo { utilizador_id, data_inicio }
       // da coleção Ausencia. Este índice foi removido do schema Mongoose no
       // Prompt 116, mas índices MongoDB NÃO são auto-removidos. Sem isto,

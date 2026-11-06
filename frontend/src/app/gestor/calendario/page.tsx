@@ -1585,7 +1585,7 @@ export default function CalendarioOperacionalPage() {
                 : ""}
             </DialogTitle>
             <DialogDescription>
-              {itensDoDia.length === 0 ? "Sem limpezas neste dia." : "Toca numa limpeza para ver o detalhe."}
+              {itensDoDia.some((t) => t.tipo !== "ausencia" && t.tipo !== "ausencia_pendente" && t.tipo !== "folga_fixa") ? "Toca numa limpeza para ver o detalhe." : "Sem limpezas neste dia."}
             </DialogDescription>
           </div>
           <DialogClose onClick={() => setDiaAberto(null)} />

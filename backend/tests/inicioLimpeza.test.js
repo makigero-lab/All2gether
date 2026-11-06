@@ -361,4 +361,48 @@ describe('Smoobu com a limpeza em curso', () => {
     await esperar();
     expect((await Tarefa.findOne({ smoobu_reserva_id: String(id) })).estado).toBe('cancelada');
   });
+
+  test('início automático sem toque conta como NÃO iniciada: o cancelamento cancela', async () => {
+    const { apt, s } = await preparar();
+    const id = 840000 + ++n;
+    await wh('newReservation', reserva(id, apt));
+    await esperar();
+    await Tarefa.updateOne({ smoobu_reserva_id: String(id) }, { $set: { estado: 'em_curso', utilizador_id: s._id, iniciada_em: new Date(), inicio_origem: 'automatico', iniciada_por: null } });
+    await wh('cancelReservation', reserva(id, apt, { type: 'cancellation' }));
+    await esperar();
+    expect((await Tarefa.findOne({ smoobu_reserva_id: String(id) })).estado).toBe('cancelada');
+  });
+
+  test('início automático sem toque: a mudança de data limpa o início e move como atribuída (o job volta a poder iniciá-la)', async () => {
+    const { apt, s } = await preparar();
+    const id = 850000 + ++n;
+    await wh('newReservation', reserva(id, apt));
+    await esperar();
+    await Tarefa.updateOne({ smoobu_reserva_id: String(id) }, { $set: { estado: 'em_curso', utilizador_id: s._id, iniciada_em: new Date(), inicio_origem: 'automatico', iniciada_por: null } });
+    await wh('updateReservation', reserva(id, apt, { departure: '2041-03-20', type: 'modification of booking' }));
+    await esperar();
+    const t = await Tarefa.findOne({ smoobu_reserva_id: String(id) });
+    expect(t.estado).not.toBe('em_curso');
+    expect(t.iniciada_em).toBeNull();
+    expect(t.inicio_origem).toBeNull();
+    expect(t.data.toISOString().slice(0, 10)).toBe('2041-03-20');
+    if (t.estado === 'atribuida') {
+      const r = await executarInicioAutomatico(new Date('2041-03-20T14:00:00Z'));
+      expect(r.iniciadas).toBeGreaterThanOrEqual(1);
+      expect((await Tarefa.findById(t._id)).estado).toBe('em_curso');
+    }
+  });
+
+  test('início automático MAS tocado (checklist ou botão): mantém o comportamento (em curso, alerta)', async () => {
+    const { apt, s } = await preparar();
+    const id = 860000 + ++n;
+    await wh('newReservation', reserva(id, apt));
+    await esperar();
+    await Tarefa.updateOne({ smoobu_reserva_id: String(id) }, { $set: { estado: 'em_curso', utilizador_id: s._id, iniciada_em: new Date(), inicio_origem: 'automatico', primeiro_item_checklist_em: new Date() } });
+    await wh('cancelReservation', reserva(id, apt, { type: 'cancellation' }));
+    await esperar();
+    const t = await Tarefa.findOne({ smoobu_reserva_id: String(id) });
+    expect(t.estado).toBe('em_curso');
+    expect(t.alerta).toMatch(/limpeza já em curso/);
+  });
 });

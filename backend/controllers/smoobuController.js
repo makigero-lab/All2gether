@@ -55,6 +55,7 @@ const {
 } = require('../utils/scheduler');
 const { minutosLocais } = require('../utils/horario');
 const { avisarGestores } = require('../utils/notificar');
+const { inicioAutomaticoSemToque } = require('../utils/cicloTarefa');
 
 /**
  * Avisa os gestores de que limpezas ficaram por atribuir. Com `opcoes.porAtribuir` (array)
@@ -1080,7 +1081,7 @@ async function cancelarTarefaPorReserva(reservaId, empresaRestrita = null) {
   for (const tarefa of tarefas) {
     if (tarefa.estado === 'cancelada') continue; // idempotente
     if (tarefa.estado === 'concluida') continue; // histórico: limpeza já feita
-    if (tarefa.estado === 'em_curso') {
+    if (tarefa.estado === 'em_curso' && !inicioAutomaticoSemToque(tarefa)) {
       // A pessoa já está a limpar: não se cancela por baixo dela nem se lhe tira a casa.
       // Fica em curso e o gestor é avisado (decide se a pessoa termina).
       emCurso++;
@@ -1149,6 +1150,15 @@ async function atualizarTarefaPorReserva(
   if (dataTarefaRaw) {
     novoRange = obterRangeDia(dataTarefaRaw);
     const diaAtual = obterRangeDia(tarefa.data);
+    if (inicioAutomaticoSemToque(tarefa) && novoRange && diaAtual && diaAtual.start.getTime() !== novoRange.start.getTime()) {
+      // Início automático que ninguém tocou: conta como não iniciada. Limpa o início e segue
+      // como uma atribuída (o job volta a poder iniciá-la na data nova).
+      tarefa.estado = 'atribuida';
+      tarefa.iniciada_em = null;
+      tarefa.inicio_origem = null;
+      tarefa.iniciada_por = null;
+      mudou = true;
+    }
     if (tarefa.estado === 'em_curso' && novoRange && diaAtual && diaAtual.start.getTime() !== novoRange.start.getTime()) {
       // Limpeza em curso: a data não muda por baixo da pessoa. O gestor é avisado.
       const aviso = `A reserva mudou de data no Smoobu (${novoRange.start.toISOString().slice(0, 10)}) com a limpeza em curso: a data não foi alterada.`;

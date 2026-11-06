@@ -109,7 +109,7 @@ const CELULA_CARTAO =
 /** Marca visual de "por gravar" (não depende só da cor: leva também um traço e o aviso da linha). */
 // Colunas «Limpeza» (estado) e apagar coladas à direita ao fazer scroll na tabela larga (desktop).
 const FIXO_ACOES = "sticky right-0 z-[1] w-12 min-w-[3rem]";
-const FIXO_ESTADO = "sticky right-12 z-[1] min-w-[10rem] shadow-[-8px_0_8px_-8px_rgba(0,0,0,0.25)]";
+const FIXO_ESTADO = "sticky right-12 z-[1] w-[15rem] min-w-[15rem] shadow-[-8px_0_8px_-8px_rgba(0,0,0,0.25)]";
 const PENDENTE_TABELA = "bg-amber-100 dark:bg-amber-900/40 shadow-[inset_3px_0_0_0_rgb(217_119_6)]";
 const PENDENTE_CARTAO = "border-amber-600 bg-amber-50 dark:bg-amber-950/30";
 
