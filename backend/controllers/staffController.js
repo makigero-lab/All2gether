@@ -15,7 +15,7 @@ const Utilizador = require('../models/Utilizador');
 const Tarefa = require('../models/Tarefa');
 const Propriedade = require('../models/Propriedade');
 const { notificarUtilizador, avisarGestores } = require('../utils/notificar');
-const { preencherVagaTarefa } = require('../utils/atribuicaoAutomatica');
+const { preencherVagaTarefa, preencherVagasAposAusencia } = require('../utils/atribuicaoAutomatica');
 const { comMembro, retirarMembroDoc } = require('../utils/equipaTarefa');
 
 /* ------------------------------------------------------------------ */
@@ -233,9 +233,16 @@ exports.cancelarAusenciaSoft = async (req, res) => {
       `(estado anterior: ${estadoAnterior}).`
     );
 
+    // Se bloqueava a pessoa, preenche já as vagas do período (best-effort).
+    let preenchimento = null;
+    if (['aprovada', 'pendente_emergencia'].includes(estadoAnterior)) {
+      preenchimento = await preencherVagasAposAusencia(ausencia);
+    }
+
     return res.status(200).json({
       mensagem: 'Ausência cancelada com sucesso.',
       ausencia,
+      preenchimento,
     });
   } catch (err) {
     console.error('❌ cancelarAusenciaSoft:', err.message);
@@ -280,9 +287,16 @@ exports.cancelarAusencia = async (req, res) => {
 
     await Ausencia.deleteOne({ _id: id });
 
+    // 'pendente_emergencia' bloqueava a pessoa: preenche já as vagas (best-effort, depois de apagar).
+    let preenchimento = null;
+    if (ausencia.estado === 'pendente_emergencia') {
+      preenchimento = await preencherVagasAposAusencia(ausencia);
+    }
+
     return res.status(200).json({
       mensagem: 'Pedido cancelado com sucesso.',
       ausencia_id: id,
+      preenchimento,
     });
   } catch (err) {
     console.error('❌ cancelarAusencia:', err.message);

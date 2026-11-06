@@ -1,12 +1,10 @@
 "use client";
 
-import { ResultadoImportacao, lerDetalheErros } from "@/components/resultado-importacao";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Loader2,
   AlertCircle,
   Table2,
-  Upload,
   Download,
   Trash2,
   Plus,
@@ -23,7 +21,6 @@ import {
   DialogTitle,
   DialogDescription,
   DialogClose,
-  DialogContent,
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
@@ -301,13 +298,6 @@ export default function ParceiroReservasPage() {
   const contadorTmp = useRef(0);
 
   const [eliminar, setEliminar] = useState<ReservaDTO | null>(null);
-
-  // FIX (excel parceiro) — Estado para o modal de importação de Excel.
-  const [importOpen, setImportOpen] = useState(false);
-  const [importFile, setImportFile] = useState<File | null>(null);
-  const [importLoading, setImportLoading] = useState(false);
-  const [importResult, setImportResult] = useState<string | null>(null);
-  const [importErros, setImportErros] = useState<string[]>([]);
 
   const pendentes = contarPendentes(rascunho);
 
@@ -744,32 +734,6 @@ export default function ParceiroReservasPage() {
     }
   }
 
-  // FIX (excel parceiro) — Importa reservas de um .xlsx (não toca nos rascunhos).
-  async function handleImportarExcel() {
-    if (!importFile) return;
-    setImportLoading(true);
-    setImportResult(null);
-    setImportErros([]);
-    try {
-      const arrayBuffer = await importFile.arrayBuffer();
-      const res = await fetch("/api/parceiro/reservas/importar-excel", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
-        body: arrayBuffer,
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.erro || `Erro ${res.status}`);
-      setImportErros(lerDetalheErros(data.detalheErros));
-      setImportResult(data.message || `${data.criadas} criadas, ${data.ignoradas} ignoradas, ${data.erros} erros.`);
-      await carregar(true);
-    } catch (e) {
-      setImportResult(mensagemErro(e, "Erro ao importar Excel."));
-    } finally {
-      setImportLoading(false);
-    }
-  }
-
   const setN = (k: keyof typeof NOVA_VAZIA) => (v: string) => setNova((n) => ({ ...n, [k]: v }));
   const enterAdiciona = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") acrescentarNova();
@@ -898,21 +862,6 @@ export default function ParceiroReservasPage() {
           >
             <Download className="h-4 w-4" />
             <span className="hidden sm:inline">Exportar</span>
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => {
-              setImportOpen(true);
-              setImportFile(null);
-              setImportResult(null);
-            }}
-            disabled={importLoading || gravando}
-            className="gap-2"
-            title="Importa reservas em massa de um ficheiro Excel (.xlsx)."
-            aria-label="Importar reservas de um ficheiro Excel"
-          >
-            <Upload className="h-4 w-4" />
-            <span className="hidden sm:inline">Importar</span>
           </Button>
         </div>
       </div>
@@ -1358,69 +1307,6 @@ export default function ParceiroReservasPage() {
         </DialogFooter>
       </Dialog>
 
-      {/* FIX (excel parceiro) — Modal de importação de Excel. */}
-      <Dialog open={importOpen} onOpenChange={(o) => !o && !importLoading && setImportOpen(o)}>
-        <DialogHeader>
-          <div>
-            <DialogTitle className="flex items-center gap-2">
-              <Upload className="h-5 w-5 text-gold-text" />
-              Importar Reservas (Excel)
-            </DialogTitle>
-            <DialogDescription>
-              Carrega um ficheiro .xlsx com as colunas: Propriedade, Check-in,
-              Check-out, Hóspedes (opcional). O sistema só aceita propriedades
-              que te estão atribuídas. A importação grava logo e não apaga as
-              alterações que tens por gravar.
-            </DialogDescription>
-          </div>
-          <DialogClose onClick={() => !importLoading && setImportOpen(false)} />
-        </DialogHeader>
-        <DialogContent className="space-y-4">
-          <div className="space-y-2">
-            <label htmlFor="importar-ficheiro-excel" className="text-sm font-medium">Ficheiro Excel (.xlsx)</label>
-            <input
-              id="importar-ficheiro-excel"
-              type="file"
-              accept=".xlsx,.xls"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                setImportFile(f ?? null);
-                setImportResult(null);
-              }}
-              className="flex w-full cursor-pointer items-center gap-2 rounded-md border border-dashed border-input bg-muted/30 px-3 py-2 text-sm text-muted-foreground hover:bg-muted/50"
-            />
-            {importFile && (
-              <p className="text-xs text-muted-foreground">
-                Ficheiro selecionado: {importFile.name} ({(importFile.size / 1024).toFixed(0)} KB)
-              </p>
-            )}
-          </div>
-          {importResult && (
-            <ResultadoImportacao resumo={importResult} detalheErros={importErros} />
-          )}
-        </DialogContent>
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setImportOpen(false)}
-            disabled={importLoading}
-          >
-            Cancelar
-          </Button>
-          <Button
-            type="button"
-            onClick={handleImportarExcel}
-            disabled={!importFile || importLoading}
-          >
-            {importLoading ? (
-              <><Loader2 className="mr-2 h-4 w-4 animate-spin" />A importar…</>
-            ) : (
-              <><Upload className="mr-2 h-4 w-4" />Importar</>
-            )}
-          </Button>
-        </DialogFooter>
-      </Dialog>
     </main>
   );
 }

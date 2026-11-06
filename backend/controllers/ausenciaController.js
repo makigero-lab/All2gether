@@ -19,7 +19,9 @@ const Utilizador = require('../models/Utilizador');
 const Tarefa = require('../models/Tarefa');
 const { registarAuditoria } = require('../utils/auditoria');
 const { avisarGestores } = require('../utils/notificar');
-const { diagnosticarFaltaDeStaff, planearVaga, avisarColegasDoSubstituto } = require('../utils/atribuicaoAutomatica');
+const {
+  diagnosticarFaltaDeStaff, planearVaga, avisarColegasDoSubstituto, preencherVagasAposAusencia,
+} = require('../utils/atribuicaoAutomatica');
 const { comMembro, idsEquipa, normalizarEquipa, retirarMembroDoc } = require('../utils/equipaTarefa');
 
 /**
@@ -37,6 +39,19 @@ function obterEmpresaId(req, res) {
     return { ok: false };
   }
   return { ok: true, empresaId };
+}
+
+/** Estados de ausência que o motor trata como indisponibilidade (ver loadBalancer). */
+const ESTADOS_QUE_BLOQUEIAM = ['aprovada', 'pendente_emergencia'];
+
+/** Frase para o gestor sobre o preenchimento automático após o fim de uma ausência. */
+function textoPreenchimento(p) {
+  if (!p) return '';
+  if (p.erro || p.em_segundo_plano) return 'O preenchimento automático das vagas não terminou: usa "Auto-Atribuir Pendentes" se ficarem tarefas por atribuir.';
+  const partes = [];
+  if (p.atribuidas > 0) partes.push(`${p.atribuidas} tarefa(s) preenchida(s) automaticamente`);
+  if (p.orfas > 0) partes.push(`${p.orfas} continuam por preencher (ninguém disponível)`);
+  return partes.length ? `${partes.join('; ')}.` : '';
 }
 
 /** Normaliza uma data para meia-noite UTC. */
@@ -294,8 +309,15 @@ exports.eliminarAusencia = async (req, res) => {
 
     await Ausencia.deleteOne({ _id: id });
 
+    // Se bloqueava a pessoa, deixou de bloquear: preenche já as vagas (best-effort, depois de apagar).
+    let preenchimento = null;
+    if (ESTADOS_QUE_BLOQUEIAM.includes(ausencia.estado)) {
+      preenchimento = await preencherVagasAposAusencia(ausencia);
+    }
+
     return res.status(200).json({
       mensagem: 'Ausência eliminada com sucesso.',
+      preenchimento,
       ausencia_id: id,
     });
   } catch (err) {
@@ -368,10 +390,12 @@ exports.aprovarRejeitarAusencia = async (req, res) => {
     }
 
     // Atualiza o estado.
+    const estadoAnterior = ausencia.estado;
     ausencia.estado = novoEstado;
     await ausencia.save();
 
     let redistribuicao = null;
+    let preenchimento = null;
 
     // Se aprovada → desatribui tarefas do período E TENTA REATRIBUIÇÃO AUTOMÁTICA.
     // FIX (auto-reatribuição inteligente) — Após desatribuir as tarefas do
@@ -396,6 +420,12 @@ exports.aprovarRejeitarAusencia = async (req, res) => {
       );
     }
 
+    // Uma ausência que bloqueava a pessoa (aprovada/emergência) e é rejeitada: a pessoa volta
+    // a estar disponível, preenche-se já o que ficou por atribuir. ('pendente' não bloqueia.)
+    if (novoEstado === 'rejeitada' && ESTADOS_QUE_BLOQUEIAM.includes(estadoAnterior)) {
+      preenchimento = await preencherVagasAposAusencia(ausencia);
+    }
+
     // Auditoria.
     const utilizador = await Utilizador.findById(ausencia.utilizador_id).select('nome').lean();
     if (redistribuicao && redistribuicao.em_curso_mantidas > 0) {
@@ -418,6 +448,7 @@ exports.aprovarRejeitarAusencia = async (req, res) => {
         data_fim: ausencia.data_fim,
         tipo: ausencia.tipo,
         redistribuicao,
+        preenchimento,
       },
     });
 
@@ -450,9 +481,10 @@ exports.aprovarRejeitarAusencia = async (req, res) => {
           ? `Ausência aprovada. ${redistribuicao.desatribuidas} tarefa(s) desatribuída(s). ` +
             textoReatribuicao(redistribuicao.reatribuicao) +
             (redistribuicao.aviso ? ` ${redistribuicao.aviso}` : '')
-          : 'Ausência rejeitada.',
+          : 'Ausência rejeitada.' + (preenchimento ? ` ${textoPreenchimento(preenchimento)}` : ''),
       ausencia,
       redistribuicao,
+      preenchimento,
     });
   } catch (err) {
     console.error('❌ aprovarRejeitarAusencia:', err.message);
@@ -477,9 +509,10 @@ exports.aprovarRejeitarAusencia = async (req, res) => {
  *     (valida utilizador_id === req.user.id).
  *   - Gestor/admin pode cancelar qualquer ausência da sua empresa
  *     (valida empresa_id).
- *   - Se a ausência estava 'aprovada', as tarefas que foram desatribuídas
- *     NÃO são automaticamente reatribuídas (apenas log warning — o gestor
- *     pode reatribuir manualmente ou via "Auto-Atribuir Pendentes").
+ *   - Se a ausência bloqueava a pessoa ('aprovada' ou 'pendente_emergencia'), a pessoa
+ *     volta a estar disponível e as vagas do período (de hoje em diante) são
+ *     preenchidas NA HORA pelo motor, sem clique (best-effort: uma falha nunca
+ *     faz falhar o cancelamento). 'pendente' não bloqueava, por isso não faz nada.
  *
  * Resposta 200: { mensagem, ausencia }
  *   400 — ID inválido / estado não permite cancelamento
@@ -532,17 +565,12 @@ exports.cancelarAusencia = async (req, res) => {
     ausencia.estado = 'cancelada';
     await ausencia.save();
 
-    // Se estava aprovada, avisa que as tarefas desatribuídas não são
-    // automaticamente reatribuídas — o gestor tem de o fazer manualmente.
+    // Se bloqueava a pessoa, preenche já as vagas do período (motor partilhado).
+    let preenchimento = null;
     let reatribuicaoAviso = null;
-    if (estadoAnterior === 'aprovada') {
-      reatribuicaoAviso =
-        'A ausência estava aprovada e as tarefas do período foram desatribuídas. ' +
-        'Reatribui manualmente ou usa "Auto-Atribuir Pendentes".';
-      console.log(
-        `⚠️  [cancelarAusencia] Ausência ${ausencia._id} estava aprovada — ` +
-          `tarefas desatribuídas NÃO foram reatribuídas automaticamente.`
-      );
+    if (ESTADOS_QUE_BLOQUEIAM.includes(estadoAnterior)) {
+      preenchimento = await preencherVagasAposAusencia(ausencia);
+      reatribuicaoAviso = textoPreenchimento(preenchimento) || null;
     }
 
     // Auditoria.
@@ -565,6 +593,7 @@ exports.cancelarAusencia = async (req, res) => {
         estado_anterior: estadoAnterior,
         estado_novo: 'cancelada',
         cancelado_por_role: role,
+        preenchimento,
       },
     });
 
@@ -597,6 +626,7 @@ exports.cancelarAusencia = async (req, res) => {
           : null,
       },
       reatribuicaoAviso,
+      preenchimento,
     });
   } catch (err) {
     console.error('❌ cancelarAusencia:', err.message);

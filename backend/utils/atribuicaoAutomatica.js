@@ -254,7 +254,178 @@ function recuperavelSemPessoa(t) {
   return semPessoa(t) && (t.estado === 'atribuida' || !temProgresso(t));
 }
 
+/**
+ * Trata UMA tarefa sem pessoa ou com vaga (a mesma lógica da Fase A do cão de
+ * guarda e do preenchimento após o fim de uma ausência).
+ *  - vaga numa equipa incompleta -> `preencherVagaTarefa`;
+ *  - sem pessoa -> `planearAtribuicao` + gravação CONDICIONAL (filtro de estado):
+ *    duas execuções em simultâneo não duplicam atribuições nem avisos;
+ *  - 'em_curso' sem pessoa e com trabalho feito: não se mexe (o gestor decide).
+ * @param {object} tarefa - lean, com `propriedade_id` populado (nome, coordenadas, staff_necessario)
+ * @param {Date} dia - dia (UTC) onde o motor procura pessoas
+ * @returns {Promise<{ resultado: 'atribuida'|'orfa'|'em_curso_com_trabalho', novos: any[], propNome: string }>}
+ */
+async function atribuirTarefaEmFalta(tarefa, dia) {
+  const propriedade = tarefa.propriedade_id || {};
+  const propNome = propriedade.nome ?? 'Propriedade';
+  const fantasma = semPessoa(tarefa);
+  if (fantasma && !recuperavelSemPessoa(tarefa)) {
+    return { resultado: 'em_curso_com_trabalho', novos: [], propNome };
+  }
+  if (tarefa.estado === 'atribuida' && !fantasma) {
+    const v = await preencherVagaTarefa({ empresaId: tarefa.empresa_id, tarefa, propriedade });
+    return { resultado: v.novos.length > 0 ? 'atribuida' : 'orfa', novos: v.novos, propNome };
+  }
+  const plano = await planearAtribuicao({
+    empresaId: tarefa.empresa_id,
+    propriedade,
+    dia,
+    tempoLimpeza: tarefa.tempo_limpeza_minutos || 45,
+  });
+  if (plano.estado === 'atribuida') {
+    const r = await Tarefa.updateOne(
+      { _id: tarefa._id, estado: tarefa.estado, utilizador_id: null },
+      {
+        $set: {
+          utilizador_id: plano.utilizador_id,
+          equipa_atribuida: plano.equipa_atribuida,
+          estado: 'atribuida',
+          data: plano.data,
+          tempo_viagem_minutos: plano.tempo_viagem_minutos,
+          motivo_nao_atribuicao: null,
+          pessoas_em_falta: plano.faltam,
+        },
+      }
+    );
+    // Só conta (e avisa) quem gravou mesmo.
+    return r.modifiedCount === 1
+      ? { resultado: 'atribuida', novos: plano.equipa_atribuida, propNome }
+      : { resultado: 'orfa', novos: [], propNome };
+  }
+  // Causa real: lotação -> 'nao_atribuida'; ausência/folga/sem equipa -> 'por_atribuir'.
+  await Tarefa.updateOne(
+    { _id: tarefa._id, utilizador_id: null, estado: tarefa.estado },
+    { $set: { estado: plano.estado, motivo_nao_atribuicao: plano.motivo_nao_atribuicao } }
+  );
+  return { resultado: 'orfa', novos: [], propNome };
+}
+
+/**
+ * Quando alguém volta a ficar disponível (ausência cancelada ou rejeitada), preenche
+ * NA HORA as vagas dos dias [max(inicio, hoje), fim] da empresa: tarefas sem pessoa
+ * (`por_atribuir`/`nao_atribuida`/fantasma recuperável) e equipas com vaga. O motor
+ * escolhe a melhor pessoa disponível (não tem de ser a que voltou). Nunca toca em
+ * concluida/cancelada nem em em_curso com trabalho feito.
+ *
+ * Best-effort: NUNCA lança. Serializado por empresa (lock Mongo) para que duas
+ * execuções simultâneas não dupliquem atribuições nem notificações.
+ * @returns {Promise<{ total: number, atribuidas: number, orfas: number, erro?: string }>}
+ */
+async function preencherVagasPeriodo(empresaId, inicio, fim) {
+  const vazio = { total: 0, atribuidas: 0, orfas: 0 };
+  let dono = null;
+  const chave = `vagas:${empresaId}`;
+  const { obterLock, libertarLock, renovarLock } = require('./lockEmpresa');
+  try {
+    const agora = new Date();
+    const hoje = new Date(Date.UTC(agora.getUTCFullYear(), agora.getUTCMonth(), agora.getUTCDate()));
+    const de = new Date(Math.max(new Date(inicio).getTime(), hoje.getTime()));
+    const ate = new Date(new Date(fim).getTime() + 24 * 60 * 60 * 1000);
+    if (ate <= de) return vazio;
+
+    dono = await obterLock(chave, { ttlMs: 60000, esperaMs: 5000 });
+    if (!dono) return { ...vazio, erro: 'ocupado' };
+
+    // Lê DEPOIS de obter o lock: uma execução anterior já preencheu o que podia.
+    const tarefas = await Tarefa.find({
+      empresa_id: empresaId,
+      data: { $gte: de, $lt: ate },
+      $or: [
+        { estado: { $in: ['por_atribuir', 'nao_atribuida'] }, utilizador_id: null },
+        { estado: 'atribuida', pessoas_em_falta: { $gt: 0 } },
+        FILTRO_SEM_PESSOA,
+      ],
+    })
+      .populate({ path: 'propriedade_id', select: 'nome coordenadas staff_necessario tempo_limpeza_minutos' })
+      .lean();
+
+    let atribuidas = 0;
+    let orfas = 0;
+    const recebidas = new Map(); // pessoa -> nomes de propriedades (um aviso por pessoa)
+    for (let i = 0; i < tarefas.length; i++) {
+      const t = tarefas[i];
+      // Heartbeat: o ciclo pode demorar mais que o TTL (60 s); renova a cada 20 tarefas.
+      if (i > 0 && i % 20 === 0) await renovarLock(chave, dono, 60000);
+      try {
+        const d = new Date(t.data);
+        const dia = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+        const r = await atribuirTarefaEmFalta(t, dia);
+        if (r.resultado === 'atribuida') {
+          atribuidas++;
+          for (const id of r.novos) {
+            const k = String(id);
+            recebidas.set(k, [...(recebidas.get(k) || []), r.propNome]);
+          }
+        } else {
+          orfas++;
+        }
+      } catch (e) {
+        orfas++;
+        console.error(`⚠️  [preencherVagasPeriodo] tarefa ${t._id}:`, e.message);
+      }
+    }
+
+    const { notificarUtilizador } = require('./notificar');
+    for (const [id, props] of recebidas) {
+      // Uma falha numa pessoa não impede os avisos às outras.
+      try {
+        await notificarUtilizador(
+          id,
+          '🧹 Nova Limpeza Atribuída',
+          props.length === 1
+            ? `Foste escalado para limpar a ${props[0]}.`
+            : `Foste escalado para ${props.length} limpezas: ${[...new Set(props)].join(', ')}.`,
+          '/staff',
+          { tipo: 'tarefa_reatribuida', empresa_id: String(empresaId), criarInApp: true }
+        );
+      } catch (e) {
+        console.error('⚠️  [preencherVagasPeriodo] notificar:', e.message);
+      }
+    }
+    return { total: tarefas.length, atribuidas, orfas };
+  } catch (err) {
+    console.error('⚠️  [preencherVagasPeriodo] falhou (best-effort):', err.message);
+    return { ...vazio, erro: err.message };
+  } finally {
+    if (dono) await libertarLock(chave, dono);
+  }
+}
+
+/**
+ * A ausência deixou de valer (cancelada ou rejeitada): preenche NA HORA as vagas do
+ * período, de hoje em diante, sem clique. Best-effort: nunca lança e nunca demora mais
+ * de `limiteMs` a devolver (se o motor for lento, continua em segundo plano e a
+ * resposta HTTP segue com `em_segundo_plano`).
+ * @returns {Promise<{ total, atribuidas, orfas, erro?: string, em_segundo_plano?: boolean }>}
+ */
+async function preencherVagasAposAusencia(ausencia, limiteMs = 10000) {
+  const trabalho = Promise.resolve()
+    .then(() => preencherVagasPeriodo(ausencia.empresa_id, ausencia.data_inicio, ausencia.data_fim))
+    .catch((e) => ({ total: 0, atribuidas: 0, orfas: 0, erro: e.message }));
+  let timer;
+  const prazo = new Promise((resolve) => {
+    timer = setTimeout(() => resolve({ total: 0, atribuidas: 0, orfas: 0, em_segundo_plano: true }), limiteMs);
+    if (timer.unref) timer.unref();
+  });
+  const r = await Promise.race([trabalho, prazo]);
+  clearTimeout(timer);
+  return r;
+}
+
 module.exports = {
+  preencherVagasAposAusencia,
+  atribuirTarefaEmFalta,
+  preencherVagasPeriodo,
   FILTRO_SEM_PESSOA,
   semPessoa,
   temProgresso,

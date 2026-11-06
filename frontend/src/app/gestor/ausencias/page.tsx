@@ -887,8 +887,8 @@ export default function AusenciasPage() {
             <DialogDescription>
               Vais cancelar esta ausência. O registo fica marcado como
               <strong> cancelada</strong> (mantém-se no histórico para
-              auditoria). Se a ausência estava aprovada, as tarefas
-              desatribuídas terão de ser reatribuídas manualmente.
+              auditoria). Se a ausência estava aprovada, as vagas que ficaram
+              por preencher (de hoje em diante) são preenchidas automaticamente.
             </DialogDescription>
           </div>
           <DialogClose onClick={() => !cancelando && setACancelar(null)} />

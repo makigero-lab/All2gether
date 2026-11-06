@@ -3,11 +3,13 @@
  *
  * Permite ao gestor exportar todas as tarefas (com dados de reserva) para um
  * ficheiro .xlsx, e importar reservas em massa a partir de um Excel (fazendo
- * match do nome da propriedade). O parceiro faz o mesmo apenas nas suas casas.
+ * match do nome da propriedade). O parceiro só EXPORTA as suas casas (não há
+ * importação de parceiro: a importação é única, feita pelo gestor).
  *
- * Rotas (gestor: /api/gestor/reservas ; parceiro: /api/parceiro/reservas):
- *   GET  /exportar-excel    — download direto de .xlsx
- *   POST /importar-excel    — upload de .xlsx (body RAW, ver express.raw nas rotas)
+ * Rotas:
+ *   GET  /api/gestor/reservas/exportar-excel     — download direto de .xlsx
+ *   POST /api/gestor/reservas/importar-excel     — upload de .xlsx (body RAW, ver express.raw nas rotas)
+ *   GET  /api/parceiro/reservas/exportar-excel   — export só das casas do parceiro
  *
  * Segurança: o ficheiro é validado (tamanho, assinatura ZIP 'PK', máx. linhas)
  * antes de ser lido; nunca se devolve err.message ao cliente.
@@ -328,8 +330,6 @@ async function importarLinhas({
   mapaProps,
   empresaId,
   utilizadorId,
-  origemParceiro,
-  msgNaoEncontrada,
 }) {
   let criadas = 0;
   let ignoradas = 0;
@@ -371,7 +371,7 @@ async function importarLinhas({
       }
       const prop = mapaProps.get(nomeProp.toLowerCase());
       if (!prop) {
-        detalheErros.push(`Linha ${nLinha}: Propriedade "${nomeProp}" ${msgNaoEncontrada}`);
+        detalheErros.push(`Linha ${nLinha}: Propriedade "${nomeProp}" não encontrada.`);
         erros++;
         continue;
       }
@@ -453,7 +453,6 @@ async function importarLinhas({
         motivo_nao_atribuicao: MOTIVO_A_ATRIBUIR,
         observacoes,
         hospedes: numHospedes,
-        origem_parceiro: origemParceiro,
         checklist: prop.checklist || [],
         detalhes_reserva: {
           checkin: checkInISO,
@@ -572,8 +571,6 @@ exports.importarExcel = async (req, res) => {
       mapaProps: mapaPorNome(propriedades),
       empresaId,
       utilizadorId: gestorId,
-      origemParceiro: false,
-      msgNaoEncontrada: 'não encontrada.',
     });
     return res.status(200).json(resultado);
   } catch (err) {
@@ -633,42 +630,5 @@ exports.exportarExcelParceiro = async (req, res) => {
   } catch (err) {
     console.error('❌ excel.exportarExcelParceiro:', err.message);
     return res.status(500).json({ erro: 'Erro ao gerar Excel.' });
-  }
-};
-
-/* ------------------------------------------------------------------ */
-/* POST /api/parceiro/reservas/importar-excel — Importar (Parceiro)    */
-/* Só aceita propriedades do próprio parceiro (parceiro_id + empresa). */
-/* ------------------------------------------------------------------ */
-exports.importarExcelParceiro = async (req, res) => {
-  try {
-    const parceiroId = req.user && req.user.id;
-    const empresaId = req.user && req.user.empresa_id;
-    if (!parceiroId || !empresaId) {
-      return res.status(400).json({ erro: 'Autenticação em falta.' });
-    }
-    const lido = await lerLinhasExcel(req);
-    if (lido.erro) return res.status(lido.status).json({ erro: lido.erro });
-
-    const propriedades = await Propriedade.find({
-      parceiro_id: parceiroId,
-      empresa_id: empresaId,
-      ativo: true,
-    }).lean();
-    const resultado = await importarLinhas({
-      linhas: lido.linhas,
-      mapaProps: mapaPorNome(propriedades),
-      empresaId,
-      utilizadorId: parceiroId,
-      origemParceiro: true,
-      msgNaoEncontrada: 'não encontrada (ou não te pertence).',
-    });
-    // O motivo de não atribuição é informação interna da operação: o parceiro não a vê.
-    delete resultado.detalheNaoAtribuidas;
-    return res.status(200).json(resultado);
-  } catch (err) {
-    console.error('❌ excel.importarExcelParceiro:', err.message);
-    if (err.status === 409) return res.status(409).json({ erro: err.message });
-    return res.status(500).json({ erro: 'Erro ao importar Excel.' });
   }
 };
