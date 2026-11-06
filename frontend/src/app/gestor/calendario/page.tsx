@@ -824,10 +824,12 @@ export default function CalendarioOperacionalPage() {
         origem: string;
         tempo_viagem: number;
         warning?: string;
+        aviso_horario?: string;
       }>(`/api/gestor/tarefas/${tarefaSelecionada._id}/reatribuir`, {
         utilizador_id: reatribuindoPara,
       });
-      if (res.warning) setWarningToast(res.warning);
+      const avisoReatribuir = [res.warning, res.aviso_horario].filter(Boolean).join(" | ");
+      if (avisoReatribuir) setWarningToast(avisoReatribuir);
 
       // Atualiza localmente a tarefa no estado com a data recalculada.
       const novoStaff = equipa.find((u) => u._id === reatribuindoPara);
@@ -949,7 +951,12 @@ export default function CalendarioOperacionalPage() {
       // Prompt 114 — Captura warning de distância (Haversine > 15km).
       // Prompt 117 — envia hora, check_in, check_out, hospedes. A combinação
       // data + hora é tratada pelo backend como LOCAL (não UTC midnight).
-      const res = await adminPost<{ tarefa: TarefaCalendario; warning?: string }>(
+      const res = await adminPost<{
+        tarefa: TarefaCalendario;
+        warning?: string;
+        conflito_horario?: boolean;
+        aviso_horario?: string;
+      }>(
         "/api/gestor/tarefas",
         {
           propriedade_id: novaForm.propriedade_id,
@@ -964,8 +971,10 @@ export default function CalendarioOperacionalPage() {
           tipo: novaForm.tipo,
         }
       );
+      // Conflito real: `conflito_horario`. O aviso «fora do horário de trabalho» vem em
+      // `aviso_horario` (toast informativo; a tarefa fica criada e o modal fecha).
+      const temConflito = res.conflito_horario === true;
       if (res.warning) {
-        const temConflito = res.warning.toLowerCase().includes("horário");
         if (temConflito && !conflitoForcar) {
           // 1º clique com conflito: abre modal de confirmação.
           // A tarefa JÁ FOI CRIADA pelo backend (soft block). Mostramos o
@@ -992,7 +1001,9 @@ export default function CalendarioOperacionalPage() {
           return;
         }
         // 2º clique (conflitoForcar=true) ou warning de distância: mostra toast.
-        setWarningToast(res.warning);
+        setWarningToast([res.warning, res.aviso_horario].filter(Boolean).join(" | "));
+      } else if (res.aviso_horario) {
+        setWarningToast(res.aviso_horario);
       }
       setConflitoForcar(false);
       setNovaForm({

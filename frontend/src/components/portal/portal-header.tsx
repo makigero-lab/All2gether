@@ -64,7 +64,7 @@ export function UserMenu() {
       <button
         type="button"
         onClick={() => setAberto((v) => !v)}
-        className="flex items-center gap-2 rounded-full border border-input bg-background px-2 py-1 text-sm transition-colors hover:bg-accent"
+        className="flex min-h-11 items-center gap-2 rounded-full border border-input bg-background px-2 py-1 text-sm transition-colors hover:bg-accent"
         aria-label="Menu do utilizador"
         aria-expanded={aberto}
       >
@@ -105,7 +105,7 @@ export function UserMenu() {
                   : "/staff";
               router.push(rotaPerfil);
             }}
-            className="flex w-full cursor-pointer items-center gap-2 rounded-sm px-3 py-2 text-sm transition-colors hover:bg-accent"
+            className="flex min-h-11 w-full cursor-pointer items-center gap-2 rounded-sm px-3 py-2 text-sm transition-colors hover:bg-accent"
             role="menuitem"
           >
             <User className="h-4 w-4" />
@@ -119,7 +119,7 @@ export function UserMenu() {
               setAberto(false);
               fazerLogout();
             }}
-            className="flex w-full items-center gap-2 rounded-sm px-3 py-2 text-sm text-destructive transition-colors hover:bg-destructive/10"
+            className="flex min-h-11 w-full items-center gap-2 rounded-sm px-3 py-2 text-sm text-destructive transition-colors hover:bg-destructive/10"
             role="menuitem"
           >
             <LogOut className="h-4 w-4" />

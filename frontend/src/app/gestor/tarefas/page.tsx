@@ -371,7 +371,12 @@ export default function AdminTarefasPage() {
       // sem Z) para não gravar às 00:00 UTC.
       // Prompt 126 — Se conflitoForcar=true (2º clique), envia flag para o
       // backend ignorar o conflito de horário.
-      const res = await adminPost<{ tarefa: TarefaAdmin; warning?: string }>(
+      const res = await adminPost<{
+        tarefa: TarefaAdmin;
+        warning?: string;
+        conflito_horario?: boolean;
+        aviso_horario?: string;
+      }>(
         "/api/gestor/tarefas",
         {
           propriedade_id: form.propriedade_id,
@@ -392,8 +397,9 @@ export default function AdminTarefasPage() {
       // No 1º clique (conflitoForcar=false), mostra o aviso inline e NÃO fecha
       // o form. No 2º clique (conflitoForcar=true), o utilizador já confirmou —
       // fecha o form normalmente.
-      const temConflitoHorario =
-        !!res.warning && res.warning.toLowerCase().includes("horário");
+      // O backend marca o conflito real com `conflito_horario`; o aviso de «fora do
+      // horário de trabalho» vem em `aviso_horario` e é só informativo.
+      const temConflitoHorario = res.conflito_horario === true;
 
       if (temConflitoHorario && !conflitoForcar) {
         // 1º clique com conflito: ativa o modo "Forçar Agendamento".
@@ -408,9 +414,10 @@ export default function AdminTarefasPage() {
       setConflitoForcar(false);
 
       // Warning logístico (distância > 15km) — mostra como toast.
-      if (res.warning && !temConflitoHorario) {
-        setWarningToast(res.warning);
-      }
+      const avisoToast = [!temConflitoHorario ? res.warning : null, res.aviso_horario]
+        .filter(Boolean)
+        .join(" | ");
+      if (avisoToast) setWarningToast(avisoToast);
 
       setForm({
         propriedade_id: "",
@@ -438,11 +445,12 @@ export default function AdminTarefasPage() {
     setAtribuirSubmitting(true);
     try {
       // Prompt 114 — Captura warning de distância.
-      const res = await adminPatch<{ tarefa: TarefaAdmin; warning?: string }>(
+      const res = await adminPatch<{ tarefa: TarefaAdmin; warning?: string; aviso_horario?: string }>(
         `/api/gestor/tarefas/${atribuindo._id}/atribuir`,
         { utilizador_id: atribuirUserId }
       );
-      if (res.warning) setWarningToast(res.warning);
+      const avisoAtribuir = [res.warning, res.aviso_horario].filter(Boolean).join(" | ");
+      if (avisoAtribuir) setWarningToast(avisoAtribuir);
       setAtribuindo(null);
       setAtribuirUserId("");
       await carregar();

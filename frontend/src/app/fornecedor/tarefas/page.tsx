@@ -205,7 +205,7 @@ export default function FornecedorTarefasPage() {
             Tarefas dos próximos 7 dias. Marca a roupa entregue em cada propriedade.
           </p>
         </div>
-        <Button variant="outline" size="icon" className="h-11 w-11 sm:h-9 sm:w-9" onClick={carregar} disabled={loading} aria-label="Atualizar">
+        <Button variant="outline" size="icon" className="h-11 w-11" onClick={carregar} disabled={loading} aria-label="Atualizar">
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
         </Button>
       </div>
