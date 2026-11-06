@@ -1,5 +1,5 @@
 /**
- * Testes de importação/exportação Excel (gestor e parceiro).
+ * Testes de importação (gestor) e exportação (gestor e parceiro) de Excel.
  * Usa .xlsx REAL enviado como body cru (como faz o frontend), para garantir
  * que o parser raw está montado e que datas/duplicados/isolamento funcionam.
  */
@@ -195,34 +195,15 @@ describe('Importação Excel — gestor', () => {
   });
 });
 
-describe('Importação Excel — parceiro (isolamento)', () => {
+describe('Importação Excel — parceiro (rota retirada)', () => {
   const URL = '/api/parceiro/reservas/importar-excel';
 
-  it('cria reservas nas suas casas com origem_parceiro=true', async () => {
+  it('a rota já não existe (404) para parceiro, staff e gestor, e nada é criado', async () => {
     const buf = await xlsxBuffer([{ Propriedade: 'Casa Parceiro', 'Check-out': '20/06/2030', 'Hóspedes': 3 }]);
-    const res = await importar(URL, parceiroToken, buf);
-    expect(res.status).toBe(200);
-    expect(res.body.criadas).toBe(1);
-    const t = await Tarefa.findOne({ propriedade_id: casaParceiro._id });
-    expect(t.origem_parceiro).toBe(true);
-    expect(t.hospedes).toBe(3);
-  });
-
-  it('NÃO cria reservas em casas de outro parceiro nem do gestor', async () => {
-    const buf = await xlsxBuffer([
-      { Propriedade: 'Casa Do Outro', 'Check-out': '21/06/2030' },
-      { Propriedade: 'Casa Gestor', 'Check-out': '22/06/2030' },
-    ]);
-    const res = await importar(URL, parceiroToken, buf);
-    expect(res.status).toBe(200);
-    expect(res.body.criadas).toBe(0);
-    expect(res.body.erros).toBe(2);
-    expect(await Tarefa.countDocuments({ propriedade_id: casaOutroParceiro._id })).toBe(0);
-  });
-
-  it('staff não acede (403)', async () => {
-    const buf = await xlsxBuffer([{ Propriedade: 'Casa Parceiro', 'Check-out': '23/06/2030' }]);
-    expect((await importar(URL, staffToken, buf)).status).toBe(403);
+    for (const tk of [parceiroToken, staffToken, gestorToken]) {
+      expect((await importar(URL, tk, buf)).status).toBe(404);
+    }
+    expect(await Tarefa.countDocuments({ propriedade_id: casaParceiro._id })).toBe(0);
   });
 });
 
@@ -248,6 +229,13 @@ describe('Exportação Excel', () => {
   });
 
   it('parceiro só exporta as suas propriedades', async () => {
+    // Reservas de duas casas: o export do parceiro só traz a dele.
+    for (const casa of [casaParceiro, casaOutroParceiro]) {
+      await Tarefa.create({
+        empresa_id: empresa._id, propriedade_id: casa._id, origem: 'manual', tipo: 'limpeza',
+        data: new Date(Date.UTC(2030, 8, 10, 10)), estado: 'por_atribuir', tempo_limpeza_minutos: 30,
+      });
+    }
     const res = await request(app)
       .get('/api/parceiro/reservas/exportar-excel')
       .set('Authorization', `Bearer ${parceiroToken}`)

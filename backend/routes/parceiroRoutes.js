@@ -13,7 +13,6 @@
  */
 
 const express = require('express');
-const rawXlsx = require('../middleware/rawXlsx');
 const { auth } = require('../middleware/auth');
 const { isParceiro } = require('../middleware/requireRole');
 const {
@@ -27,7 +26,7 @@ const {
   eliminarReserva,
 } = require('../controllers/parceiroController');
 // FIX (excel parceiro) — Controller de Excel partilhado (funções dedicadas).
-const { exportarExcelParceiro, importarExcelParceiro } = require('../controllers/excelController');
+const { exportarExcelParceiro } = require('../controllers/excelController');
 
 const router = express.Router();
 
@@ -43,6 +42,5 @@ router.delete('/reservas/:id', auth, isParceiro, eliminarReserva);
 
 // FIX (excel parceiro) — Rotas de importação/exportação de Excel (parceiro).
 router.get('/reservas/exportar-excel', auth, isParceiro, exportarExcelParceiro);
-router.post('/reservas/importar-excel', auth, isParceiro, rawXlsx, importarExcelParceiro);
 
 module.exports = router;
