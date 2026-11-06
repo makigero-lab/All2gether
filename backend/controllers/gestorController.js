@@ -21,6 +21,7 @@ const { obterCoordenadas } = require('../utils/geocoding');
 const { registarAuditoria } = require('../utils/auditoria');
 const { comMembro, filtroMembro, retirarMembroDoc, membrosPopulados, EXPR_MEMBROS } = require('../utils/equipaTarefa');
 const { FILTRO_SEM_PESSOA } = require('../utils/atribuicaoAutomatica');
+const { lerConfigTipos } = require('../utils/tipoLimpeza');
 
 /* ------------------------------------------------------------------ */
 /* Helper — obter empresa_id do JWT (req.user)                        */
@@ -249,6 +250,10 @@ exports.criarPropriedade = async (req, res) => {
 
     const { nome, morada, tempo_limpeza_minutos, parceiro_id, fornecedor_id, staff_necessario, dias_fixos_limpeza, nome_responsavel, contacto, frequencia_limpeza, horario_limpeza, observacoes, morada_estruturada, equipa_preferencial, capacidade_hospedes } = req.body || {};
 
+    // Tipos de limpeza: tempo e checklist por tipo (opcionais).
+    const cfgTipos = lerConfigTipos(req.body);
+    if (cfgTipos.erro) return res.status(400).json({ erro: cfgTipos.erro });
+
     // Validações de presença.
     // FIX (morada estruturada) — Aceita morada OU morada_estruturada (pelo menos
     // o campo rua). Retrocompatível com as 46 propriedades legadas que usam `morada`.
@@ -384,6 +389,10 @@ exports.criarPropriedade = async (req, res) => {
         ? req.body.checklist.filter((s) => typeof s === 'string' && s.trim())
         : [],
     });
+    if (Object.keys(cfgTipos.set).length > 0) {
+      for (const [k, v] of Object.entries(cfgTipos.set)) nova.set(k, v);
+      await nova.save();
+    }
 
     // Auditoria.
     registarAuditoria({
@@ -1188,6 +1197,8 @@ exports.atualizarPropriedade = async (req, res) => {
       observacoes === undefined &&
       morada_estruturada === undefined &&
       req.body?.checklist === undefined &&
+      req.body?.tempos_limpeza_por_tipo === undefined &&
+      req.body?.checklists_por_tipo === undefined &&
       capacidade_hospedes === undefined &&
       fornecedor_id === undefined
     ) {
@@ -1195,6 +1206,10 @@ exports.atualizarPropriedade = async (req, res) => {
         erro: 'Nenhum campo para atualizar. Envie nome, morada, tempo_limpeza_minutos, checklist, funcionario_preferencial_id, modelo_checklist_id, observacoes ou morada_estruturada.',
       });
     }
+
+    // Tipos de limpeza: tempo e checklist por tipo (validados antes de gravar).
+    const cfgTipos = lerConfigTipos(req.body);
+    if (cfgTipos.erro) return res.status(400).json({ erro: cfgTipos.erro });
 
     // Validações de formato (se vierem).
     if (nome !== undefined && !String(nome).trim()) {
@@ -1356,6 +1371,8 @@ exports.atualizarPropriedade = async (req, res) => {
         ? req.body.checklist.filter((s) => typeof s === 'string' && s.trim())
         : [];
     }
+
+    for (const [k, v] of Object.entries(cfgTipos.set)) propriedade.set(k, v);
 
     // Prompt 95 (Fase 1.5) — Funcionário preferencial (Algoritmo VIP).
     // HF11 — Sistema HÍBRIDO: um staff PODE ser o preferencial de MÚLTIPLAS

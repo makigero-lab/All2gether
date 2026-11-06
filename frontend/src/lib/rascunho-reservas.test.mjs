@@ -22,6 +22,7 @@ const L = exports_;
 const servidor = {
   check_in: "2030-06-08", check_out: "2030-06-10", hora_checkin: "", hospedes: "2",
   nome_hospede: "Maria", plataforma: "Airbnb", horario_preferido: "", observacoes: "",
+  tipo_limpeza: "normal", data_limpeza: "",
 };
 
 class Armazem {
@@ -174,4 +175,77 @@ test("rascunho com mais de 7 dias é apagado ao ler; dentro do prazo mantém-se"
 test("texto singular/plural das alterações por gravar", () => {
   assert.equal(L.textoPendentes(1), "1 alteração por gravar");
   assert.equal(L.textoPendentes(3), "3 alterações por gravar");
+});
+
+test("tipo de limpeza: sem tipo ou vazio vale normal e não pede data", () => {
+  assert.equal(L.validarReserva({ ...servidor, tipo_limpeza: "" }), null);
+  assert.equal(L.validarReserva({ ...servidor, tipo_limpeza: undefined, data_limpeza: undefined }), null);
+  assert.equal(L.validarReserva({ ...servidor, tipo_limpeza: "profunda" }), null);
+  assert.equal(L.tipoOuNormal(""), "normal");
+  assert.equal(L.tipoOuNormal("luxo"), "normal");
+  assert.equal(L.tipoOuNormal("preparacao"), "preparacao");
+});
+
+test("tipo de limpeza inválido é recusado", () => {
+  assert.match(L.validarReserva({ ...servidor, tipo_limpeza: "luxo" }), /Tipo de limpeza inválido/);
+});
+
+test("intermédia: data obrigatória, entre check-in e check-out", () => {
+  const v = { ...servidor, tipo_limpeza: "intermedia" };
+  assert.match(L.validarReserva(v), /data da limpeza/);
+  assert.match(L.validarReserva({ ...v, data_limpeza: "2030-06-07" }), /entre 08\/06 e 10\/06/);
+  assert.match(L.validarReserva({ ...v, data_limpeza: "2030-06-11" }), /entre 08\/06 e 10\/06/);
+  assert.match(L.validarReserva({ ...v, data_limpeza: "31/06/2030" }), /data da limpeza/);
+  assert.equal(L.validarReserva({ ...v, data_limpeza: "2030-06-09" }), null);
+  assert.equal(L.validarReserva({ ...v, data_limpeza: "2030-06-08" }), null);
+  assert.equal(L.validarReserva({ ...v, data_limpeza: "2030-06-10" }), null);
+});
+
+test("preparação: data obrigatória, até ao check-in", () => {
+  const v = { ...servidor, tipo_limpeza: "preparacao" };
+  assert.match(L.validarReserva(v), /data da limpeza/);
+  assert.equal(L.validarReserva({ ...v, data_limpeza: "2030-06-07" }), null);
+  assert.equal(L.validarReserva({ ...v, data_limpeza: "2030-06-08" }), null);
+  assert.match(L.validarReserva({ ...v, data_limpeza: "2030-06-09" }), /até ao check-in/);
+});
+
+test("mudar a data das reservas revalida a data da limpeza com os valores efetivos", () => {
+  const sv = { ...servidor, tipo_limpeza: "intermedia", data_limpeza: "2030-06-09" };
+  const ed = L.aplicarCampo({}, "r1", "check_out", "2030-06-08", sv);
+  assert.match(L.validarReserva(L.valoresEfetivos(sv, ed.r1)), /entre 08\/06 e 08\/06/);
+});
+
+test("payload: tipo vazio vira normal e data vazia vira null", () => {
+  assert.deepEqual(L.paraPayload({ tipo_limpeza: "", data_limpeza: "" }), { tipo_limpeza: "normal", data_limpeza: null });
+  assert.deepEqual(L.paraPayload({ tipo_limpeza: "intermedia", data_limpeza: "2030-06-09" }), { tipo_limpeza: "intermedia", data_limpeza: "2030-06-09" });
+  assert.deepEqual(L.paraPayload({ tipo_limpeza: "luxo" }), { tipo_limpeza: "normal" });
+});
+
+test("rascunho: o tipo e a data guardam-se e rascunhos antigos sem esses campos continuam válidos", () => {
+  const a = new Armazem();
+  const k = L.chaveRascunho("u1", "e1");
+  const nova = { ...servidor, tmp: "n1", propriedade_id: "p1", tipo_limpeza: "intermedia", data_limpeza: "2030-06-09" };
+  L.guardarRascunhoReservas(k, { edicoes: {}, novas: [nova], eliminar: {} }, a);
+  assert.equal(L.lerRascunhoReservas(k, a).novas[0].tipo_limpeza, "intermedia");
+  assert.equal(L.lerRascunhoReservas(k, a).novas[0].data_limpeza, "2030-06-09");
+  // rascunho antigo (sem os campos novos)
+  const antigo = { ...servidor }; delete antigo.tipo_limpeza; delete antigo.data_limpeza;
+  a.setItem(k, JSON.stringify({ guardado_em: Date.now(), edicoes: {}, eliminar: {}, novas: [{ ...antigo, tmp: "n2", propriedade_id: "p1" }] }));
+  const lido = L.lerRascunhoReservas(k, a).novas[0];
+  assert.equal(lido.tipo_limpeza, "");
+  assert.equal(L.validarReserva(lido, "p1"), null);
+});
+
+test("limites do campo da data da limpeza por tipo", () => {
+  assert.deepEqual(L.limitesDataLimpeza("intermedia", "2030-06-08", "2030-06-10"), { min: "2030-06-08", max: "2030-06-10" });
+  assert.deepEqual(L.limitesDataLimpeza("preparacao", "2030-06-08", "2030-06-10"), { min: "2030-05-09", max: "2030-06-08" });
+  assert.deepEqual(L.limitesDataLimpeza("normal", "2030-06-08", "2030-06-10"), {});
+  assert.deepEqual(L.limitesDataLimpeza("intermedia", "", ""), { min: undefined, max: undefined });
+});
+
+test("preparação: no máximo 30 dias antes do check-in, com mensagem com a data", () => {
+  const v = { ...servidor, tipo_limpeza: "preparacao" };
+  assert.equal(L.validarReserva({ ...v, data_limpeza: "2030-05-09" }), null);
+  assert.match(L.validarReserva({ ...v, data_limpeza: "2030-05-08" }), /no máximo 30 dias.*09\/05/);
+  assert.match(L.validarReserva({ ...v, data_limpeza: "2030-06-09" }), /até ao check-in \(08\/06\)/);
 });

@@ -2102,6 +2102,9 @@ async function sincronizarReservas(req, res) {
       // Reconciliação não recria tarefas de reservas manuais (o gestor pode tê-las apagado).
       const reservasManuaisAlvo = reconciliacao ? [] : null;
       const ReservaManual = require('../models/ReservaManual');
+      const {
+        tipoDe: tipoDeLimpeza, tempoDoTipo, checklistDoTipo, temChecklistPropria, resolverDiaLimpeza,
+      } = require('../utils/tipoLimpeza');
       const hoje = new Date();
       hoje.setUTCHours(0, 0, 0, 0);
       // Busca reservas manuais futuras (check_out >= hoje) sem tarefa gerada
@@ -2131,11 +2134,15 @@ async function sincronizarReservas(req, res) {
           continue;
         }
 
-        const dataCheckOutRM = new Date(rm.check_out);
-        const dataTarefaRM = new Date(
-          Date.UTC(dataCheckOutRM.getUTCFullYear(), dataCheckOutRM.getUTCMonth(), dataCheckOutRM.getUTCDate())
-        );
-        dataTarefaRM.setUTCHours(10, 0, 0, 0);
+        // Tipo de limpeza da reserva (sem o campo = normal): dia, tempo e checklist do tipo.
+        // Não reutiliza gerarTarefaLimpezaReserva porque esta recriação NÃO atribui (fica
+        // por atribuir para o gestor, como sempre foi).
+        const tipoRM = tipoDeLimpeza(rm);
+        const rdRM = resolverDiaLimpeza({
+          tipo: tipoRM, check_in: rm.check_in, check_out: rm.check_out, data_limpeza: rm.data_limpeza,
+        });
+        const diaRM = rdRM.erro ? new Date(rm.check_out).toISOString().slice(0, 10) : rdRM.dia;
+        const dataTarefaRM = new Date(`${diaRM}T10:00:00Z`);
 
         const numHospedesRM = rm.hospedes || propriedadeRM.capacidade_hospedes || null;
 
@@ -2147,13 +2154,15 @@ async function sincronizarReservas(req, res) {
           utilizador_id: null,
           equipa_atribuida: [],
           data: dataTarefaRM,
-          tempo_limpeza_minutos: propriedadeRM.tempo_limpeza_minutos || 45,
+          tempo_limpeza_minutos: tempoDoTipo(propriedadeRM, tipoRM),
           tipo: 'limpeza',
+          tipo_limpeza: tipoRM,
           estado: 'por_atribuir',
           observacoes: rm.observacoes || '',
           hospedes: numHospedesRM,
           origem_parceiro: true, // FIX (sync parceiros) — marca como origem parceiro
-          checklist: propriedadeRM.checklist || [],
+          checklist: checklistDoTipo(propriedadeRM, tipoRM),
+          checklist_do_tipo: temChecklistPropria(propriedadeRM, tipoRM),
           detalhes_reserva: {
             checkin: rm.check_in ? new Date(rm.check_in).toISOString().slice(0, 10) : null,
             checkout: new Date(rm.check_out).toISOString().slice(0, 10),

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { rotuloTipoLimpeza } from "@/components/tipo-limpeza-badge";
 import {
   CalendarRange,
   Loader2,
@@ -62,6 +63,8 @@ interface TarefaCalendario {
   data: string;
   tempo_limpeza_minutos: number;
   tipo: string;
+  /** Tipo de limpeza; sem o campo = normal. */
+  tipo_limpeza?: string | null;
   estado: string;
   observacoes?: string;
   // HF25 — estado da ausência (aprovada | pendente | pendente_emergencia).
@@ -568,7 +571,8 @@ export default function CalendarioOperacionalPage() {
     const isMonthView = arg.view.type === "dayGridMonth";
     const paleta = paletaPorEstado(t.estado);
     const emoji = emojiPorTipo(t.tipo);
-    const titulo = t.propriedade_id?.nome ?? "—";
+    const tipoEspecial = t.tipo === "limpeza" && t.tipo_limpeza && t.tipo_limpeza !== "normal" ? rotuloTipoLimpeza(t.tipo_limpeza) : null;
+    const titulo = `${tipoEspecial ? `${tipoEspecial} - ` : ""}${t.propriedade_id?.nome ?? "—"}`;
     const staff = t.utilizador_id?.nome ?? null;
     const isFolga = t.tipo === "folga_fixa";
     const isAusencia = t.tipo === "ausencia";

@@ -1,6 +1,7 @@
 "use client";
 
 import { ResultadoImportacao, lerDetalheErros } from "@/components/resultado-importacao";
+import { TipoLimpezaBadge } from "@/components/tipo-limpeza-badge";
 import { useCallback, useEffect, useState } from "react";
 import {
   Plus,
@@ -84,6 +85,8 @@ interface TarefaAdmin {
   hospedes?: number | null;
   // FIX (sync parceiros) — true se a tarefa veio de uma reserva de parceiro.
   origem_parceiro?: boolean;
+  /** Tipo de limpeza; sem o campo = normal. */
+  tipo_limpeza?: string | null;
   // FIX (motivo_falha_atribuicao) — Motivo pelo qual a auto-atribuição falhou
   // (ex: "Toda a equipa de folga/férias", "Lotação máxima excedida").
   motivo_nao_atribuicao?: string | null;
@@ -1124,8 +1127,9 @@ export default function AdminTarefasPage() {
                     <span className="text-xs uppercase tracking-wide">Equipa: </span>
                     <EquipaTarefa t={t} />
                   </p>
-                  {(t.origem_parceiro || (Array.isArray(t.avarias) && t.avarias.length > 0)) && (
+                  {(t.origem_parceiro || (t.tipo_limpeza && t.tipo_limpeza !== "normal") || (Array.isArray(t.avarias) && t.avarias.length > 0)) && (
                     <div className="flex flex-wrap gap-1">
+                      <TipoLimpezaBadge tipo={t.tipo_limpeza} />
                       {t.origem_parceiro && (
                         <Badge variant="secondary" className="px-1.5 py-0 text-xs">🤝 Parceiro</Badge>
                       )}
@@ -1182,6 +1186,7 @@ export default function AdminTarefasPage() {
                               🤝 Parceiro
                             </Badge>
                           )}
+                          <TipoLimpezaBadge tipo={t.tipo_limpeza} />
                           {temAvarias && (
                             <Badge
                               variant="destructive"

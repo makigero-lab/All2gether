@@ -87,6 +87,8 @@ export default function DetalheTarefaPage({
     propriedade_nome: tarefa.propriedade_id?.nome ?? "Propriedade",
     hora_limite: "",
     tempo_estimado_minutos: tarefa.tempo_limpeza_minutos,
+    tipo_limpeza: tarefa.tipo_limpeza ?? null,
+    checklist_do_tipo: tarefa.checklist_do_tipo === true,
     estado: tarefa.estado,
     tipo: tarefa.tipo,
     endereco: tarefa.propriedade_id?.morada,

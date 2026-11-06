@@ -26,6 +26,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import type { TarefaMock, EstadoTarefa, TipoTarefa } from "@/lib/api";
+import { TipoLimpezaBadge } from "@/components/tipo-limpeza-badge";
 
 const tipoIcon: Record<TarefaMock["tipo"], React.ComponentType<{ className?: string }>> = {
   limpeza: SprayCan,
@@ -121,9 +122,10 @@ export function TaskCard({ tarefa }: { tarefa: TarefaMock }) {
                   <span className="sr-only"> — {tipoLabel[tarefa.tipo]}, abrir tarefa</span>
                 </Link>
               </CardTitle>
-              <p className="mt-0.5 text-xs text-muted-foreground">
+              <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                 {tipoLabel[tarefa.tipo]}
-              </p>
+                {tarefa.tipo === "limpeza" && <TipoLimpezaBadge tipo={tarefa.tipo_limpeza} />}
+              </div>
             </div>
           </div>
           <EstadoTarefaBadge estado={tarefa.estado} className="shrink-0" />

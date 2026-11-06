@@ -40,6 +40,29 @@ import {
 import { lerUtilizador, type Role } from "@/lib/auth";
 import { googleMapsUrl } from "@/lib/utils";
 
+/** Tipos de limpeza configuráveis por casa (normal usa os valores base da casa). */
+const TIPOS_CONFIG = [
+  { id: "intermedia", rotulo: "Intermédia" },
+  { id: "profunda", rotulo: "Profunda" },
+  { id: "preparacao", rotulo: "Preparação" },
+] as const;
+type TipoConfig = (typeof TIPOS_CONFIG)[number]["id"];
+type ConfigTipos = Record<TipoConfig, { tempo: string; checklist: string }>;
+const CONFIG_TIPOS_VAZIA: ConfigTipos = {
+  intermedia: { tempo: "", checklist: "" },
+  profunda: { tempo: "", checklist: "" },
+  preparacao: { tempo: "", checklist: "" },
+};
+function configTiposDe(p: PropriedadeDTO): ConfigTipos {
+  const out = { intermedia: { ...CONFIG_TIPOS_VAZIA.intermedia }, profunda: { ...CONFIG_TIPOS_VAZIA.profunda }, preparacao: { ...CONFIG_TIPOS_VAZIA.preparacao } };
+  for (const { id } of TIPOS_CONFIG) {
+    const t = p.tempos_limpeza_por_tipo?.[id];
+    out[id].tempo = t != null ? String(t) : "";
+    out[id].checklist = (p.checklists_por_tipo?.[id] ?? []).join("\n");
+  }
+  return out;
+}
+
 /**
  * Página de Propriedades — Painel de Administração.
  *
@@ -376,6 +399,8 @@ export default function PropriedadesPage() {
     morada: "",
     tempo_limpeza_minutos: "45",
     checklist: "",
+    // Tipos de limpeza: tempo (min) e checklist por tipo (vazios = os da casa).
+    tipos: CONFIG_TIPOS_VAZIA,
     funcionario_preferencial_id: "",
     modelo_checklist_id: "",
     // FIX (parceiro associado + morada estruturada) — novos campos.
@@ -490,6 +515,7 @@ export default function PropriedadesPage() {
       morada: p.morada ?? "",
       tempo_limpeza_minutos: String(p.tempo_limpeza_minutos ?? 45),
       checklist: (p.checklist ?? []).join("\n"),
+      tipos: configTiposDe(p),
       funcionario_preferencial_id: p.funcionario_preferencial_id ?? "",
       // FIX (equipas preferenciais) — Array de IDs de staff preferencial.
       equipa_preferencial: Array.isArray(p.equipa_preferencial)
@@ -591,6 +617,14 @@ export default function PropriedadesPage() {
       return;
     }
 
+    for (const { id, rotulo } of TIPOS_CONFIG) {
+      const t = editForm.tipos[id].tempo.trim();
+      if (t !== "" && (!/^\d{1,3}$/.test(t) || Number(t) < 1 || Number(t) > 480)) {
+        setEditErro(`Tempo da limpeza ${rotulo.toLowerCase()}: entre 1 e 480 minutos (ou deixa vazio para usar o tempo da casa).`);
+        return;
+      }
+    }
+
     // Prompt 126 — Confirmação de morada inválida no modal de edição.
     if (editMoradaWarning && !editMoradaConfirmada) {
       setEditMoradaConfirmada(true);
@@ -622,6 +656,16 @@ export default function PropriedadesPage() {
             .split("\n")
             .map((s) => s.trim())
             .filter((s) => s.length > 0),
+          // Tipos de limpeza: vazio = usa o tempo / a checklist da casa.
+          tempos_limpeza_por_tipo: Object.fromEntries(
+            TIPOS_CONFIG.map(({ id }) => [id, editForm.tipos[id].tempo.trim() === "" ? null : Number(editForm.tipos[id].tempo)])
+          ),
+          checklists_por_tipo: Object.fromEntries(
+            TIPOS_CONFIG.map(({ id }) => [
+              id,
+              editForm.tipos[id].checklist.split("\n").map((x) => x.trim()).filter((x) => x.length > 0),
+            ])
+          ),
           // FIX (cartão redundante removido) — funcionario_preferencial_id
           // já não é enviado (cartão removido da UI). O backend mantém o
           // campo para retrocompatibilidade mas não é editável.
@@ -1896,6 +1940,48 @@ export default function PropriedadesPage() {
                       ? " Editaste manualmente após o auto-fill do modelo — as tuas alterações serão guardadas."
                       : " Dica: seleciona um \"Modelo de Checklist\" na aba \"Atribuição\" para preencher automaticamente."}
                   </p>
+                </div>
+
+                {/* Tipos de limpeza: tempo e checklist próprios; vazio = usa os da casa. */}
+                <div className="space-y-3 rounded-md border p-3">
+                  <div>
+                    <h4 className="text-sm font-semibold">Tipos de limpeza</h4>
+                    <p className="text-xs text-muted-foreground">
+                      A limpeza «Normal» usa o tempo e a checklist desta casa. Nos outros tipos, deixa o tempo ou a checklist vazios para usar os da casa. O tipo não muda preços.
+                    </p>
+                  </div>
+                  {TIPOS_CONFIG.map(({ id, rotulo }) => (
+                    <div key={id} className="space-y-1.5 border-t pt-3 first:border-t-0 first:pt-0">
+                      <p className="text-sm font-medium">{rotulo}</p>
+                      <div className="flex items-center gap-2">
+                        <label htmlFor={`edit-tempo-${id}`} className="text-xs text-muted-foreground">Tempo (minutos)</label>
+                        <input
+                          id={`edit-tempo-${id}`}
+                          type="number"
+                          inputMode="numeric"
+                          min={1}
+                          max={480}
+                          value={editForm.tipos[id].tempo}
+                          placeholder={editForm.tempo_limpeza_minutos}
+                          onChange={(e) =>
+                            setEditForm((f) => ({ ...f, tipos: { ...f.tipos, [id]: { ...f.tipos[id], tempo: e.target.value } } }))
+                          }
+                          className="h-11 w-24 rounded-md border border-input bg-background px-2 text-base sm:h-9 sm:text-sm"
+                        />
+                      </div>
+                      <label htmlFor={`edit-checklist-${id}`} className="sr-only">Checklist da limpeza {rotulo.toLowerCase()} (um item por linha)</label>
+                      <textarea
+                        id={`edit-checklist-${id}`}
+                        value={editForm.tipos[id].checklist}
+                        onChange={(e) =>
+                          setEditForm((f) => ({ ...f, tipos: { ...f.tipos, [id]: { ...f.tipos[id], checklist: e.target.value } } }))
+                        }
+                        rows={4}
+                        placeholder="Checklist própria (um item por linha); vazio = a checklist da casa"
+                        className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                      />
+                    </div>
+                  ))}
                 </div>
               </TabsContent>
             </Tabs>

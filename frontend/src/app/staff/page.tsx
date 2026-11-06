@@ -42,6 +42,7 @@ interface TarefaReal {
   tipo: string;
   estado: string;
   tempo_limpeza_minutos: number;
+  tipo_limpeza?: string | null;
   // Prompt 136 — detalhes_reserva (para mostrar nome_hospede no cartão).
   detalhes_reserva?: {
     checkin?: string | null;
@@ -64,6 +65,7 @@ function adaptarTarefa(t: TarefaReal) {
     propriedade_nome: t.propriedade_id?.nome ?? "Propriedade",
     hora_limite: "",
     tempo_estimado_minutos: t.tempo_limpeza_minutos,
+    tipo_limpeza: t.tipo_limpeza ?? null,
     estado: t.estado as "por_atribuir" | "atribuida" | "em_curso" | "concluida" | "cancelada",
     tipo: t.tipo as "limpeza" | "check_in" | "check_out" | "manutencao" | "outro",
     endereco: t.propriedade_id?.morada,

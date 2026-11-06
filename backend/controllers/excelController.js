@@ -23,6 +23,9 @@ const { planearAtribuicao } = require('../utils/atribuicaoAutomatica');
 const { verificarTamanhoXlsx } = require('../utils/xlsxLimites');
 const { obterLock, libertarLock, renovarLock } = require('../utils/lockEmpresa');
 const { notificarUtilizador, avisarGestores } = require('../utils/notificar');
+const {
+  normalizarTipo, tipoDe, eSaida, tempoDoTipo, checklistDoTipo, temChecklistPropria, resolverDiaLimpeza, ROTULOS_TIPO,
+} = require('../utils/tipoLimpeza');
 
 const MIME_XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const MAX_LINHAS_IMPORT = 2000;
@@ -363,6 +366,15 @@ async function importarLinhas({
       const dataRaw = col(linha, 'Data', 'data');
       const nomeHospede = String(col(linha, 'Nome Hóspede', 'nome_hospede', 'hospede') ?? '').trim();
       const observacoes = String(col(linha, 'Observações', 'observacoes') ?? '').trim();
+      // Tipo de limpeza (opcional; vazio = normal). A coluna «Tipo» dos ficheiros exportados
+      // antes desta funcionalidade tinha «limpeza»/«manutencao» (tipo da tarefa): conta como vazio.
+      let tipoRaw = col(linha, 'Tipo de limpeza', 'tipo_limpeza', 'Tipo da limpeza');
+      if (tipoRaw === null) {
+        const antigo = col(linha, 'Tipo', 'tipo');
+        const a = antigo === null ? '' : String(antigo).trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        tipoRaw = a === 'limpeza' || a === 'manutencao' ? null : antigo;
+      }
+      const dataLimpezaRaw = col(linha, 'Data limpeza', 'Data da limpeza', 'data_limpeza');
 
       if (!nomeProp) {
         detalheErros.push(`Linha ${nLinha}: Propriedade em falta.`);
@@ -375,6 +387,14 @@ async function importarLinhas({
         erros++;
         continue;
       }
+
+      const tp = normalizarTipo(tipoRaw === null ? null : String(tipoRaw));
+      if (!tp.ok) {
+        detalheErros.push(`Linha ${nLinha}: Tipo de limpeza inválido "${tipoRaw}" (usa Normal, Intermédia, Profunda ou Preparação).`);
+        erros++;
+        continue;
+      }
+      const tipoLimpeza = tp.tipo;
 
       // A tarefa é agendada para o check-out (ou, na falta, para a coluna Data).
       const brutoSaida = checkOutRaw ?? dataRaw;
@@ -400,6 +420,29 @@ async function importarLinhas({
         dataCheckIn = ci;
       }
 
+      // Dia da limpeza: check-out (normal/profunda) ou a «Data limpeza» (intermédia/preparação).
+      let dataLimpeza = dataTarefa;
+      let diaLimpezaISO = checkOutISO;
+      if (!eSaida(tipoLimpeza)) {
+        if (checkInRaw === null) {
+          detalheErros.push(`Linha ${nLinha}: O Check-in é obrigatório na limpeza ${ROTULOS_TIPO[tipoLimpeza].toLowerCase()}.`);
+          erros++;
+          continue;
+        }
+        const dl = parseDataExcel(dataLimpezaRaw);
+        const rd = resolverDiaLimpeza({
+          tipo: tipoLimpeza, check_in: checkInISO, check_out: checkOutISO, data_limpeza: dl ? paraISO(dl) : null,
+          hoje: new Date().toISOString().slice(0, 10),
+        });
+        if (rd.erro) {
+          detalheErros.push(`Linha ${nLinha}: ${rd.erro}`);
+          erros++;
+          continue;
+        }
+        dataLimpeza = new Date(`${rd.dia}T10:00:00Z`);
+        diaLimpezaISO = rd.dia;
+      }
+
       // Fallback de hóspedes — se vazio/zero, usa a capacidade da propriedade.
       let numHospedes = hospedes !== null ? Number(hospedes) : null;
       if (numHospedes === null || numHospedes === 0 || Number.isNaN(numHospedes)) {
@@ -409,12 +452,14 @@ async function importarLinhas({
       // Chave natural (idempotência): empresa + propriedade + DIA do check-out +
       // tipo limpeza + não cancelada. Compara o dia (não a hora): depois de
       // atribuída, a hora de início muda, e reimportar duplicava.
-      const chave = `${prop._id}|${checkOutISO}`;
+      // Uma saída (normal/profunda) por dia e casa; intermédia/preparação só colidem com o mesmo tipo.
+      const classe = eSaida(tipoLimpeza) ? 'saida' : tipoLimpeza;
+      const chave = `${prop._id}|${diaLimpezaISO}|${classe}`;
       if (chavesVistas.has(chave)) {
         ignoradas++;
         continue;
       }
-      const inicioDia = new Date(dataTarefa);
+      const inicioDia = new Date(dataLimpeza);
       inicioDia.setUTCHours(0, 0, 0, 0);
       const existente = await Tarefa.exists({
         empresa_id: empresaId,
@@ -422,6 +467,9 @@ async function importarLinhas({
         data: { $gte: inicioDia, $lt: new Date(inicioDia.getTime() + 86400000) },
         tipo: 'limpeza',
         estado: { $ne: 'cancelada' },
+        ...(eSaida(tipoLimpeza)
+          ? { tipo_limpeza: { $nin: ['intermedia', 'preparacao'] } }
+          : { tipo_limpeza: tipoLimpeza }),
       });
       if (existente) {
         ignoradas++;
@@ -437,6 +485,8 @@ async function importarLinhas({
         check_out: dataTarefa,
         hospedes: numHospedes,
         observacoes,
+        tipo_limpeza: tipoLimpeza,
+        data_limpeza: eSaida(tipoLimpeza) ? null : new Date(`${diaLimpezaISO}T00:00:00Z`),
       });
 
       const novaTarefa = await Tarefa.create({
@@ -446,14 +496,16 @@ async function importarLinhas({
         origem: 'manual',
         utilizador_id: null,
         equipa_atribuida: [],
-        data: dataTarefa,
-        tempo_limpeza_minutos: prop.tempo_limpeza_minutos || 45,
+        data: dataLimpeza,
+        tempo_limpeza_minutos: tempoDoTipo(prop, tipoLimpeza),
+        tipo_limpeza: tipoLimpeza,
         tipo: 'limpeza',
         estado: 'por_atribuir',
         motivo_nao_atribuicao: MOTIVO_A_ATRIBUIR,
         observacoes,
         hospedes: numHospedes,
-        checklist: prop.checklist || [],
+        checklist: checklistDoTipo(prop, tipoLimpeza),
+        checklist_do_tipo: temChecklistPropria(prop, tipoLimpeza),
         detalhes_reserva: {
           checkin: checkInISO,
           checkout: checkOutISO,
@@ -469,7 +521,7 @@ async function importarLinhas({
         linha: nLinha,
         tarefa: novaTarefa,
         propriedade: prop,
-        rotulo: `${prop.nome} (${formatarDataPT(dataTarefa)})`,
+        rotulo: `${prop.nome} (${formatarDataPT(dataLimpeza)})`,
       });
     } catch (errLinha) {
       console.error(`❌ excel.importar linha ${nLinha}:`, errLinha.message);
@@ -536,6 +588,7 @@ exports.exportarExcel = async (req, res) => {
       'Origem': t.origem ?? '',
       'Parceiro': t.origem_parceiro ? 'Sim' : 'Não',
       'Tipo': t.tipo ?? '',
+      'Tipo de limpeza': ROTULOS_TIPO[tipoDe(t)],
       'Estado': t.estado ?? '',
       // Todos os membros (responsável primeiro, sem repetidos); sem responsável = sem equipa.
       'Equipa': nomesDaEquipa(t),

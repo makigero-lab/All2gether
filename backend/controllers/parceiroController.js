@@ -26,6 +26,12 @@ const { planearAtribuicao } = require('../utils/atribuicaoAutomatica');
 const { idsEquipa } = require('../utils/equipaTarefa');
 const { agregarNotificacao } = require('../utils/notificarAgregado');
 const { avisarGestores } = require('../utils/notificar');
+const { temProgresso, planearAtribuicao: planearMotor, temSobreposicao } = require('../utils/atribuicaoAutomatica');
+const { comMembro } = require('../utils/equipaTarefa');
+const { obterRangeDia } = require('../utils/scheduler');
+const {
+  normalizarTipo, tipoDe, eSaida, tempoDoTipo, checklistDoTipo, temChecklistPropria, resolverDiaLimpeza, ROTULOS_TIPO,
+} = require('../utils/tipoLimpeza');
 
 const fmtDia = (d) => new Date(d).toISOString().slice(0, 10).split('-').reverse().join('/');
 
@@ -309,13 +315,19 @@ function validarDatas(check_in, check_out) {
  * de reservas do parceiro (ReservaManual) e as de outra origem (rotina, Smoobu,
  * tarefa manual do gestor). `excluirTarefaId` deixa de fora a própria tarefa.
  */
-async function limpezasDoDia({ empresaId, propriedadeId, inicioDia, excluirTarefaId = null }) {
+async function limpezasDoDia({ empresaId, propriedadeId, inicioDia, tipoLimpeza = 'normal', excluirTarefaId = null }) {
+  // «Saída» (normal/profunda, sem o campo = normal) compara com outras saídas do dia; uma
+  // intermédia ou de preparação só conflitua com outra do MESMO tipo nesse dia.
+  const filtroTipo = eSaida(tipoLimpeza)
+    ? { tipo_limpeza: { $nin: ['intermedia', 'preparacao'] } }
+    : { tipo_limpeza: tipoLimpeza };
   const filtro = {
     empresa_id: empresaId,
     propriedade_id: propriedadeId,
     tipo: 'limpeza',
     estado: { $ne: 'cancelada' },
     data: { $gte: inicioDia, $lt: new Date(inicioDia.getTime() + 86400000) },
+    ...filtroTipo,
   };
   if (excluirTarefaId) filtro._id = { $ne: excluirTarefaId };
   const tarefas = await Tarefa.find(filtro).select('_id').lean();
@@ -329,6 +341,13 @@ async function limpezasDoDia({ empresaId, propriedadeId, inicioDia, excluirTaref
     doParceiro: doParceiroIds.size > 0,
     deOutraOrigem: ids.some((id) => !doParceiroIds.has(String(id))),
   };
+}
+
+/** Texto do dia duplicado conforme o tipo. */
+function textoDuplicada(tipo, dia) {
+  return eSaida(tipo)
+    ? `com check-out a ${fmtDia(dia)}`
+    : `${ROTULOS_TIPO[tipo].toLowerCase()} a ${fmtDia(dia)}`;
 }
 
 /** Gestor decide: há outra limpeza (outra origem) no mesmo dia e casa. */
@@ -348,9 +367,12 @@ function avisarGestorDuasLimpezas(empresaId, propriedade, inicioDia) {
  */
 async function gerarTarefaLimpezaReserva({
   propriedade, empresaId, check_in, check_out, numHospedes, observacoes, detalhesExtra = {},
+  tipoLimpeza = 'normal', diaLimpeza = null,
 }) {
-  const dataCheckOut = new Date(check_out);
-  const tempoNovaTarefa = propriedade.tempo_limpeza_minutos || 45;
+  // Normal/profunda: dia do check-out. Intermédia/preparação: o dia escolhido.
+  const dataCheckOut = new Date(diaLimpeza || check_out);
+  // O tempo do tipo (ou o da casa) é o que chega ao motor, ao limite de 8h e ao scheduler.
+  const tempoNovaTarefa = tempoDoTipo(propriedade, tipoLimpeza);
 
   // Auto-atribuição com o motor partilhado (staff_necessario, scheduler, motivo real).
   const plano = await planearAtribuicao({
@@ -382,7 +404,9 @@ async function gerarTarefaLimpezaReserva({
     // FIX (sync parceiros) — Marca a tarefa como originária de uma reserva
     // de parceiro (para destaque visual e filtro "Apenas Parceiros").
     origem_parceiro: true,
-    checklist: propriedade.checklist || [],
+    tipo_limpeza: tipoLimpeza,
+    checklist: checklistDoTipo(propriedade, tipoLimpeza),
+    checklist_do_tipo: temChecklistPropria(propriedade, tipoLimpeza),
     detalhes_reserva: {
       checkin: String(check_in),
       checkout: String(check_out),
@@ -390,6 +414,71 @@ async function gerarTarefaLimpezaReserva({
       ...detalhesExtra,
     },
   });
+}
+
+/**
+ * A limpeza ficou mais longa (mesmo dia, outro tipo): se a equipa atual continua a caber
+ * (máx. 8h/dia por pessoa e sem sobreposição), mantém pessoas e hora. Se não, liberta a
+ * tarefa e deixa o motor escolher de novo com o tempo novo; sem ninguém, fica por atribuir
+ * com o motivo real e os gestores são avisados. Grava já os campos de atribuição (updateOne):
+ * o `tarefa.save()` seguinte só escreve o resto. Nunca é chamada para `em_curso`/`concluida`
+ * (a regra de 409 vem antes: a limpeza em curso fica com a pessoa).
+ */
+async function replanearSeNaoCabe(tarefa, propriedade, tempoNovo) {
+  const range = obterRangeDia(tarefa.data);
+  const membros = idsEquipa(tarefa);
+  let cabe = true;
+  for (const id of membros) {
+    const outras = await Tarefa.find(comMembro({
+      empresa_id: tarefa.empresa_id,
+      _id: { $ne: tarefa._id },
+      data: { $gte: range.start, $lt: range.end },
+      estado: { $nin: ['cancelada', 'concluida'] },
+    }, id)).select('tempo_limpeza_minutos').lean();
+    const carga = outras.reduce((acc, t) => acc + (Number(t.tempo_limpeza_minutos) || 0), 0);
+    if (carga + tempoNovo > 480 || await temSobreposicao(id, tarefa.data, tempoNovo, tarefa._id)) {
+      cabe = false;
+      break;
+    }
+  }
+  if (cabe) return;
+
+  const dataAntes = tarefa.data;
+  // Liberta primeiro: o motor não deve contar a carga desta tarefa com a equipa antiga.
+  await Tarefa.updateOne(
+    { _id: tarefa._id },
+    { $set: { utilizador_id: null, equipa_atribuida: [], pessoas_em_falta: 0, estado: 'por_atribuir' } }
+  );
+  const plano = await planearMotor({
+    empresaId: tarefa.empresa_id, propriedade, dia: tarefa.data, tempoLimpeza: tempoNovo,
+  });
+  if (plano.estado === 'atribuida') {
+    await Tarefa.updateOne({ _id: tarefa._id }, { $set: {
+      utilizador_id: plano.utilizador_id,
+      equipa_atribuida: plano.equipa_atribuida,
+      estado: 'atribuida',
+      data: plano.data,
+      tempo_viagem_minutos: plano.tempo_viagem_minutos,
+      motivo_nao_atribuicao: null,
+      pessoas_em_falta: plano.faltam,
+    } });
+    const novos = new Set(plano.equipa_atribuida.map(String));
+    avisarEquipaSaiu(membros.filter((m) => !novos.has(String(m))), propriedade, dataAntes, 'foi passada a outra pessoa (a limpeza ficou mais longa).');
+    avisarEquipaNova({ utilizador_id: plano.utilizador_id, equipa_atribuida: plano.equipa_atribuida, data: plano.data }, propriedade);
+  } else {
+    await Tarefa.updateOne({ _id: tarefa._id }, { $set: {
+      estado: plano.estado,
+      motivo_nao_atribuicao: plano.motivo_nao_atribuicao,
+      pessoas_em_falta: 0,
+    } });
+    avisarEquipaSaiu(membros, propriedade, dataAntes, 'ficou por atribuir (a limpeza ficou mais longa).');
+    await avisarGestores(
+      tarefa.empresa_id,
+      '⚠️ Limpeza por atribuir',
+      `"${propriedade.nome}" (${fmtDia(dataAntes)}) passou a ${tempoNovo} min e já não cabe na agenda de ninguém: ${plano.motivo_nao_atribuicao || 'por atribuir'}.`,
+      '/gestor/tarefas'
+    ).catch(() => {});
+  }
 }
 
 /** Resposta a um reenvio da mesma reserva (mesma chave): devolve a existente, sem criar nada. */
@@ -431,6 +520,13 @@ async function criarReserva(req, res) {
     }
     const erroDatas = validarDatas(check_in, check_out);
     if (erroDatas) return res.status(400).json({ erro: erroDatas });
+    const tp = normalizarTipo(req.body.tipo_limpeza);
+    if (!tp.ok) return res.status(400).json({ erro: 'Tipo de limpeza inválido.' });
+    const tipoLimpeza = tp.tipo;
+    const rd = resolverDiaLimpeza({
+      tipo: tipoLimpeza, check_in, check_out, data_limpeza: req.body.data_limpeza, hoje: new Date().toISOString().slice(0, 10),
+    });
+    if (rd.erro) return res.status(400).json({ erro: rd.erro });
 
     // Valida que a propriedade pertence ao parceiro.
     const propriedade = await Propriedade.findOne({
@@ -458,14 +554,13 @@ async function criarReserva(req, res) {
     // check-out (não cancelada). Duas saídas no mesmo dia na mesma casa não
     // existem; entradas e saídas no mesmo dia são reservas diferentes (outro
     // dia de check-out) e passam. Casas diferentes no mesmo dia também.
-    const inicioDiaSaida = new Date(check_out);
-    inicioDiaSaida.setUTCHours(0, 0, 0, 0);
+    const inicioDiaSaida = new Date(`${rd.dia}T00:00:00Z`);
     const { doParceiro, deOutraOrigem } = await limpezasDoDia({
-      empresaId, propriedadeId: propriedade._id, inicioDia: inicioDiaSaida,
+      empresaId, propriedadeId: propriedade._id, inicioDia: inicioDiaSaida, tipoLimpeza,
     });
     if (doParceiro) {
       return res.status(409).json({
-        erro: `Já existe uma limpeza para "${propriedade.nome}" com check-out a ${fmtDia(inicioDiaSaida)}. Se é a mesma reserva, já está registada: tira esta linha das alterações por gravar.`,
+        erro: `Já existe uma limpeza para "${propriedade.nome}" ${textoDuplicada(tipoLimpeza, inicioDiaSaida)}. Se é a mesma reserva, já está registada: tira esta linha das alterações por gravar.`,
         codigo: 'RESERVA_DUPLICADA',
       });
     }
@@ -491,6 +586,8 @@ async function criarReserva(req, res) {
         hospedes: numHospedes,
         observacoes: observacoes ? String(observacoes).trim() : '',
         ...(chave ? { chave_idempotencia: chave } : {}),
+        tipo_limpeza: tipoLimpeza,
+        data_limpeza: rd.dataLimpeza,
         ...extras,
       });
     } catch (e) {
@@ -512,6 +609,8 @@ async function criarReserva(req, res) {
         numHospedes,
         observacoes,
         detalhesExtra: detalhesTarefa,
+        tipoLimpeza,
+        diaLimpeza: rd.dia,
       });
     } catch (e) {
       // Sem limpeza não deve ficar reserva órfã: assim o Gravar seguinte volta a tentar.
@@ -554,7 +653,7 @@ async function listarReservas(req, res) {
 
     const reservas = await ReservaManual.find({ parceiro_id: parceiroId })
       .populate('propriedade_id', 'nome morada')
-      .populate('tarefa_gerada_id', 'estado data')
+      .populate('tarefa_gerada_id', 'estado data tipo_limpeza tempo_limpeza_minutos')
       .sort({ check_out: -1 })
       .lean();
 
@@ -600,7 +699,27 @@ async function atualizarReserva(req, res) {
     if (erroDatas) return res.status(400).json({ erro: erroDatas });
 
     const dia = (d) => new Date(d).toISOString().slice(0, 10);
-    const checkOutMudou = dia(novoCheckOut) !== dia(reserva.check_out);
+
+    // Tipo e dia da limpeza (normal/profunda: check-out; intermédia/preparação: data escolhida).
+    const tp = body.tipo_limpeza !== undefined ? normalizarTipo(body.tipo_limpeza) : { ok: true, tipo: tipoDe(reserva) };
+    if (!tp.ok) return res.status(400).json({ erro: 'Tipo de limpeza inválido.' });
+    const tipoNovo = tp.tipo;
+    // O «não pode ser no passado» só se aplica quando o tipo, a data da limpeza ou o check-in mudam.
+    const reverPassado = tipoNovo !== tipoDe(reserva) || body.data_limpeza !== undefined || body.check_in !== undefined;
+    const rd = resolverDiaLimpeza({
+      tipo: tipoNovo, check_in: novoCheckIn, check_out: novoCheckOut,
+      data_limpeza: body.data_limpeza !== undefined ? body.data_limpeza : reserva.data_limpeza,
+      hoje: reverPassado ? new Date().toISOString().slice(0, 10) : undefined,
+    });
+    if (rd.erro) return res.status(400).json({ erro: rd.erro });
+    const tipoAntes = tipoDe(reserva);
+    const rdAntes = resolverDiaLimpeza({
+      tipo: tipoAntes, check_in: reserva.check_in, check_out: reserva.check_out, data_limpeza: reserva.data_limpeza,
+    });
+    const diaAntes = rdAntes.erro ? dia(reserva.check_out) : rdAntes.dia;
+    const tipoMudou = tipoNovo !== tipoAntes;
+    // O dia da limpeza mudou: a limpeza antiga é cancelada e gera-se outra (como sempre).
+    const checkOutMudou = rd.dia !== diaAntes;
 
     let numHospedes = reserva.hospedes;
     if (body.hospedes !== undefined) {
@@ -619,17 +738,17 @@ async function atualizarReserva(req, res) {
     // recusa (a antiga fica intacta). A própria tarefa fica de fora.
     let deOutraOrigem = false;
     let inicioNovoDia = null;
-    if (tarefa && checkOutMudou) {
-      inicioNovoDia = new Date(novoCheckOut);
-      inicioNovoDia.setUTCHours(0, 0, 0, 0);
+    // (também quando só muda o tipo: pode passar para uma classe/tipo que já existe nesse dia)
+    if (tarefa && (checkOutMudou || tipoMudou)) {
+      inicioNovoDia = new Date(`${rd.dia}T00:00:00Z`);
       const r = await limpezasDoDia({
         empresaId: reserva.empresa_id, propriedadeId: reserva.propriedade_id,
-        inicioDia: inicioNovoDia, excluirTarefaId: tarefa._id,
+        inicioDia: inicioNovoDia, tipoLimpeza: tipoNovo, excluirTarefaId: tarefa._id,
       });
       if (r.doParceiro) {
         const p = await Propriedade.findById(reserva.propriedade_id).select('nome').lean();
         return res.status(409).json({
-          erro: `Já existe outra limpeza para "${p?.nome || 'esta casa'}" com check-out a ${fmtDia(inicioNovoDia)}. Escolhe outro dia ou elimina a outra reserva primeiro.`,
+          erro: `Já existe outra limpeza para "${p?.nome || 'esta casa'}" ${textoDuplicada(tipoNovo, inicioNovoDia)}. Escolhe outro dia ou elimina a outra reserva primeiro.`,
           codigo: 'RESERVA_DUPLICADA',
         });
       }
@@ -641,6 +760,8 @@ async function atualizarReserva(req, res) {
     reserva.hospedes = numHospedes;
     if (body.observacoes !== undefined) reserva.observacoes = String(body.observacoes ?? '').trim();
     Object.assign(reserva, extras);
+    reserva.tipo_limpeza = tipoNovo;
+    reserva.data_limpeza = rd.dataLimpeza;
 
     const detalhesExtra = detalhesDaReserva(extras);
     if (tarefa && checkOutMudou) {
@@ -661,6 +782,8 @@ async function atualizarReserva(req, res) {
           hora_checkin: reserva.hora_checkin,
           horario_preferido: reserva.horario_preferido,
         },
+        tipoLimpeza: tipoNovo,
+        diaLimpeza: rd.dia,
       });
       tarefa.estado = 'cancelada';
       tarefa.utilizador_id = null;
@@ -675,6 +798,23 @@ async function atualizarReserva(req, res) {
       avisarEquipaNova(nova, propriedade);
       if (deOutraOrigem) await avisarGestorDuasLimpezas(reserva.empresa_id, propriedade, inicioNovoDia);
     } else if (tarefa) {
+      if (tipoMudou) {
+        // Mesmo dia, outro tipo: atualiza tipo, tempo e checklist da mesma tarefa (mantém equipa
+        // e estado). A checklist só se troca se ainda não houve trabalho nela.
+        const propriedade = await Propriedade.findById(reserva.propriedade_id).lean();
+        const tempoAntes = Number(tarefa.tempo_limpeza_minutos) || 45;
+        const tempoNovo = tempoDoTipo(propriedade, tipoNovo);
+        tarefa.tipo_limpeza = tipoNovo;
+        tarefa.tempo_limpeza_minutos = tempoNovo;
+        if (!temProgresso(tarefa)) {
+          tarefa.checklist = checklistDoTipo(propriedade, tipoNovo);
+          tarefa.checklist_do_tipo = temChecklistPropria(propriedade, tipoNovo);
+        }
+        // Limpeza mais longa: se já não cabe (8h ou sobreposição), o motor replaneia.
+        if (tempoNovo > tempoAntes && tarefa.estado === 'atribuida' && idsEquipa(tarefa).length > 0) {
+          await replanearSeNaoCabe(tarefa, propriedade, tempoNovo);
+        }
+      }
       tarefa.hospedes = numHospedes;
       tarefa.observacoes = reserva.observacoes;
       tarefa.detalhes_reserva = {

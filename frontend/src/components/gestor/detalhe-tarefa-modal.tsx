@@ -19,6 +19,7 @@ import {
 // Prompt Extra — parsearDataSegura para compatibilidade Safari/iOS.
 import { useEffect, useState } from "react";
 import { parsearDataSegura } from "@/lib/utils";
+import { TipoLimpezaBadge } from "@/components/tipo-limpeza-badge";
 import { adminGet, type ContactoHospedeDTO } from "@/lib/api";
 import { lerUtilizador } from "@/lib/auth";
 
@@ -67,6 +68,7 @@ export interface TarefaDetalheGestor {
   } | null;
   // Prompt 137 — Tempo de viagem (para mostrar badge no detalhe).
   tempo_viagem_minutos?: number | null;
+  tipo_limpeza?: string | null;
   propriedade_id?: { nome: string; morada?: string; capacidade_hospedes?: number | null } | null;
   utilizador_id?: { _id?: string; nome: string } | null;
   equipa_atribuida?: { _id?: string; nome: string }[] | null;
@@ -267,6 +269,14 @@ export function DetalheTarefaModal({
                   🚗 <strong>Tempo de Viagem estimado:</strong>{" "}
                   {tarefa.tempo_viagem_minutos} min
                 </span>
+              </div>
+            )}
+
+            {/* Tipo de limpeza (não muda preços) */}
+            {tarefa.tipo === "limpeza" && (
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-muted-foreground">Tipo de limpeza:</span>
+                <TipoLimpezaBadge tipo={tarefa.tipo_limpeza} sempre />
               </div>
             )}
 

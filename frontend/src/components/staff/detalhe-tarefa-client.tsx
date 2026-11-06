@@ -1,5 +1,7 @@
 "use client";
 
+import { TipoLimpezaBadge, rotuloTipoLimpeza } from "@/components/tipo-limpeza-badge";
+
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { comprimirImagem } from "@/lib/imagem";
@@ -452,9 +454,10 @@ export function DetalheTarefaClient({
             <h1 className="truncate text-lg font-semibold leading-tight">
               {tarefa.propriedade_nome}
             </h1>
-            <p className="mt-0.5 text-xs text-muted-foreground">
+            <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
               {tipoLabel[tarefa.tipo]}
-            </p>
+              {tarefa.tipo === "limpeza" && <TipoLimpezaBadge tipo={tarefa.tipo_limpeza} sempre />}
+            </div>
           </div>
         </div>
 
@@ -546,6 +549,16 @@ export function DetalheTarefaClient({
 
       {/* Conteúdo principal */}
       <main className="flex-1 space-y-5 p-5">
+        {/* Tipo de limpeza especial: só promete checklist própria quando a tarefa a tem. */}
+        {tarefa.tipo === "limpeza" && tarefa.tipo_limpeza && tarefa.tipo_limpeza !== "normal" && (
+          <p className="rounded-md border bg-muted/40 px-3 py-2.5 text-sm">
+            <strong>Limpeza {rotuloTipoLimpeza(tarefa.tipo_limpeza).toLowerCase()}:</strong>{" "}
+            {tarefa.checklist_do_tipo
+              ? "segue a checklist própria desta casa"
+              : "segue a checklist habitual da casa"}
+          </p>
+        )}
+
         {/* Prompt 114 — Lotação/Capacidade Máxima destacada */}
         {tarefa.capacidade_hospedes != null && tarefa.capacidade_hospedes > 0 && (
           <div className="flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-50 px-3 py-2.5 text-sm dark:bg-amber-950/20">
