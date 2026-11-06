@@ -21,10 +21,12 @@ const { auth } = require('../middleware/auth');
 const { isGestor } = require('../middleware/requireRole');
 const {
   getRelatorioProdutividade,
+  getRelatorioTempoReal,
   getResumoIA,
 } = require('../controllers/relatorioController');
 
 router.get('/produtividade', auth, isGestor, getRelatorioProdutividade);
+router.get('/tempo-real', auth, isGestor, getRelatorioTempoReal);
 router.post('/ai-summary', auth, isGestor, getResumoIA);
 
 module.exports = router;

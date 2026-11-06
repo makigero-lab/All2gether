@@ -16,6 +16,7 @@ const Utilizador = require('../models/Utilizador');
 const Propriedade = require('../models/Propriedade');
 const { obterEmpresaId } = require('./gestorController');
 const { enviarEventoParaAutocell } = require('../utils/outboundWebhook');
+const { calcularPorCasa } = require('../utils/tempoReal');
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -279,6 +280,57 @@ exports.getRelatorioProdutividade = async (req, res) => {
     });
   } catch (err) {
     console.error('❌ getRelatorioProdutividade:', err.message);
+    return res.status(500).json({ erro: 'Erro interno do servidor.' });
+  }
+};
+
+/* ------------------------------------------------------------------ */
+/* GET /api/gestor/relatorios/tempo-real                               */
+/* ------------------------------------------------------------------ */
+/**
+ * Tempo real vs estimado por casa (só limpezas normais concluídas no período, com início por
+ * botão ou por checklist) + quantas limpezas começaram por botão/automaticamente. Devolve
+ * sugestões de ajuste; nunca altera nada. Query: inicio, fim (como a produtividade).
+ */
+exports.getRelatorioTempoReal = async (req, res) => {
+  try {
+    const { ok, empresaId } = obterEmpresaId(req, res);
+    if (!ok) return;
+    const agora = new Date();
+    const hojeFim = new Date(Date.UTC(agora.getUTCFullYear(), agora.getUTCMonth(), agora.getUTCDate()) + 24 * 60 * 60 * 1000);
+    // `fim` é inclusivo (o dia escolhido conta): internamente [inicio, fim+1 dia[.
+    const fimEscolhido = normalizarDataUTC(req.query.fim);
+    const fim = fimEscolhido ? new Date(fimEscolhido.getTime() + 24 * 60 * 60 * 1000) : hojeFim;
+    const inicio = normalizarDataUTC(req.query.inicio) || new Date(fim.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+    const concluidas = await Tarefa.find({
+      empresa_id: empresaId,
+      tipo: 'limpeza',
+      estado: 'concluida',
+      data: { $gte: inicio, $lt: fim },
+    })
+      .select('propriedade_id tempo_limpeza_minutos tipo_limpeza hora_conclusao concluida_em iniciada_em inicio_origem primeiro_item_checklist_em')
+      .lean();
+
+    const props = await Propriedade.find({ empresa_id: empresaId }).select('nome tempo_limpeza_minutos').lean();
+    const mapa = new Map(props.map((p) => [String(p._id), { nome: p.nome, tempo: p.tempo_limpeza_minutos }]));
+    const { casas, excluidas } = calcularPorCasa(concluidas, mapa);
+
+    const inicios = { botao: 0, automatico: 0, sem_registo: 0 };
+    for (const t of concluidas) {
+      if (t.inicio_origem === 'botao') inicios.botao++;
+      else if (t.inicio_origem === 'automatico') inicios.automatico++;
+      else inicios.sem_registo++;
+    }
+    return res.status(200).json({
+      periodo: { inicio: inicio.toISOString(), fim: fim.toISOString() },
+      inicios,
+      limpezas_concluidas: concluidas.length,
+      excluidas_sem_inicio_fiavel: excluidas,
+      casas,
+    });
+  } catch (err) {
+    console.error('❌ getRelatorioTempoReal:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
   }
 };

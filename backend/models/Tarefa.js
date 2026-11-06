@@ -264,12 +264,48 @@ const tarefaSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// Início da limpeza (híbrido): o staff carrega em «Comecei» (origem 'botao') ou, sem clique, o job
+// de início passa a tarefa a 'em_curso' à hora marcada (origem 'automatico').
+tarefaSchema.add({
+  iniciada_em: { type: Date, default: null },
+  inicio_origem: { type: String, enum: ['botao', 'automatico', null], default: null },
+  iniciada_por: { type: mongoose.Schema.Types.ObjectId, ref: 'Utilizador', default: null },
+  // Primeira vez que alguém marcou um item da checklist (prova de que o trabalho começou, usada
+  // nos relatórios de tempo real quando o início foi automático).
+  primeiro_item_checklist_em: { type: Date, default: null },
+  // «Não consegui começar»: último registo do staff (motivo fixo + nota opcional).
+  nao_consegui_comecar: {
+    type: new mongoose.Schema(
+      {
+        motivo: { type: String, enum: ['hospede_na_casa', 'sem_acesso', 'casa_diferente'], required: true },
+        nota: { type: String, default: '', trim: true, maxlength: 500 },
+        em: { type: Date, default: Date.now },
+        por: { type: mongoose.Schema.Types.ObjectId, ref: 'Utilizador', default: null },
+      },
+      { _id: false }
+    ),
+    default: undefined,
+  },
+  // Manutenção criada a partir de uma avaria: aponta para a limpeza onde foi reportada e para
+  // o item do array `avarias` dessa limpeza. Ao concluir a manutenção, a avaria fica resolvida.
+  avaria_origem_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Tarefa', default: null, index: true },
+  avaria_origem_item_id: { type: mongoose.Schema.Types.ObjectId, default: null },
+});
 // Rotinas fixas: no máximo 1 tarefa automática por propriedade e dia (YYYY-MM-DD). Garante que
 // duas instâncias do cron (ou duas execuções simultâneas) não duplicam. Índice parcial: só
 // afeta documentos com `rotina_dia` preenchido.
 tarefaSchema.add({ rotina_dia: { type: String, default: undefined } });
 // O responsável (utilizador_id) é sempre membro da equipa quando esta existe.
 // Tarefas antigas com equipa vazia ficam como estão (equivalem a equipa de 1).
+// Se a limpeza deixa de estar em curso e volta ao circuito (reatribuída, desatribuída), o início
+// registado deixa de valer: recomeça com a nova pessoa. 'concluida'/'cancelada' mantêm o histórico.
+tarefaSchema.pre('validate', function limparInicioSeRecomeca() {
+  if (this.isModified('estado') && ['atribuida', 'por_atribuir', 'nao_atribuida'].includes(this.estado) && this.iniciada_em) {
+    this.iniciada_em = null;
+    this.inicio_origem = null;
+    this.iniciada_por = null;
+  }
+});
 tarefaSchema.pre('validate', function normalizarEquipaDoResponsavel() {
   // Sem responsável e fora do circuito de trabalho: a equipa é libertada
   // (evita "membros fantasma" que continuariam a ver a tarefa).

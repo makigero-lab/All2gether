@@ -57,6 +57,7 @@ const {
 } = require('../controllers/gestorController');
 const { reportarAtrasoTarefa, criarTarefa, atribuirTarefa, reatribuirTarefa, atualizarEstadoTarefa, apagarTarefasFuturas, listarIndisponiveisData, autoAtribuirTarefas, criarTarefaEspontanea } = require('../controllers/tarefaController');
 // CRUD de Modelos de Checklist (futuro: Modelos de Protocolo Clínico)
+const { getProvaLimpeza, resolverAvaria } = require('../controllers/provaController');
 const { listarModelos, criarModelo, obterModelo, atualizarModelo, apagarModelo } = require('../controllers/checklistController');
 // Smoobu — importação/sincronização de propriedades (HF5) + reservas (HF7).
 const { getPropriedadesSmoobu, importarPropriedades, sincronizarReservas, reconciliarCancelamentos } = require('../controllers/smoobuController');
@@ -142,6 +143,9 @@ router.post('/reservas/importar-excel', auth, isGestor, rawXlsx, importarExcel);
 
 // Reportar atraso numa tarefa.
 router.post('/tarefas/:id/atraso', auth, isGestor, reportarAtrasoTarefa);
+// Prova da limpeza (fotos só ao abrir) e avarias (ciclo fechado).
+router.get('/tarefas/:id/prova', auth, isGestor, getProvaLimpeza);
+router.patch('/tarefas/:id/avarias/:avariaId/resolver', auth, isGestor, resolverAvaria);
 
 // Gestão manual de tarefas.
 router.post('/tarefas', auth, isGestor, criarTarefa);

@@ -37,7 +37,7 @@ import { mensagemErro } from "@/lib/rascunho-staff";
  */
 interface TarefaReal {
   _id: string;
-  propriedade_id?: { nome: string; morada?: string } | null;
+  propriedade_id?: { nome: string; morada?: string; fornecedor_id?: string | null } | null;
   data: string;
   tipo: string;
   estado: string;
@@ -53,6 +53,10 @@ interface TarefaReal {
   // Prompt 137 — tempo de viagem (para badge no cartão).
   tempo_viagem_minutos?: number | null;
   equipa_nomes?: Array<{ _id: string; nome: string; responsavel: boolean; eu?: boolean }> | null;
+  iniciada_em?: string | null;
+  inicio_origem?: "botao" | "automatico" | null;
+  nao_consegui_comecar?: { motivo: string; nota?: string; em?: string } | null;
+  roupa_entregue?: boolean;
 }
 
 /**
@@ -77,6 +81,11 @@ function adaptarTarefa(t: TarefaReal) {
     // Prompt 137 — repassa tempo_viagem_minutos para o badge no cartão.
     tempo_viagem_minutos: t.tempo_viagem_minutos ?? null,
     equipa_nomes: t.equipa_nomes ?? null,
+    iniciada_em: t.iniciada_em ?? null,
+    inicio_origem: t.inicio_origem ?? null,
+    nao_consegui_comecar: t.nao_consegui_comecar ?? null,
+    tem_lavandaria: !!t.propriedade_id?.fornecedor_id,
+    roupa_entregue: t.roupa_entregue === true,
   };
 }
 
@@ -368,7 +377,7 @@ export default function StaffPage() {
             {tarefasAtivasDia.length > 0 && (
               <div className="space-y-4">
                 {tarefasAtivasDia.map((t) => (
-                  <TaskCard key={t._id} tarefa={adaptarTarefa(t)} />
+                  <TaskCard key={t._id} tarefa={adaptarTarefa(t)} onAtualizar={carregar} />
                 ))}
               </div>
             )}

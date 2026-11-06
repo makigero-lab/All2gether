@@ -1,3 +1,5 @@
+"use client";
+
 import Link from "next/link";
 import {
   Clock,
@@ -11,6 +13,9 @@ import {
   User,
   Users,
   Navigation,
+  Shirt,
+  Play,
+  TriangleAlert,
 } from "lucide-react";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -27,6 +32,7 @@ import {
 } from "@/components/ui/card";
 import type { TarefaMock, EstadoTarefa, TipoTarefa } from "@/lib/api";
 import { TipoLimpezaBadge } from "@/components/tipo-limpeza-badge";
+import { BotaoComecei, BotaoNaoConsegui, horaCurta } from "@/components/staff/comecar-limpeza";
 
 const tipoIcon: Record<TarefaMock["tipo"], React.ComponentType<{ className?: string }>> = {
   limpeza: SprayCan,
@@ -81,7 +87,7 @@ function horaInicio(dataISO?: string): string {
  * Maps fica por cima (`relative z-10`), por isso não abre a tarefa. O "botão"
  * "Ver detalhes" é só visual (div): o clique cai no overlay do link.
  */
-export function TaskCard({ tarefa }: { tarefa: TarefaMock }) {
+export function TaskCard({ tarefa, onAtualizar }: { tarefa: TarefaMock; onAtualizar?: () => void }) {
   const Icon = tipoIcon[tarefa.tipo];
   const porAtribuir = tarefa.estado === "por_atribuir";
   const hora = horaInicio(tarefa.data);
@@ -90,6 +96,13 @@ export function TaskCard({ tarefa }: { tarefa: TarefaMock }) {
   // Prompt 137 — tempo de viagem estimado (para badge no cartão).
   const tempoViagem = Number(tarefa.tempo_viagem_minutos) || 0;
   const equipa = textoEquipa(tarefa.equipa_nomes);
+  // «Comecei»: só em tarefas atribuídas, de hoje (ou de dias passados por fechar).
+  const dataTarefa = parsearDataSegura(tarefa.data ?? "");
+  const ate = new Date();
+  ate.setHours(23, 59, 59, 999);
+  const podeComecar = tarefa.estado === "atribuida" && !!dataTarefa && dataTarefa.getTime() <= ate.getTime() && !!onAtualizar;
+  const emCurso = tarefa.estado === "em_curso";
+  const desde = horaCurta(tarefa.iniciada_em);
 
   return (
     <div className="block">
@@ -211,6 +224,44 @@ export function TaskCard({ tarefa }: { tarefa: TarefaMock }) {
                 🚗 Tempo de Viagem: {tempoViagem} min
               </span>
             </p>
+          )}
+
+          {/* Lavandaria: só com fornecedor associado à casa. */}
+          {tarefa.tem_lavandaria && tarefa.tipo === "limpeza" && (
+            <p
+              className={cn(
+                "flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium",
+                tarefa.roupa_entregue
+                  ? "bg-status-conc-bg text-status-conc"
+                  : "border border-amber-500/40 bg-amber-50 text-amber-900 dark:bg-amber-950/20 dark:text-amber-100"
+              )}
+            >
+              <Shirt className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              Roupa limpa: {tarefa.roupa_entregue ? "entregue" : "em falta"}
+            </p>
+          )}
+
+          {emCurso && desde && (
+            <p className="flex items-center gap-1.5 rounded-md bg-status-curso-bg px-2 py-1.5 text-xs font-medium text-status-curso">
+              <Play className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              Em curso desde as {desde}
+              {tarefa.inicio_origem === "automatico" ? " (início automático)" : ""}
+            </p>
+          )}
+
+          {tarefa.nao_consegui_comecar && !emCurso && (
+            <p className="flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-50 px-2 py-1.5 text-xs text-amber-900 dark:bg-amber-950/20 dark:text-amber-100">
+              <TriangleAlert className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              Avisaste o gestor que não conseguiste começar.
+            </p>
+          )}
+
+          {/* Botões por cima do link do cartão (z-10): não abrem a tarefa. */}
+          {podeComecar && (
+            <div className="relative z-10 space-y-1">
+              <BotaoComecei tarefaId={tarefa.id} onFeito={onAtualizar!} />
+              <BotaoNaoConsegui tarefaId={tarefa.id} onFeito={onAtualizar!} />
+            </div>
           )}
 
           {/* Visual apenas: o clique é tratado pelo link do título (overlay). */}

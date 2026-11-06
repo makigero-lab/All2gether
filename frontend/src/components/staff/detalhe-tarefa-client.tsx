@@ -30,6 +30,8 @@ import {
   AlertCircle,
   Navigation,
   Shirt,
+  Play,
+  TriangleAlert,
 } from "lucide-react";
 import { textoEquipa } from "@/lib/equipa";
 
@@ -67,6 +69,7 @@ import {
 import { adminPost, adminPatch } from "@/lib/api";
 import type { TarefaMock, EstadoTarefa, TipoTarefa } from "@/lib/api";
 import { DetalhesReservaCard } from "@/components/detalhes-reserva-card";
+import { BotaoComecei, BotaoNaoConsegui, horaCurta } from "@/components/staff/comecar-limpeza";
 
 const tipoIcon: Record<TarefaMock["tipo"], React.ComponentType<{ className?: string }>> = {
   limpeza: SprayCan,
@@ -117,6 +120,14 @@ export function DetalheTarefaClient({
   // bloqueia TODA a interação: checklists, observações, Concluir, Atraso,
   // Avaria. Mostra o estado final sem permitir editar.
   const jaConcluida = tarefa.estado === "concluida";
+
+  // Início da limpeza («Comecei» / automático): estado local, atualizado sem recarregar a página
+  // (recarregar perderia a checklist e as notas por gravar).
+  const [estadoLocal, setEstadoLocal] = useState<string>(tarefa.estado);
+  const [iniciadaEm, setIniciadaEm] = useState<string | null>(tarefa.iniciada_em ?? null);
+  const [inicioOrigem, setInicioOrigem] = useState<string | null>(tarefa.inicio_origem ?? null);
+  const [naoConseguiAvisado, setNaoConseguiAvisado] = useState<boolean>(!!tarefa.nao_consegui_comecar);
+  const podeComecar = estadoLocal === "atribuida" && !jaConcluida;
 
   // Prompt 133 — Checklist dinâmica (snapshot do ModeloChecklist).
   // Se existir e tiver pelo menos 1 item, renderiza secções em vez da
@@ -550,45 +561,51 @@ export function DetalheTarefaClient({
 
       {/* Conteúdo principal */}
       <main className="flex-1 space-y-5 p-5">
-        {/* Tipo de limpeza especial: só promete checklist própria quando a tarefa a tem. */}
-        {tarefa.tipo === "limpeza" && tarefa.tipo_limpeza && tarefa.tipo_limpeza !== "normal" && (
-          <p className="rounded-md border bg-muted/40 px-3 py-2.5 text-sm">
-            <strong>Limpeza {rotuloTipoLimpeza(tarefa.tipo_limpeza).toLowerCase()}:</strong>{" "}
-            {tarefa.checklist_do_tipo
-              ? "segue a checklist própria desta casa"
-              : "segue a checklist habitual da casa"}
+        {/* Início da limpeza: «Comecei» (ou o estado atual) e «Não consegui começar». */}
+        {!jaConcluida && podeComecar && (
+          <div className="space-y-1 rounded-lg border border-primary/30 bg-primary/5 p-3">
+            <BotaoComecei
+              tarefaId={String(tarefa.id)}
+              onFeito={() => {
+                setEstadoLocal("em_curso");
+                setIniciadaEm(new Date().toISOString());
+                setInicioOrigem("botao");
+                setNaoConseguiAvisado(false);
+              }}
+            />
+            <BotaoNaoConsegui
+              tarefaId={String(tarefa.id)}
+              onFeito={() => setNaoConseguiAvisado(true)}
+            />
+            {naoConseguiAvisado && (
+              <p className="flex items-center gap-1.5 text-xs text-amber-800 dark:text-amber-200">
+                <TriangleAlert className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                Avisaste o gestor que não conseguiste começar.
+              </p>
+            )}
+          </div>
+        )}
+        {!jaConcluida && estadoLocal === "em_curso" && (
+          <p className="flex items-center gap-2 rounded-md bg-status-curso-bg px-3 py-2.5 text-sm font-medium text-status-curso">
+            <Play className="h-4 w-4 shrink-0" aria-hidden="true" />
+            Em curso{horaCurta(iniciadaEm) ? ` desde as ${horaCurta(iniciadaEm)}` : ""}
+            {inicioOrigem === "automatico" ? " (início automático)" : ""}
           </p>
         )}
 
-        {/* Prompt 114 — Lotação/Capacidade Máxima destacada */}
-        {tarefa.capacidade_hospedes != null && tarefa.capacidade_hospedes > 0 && (
-          <div className="flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-50 px-3 py-2.5 text-sm dark:bg-amber-950/20">
-            <Users className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
-            <span className="text-amber-900 dark:text-amber-100">
-              <strong>Lotação máxima:</strong>{" "}
-              {plural(tarefa.capacidade_hospedes, "hóspede")}
-            </span>
+        {/* Avaria por resolver noutra limpeza desta casa. */}
+        {!jaConcluida && tarefa.avarias_abertas_casa && tarefa.avarias_abertas_casa.length > 0 && (
+          <div role="note" className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2.5 text-sm">
+            <p className="flex items-center gap-2 font-semibold text-destructive">
+              <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+              Avaria aberta nesta casa
+            </p>
+            <ul className="mt-1 list-disc space-y-0.5 pl-6 text-foreground">
+              {tarefa.avarias_abertas_casa.map((a, i) => (
+                <li key={i}>{a.descricao}</li>
+              ))}
+            </ul>
           </div>
-        )}
-
-        {/* Prompt 95 — Card de detalhes da reserva Smoobu (se existir). */}
-        <DetalhesReservaCard detalhes={tarefa.detalhes_reserva} />
-
-        {/* Prompt 126 — Observações/notas internas da propriedade (regras de acesso, etc.). */}
-        {tarefa.observacoes_propriedade && tarefa.observacoes_propriedade.trim() && (
-          <Card className="border-primary/30">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base">
-                <ClipboardList className="h-5 w-5 text-gold-text" />
-                Observações da Propriedade
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-0">
-              <p className="whitespace-pre-wrap text-sm text-foreground">
-                {tarefa.observacoes_propriedade}
-              </p>
-            </CardContent>
-          </Card>
         )}
 
         {/* Checklist interativa */}
@@ -742,6 +759,62 @@ export function DetalheTarefaClient({
             </p>
           </CardContent>
         </Card>
+        {/* Tipo de limpeza especial: só promete checklist própria quando a tarefa a tem. */}
+        {tarefa.tipo === "limpeza" && tarefa.tipo_limpeza && tarefa.tipo_limpeza !== "normal" && (
+          <p className="rounded-md border bg-muted/40 px-3 py-2.5 text-sm">
+            <strong>Limpeza {rotuloTipoLimpeza(tarefa.tipo_limpeza).toLowerCase()}:</strong>{" "}
+            {tarefa.checklist_do_tipo
+              ? "segue a checklist própria desta casa"
+              : "segue a checklist habitual da casa"}
+          </p>
+        )}
+
+        {/* Prompt 114 — Lotação/Capacidade Máxima destacada */}
+        {tarefa.capacidade_hospedes != null && tarefa.capacidade_hospedes > 0 && (
+          <div className="flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-50 px-3 py-2.5 text-sm dark:bg-amber-950/20">
+            <Users className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+            <span className="text-amber-900 dark:text-amber-100">
+              <strong>Lotação máxima:</strong>{" "}
+              {plural(tarefa.capacidade_hospedes, "hóspede")}
+            </span>
+          </div>
+        )}
+
+        {/* Lavandaria: só com fornecedor associado à casa. */}
+        {tarefa.tem_lavandaria && tarefa.tipo === "limpeza" && (
+          <p
+            className={cn(
+              "flex items-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium",
+              tarefa.roupa_entregue
+                ? "bg-status-conc-bg text-status-conc"
+                : "border border-amber-500/40 bg-amber-50 text-amber-900 dark:bg-amber-950/20 dark:text-amber-100"
+            )}
+          >
+            <Shirt className="h-4 w-4 shrink-0" aria-hidden="true" />
+            Roupa limpa: {tarefa.roupa_entregue ? "entregue" : "em falta"}
+          </p>
+        )}
+
+        {/* Prompt 95 — Card de detalhes da reserva Smoobu (se existir). */}
+        <DetalhesReservaCard detalhes={tarefa.detalhes_reserva} />
+
+        {/* Prompt 126 — Observações/notas internas da propriedade (regras de acesso, etc.). */}
+        {tarefa.observacoes_propriedade && tarefa.observacoes_propriedade.trim() && (
+          <Card className="border-primary/30">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <ClipboardList className="h-5 w-5 text-gold-text" />
+                Observações da Propriedade
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0">
+              <p className="whitespace-pre-wrap text-sm text-foreground">
+                {tarefa.observacoes_propriedade}
+              </p>
+            </CardContent>
+          </Card>
+        )}
+
       </main>
 
       {/* Botão Concluir Limpeza — fixo no fundo */}

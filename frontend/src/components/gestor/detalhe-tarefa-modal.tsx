@@ -14,13 +14,18 @@ import {
   StickyNote,
   Camera,
   CheckCircle2,
+  Play,
+  ListChecks,
+  Loader2,
+  OctagonAlert,
 } from "lucide-react";
 
 // Prompt Extra — parsearDataSegura para compatibilidade Safari/iOS.
 import { useEffect, useState } from "react";
 import { parsearDataSegura, plural } from "@/lib/utils";
 import { TipoLimpezaBadge } from "@/components/tipo-limpeza-badge";
-import { adminGet, type ContactoHospedeDTO } from "@/lib/api";
+import { adminGet, adminPatch, type ContactoHospedeDTO } from "@/lib/api";
+import { mensagemErro } from "@/lib/rascunho-staff";
 import { lerUtilizador } from "@/lib/auth";
 
 import {
@@ -32,6 +37,7 @@ import {
   DialogContent,
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { EstadoTarefaBadge } from "@/components/ui/estado-tarefa-badge";
 import {
   Card,
@@ -43,6 +49,7 @@ import { DetalhesReservaCard } from "@/components/detalhes-reserva-card";
 
 /** Tarefa no formato devolvido pelo GET /api/gestor/tarefas (com populate). */
 export interface AvariaDTO {
+  _id?: string;
   descricao: string;
   fotos?: string[];
   resolvido?: boolean;
@@ -73,6 +80,28 @@ export interface TarefaDetalheGestor {
   utilizador_id?: { _id?: string; nome: string } | null;
   equipa_atribuida?: { _id?: string; nome: string }[] | null;
   pessoas_em_falta?: number;
+  // Início da limpeza e alertas (ex.: «Não consegui começar»).
+  iniciada_em?: string | null;
+  inicio_origem?: "botao" | "automatico" | null;
+  alerta?: string | null;
+  hora_conclusao?: string | null;
+  concluida_em?: string | null;
+}
+
+/** Prova da limpeza (GET /api/gestor/tarefas/:id/prova): carrega-se só ao abrir o modal. */
+interface ProvaDTO {
+  hora_conclusao: string | null;
+  fotos: string[];
+  fotos_expiradas: boolean;
+  checklist: { feitos: number; total: number };
+  avarias: { _id: string | null; descricao: string; fotos: string[]; resolvido: boolean; data_registo: string | null }[];
+}
+
+function horaCurta(iso?: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Lisbon" });
 }
 
 /**
@@ -161,12 +190,22 @@ export function DetalheTarefaModal({
   tarefa,
   open,
   onOpenChange,
+  onAvariaAlterada,
 }: {
   tarefa: TarefaDetalheGestor | null;
   open: boolean;
   onOpenChange: (o: boolean) => void;
+  /** Chamado depois de marcar uma avaria como resolvida (para a lista recarregar). */
+  onAvariaAlterada?: () => void;
 }) {
   const Icon = tarefa ? (tipoIcon[tarefa.tipo] ?? SprayCan) : SprayCan;
+
+  // Prova da limpeza: fotos, hora de conclusão e checklist, só ao abrir.
+  const [prova, setProva] = useState<ProvaDTO | null>(null);
+  const [provaErro, setProvaErro] = useState<string | null>(null);
+  const [provaA, setProvaA] = useState(false);
+  const [resolvendo, setResolvendo] = useState<string | null>(null);
+  const [fotoGrande, setFotoGrande] = useState<string | null>(null);
 
   // Email/telefone do hóspede: só o admin os pede (o backend recusa os outros).
   const [contacto, setContacto] = useState<ContactoHospedeDTO | null>(null);
@@ -191,6 +230,47 @@ export function DetalheTarefaModal({
       cancelado = true;
     };
   }, [open, tarefaId]);
+
+  useEffect(() => {
+    setProva(null);
+    setProvaErro(null);
+    setFotoGrande(null);
+    if (!open || !tarefaId) return;
+    let cancelado = false;
+    setProvaA(true);
+    (async () => {
+      try {
+        const p = await adminGet<ProvaDTO>(`/api/gestor/tarefas/${tarefaId}/prova`);
+        if (!cancelado) setProva(p);
+      } catch (e) {
+        if (!cancelado) setProvaErro(mensagemErro(e, "Não foi possível carregar as fotos."));
+      } finally {
+        if (!cancelado) setProvaA(false);
+      }
+    })();
+    return () => {
+      cancelado = true;
+    };
+  }, [open, tarefaId]);
+
+  async function resolverAvaria(avariaId: string | null) {
+    if (!tarefaId || !avariaId) return;
+    setResolvendo(avariaId);
+    try {
+      await adminPatch(`/api/gestor/tarefas/${tarefaId}/avarias/${avariaId}/resolver`, { resolvido: true });
+      setProva((p) => (p ? { ...p, avarias: p.avarias.map((a) => (a._id === avariaId ? { ...a, resolvido: true } : a)) } : p));
+      onAvariaAlterada?.();
+    } catch (e) {
+      setProvaErro(mensagemErro(e, "Não foi possível marcar a avaria como resolvida."));
+    } finally {
+      setResolvendo(null);
+    }
+  }
+
+  // Avarias a mostrar: as da prova (com fotos) ou, enquanto carrega, as da lista (sem fotos).
+  const avariasMostrar: AvariaDTO[] = prova
+    ? prova.avarias.map((a) => ({ _id: a._id ?? undefined, descricao: a.descricao, fotos: a.fotos, resolvido: a.resolvido, data_registo: a.data_registo ?? undefined }))
+    : (tarefa?.avarias ?? []).map(normalizarAvaria);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -295,6 +375,83 @@ export function DetalheTarefaModal({
             {/* Prompt 95 — Card de detalhes da reserva Smoobu */}
             <DetalhesReservaCard detalhes={tarefa.detalhes_reserva} contacto={contacto} />
 
+            {/* Alerta (ex.: «não conseguiu começar», reserva alterada no Smoobu) */}
+            {tarefa.alerta && (
+              <div role="alert" className="flex items-start gap-2 rounded-md border border-amber-500/50 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/20 dark:text-amber-100">
+                <OctagonAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                <span className="whitespace-pre-wrap">{tarefa.alerta.split(" | ").join("\n")}</span>
+              </div>
+            )}
+
+            {/* Início da limpeza */}
+            {tarefa.iniciada_em && (
+              <p className="flex items-center gap-2 text-sm">
+                <Play className="h-4 w-4 text-gold-text" aria-hidden="true" />
+                Começou às <strong>{horaCurta(tarefa.iniciada_em)}</strong>
+                <span className="text-muted-foreground">
+                  ({tarefa.inicio_origem === "automatico" ? "início automático, à hora marcada" : "pelo botão «Comecei»"})
+                </span>
+              </p>
+            )}
+
+            {/* Prova da limpeza: hora de conclusão, checklist e fotos */}
+            {tarefa.estado === "concluida" && (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="flex items-center gap-2 text-sm">
+                    <Camera className="h-4 w-4 text-emerald-600" />
+                    Prova da limpeza
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3 pt-0">
+                  {provaA && (
+                    <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" /> A carregar fotos…
+                    </p>
+                  )}
+                  {provaErro && (
+                    <p role="alert" className="text-sm text-destructive">{provaErro}</p>
+                  )}
+                  <p className="text-sm">
+                    Concluída às{" "}
+                    <strong>{horaCurta(prova?.hora_conclusao ?? tarefa.hora_conclusao ?? tarefa.concluida_em)}</strong>
+                    {prova && prova.checklist.total > 0 && (
+                      <span className="ml-3 inline-flex items-center gap-1 text-muted-foreground">
+                        <ListChecks className="h-4 w-4" aria-hidden="true" />
+                        Checklist: {prova.checklist.feitos}/{prova.checklist.total} itens feitos
+                      </span>
+                    )}
+                  </p>
+                  {prova && prova.fotos.length > 0 && (
+                    <ul className="flex flex-wrap gap-2">
+                      {prova.fotos.map((f, i) => (
+                        <li key={i}>
+                          <button type="button" onClick={() => setFotoGrande(f)} className="block h-20 w-20 overflow-hidden rounded-md border" aria-label={`Ampliar foto ${i + 1} da limpeza`}>
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={f} alt={`Foto ${i + 1} da limpeza`} className="h-full w-full object-cover" />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {prova && prova.fotos.length === 0 && (
+                    <p className="text-sm text-muted-foreground">
+                      {prova.fotos_expiradas
+                        ? "As fotos já foram apagadas (guardam-se durante 7 dias)."
+                        : "Sem fotos nesta limpeza."}
+                    </p>
+                  )}
+                  {fotoGrande && (
+                    <div className="space-y-2">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={fotoGrande} alt="Foto ampliada da limpeza" className="max-h-[60vh] w-full rounded-md object-contain" />
+                      <Button variant="outline" size="sm" onClick={() => setFotoGrande(null)}>Fechar foto</Button>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
             {/* Observações do gestor */}
             {tarefa.observacoes && (
               <Card>
@@ -328,18 +485,17 @@ export function DetalheTarefaModal({
             )}
 
             {/* Avarias reportadas (HF14 — renderização rica com fotos + estado) */}
-            {tarefa.avarias && tarefa.avarias.length > 0 && (
+            {avariasMostrar.length > 0 && (
               <Card className="border-destructive/30">
                 <CardHeader className="pb-2">
                   <CardTitle className="flex items-center gap-2 text-sm text-destructive">
                     <AlertTriangle className="h-4 w-4" />
-                    Avarias Reportadas ({tarefa.avarias.length})
+                    Avarias Reportadas ({avariasMostrar.length})
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="pt-0">
                   <ul className="space-y-3">
-                    {tarefa.avarias.map((a, i) => {
-                      const av = normalizarAvaria(a);
+                    {avariasMostrar.map((av, i) => {
                       return (
                         <li
                           key={i}
@@ -349,14 +505,29 @@ export function DetalheTarefaModal({
                             <p className="text-sm font-medium">
                               {av.descricao}
                             </p>
-                            {av.resolvido && (
+                            {av.resolvido ? (
                               <Badge
                                 variant="secondary"
                                 className="shrink-0 gap-1 text-xs"
                               >
                                 <CheckCircle2 className="h-3 w-3" />
-                                Resolvido
+                                Resolvida
                               </Badge>
+                            ) : (
+                              av._id && (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-9 shrink-0 gap-1"
+                                  disabled={resolvendo === av._id}
+                                  onClick={() => resolverAvaria(av._id ?? null)}
+                                  aria-label={`Marcar a avaria «${av.descricao}» como resolvida`}
+                                >
+                                  {resolvendo === av._id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                                  Resolvida
+                                </Button>
+                              )
                             )}
                           </div>
                           {av.data_registo && (

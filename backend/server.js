@@ -44,6 +44,8 @@ const { iniciarArquivista } = require('./jobs/arquivista');
 const { iniciarSincronizacaoSmoobu } = require('./jobs/sincronizacaoSmoobu');
 const { iniciarLimpezaFotos } = require('./jobs/limpezaFotos');
 const { iniciarGeradorRotinas } = require('./jobs/geradorRotinas');
+const { iniciarInicioLimpeza } = require('./jobs/inicioLimpeza');
+const { iniciarResumoGestor } = require('./jobs/resumoGestor');
 const { configurarWebPush } = require('./utils/push');
 
 const app = express();
@@ -204,6 +206,15 @@ if (require.main === module) {
         console.error('⚠️  Falha na migração de retenção do WebhookLog (não bloqueia):', e.message);
       }
 
+      // Índice único parcial {utilizador_id, chave} das notificações (idempotência dos avisos).
+      // O autoIndex do mongoose está ativo por omissão; isto garante-o de forma explícita e
+      // nunca impede o arranque se falhar.
+      try {
+        await require('./models/Notificacao').createIndexes();
+      } catch (e) {
+        console.error('⚠️  Falha ao criar índices de Notificacao (não bloqueia):', e.message);
+      }
+
       // Prompt 131 — Remove o índice único antigo { utilizador_id, data_inicio }
       // da coleção Ausencia. Este índice foi removido do schema Mongoose no
       // Prompt 116, mas índices MongoDB NÃO são auto-removidos. Sem isto,
@@ -284,6 +295,13 @@ if (require.main === module) {
       // cria tarefas automáticas para propriedades com dias_fixos_limpeza
       // configurados para o dia de amanhã. Submete ao Load Balancer.
       iniciarGeradorRotinas();
+
+      // Início da limpeza: passa 'atribuida' a 'em_curso' à hora marcada se ninguém carregou
+      // em «Comecei» (de minuto a minuto + recuperação ao arrancar).
+      iniciarInicioLimpeza();
+
+      // Resumo das 18:05 para o gestor (só se houver novidades; uma vez por dia).
+      iniciarResumoGestor();
     })
     .catch((err) => {
       console.error('❌ Erro ao ligar ao MongoDB:', err.message);

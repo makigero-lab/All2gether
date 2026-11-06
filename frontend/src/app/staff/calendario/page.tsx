@@ -162,6 +162,10 @@ export default function StaffCalendarioPage() {
 
   // Dia de hoje (primeiro do array) para a vista em bloco.
   const diaHoje = dias[0];
+  // Próximos dias: só os que têm tarefas (ou ausência). Os outros contam-se como dias livres.
+  const proximos = dias.slice(1);
+  const diasComConteudo = proximos.filter((d) => d.tarefas.length > 0 || d.ausencia !== null);
+  const diasLivres = proximos.length - diasComConteudo.length;
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-md flex-col bg-muted/20">
@@ -329,8 +333,20 @@ export default function StaffCalendarioPage() {
                 <span className="h-px flex-1 bg-border" />
               </div>
 
+              {/* Só aparecem os dias com tarefas (ou ausência); os restantes entram no resumo. */}
+              {diasLivres > 0 && (
+                <p className="mb-3 rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground" role="status">
+                  {diasLivres} {diasLivres === 1 ? "dia livre" : "dias livres"} nos próximos 30 dias, sem tarefas.
+                </p>
+              )}
+              {diasComConteudo.length === 0 && (
+                <p className="rounded-md border border-dashed px-3 py-4 text-center text-sm text-muted-foreground">
+                  Sem tarefas nos próximos dias.
+                </p>
+              )}
+
               <div className="space-y-3">
-                {dias.slice(1).map((dia, idx) => {
+                {diasComConteudo.map((dia, idx) => {
                   const diaFmt = format(dia.data, "EEE, d MMM", { locale: pt });
                   const temTarefas = dia.tarefas.length > 0;
                   const temAusencia = dia.ausencia !== null;

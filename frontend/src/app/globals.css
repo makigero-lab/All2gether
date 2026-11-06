@@ -137,6 +137,27 @@
   font-family: inherit;
 }
 
+/* Tema escuro: a grelha do FullCalendar vinha com linhas claras (#ddd) e fundo branco por omissão.
+   Usa os tokens do tema e linhas suaves. */
+.dark .fc {
+  --fc-border-color: hsl(var(--border) / 0.55);
+  --fc-page-bg-color: transparent;
+  --fc-neutral-bg-color: hsl(var(--muted) / 0.35);
+  --fc-today-bg-color: hsl(var(--primary) / 0.1);
+  --fc-list-event-hover-bg-color: hsl(var(--muted) / 0.5);
+}
+
+.dark .fc .fc-timegrid-slot-minor {
+  border-top-color: hsl(var(--border) / 0.3);
+}
+
+/* Ponto do tipo de limpeza (vista Mês), com halo para se ver sobre qualquer fundo */
+.fc-evt-month__dot--tipo {
+  width: 8px;
+  height: 8px;
+  box-shadow: 0 0 0 1px hsl(var(--background) / 0.85);
+}
+
 /* Toolbar — botões alinhados com o tema All2gether (dourado) */
 .fc .fc-toolbar.fc-header-toolbar {
   gap: 0.5rem;

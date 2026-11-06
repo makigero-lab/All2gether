@@ -16,6 +16,7 @@ const {
   calcularInicioTarefaUtilizador,
 } = require('../utils/scheduler');
 const Horario = require('../utils/horario');
+const { avisarParceiro, aoConcluirTarefa } = require('../utils/cicloTarefa');
 
 /**
  * 'YYYY-MM-DD' (+ 'HH:MM' de Lisboa, com hora de verão) -> instante UTC.
@@ -595,6 +596,7 @@ exports.atribuirTarefa = async (req, res) => {
     const { utilizador_id } = req.body || {};
     let equipaAntes = [];
     let avisoHorario = null;
+    const dataAntes = new Date(tarefa.data).getTime();
 
     // Tarefas concluídas/canceladas são histórico: não se atribuem (antes eram "ressuscitadas").
     if (tarefa.estado === 'concluida' || tarefa.estado === 'cancelada') {
@@ -706,6 +708,8 @@ exports.atribuirTarefa = async (req, res) => {
     }
 
     await tarefa.save();
+    // O gestor mudou o dia/hora de uma limpeza de parceiro: aviso no sino do parceiro.
+    if (new Date(tarefa.data).getTime() !== dataAntes) await avisarParceiro(tarefa, 'alterada');
 
     // Notifica quem passou a fazer parte da tarefa (fire-and-forget).
     // Só envia se foi uma (re)atribuição real — não no caso de remover atribuição.
@@ -793,6 +797,7 @@ exports.atualizarEstadoTarefa = async (req, res) => {
       tarefa.data_conclusao = null;
       tarefa.hora_conclusao = null;
     }
+    const estadoAntes = tarefa.estado;
     tarefa.estado = estado;
     if (estado === 'concluida') {
       const agoraConclusao = new Date();
@@ -806,6 +811,12 @@ exports.atualizarEstadoTarefa = async (req, res) => {
       tarefa.equipa_atribuida = [];
     }
     await tarefa.save();
+
+    // Efeitos laterais (só quando o estado mudou de facto): avaria resolvida, avisos ao parceiro.
+    if (estadoAntes !== estado) {
+      if (estado === 'concluida') await aoConcluirTarefa(tarefa);
+      else if (estado === 'cancelada') await avisarParceiro(tarefa, 'cancelada');
+    }
 
     return res.status(200).json({ tarefa });
   } catch (err) {
@@ -956,6 +967,7 @@ exports.reatribuirTarefa = async (req, res) => {
     // O novo responsável substitui o anterior; os outros membros mantêm-se.
     tarefa.utilizador_id = eq.utilizador_id;
     tarefa.equipa_atribuida = eq.equipa_atribuida.length > 1 || equipaAntes.length > 1 ? eq.equipa_atribuida : [];
+    const dataAntesReatrib = new Date(tarefa.data).getTime();
     tarefa.data = resultadoScheduler.data;
     tarefa.estado = 'atribuida';
     tarefa.motivo_nao_atribuicao = null;
@@ -964,6 +976,7 @@ exports.reatribuirTarefa = async (req, res) => {
     // p.ex. se o novo responsável já era membro).
     tarefa.pessoas_em_falta = Math.max(0, (Number(propriedade.staff_necessario) || 1) - eq.equipa_atribuida.length);
     await tarefa.save();
+    if (new Date(tarefa.data).getTime() !== dataAntesReatrib) await avisarParceiro(tarefa, 'alterada');
 
     console.log(
       `🔄 reatribuirTarefa: tarefa ${tarefa._id} → utilizador ${novoUser.nome} ` +

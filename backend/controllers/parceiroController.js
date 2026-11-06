@@ -244,6 +244,8 @@ async function listarTarefas(req, res) {
     const tarefas = await Tarefa.find({
       propriedade_id: { $in: propriedadesIds.map((p) => p._id) },
       origem: 'manual',
+      // Manutenções (avarias reportadas pelo staff) são internas: o parceiro não as vê.
+      tipo: { $ne: 'manutencao' },
     })
       .populate('propriedade_id', 'nome morada')
       // FIX (portal lavandaria) — Inclui hospedes (bug latente: não era enviado)
@@ -669,7 +671,7 @@ async function listarReservas(req, res) {
 
     const reservas = await ReservaManual.find({ parceiro_id: parceiroId })
       .populate('propriedade_id', 'nome morada')
-      .populate('tarefa_gerada_id', 'estado data tipo_limpeza tempo_limpeza_minutos')
+      .populate('tarefa_gerada_id', 'estado data tipo_limpeza tempo_limpeza_minutos hora_conclusao concluida_em')
       .sort({ check_out: -1 })
       .lean();
 
