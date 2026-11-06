@@ -17,6 +17,7 @@ const Propriedade = require('../models/Propriedade');
 const { notificarUtilizador, avisarGestores } = require('../utils/notificar');
 const { preencherVagaTarefa, preencherVagasAposAusencia } = require('../utils/atribuicaoAutomatica');
 const { comMembro, retirarMembroDoc } = require('../utils/equipaTarefa');
+const { aoConcluirTarefa } = require('../utils/cicloTarefa');
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -570,6 +571,9 @@ exports.concluirTarefa = async (req, res) => {
       return res.status(400).json({ erro: 'Tarefa já concluída (ou entretanto cancelada).' });
     }
 
+    // Avaria resolvida (manutenção) e aviso ao parceiro; best-effort, nunca falha a conclusão.
+    await aoConcluirTarefa(atualizada);
+
     return res.status(200).json({ tarefa: atualizada });
   } catch (err) {
     console.error('❌ concluirTarefa:', err.message);
@@ -649,6 +653,8 @@ exports.reportarAvaria = async (req, res) => {
       data_registo: new Date(),
     });
     await tarefa.save();
+    // Item acabado de registar (liga a manutenção a esta avaria).
+    const itemAvaria = tarefa.avarias[tarefa.avarias.length - 1];
 
     // Cria uma NOVA tarefa de manutenção para a mesma propriedade,
     // para o gestor atribuir a alguém (ex: reparador).
@@ -667,6 +673,9 @@ exports.reportarAvaria = async (req, res) => {
       tipo: 'manutencao',
       estado: 'por_atribuir',
       observacoes: `Avaria reportada por staff: ${String(descricao).trim()}`,
+      // Ciclo fechado: ao concluir esta manutenção, a avaria fica resolvida.
+      avaria_origem_id: tarefa._id,
+      avaria_origem_item_id: itemAvaria && itemAvaria._id ? itemAvaria._id : null,
     });
 
     console.log(
@@ -929,6 +938,8 @@ exports.toggleChecklistItem = async (req, res) => {
 
     // Atualiza diretamente no array (positional operator).
     tarefa.checklist_dinamica[secIdx].items[itemIdx].concluido = novoValor;
+    // Primeiro item marcado: prova de que o trabalho começou (relatório de tempo real).
+    if (novoValor && !tarefa.primeiro_item_checklist_em) tarefa.primeiro_item_checklist_em = new Date();
     await tarefa.save();
 
     console.log(

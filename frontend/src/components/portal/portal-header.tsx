@@ -6,6 +6,7 @@ import { User, LogOut, ChevronDown } from "lucide-react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { lerUtilizador, fazerLogout, type Role } from "@/lib/auth";
+import { NotificationBell } from "@/components/notification-bell";
 
 /**
  * UserMenu — Dropdown de utilizador partilhado (FIX: header parceiro/fornecedor).
@@ -154,8 +155,11 @@ export function PortalHeader({ portalLabel }: { portalLabel: string }) {
         </span>
       </div>
 
-      {/* Menu do utilizador (avatar + logout) */}
-      <UserMenu />
+      {/* Sino (avisos dentro da aplicação, sem push) + menu do utilizador (avatar + logout) */}
+      <div className="flex items-center gap-1">
+        <NotificationBell />
+        <UserMenu />
+      </div>
     </header>
   );
 }

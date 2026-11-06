@@ -12,6 +12,9 @@ import {
   Siren,
   TriangleAlert,
   ArrowRight,
+  Play,
+  Wrench,
+  Shirt,
 } from "lucide-react";
 import Link from "next/link";
 import { format } from "date-fns";
@@ -39,6 +42,22 @@ interface DashboardData {
   // Limpezas a que falta pelo menos uma pessoa (sem substituto).
   tarefasEquipaIncompleta?: number;
   tarefasConcluidasHoje: number;
+  // Limpezas em curso neste momento (início por botão ou automático).
+  aDecorrerAgora?: {
+    total: number;
+    tarefas: {
+      _id: string;
+      propriedade_nome: string;
+      pessoa: string | null;
+      iniciada_em: string | null;
+      inicio_origem: "botao" | "automatico" | null;
+      tipo: string;
+    }[];
+  };
+  // Avarias reportadas por resolver (ciclo fechado ao concluir a manutenção).
+  avariasAbertas?: number;
+  // Limpezas de hoje (casas com lavandaria) sem roupa limpa entregue.
+  limpezasSemRoupa?: number;
   tarefasPorStaff: { utilizador_id: string; nome: string; tarefas: number; carga_minutos: number }[];
   // v1.54.0 (Prompt 76) — Radar de Risco: check-ins sem limpeza nas próximas 48h.
   checkinsEmRisco?: {
@@ -136,11 +155,17 @@ export default function AdminDashboardPage() {
         { label: "Propriedades", value: `${data.propriedadesAtivas}/${data.totalPropriedades}`, icon: Building2 },
         { label: "Equipa ativa", value: data.membrosEquipaAtivos, icon: Users },
         { label: "Limpezas hoje", value: data.tarefasHoje, icon: ClipboardList },
-        { label: "Por atribuir", value: data.tarefasPorAtribuir, icon: AlertCircle },
+        { label: "Por atribuir hoje", value: data.tarefasPorAtribuir, icon: AlertCircle },
         ...((data.tarefasEquipaIncompleta ?? 0) > 0
           ? [{ label: "Falta pessoa", value: data.tarefasEquipaIncompleta ?? 0, icon: Users }]
           : []),
-        { label: "Concluídas", value: data.tarefasConcluidasHoje, icon: CheckCircle2 },
+        { label: "Concluídas hoje", value: data.tarefasConcluidasHoje, icon: CheckCircle2 },
+        ...((data.avariasAbertas ?? 0) > 0
+          ? [{ label: "Avarias abertas", value: data.avariasAbertas ?? 0, icon: Wrench }]
+          : []),
+        ...((data.limpezasSemRoupa ?? 0) > 0
+          ? [{ label: "Limpezas de hoje sem roupa entregue", value: data.limpezasSemRoupa ?? 0, icon: Shirt }]
+          : []),
       ]
     : [];
 
@@ -171,10 +196,11 @@ export default function AdminDashboardPage() {
               </div>
               <div className="flex-1">
                 <p className="text-sm font-semibold text-orange-900 dark:text-orange-100">
-                  ⚠️ Tens {plural(data.checkinsEmRisco.total, "limpeza")} crítica(s) pendente(s) para as próximas 48h!
+                  ⚠️ Próximas 48 h: {plural(data.checkinsEmRisco.total, "limpeza")} por atribuir
                 </p>
                 <p className="mt-0.5 text-xs text-orange-800/80 dark:text-orange-200/80">
-                  Estas tarefas estão <strong>por atribuir</strong> e podem comprometer check-ins.
+                  Contam-se as próximas 48 horas a partir de agora (não só o dia de hoje), por isso o número
+                  pode ser diferente de «Por atribuir hoje». Podem comprometer check-ins.
                 </p>
                 {/* Lista das tarefas em risco (máx. 3, depois "e mais N") */}
                 <ul className="mt-2 space-y-1">
@@ -336,6 +362,37 @@ export default function AdminDashboardPage() {
               );
             })}
           </div>
+
+          {/* A decorrer agora: limpezas em curso */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Play className="h-4 w-4 text-gold-text" aria-hidden="true" />
+                A decorrer agora
+              </CardTitle>
+              <CardDescription>Limpezas em curso neste momento.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {!data.aDecorrerAgora || data.aDecorrerAgora.total === 0 ? (
+                <p className="text-sm text-muted-foreground">Nenhuma limpeza em curso.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {data.aDecorrerAgora.tarefas.map((t) => (
+                    <li key={t._id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                      <span className="font-medium">{t.propriedade_nome}</span>
+                      <span className="text-muted-foreground">
+                        {t.pessoa ?? "Sem pessoa"}
+                        {t.iniciada_em
+                          ? ` · desde as ${formatarDataSegura(t.iniciada_em, (d) => format(d, "HH:mm"), "—")}`
+                          : ""}
+                        {t.inicio_origem === "automatico" ? " · início automático" : t.inicio_origem === "botao" ? " · começou pelo botão" : ""}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
 
           {/* Carga por staff */}
           <Card>

@@ -8,6 +8,8 @@
  *   POST   /ausencias            — criar pedido de ausência (sempre 'pendente')
  *   DELETE /ausencias/:id        — cancelar pedido pendente (só pendentes)
  *   POST   /falta-hoje           — reportar falta de emergência para o dia atual
+ *   PATCH  /tarefas/:id/iniciar — «Comecei» (em_curso)
+ *   POST   /tarefas/:id/nao-consegui — «Não consegui começar»
  *   PATCH  /tarefas/:id/concluir — concluir tarefa (v1.34.0)
  *   POST   /tarefas/:id/avaria   — reportar avaria (v1.38.0)
  *   POST   /tarefas/:id/atraso   — reportar atraso (v1.55.0 — Prompt 77)
@@ -35,6 +37,7 @@ const {
   reportarAtraso,
   toggleChecklistItem,
 } = require('../controllers/staffController');
+const { iniciarTarefa, naoConseguiComecar } = require('../controllers/staffInicioController');
 
 router.get('/ausencias', auth, minhasAusencias);
 router.post('/ausencias', auth, criarAusencia);
@@ -42,6 +45,8 @@ router.delete('/ausencias/:id', auth, cancelarAusencia);
 // Prompt 132 — Soft cancel (mantém histórico)
 router.patch('/ausencias/:id/cancelar', auth, cancelarAusenciaSoft);
 router.post('/falta-hoje', auth, faltaHoje);
+router.patch('/tarefas/:id/iniciar', auth, iniciarTarefa);
+router.post('/tarefas/:id/nao-consegui', auth, naoConseguiComecar);
 router.patch('/tarefas/:id/concluir', auth, concluirTarefa);
 router.post('/tarefas/:id/avaria', auth, reportarAvaria);
 router.post('/tarefas/:id/atraso', auth, reportarAtraso);

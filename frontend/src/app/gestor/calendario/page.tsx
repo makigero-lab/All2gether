@@ -31,6 +31,7 @@ import timeGridPlugin from "@fullcalendar/timegrid";
 import interactionPlugin from "@fullcalendar/interaction";
 import ptLocale from "@fullcalendar/core/locales/pt";
 import type { DatesSetArg, EventClickArg, EventContentArg, EventInput } from "@fullcalendar/core";
+import type { DateClickArg } from "@fullcalendar/interaction";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -49,6 +50,7 @@ import {
 } from "@/components/ui/dialog";
 import { adminGet, adminPost, adminPatch, type PropriedadeDTO, type UtilizadorDTO } from "@/lib/api";
 import { textoEquipaGestor, textoFalta } from "@/lib/equipa";
+import { DetalheTarefaModal, type TarefaDetalheGestor } from "@/components/gestor/detalhe-tarefa-modal";
 
 /* ------------------------------------------------------------------ */
 /* Tipos                                                               */
@@ -158,6 +160,13 @@ function emojiPorTipo(tipo: string): string {
       return "🧹";
   }
 }
+
+/** Cor do ponto do tipo de limpeza (vista Mês). A normal não tem ponto: é o caso comum. */
+const COR_PONTO_TIPO: Record<string, string> = {
+  intermedia: "#0ea5e9",
+  profunda: "#8b5cf6",
+  preparacao: "#14b8a6",
+};
 
 /** Cor de fundo/borda do evento do FullCalendar por estado da tarefa. */
 function corPorEstado(estado: string): string {
@@ -302,6 +311,10 @@ export default function CalendarioOperacionalPage() {
   // Prompt 135 — Conflito de horário (soft block): modal de confirmação.
   const [conflitoModal, setConflitoModal] = useState<{ warning: string; tarefaCriada?: TarefaCalendario } | null>(null);
   const [conflitoForcar, setConflitoForcar] = useState(false);
+  // Telemóvel: tocar numa data do calendário abre a lista desse dia.
+  const [diaAberto, setDiaAberto] = useState<string | null>(null);
+  // Prova da limpeza (fotos, hora, checklist) no modal partilhado.
+  const [provaTarefa, setProvaTarefa] = useState<TarefaCalendario | null>(null);
 
   // SSR-safe mount: FullCalendar só pode ser renderizado no cliente.
   const [mounted, setMounted] = useState(false);
@@ -573,6 +586,18 @@ export default function CalendarioOperacionalPage() {
     const emoji = emojiPorTipo(t.tipo);
     const tipoEspecial = t.tipo === "limpeza" && t.tipo_limpeza && t.tipo_limpeza !== "normal" ? rotuloTipoLimpeza(t.tipo_limpeza) : null;
     const titulo = `${tipoEspecial ? `${tipoEspecial} - ` : ""}${t.propriedade_id?.nome ?? "—"}`;
+    // Vista Mês: o tipo vai num ponto colorido (com rótulo acessível) e o título fica só com a casa.
+    const corTipo = t.tipo === "limpeza" && t.tipo_limpeza ? COR_PONTO_TIPO[t.tipo_limpeza] : undefined;
+    const tituloMes = t.propriedade_id?.nome ?? "—";
+    const pontoTipo = corTipo && tipoEspecial ? (
+      <span
+        role="img"
+        aria-label={`Limpeza ${tipoEspecial.toLowerCase()}`}
+        title={`Limpeza ${tipoEspecial.toLowerCase()}`}
+        className="fc-evt-month__dot fc-evt-month__dot--tipo"
+        style={{ backgroundColor: corTipo }}
+      />
+    ) : null;
     const staff = t.utilizador_id?.nome ?? null;
     const isFolga = t.tipo === "folga_fixa";
     const isAusencia = t.tipo === "ausencia";
@@ -689,8 +714,9 @@ export default function CalendarioOperacionalPage() {
             title={`⚠️ ${msg} — ${titulo}${staff ? ` (${staff})` : ""}`}
           >
             <span className="fc-evt-month__alert-icon" aria-hidden>🚨</span>
+            {pontoTipo}
             <span className="fc-evt-month__title">
-              {emoji} {titulo}
+              {emoji} {tituloMes}
             </span>
             <span className="fc-evt-month__alert-tag">Órfã</span>
           </div>
@@ -701,8 +727,9 @@ export default function CalendarioOperacionalPage() {
         return (
           <div className="fc-evt-month fc-evt-month--alert" title={`⚠️ ${rotuloEstado} — ${titulo}`}>
             <span className="fc-evt-month__alert-icon" aria-hidden>⚠️</span>
+            {pontoTipo}
             <span className="fc-evt-month__title">
-              {emoji} {titulo}
+              {emoji} {tituloMes}
             </span>
             <span className="fc-evt-month__alert-tag">{rotuloEstado}</span>
           </div>
@@ -715,9 +742,10 @@ export default function CalendarioOperacionalPage() {
             style={{ backgroundColor: isFolga ? "#94a3b8" : paleta.dot }}
             aria-hidden
           />
+          {pontoTipo}
           <span className="fc-evt-month__time">{arg.timeText}</span>
           <span className="fc-evt-month__title" title={textoFalta(t.pessoas_em_falta) ? `${titulo} · ${textoFalta(t.pessoas_em_falta)}` : titulo}>
-            {emoji} {titulo}{(t.pessoas_em_falta ?? 0) > 0 ? " ⚠" : ""}
+            {emoji} {tituloMes}{(t.pessoas_em_falta ?? 0) > 0 ? " ⚠" : ""}
           </span>
         </div>
       );
@@ -766,7 +794,27 @@ export default function CalendarioOperacionalPage() {
     );
   }, []);
 
+  /* --- Lista de um dia (telemóvel) --- */
+  const itensDoDia = useMemo(() => {
+    if (!diaAberto) return [];
+    return tarefas
+      .filter((t) => {
+        const d = parsearDataSegura(t.data);
+        if (!d) return false;
+        return format(d, "yyyy-MM-dd") === diaAberto;
+      })
+      .filter((t) => t.tipo !== "viagem")
+      .slice()
+      .sort((a, b) => (parsearDataSegura(a.data)?.getTime() ?? 0) - (parsearDataSegura(b.data)?.getTime() ?? 0));
+  }, [diaAberto, tarefas]);
+
   /* --- Callbacks do FullCalendar --- */
+  const handleDateClick = useCallback((arg: DateClickArg) => {
+    // Só no telemóvel: no desktop o clique na data não faz nada (evita mudar o comportamento).
+    if (typeof window === "undefined" || !window.matchMedia("(max-width: 639px)").matches) return;
+    setDiaAberto(format(arg.date, "yyyy-MM-dd"));
+  }, []);
+
   const handleDatesSet = useCallback((arg: DatesSetArg) => {
     setPeriodo({
       inicio: format(arg.start, "yyyy-MM-dd"),
@@ -812,7 +860,7 @@ export default function CalendarioOperacionalPage() {
 
   /* --- Reatribuição Inteligente (Prompt 75) --- */
   // Chama PATCH /api/gestor/tarefas/:id/reatribuir, que recalcula a hora de
-  // início via scheduler sequencial (Haversine + almoço 13h-14h) no backend.
+  // início via scheduler sequencial (Haversine + almoço de 1 h entre as 12:00 e as 14:00) no backend.
   async function handleReatribuir() {
     if (!tarefaSelecionada || !reatribuindoPara) return;
     setReatribuindo(true);
@@ -1381,6 +1429,7 @@ export default function CalendarioOperacionalPage() {
               eventDurationEditable={false}
               events={eventos}
               eventClick={handleEventClick}
+              dateClick={handleDateClick}
               datesSet={handleDatesSet}
               // FIX (calendário compacto) — Limita a 2 o nº de eventos allDay
               // visíveis por dia; o excesso fica escondido num botão "+X mais".
@@ -1511,13 +1560,71 @@ export default function CalendarioOperacionalPage() {
           </span>
         ))}
         <span className="flex items-center gap-1.5">
-          <span
-            className="h-3 w-3 rounded border"
-            style={{ backgroundColor: "#e2e8f0", borderColor: "#cbd5e1" }}
-          />
+          <span className="h-3 w-3 rounded border border-slate-300 bg-slate-200 dark:border-slate-500 dark:bg-slate-700" />
           Folga fixa
         </span>
+        <span className="flex items-center gap-3">
+          <span className="font-medium">Ponto na vista Mês:</span>
+          {Object.entries(COR_PONTO_TIPO).map(([tipo, cor]) => (
+            <span key={tipo} className="flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: cor }} aria-hidden />
+              {rotuloTipoLimpeza(tipo)}
+            </span>
+          ))}
+        </span>
       </div>
+
+
+      {/* Telemóvel: lista do dia tocado no calendário */}
+      <Dialog open={diaAberto !== null} onOpenChange={(o) => !o && setDiaAberto(null)}>
+        <DialogHeader>
+          <div>
+            <DialogTitle>
+              {diaAberto
+                ? formatarDataSegura(`${diaAberto}T12:00:00`, (d) => format(d, "EEEE, d 'de' MMMM", { locale: pt }), diaAberto)
+                : ""}
+            </DialogTitle>
+            <DialogDescription>
+              {itensDoDia.length === 0 ? "Sem limpezas neste dia." : "Toca numa limpeza para ver o detalhe."}
+            </DialogDescription>
+          </div>
+          <DialogClose onClick={() => setDiaAberto(null)} />
+        </DialogHeader>
+        <DialogContent className="space-y-2">
+          {itensDoDia.map((t) => {
+            const ausencia = t.tipo === "ausencia" || t.tipo === "ausencia_pendente" || t.tipo === "folga_fixa";
+            const titulo = ausencia ? (t.title ?? "Ausência") : (t.propriedade_id?.nome ?? "—");
+            return (
+              <button
+                key={t._id}
+                type="button"
+                disabled={ausencia}
+                onClick={() => {
+                  setDiaAberto(null);
+                  setTarefaSelecionada(t);
+                  setReatribuindoPara(t.utilizador_id?._id ?? "");
+                }}
+                className="flex min-h-11 w-full items-center justify-between gap-2 rounded-md border px-3 py-2 text-left text-sm disabled:cursor-default"
+              >
+                <span className="min-w-0">
+                  <span className="block truncate font-medium">{titulo}</span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {ausencia ? "" : `${temHoraReal(t.data) ? horaTarefa(t.data) : "sem hora"} · ${t.utilizador_id?.nome ?? "Por atribuir"}`}
+                  </span>
+                </span>
+                {!ausencia && <EstadoTarefaBadge estado={t.estado} className="shrink-0" />}
+              </button>
+            );
+          })}
+        </DialogContent>
+      </Dialog>
+
+      {/* Prova da limpeza (modal partilhado com a página de limpezas) */}
+      <DetalheTarefaModal
+        tarefa={provaTarefa as unknown as TarefaDetalheGestor | null}
+        open={provaTarefa !== null}
+        onOpenChange={(o) => !o && setProvaTarefa(null)}
+      />
 
       {/* Modal de detalhe + reatribuição */}
       <Dialog
@@ -1531,6 +1638,17 @@ export default function CalendarioOperacionalPage() {
         </DialogHeader>
         {tarefaSelecionada && (
           <DialogContent className="space-y-4">
+            {tarefaSelecionada.estado === "concluida" && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="w-full"
+                onClick={() => { setProvaTarefa(tarefaSelecionada); setTarefaSelecionada(null); }}
+              >
+                Ver prova da limpeza (fotos, hora e checklist)
+              </Button>
+            )}
             {/* Estado + tipo + propriedade */}
             <div className="flex flex-wrap items-center gap-2">
               <EstadoTarefaBadge estado={tarefaSelecionada.estado} />
@@ -1599,7 +1717,7 @@ export default function CalendarioOperacionalPage() {
               </label>
               <p className="text-xs text-muted-foreground">
                 O sistema recalcula a hora de início com base nas tarefas
-                existentes do staff, tempo de viagem e hora de almoço (13h-14h).
+                existentes do staff, tempo de viagem e hora de almoço (1 h, a começar entre as 12:00 e as 14:00).
               </p>
               <select
                 id="reatribuir"
@@ -1753,7 +1871,7 @@ export default function CalendarioOperacionalPage() {
           <p className="text-sm text-muted-foreground">
             O sistema vai procurar o funcionário com menor carga para cada
             tarefa, respeitando férias, folgas fixas, tempo de viagem e hora
-            de almoço (13h-14h). As tarefas que não conseguirem ser atribuídas
+            de almoço (1 h, a começar entre as 12:00 e as 14:00). As tarefas que não conseguirem ser atribuídas
             (sem staff disponível) continuam por atribuir.
           </p>
         </DialogContent>

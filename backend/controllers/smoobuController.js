@@ -1076,9 +1076,25 @@ async function cancelarTarefaPorReserva(reservaId, empresaRestrita = null) {
   if (tarefas.length === 0) return null;
 
   let canceladas = 0;
+  let emCurso = 0;
   for (const tarefa of tarefas) {
     if (tarefa.estado === 'cancelada') continue; // idempotente
     if (tarefa.estado === 'concluida') continue; // histórico: limpeza já feita
+    if (tarefa.estado === 'em_curso') {
+      // A pessoa já está a limpar: não se cancela por baixo dela nem se lhe tira a casa.
+      // Fica em curso e o gestor é avisado (decide se a pessoa termina).
+      emCurso++;
+      const aviso = 'Reserva cancelada no Smoobu com a limpeza já em curso: a limpeza não foi cancelada.';
+      if (!String(tarefa.alerta || '').includes(aviso)) {
+        tarefa.alerta = [tarefa.alerta, aviso].filter(Boolean).join(' | ');
+        await tarefa.save();
+        try {
+          const prop = await Propriedade.findById(tarefa.propriedade_id).select('nome').lean();
+          await avisarGestores(tarefa.empresa_id, '⚠️ Reserva cancelada com limpeza em curso', `${(prop && prop.nome) || 'Casa'}: ${aviso}`, '/gestor/tarefas', { chave: `smoobu_cancel_em_curso:${tarefa._id}` });
+        } catch (e) { /* best-effort */ }
+      }
+      continue;
+    }
     tarefa.estado = 'cancelada';
     tarefa.utilizador_id = null; // liberta o staff
     tarefa.equipa_atribuida = [];
@@ -1089,7 +1105,7 @@ async function cancelarTarefaPorReserva(reservaId, empresaRestrita = null) {
   console.log(
     `🚫 [Smoobu] ${canceladas}/${tarefas.length} tarefa(s) cancelada(s) para reserva ${reservaId}.`
   );
-  return { canceladas, total: tarefas.length };
+  return { canceladas, total: tarefas.length, em_curso_mantidas: emCurso };
 }
 
 /**
@@ -1133,7 +1149,19 @@ async function atualizarTarefaPorReserva(
   if (dataTarefaRaw) {
     novoRange = obterRangeDia(dataTarefaRaw);
     const diaAtual = obterRangeDia(tarefa.data);
-    if (novoRange && diaAtual && diaAtual.start.getTime() !== novoRange.start.getTime()) {
+    if (tarefa.estado === 'em_curso' && novoRange && diaAtual && diaAtual.start.getTime() !== novoRange.start.getTime()) {
+      // Limpeza em curso: a data não muda por baixo da pessoa. O gestor é avisado.
+      const aviso = `A reserva mudou de data no Smoobu (${novoRange.start.toISOString().slice(0, 10)}) com a limpeza em curso: a data não foi alterada.`;
+      if (!String(tarefa.alerta || '').includes(aviso)) {
+        tarefa.alerta = [tarefa.alerta, aviso].filter(Boolean).join(' | ');
+        mudou = true;
+        try {
+          const prop = await Propriedade.findById(tarefa.propriedade_id).select('nome').lean();
+          await avisarGestores(tarefa.empresa_id, '⚠️ Data alterada com limpeza em curso', `${(prop && prop.nome) || 'Casa'}: ${aviso}`, '/gestor/tarefas', { chave: `smoobu_data_em_curso:${tarefa._id}:${novoRange.start.toISOString().slice(0, 10)}` });
+        } catch (e) { /* best-effort */ }
+      }
+      novoRange = null;
+    } else if (novoRange && diaAtual && diaAtual.start.getTime() !== novoRange.start.getTime()) {
       // Só muda se o DIA mudou (antes qualquer update repunha a hora a 00:00).
       // Mantém a hora 10:00 UTC por defeito; o load balancer/scheduler recalcula se houver reatribuição.
       const novaData = new Date(novoRange.start);

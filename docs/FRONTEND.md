@@ -550,3 +550,18 @@ O token passou a ser guardado num **cookie** (`all2gether_token`, SameSite=Lax, 
 - **Rascunho**: validade de 7 dias desde a última alteração (apagado ao ler). Saída explícita (`fazerLogout()`) avisa se há rascunhos e apaga-os; sessão expirada (`route-guard`) chama `fazerLogout({ sessaoExpirada: true })` e mantém-nos.
 - Textos: `textoPendentes` («1 alteração por gravar» / «N alterações por gravar»); erro de rede = uma só mensagem «Sem ligação» (banner), não por linha. Telemóvel: `scroll-padding-bottom: 6rem` no `html` enquanto há barra Gravar.
 - **Equipa**: cartão e detalhe do staff mostram «Equipa: Carla (resp.) + Tu» (`lib/equipa.ts`); o calendário do gestor mostra «Ana (resp.) + Bruno» e «Falta 1 pessoa» (blocos semana/dia, tabela; marca ⚠ no mês). `npm test` corre também `lib/equipa.test.mjs`.
+
+### Lote «ciclo da limpeza» (interface e funcionalidades)
+
+**Interface**
+- `/parceiro/reservas` (desktop): as colunas «Limpeza» e apagar ficam coladas à direita (`sticky`, `FIXO_ESTADO`/`FIXO_ACOES`) com fundo opaco por tipo/estado (`fixo` em `COR_TIPO`/`corDaLinha`: `bg-background` mais gradiente da cor da linha).
+- `/gestor/calendario`: no telemóvel, tocar numa data (`dateClick`, só até 639 px) abre a lista do dia; na vista Mês o tipo vai num ponto colorido com `role="img"` e `aria-label` («Limpeza profunda») e o título só tem a casa (semana/dia mantêm «Profunda - Casa»); legenda dos pontos; tema escuro com `--fc-border-color` suave e o quadrado «Folga fixa» da legenda com classes dark; as concluídas têm «Ver prova da limpeza». O texto do almoço passou a «1 h, a começar entre as 12:00 e as 14:00» (também em `/gestor/tarefas`).
+- `/gestor/tarefas`: no telemóvel a barra tem «Nova limpeza», Atualizar e um menu **Ações** com texto (só avarias, auto-atribuir, limpeza espontânea, exportar, importar). «Forçar agendamento» confirma a limpeza já criada no 1.º clique (não volta a pedir ao servidor: sem 409 nem duplicado); «Desfazer limpeza» cancela-a.
+- Staff: detalhe com a checklist logo a seguir ao cabeçalho (dados da reserva por baixo); agenda só com dias com tarefas (ou ausência) e resumo «X dias livres».
+- Lavandaria: «Entregue» é um estado e «Desfazer» a ação; `aria-label` «Marcar roupa entregue em <casa>»; casas com sacos recolhidos destacadas (linha/cartão âmbar e faixa-resumo).
+- Dashboard do gestor: «Por atribuir hoje», «Concluídas hoje» e o radar «Próximas 48 h» explicam a diferença de números.
+
+**Funcionalidades**
+- Staff: `components/staff/comecar-limpeza.tsx` (`BotaoComecei`, `BotaoNaoConsegui`) no cartão (`TaskCard`, recarrega a lista) e no detalhe (atualiza o estado local, sem perder a checklist). Cartão e detalhe: «Roupa limpa: entregue/em falta» (só com lavandaria), «Em curso desde as HH:MM», aviso «Avaria aberta nesta casa».
+- Gestor: `DetalheTarefaModal` carrega a prova só ao abrir (fotos, hora, checklist 11/12), mostra o início (botão/automático), o `alerta` e o botão «Resolvida» por avaria. Dashboard: «A decorrer agora», «Avarias abertas», «Limpezas de hoje sem roupa entregue». Relatórios: `components/gestor/tempo-real-casas.tsx`.
+- Parceiro: «Concluída às HH:MM» e «Ver» (`components/parceiro/limpeza-concluida.tsx`: hora e fotos enquanto existirem). Sino (`NotificationBell`) no `PortalHeader` do parceiro e da lavandaria.

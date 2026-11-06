@@ -155,6 +155,16 @@ export interface TarefaMock {
   tempo_viagem_minutos?: number | null;
   // Equipa da limpeza (2+ pessoas): nomes, responsável primeiro. `eu` = a própria pessoa.
   equipa_nomes?: Array<{ _id: string; nome: string; responsavel: boolean; eu?: boolean }> | null;
+  // Início da limpeza (botão «Comecei» ou automático à hora marcada).
+  iniciada_em?: string | null;
+  inicio_origem?: "botao" | "automatico" | null;
+  // «Não consegui começar»: último registo do staff.
+  nao_consegui_comecar?: { motivo: string; nota?: string; em?: string } | null;
+  // Lavandaria: a casa tem lavandaria associada? (só então se mostra «Roupa limpa»).
+  tem_lavandaria?: boolean;
+  roupa_entregue?: boolean;
+  // Avarias por resolver nesta casa (reportadas noutras limpezas).
+  avarias_abertas_casa?: Array<{ descricao: string; data_registo?: string | null }> | null;
 }
 
 /**

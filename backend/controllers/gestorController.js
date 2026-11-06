@@ -21,6 +21,7 @@ const { obterCoordenadas } = require('../utils/geocoding');
 const { registarAuditoria } = require('../utils/auditoria');
 const { comMembro, filtroMembro, retirarMembroDoc, membrosPopulados, EXPR_MEMBROS } = require('../utils/equipaTarefa');
 const { FILTRO_SEM_PESSOA } = require('../utils/atribuicaoAutomatica');
+const { contarAvariasAbertas } = require('../utils/avarias');
 const { lerConfigTipos } = require('../utils/tipoLimpeza');
 
 /* ------------------------------------------------------------------ */
@@ -192,6 +193,43 @@ exports.getDashboard = async (req, res) => {
       })),
     };
 
+    // «A decorrer agora»: limpezas em curso (início por botão ou automático).
+    const emCursoDocs = await Tarefa.find({
+      empresa_id: empresaId,
+      estado: 'em_curso',
+      data: { $gte: new Date(hojeInicio.getTime() - 24 * 60 * 60 * 1000), $lt: amanhaInicio },
+    })
+      .populate({ path: 'propriedade_id', select: 'nome' })
+      .populate({ path: 'utilizador_id', select: 'nome' })
+      .select('data propriedade_id utilizador_id iniciada_em inicio_origem tipo')
+      .sort({ iniciada_em: 1 })
+      .lean();
+    const aDecorrerAgora = {
+      total: emCursoDocs.length,
+      tarefas: emCursoDocs.map((t) => ({
+        _id: String(t._id),
+        propriedade_nome: t.propriedade_id?.nome ?? '—',
+        pessoa: t.utilizador_id?.nome ?? null,
+        iniciada_em: t.iniciada_em || null,
+        inicio_origem: t.inicio_origem || null,
+        tipo: t.tipo,
+      })),
+    };
+
+    // Avarias abertas (ciclo fechado) e limpezas de hoje sem roupa limpa entregue.
+    const avariasAbertas = await contarAvariasAbertas(empresaId);
+    const propsComLavandaria = await Propriedade.find({ empresa_id: empresaId, fornecedor_id: { $ne: null } })
+      .select('_id')
+      .lean();
+    const limpezasSemRoupa = propsComLavandaria.length === 0 ? 0 : await Tarefa.countDocuments({
+      empresa_id: empresaId,
+      tipo: 'limpeza',
+      data: { $gte: hojeInicio, $lt: amanhaInicio },
+      estado: { $nin: ['cancelada', 'concluida'] },
+      roupa_entregue: { $ne: true },
+      propriedade_id: { $in: propsComLavandaria.map((p) => p._id) },
+    });
+
     return res.status(200).json({
       totalPropriedades,
       propriedadesAtivas,
@@ -199,6 +237,9 @@ exports.getDashboard = async (req, res) => {
       tarefasHoje,
       tarefasPorAtribuir,
       tarefasEquipaIncompleta,
+      aDecorrerAgora,
+      avariasAbertas,
+      limpezasSemRoupa,
       tarefasConcluidasHoje,
       tarefasPorStaff,
       checkinsEmRisco,
@@ -506,6 +547,8 @@ exports.getTarefas = async (req, res) => {
       // e o frontend trata a tarefa como 'Por Atribuir'.
       .populate({ path: 'utilizador_id', select: 'nome', match: { ativo: true, eliminado_em: null } })
       .populate({ path: 'equipa_atribuida', select: 'nome', match: { ativo: true, eliminado_em: null } })
+      // As fotos (pesadas) só se carregam ao abrir a prova da limpeza (GET /tarefas/:id/prova).
+      .select('-fotos_conclusao -avarias.fotos')
       .sort({ data: 1 })
       .lean();
 
@@ -655,6 +698,8 @@ exports.getDadosCalendario = async (req, res) => {
       // FIX (fantasmas de inativos) — match: { ativo: true, eliminado_em: null }
       .populate({ path: 'utilizador_id', select: 'nome', match: { ativo: true, eliminado_em: null } })
       .populate({ path: 'equipa_atribuida', select: 'nome', match: { ativo: true, eliminado_em: null } })
+      // As fotos (pesadas) só se carregam ao abrir a prova da limpeza (GET /tarefas/:id/prova).
+      .select('-fotos_conclusao -avarias.fotos')
       .sort({ data: 1 })
       .lean();
 

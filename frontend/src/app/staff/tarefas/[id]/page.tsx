@@ -109,6 +109,12 @@ export default function DetalheTarefaPage({
     // Prompt 138 (136 V2) — Tempo de viagem (para mostrar no detalhe).
     tempo_viagem_minutos: tarefa.tempo_viagem_minutos ?? null,
     equipa_nomes: tarefa.equipa_nomes ?? null,
+    iniciada_em: tarefa.iniciada_em ?? null,
+    inicio_origem: tarefa.inicio_origem ?? null,
+    nao_consegui_comecar: tarefa.nao_consegui_comecar ?? null,
+    tem_lavandaria: !!tarefa.propriedade_id?.fornecedor_id,
+    roupa_entregue: tarefa.roupa_entregue === true,
+    avarias_abertas_casa: tarefa.avarias_abertas_casa ?? null,
   };
 
   // Usa a checklist real da propriedade (vinda do populate do backend).

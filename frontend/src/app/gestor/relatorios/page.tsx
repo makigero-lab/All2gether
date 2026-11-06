@@ -43,6 +43,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { adminGet, adminPost } from "@/lib/api";
 import { escaparHtml } from "@/lib/utils";
+import { TempoRealCasas } from "@/components/gestor/tempo-real-casas";
 
 /* ------------------------------------------------------------------ */
 /* Tipos                                                               */
@@ -837,6 +838,8 @@ export default function RelatoriosPage() {
             </CardContent>
           </Card>
 
+          {/* Tempo real contra estimado, por casa */}
+          <TempoRealCasas inicio={inicio} fim={fim} />
         </>
       ) : null}
     </div>

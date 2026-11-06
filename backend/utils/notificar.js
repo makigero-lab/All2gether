@@ -53,11 +53,16 @@ async function criarNotificacaoInApp(utilizadorId, mensagem, opts = {}) {
       url: opts.url || '/staff',
       empresa_id: opts.empresa_id || null,
       tarefa_id: opts.tarefa_id || null,
+      ...(opts.chave ? { chave: String(opts.chave) } : {}),
       lida: false,
     });
+    return true;
   } catch (err) {
+    // Chave repetida = já foi enviada: não é erro.
+    if (err && err.code === 11000 && opts.chave) return false;
     // Fire-and-forget: loga mas não propaga.
     console.error('⚠️  criarNotificacaoInApp:', err.message);
+    return false;
   }
 }
 
@@ -91,7 +96,22 @@ async function notificarUtilizador(utilizadorId, title, body, url = '/staff', op
 
     const empresaId = opts.empresa_id || (user.empresa_id ? String(user.empresa_id) : null);
 
-    // 1. Push (se configurado + tiver subscrição).
+    // 1. In-app (OPT-IN via opts.criarInApp). Default: NÃO cria — evita inundar o sino com
+    //    notificações per-task. Com `opts.chave`, a notificação é única por utilizador: se já
+    //    existia, não se repete nem o push.
+    if (criarInApp) {
+      const mensagemInApp = opts.mensagem || `${title}: ${body}`;
+      const criada = await criarNotificacaoInApp(utilizadorId, mensagemInApp, {
+        tipo: opts.tipo || 'sistema',
+        url,
+        empresa_id: empresaId,
+        tarefa_id: opts.tarefa_id || null,
+        chave: opts.chave || null,
+      });
+      if (opts.chave && criada === false) return false;
+    }
+
+    // 2. Push (se configurado + tiver subscrição).
     if (isConfigured() && user.pushSubscription) {
       try {
         await enviarNotificacaoPush(user.pushSubscription, { title, body, url });
@@ -99,18 +119,7 @@ async function notificarUtilizador(utilizadorId, title, body, url = '/staff', op
         console.error('⚠️  push falhou:', pushErr.message);
       }
     }
-
-    // 2. In-app (OPT-IN via opts.criarInApp). Default: NÃO cria — evita
-    //    inundar o sino com notificações per-task. Só para eventos principais.
-    if (criarInApp) {
-      const mensagemInApp = opts.mensagem || `${title}: ${body}`;
-      await criarNotificacaoInApp(utilizadorId, mensagemInApp, {
-        tipo: opts.tipo || 'sistema',
-        url,
-        empresa_id: empresaId,
-        tarefa_id: opts.tarefa_id || null,
-      });
-    }
+    return true;
   } catch (err) {
     // Fire-and-forget: loga mas não propaga.
     console.error('⚠️  notificarUtilizador:', err.message);
@@ -121,7 +130,7 @@ async function notificarUtilizador(utilizadorId, title, body, url = '/staff', op
  * Push + sino in-app a todos os gestores/admins ativos da empresa.
  * Best-effort: nunca lança.
  */
-async function avisarGestores(empresaId, titulo, texto, url = '/gestor/calendario') {
+async function avisarGestores(empresaId, titulo, texto, url = '/gestor/calendario', opts = {}) {
   try {
     const gestores = await Utilizador.find({
       empresa_id: empresaId,
@@ -135,6 +144,7 @@ async function avisarGestores(empresaId, titulo, texto, url = '/gestor/calendari
       await notificarUtilizador(String(g._id), titulo, texto, url, {
         criarInApp: true,
         tipo: 'aviso',
+        ...(opts.chave ? { chave: opts.chave } : {}),
       });
     }
   } catch (e) {
@@ -142,7 +152,28 @@ async function avisarGestores(empresaId, titulo, texto, url = '/gestor/calendari
   }
 }
 
+/**
+ * Aviso SÓ no sino (sem push), para parceiro e lavandaria. Com `chave`, não se repete.
+ * Best-effort: nunca lança. Devolve true se criou.
+ */
+async function notificarSino(utilizadorId, mensagem, opts = {}) {
+  try {
+    if (!utilizadorId) return false;
+    return await criarNotificacaoInApp(String(utilizadorId), mensagem, {
+      tipo: opts.tipo || 'aviso',
+      url: opts.url || '/',
+      empresa_id: opts.empresa_id || null,
+      tarefa_id: opts.tarefa_id || null,
+      chave: opts.chave || null,
+    });
+  } catch (e) {
+    console.error('⚠️  notificarSino:', e.message);
+    return false;
+  }
+}
+
 module.exports = {
+  notificarSino,
   avisarGestores,
   notificarUtilizador,
   criarNotificacaoInApp,

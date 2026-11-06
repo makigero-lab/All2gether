@@ -9,6 +9,7 @@ import {
   Users,
   RefreshCw,
   CheckCircle2,
+  Undo2,
 } from "lucide-react";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -50,6 +51,9 @@ interface TarefaFornecedorDTO {
   sacos_roupa_suja?: number;
   propriedade_id: { nome: string; morada?: string; capacidade_hospedes?: number | null } | null;
 }
+
+/** A limpeza já recolheu sacos de roupa suja (a lavandaria tem de os levar). */
+const temSacos = (t: TarefaFornecedorDTO) => (t.sacos_roupa_suja ?? 0) > 0 && t.estado !== "cancelada";
 
 /** Para o fornecedor, "Não atribuída" (detalhe interno) é igual a "Por atribuir". */
 const estadoParaFornecedor = (e: string) => (e === "nao_atribuida" ? "por_atribuir" : e);
@@ -182,6 +186,13 @@ export default function FornecedorTarefasPage() {
     return grupos;
   }, [tarefas]);
 
+  // Casas (distintas) com sacos de roupa suja recolhidos, ainda por levar.
+  const casasComSacos = useMemo(() => {
+    const nomes = new Set<string>();
+    for (const t of tarefas) if (temSacos(t)) nomes.add(t.propriedade_id?.nome ?? "—");
+    return [...nomes];
+  }, [tarefas]);
+
   // Cartões Hoje / Amanhã (dia civil em Europe/Lisbon).
   const resumoHojeAmanha = useMemo(() => {
     const agora = new Date();
@@ -223,6 +234,16 @@ export default function FornecedorTarefasPage() {
         <div className="grid grid-cols-2 gap-3">
           <CartaoDia titulo="Hoje" resumo={resumoHojeAmanha.hoje} />
           <CartaoDia titulo="Amanhã" resumo={resumoHojeAmanha.amanha} />
+        </div>
+      )}
+
+      {/* Casas com sacos de roupa suja já recolhidos pela limpeza: a lavandaria tem de os levar. */}
+      {!loading && casasComSacos.length > 0 && (
+        <div role="status" className="flex items-start gap-2 rounded-lg border border-amber-600 bg-amber-50 px-4 py-3 text-sm dark:bg-amber-950/20">
+          <Shirt className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-300" aria-hidden="true" />
+          <span>
+            <strong>{plural(casasComSacos.length, "casa")} com sacos recolhidos:</strong> {casasComSacos.join(", ")}.
+          </span>
         </div>
       )}
 
@@ -311,24 +332,40 @@ function BotaoEntregue({
   className?: string;
 }) {
   const nome = t.propriedade_id?.nome ?? "propriedade";
+  const a = togglingId === t._id;
+  // Entregue: aparece como ESTADO (não como botão) e a ação para voltar atrás é explícita: «Desfazer».
+  if (t.roupa_entregue) {
+    return (
+      <div className={`flex flex-wrap items-center justify-center gap-2 ${className ?? ""}`}>
+        <span className="inline-flex h-11 items-center gap-1.5 rounded-md bg-status-conc-bg px-3 text-sm font-semibold text-status-conc">
+          <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+          Entregue
+        </span>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={a}
+          onClick={() => onToggle(t)}
+          aria-label={`Desfazer a entrega de roupa em ${nome}`}
+          className="h-11 min-w-[44px] gap-1.5 px-3"
+        >
+          {a ? <Loader2 className="h-4 w-4 animate-spin" /> : <Undo2 className="h-4 w-4" />}
+          Desfazer
+        </Button>
+      </div>
+    );
+  }
   return (
     <Button
       type="button"
-      variant={t.roupa_entregue ? "default" : "outline"}
-      disabled={togglingId === t._id}
+      variant="outline"
+      disabled={a}
       onClick={() => onToggle(t)}
-      aria-label={t.roupa_entregue ? `Entregue (${nome}): desmarcar` : `Marcar entregue (${nome})`}
-      aria-pressed={!!t.roupa_entregue}
-      className={`h-11 min-w-[44px] gap-1.5 px-4 ${t.roupa_entregue ? "bg-status-conc text-status-foreground hover:bg-status-conc/90" : ""} ${className ?? ""}`}
+      aria-label={`Marcar roupa entregue em ${nome}`}
+      className={`h-11 min-w-[44px] gap-1.5 px-4 ${className ?? ""}`}
     >
-      {togglingId === t._id ? (
-        <Loader2 className="h-4 w-4 animate-spin" />
-      ) : t.roupa_entregue ? (
-        <CheckCircle2 className="h-4 w-4" />
-      ) : (
-        <Shirt className="h-4 w-4" />
-      )}
-      {t.roupa_entregue ? "Entregue" : "Marcar entregue"}
+      {a ? <Loader2 className="h-4 w-4 animate-spin" /> : <Shirt className="h-4 w-4" />}
+      Marcar entregue
     </Button>
   );
 }
@@ -346,7 +383,7 @@ function CartaoTarefaLavandaria({
   const hospedesReal =
     t.hospedes && t.hospedes > 0 ? t.hospedes : t.propriedade_id?.capacidade_hospedes ?? null;
   return (
-    <Card>
+    <Card className={temSacos(t) ? "border-amber-600 bg-amber-50 dark:bg-amber-950/20" : undefined}>
       <CardContent className="space-y-3 p-4">
         <div className="flex items-start justify-between gap-2">
           <h3 className="flex min-w-0 items-center gap-1.5 text-base font-semibold">
@@ -363,9 +400,9 @@ function CartaoTarefaLavandaria({
             </span>
           )}
           {t.sacos_roupa_suja && t.sacos_roupa_suja > 0 ? (
-            <span className="inline-flex items-center gap-1">
+            <span className="inline-flex items-center gap-1 font-semibold text-amber-800 dark:text-amber-200">
               <Shirt className="h-3.5 w-3.5" />
-              {plural(t.sacos_roupa_suja, "saco")} de roupa suja
+              {plural(t.sacos_roupa_suja, "saco")} de roupa suja recolhidos
             </span>
           ) : null}
         </div>
@@ -410,7 +447,7 @@ function GrupoTarefasLavandaria({
             ? t.hospedes
             : t.propriedade_id?.capacidade_hospedes ?? null;
         return (
-          <tr key={t._id} className="hover:bg-muted/30">
+          <tr key={t._id} className={`hover:bg-muted/30 ${temSacos(t) ? "bg-amber-50 shadow-[inset_3px_0_0_0_rgb(217_119_6)] dark:bg-amber-950/20" : ""}`}>
             <td className="px-4 py-3 font-medium">
               <div className="flex items-center gap-1.5">
                 <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
@@ -435,9 +472,9 @@ function GrupoTarefasLavandaria({
             </td>
             <td className="px-4 py-3">
               {t.sacos_roupa_suja && t.sacos_roupa_suja > 0 ? (
-                <Badge variant="secondary" className="gap-1">
+                <Badge className="gap-1 bg-amber-600 text-white hover:bg-amber-600">
                   <Shirt className="h-3 w-3" />
-                  {plural(t.sacos_roupa_suja, "saco")}
+                  {plural(t.sacos_roupa_suja, "saco")} a levar
                 </Badge>
               ) : (
                 <span className="text-muted-foreground text-xs">—</span>

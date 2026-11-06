@@ -44,6 +44,8 @@ const { iniciarArquivista } = require('./jobs/arquivista');
 const { iniciarSincronizacaoSmoobu } = require('./jobs/sincronizacaoSmoobu');
 const { iniciarLimpezaFotos } = require('./jobs/limpezaFotos');
 const { iniciarGeradorRotinas } = require('./jobs/geradorRotinas');
+const { iniciarInicioLimpeza } = require('./jobs/inicioLimpeza');
+const { iniciarResumoGestor } = require('./jobs/resumoGestor');
 const { configurarWebPush } = require('./utils/push');
 
 const app = express();
@@ -284,6 +286,13 @@ if (require.main === module) {
       // cria tarefas automáticas para propriedades com dias_fixos_limpeza
       // configurados para o dia de amanhã. Submete ao Load Balancer.
       iniciarGeradorRotinas();
+
+      // Início da limpeza: passa 'atribuida' a 'em_curso' à hora marcada se ninguém carregou
+      // em «Comecei» (de minuto a minuto + recuperação ao arrancar).
+      iniciarInicioLimpeza();
+
+      // Resumo das 18:05 para o gestor (só se houver novidades; uma vez por dia).
+      iniciarResumoGestor();
     })
     .catch((err) => {
       console.error('❌ Erro ao ligar ao MongoDB:', err.message);

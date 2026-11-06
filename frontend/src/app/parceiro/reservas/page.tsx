@@ -28,6 +28,7 @@ import {
   type TipoOrdem,
 } from "@/lib/ordenacao-reservas";
 import { EstadoTarefaBadge } from "@/components/ui/estado-tarefa-badge";
+import { LimpezaConcluida } from "@/components/parceiro/limpeza-concluida";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
@@ -88,7 +89,7 @@ interface ReservaDTO {
   tipo_limpeza?: string | null;
   /** Dia da limpeza escolhido (só intermédia/preparação). */
   data_limpeza?: string | null;
-  tarefa_gerada_id: { estado: string; data: string } | null;
+  tarefa_gerada_id: { estado: string; data: string; hora_conclusao?: string | null; concluida_em?: string | null } | null;
   createdAt: string;
 }
 
@@ -106,6 +107,9 @@ const CELULA_CARTAO =
   "h-11 w-full min-w-0 rounded-md border border-input bg-background px-3 text-base outline-none focus:border-gold-text focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60";
 
 /** Marca visual de "por gravar" (não depende só da cor: leva também um traço e o aviso da linha). */
+// Colunas «Limpeza» (estado) e apagar coladas à direita ao fazer scroll na tabela larga (desktop).
+const FIXO_ACOES = "sticky right-0 z-[1] w-12 min-w-[3rem]";
+const FIXO_ESTADO = "sticky right-12 z-[1] min-w-[10rem] shadow-[-8px_0_8px_-8px_rgba(0,0,0,0.25)]";
 const PENDENTE_TABELA = "bg-amber-100 dark:bg-amber-900/40 shadow-[inset_3px_0_0_0_rgb(217_119_6)]";
 const PENDENTE_CARTAO = "border-amber-600 bg-amber-50 dark:bg-amber-950/30";
 
@@ -131,22 +135,27 @@ function noites(ci: string, co: string): number {
  * linha (erro, a eliminar, por gravar, concluída, cancelada) têm prioridade sobre a cor do tipo.
  * A cor nunca é o único sinal: o tipo está escrito na coluna/campo e nas etiquetas.
  */
-const COR_TIPO: Record<string, { tr: string; faixa: string; cartao: string; amostra: string }> = {
-  normal: { tr: "", faixa: "border-l-4 border-l-transparent", cartao: "", amostra: "border border-muted-foreground/60 bg-background" },
+// `fixo`: o mesmo tom da linha mas OPACO (fundo + gradiente com a cor), para as colunas coladas à direita
+// (sticky) não deixarem ver o conteúdo que passa por baixo ao fazer scroll.
+const COR_TIPO: Record<string, { tr: string; faixa: string; cartao: string; amostra: string; fixo: string }> = {
+  normal: { tr: "", fixo: "bg-background", faixa: "border-l-4 border-l-transparent", cartao: "", amostra: "border border-muted-foreground/60 bg-background" },
   intermedia: {
     tr: "bg-sky-50/70 dark:bg-sky-950/25",
+    fixo: "bg-background bg-gradient-to-r from-sky-50/70 to-sky-50/70 dark:from-sky-950/25 dark:to-sky-950/25",
     faixa: "border-l-4 border-l-sky-500",
     cartao: "border-l-4 border-l-sky-500 bg-sky-50/60 dark:bg-sky-950/20",
     amostra: "bg-sky-500",
   },
   profunda: {
     tr: "bg-violet-50/70 dark:bg-violet-950/25",
+    fixo: "bg-background bg-gradient-to-r from-violet-50/70 to-violet-50/70 dark:from-violet-950/25 dark:to-violet-950/25",
     faixa: "border-l-4 border-l-violet-500",
     cartao: "border-l-4 border-l-violet-500 bg-violet-50/60 dark:bg-violet-950/20",
     amostra: "bg-violet-500",
   },
   preparacao: {
     tr: "bg-teal-50/70 dark:bg-teal-950/25",
+    fixo: "bg-background bg-gradient-to-r from-teal-50/70 to-teal-50/70 dark:from-teal-950/25 dark:to-teal-950/25",
     faixa: "border-l-4 border-l-teal-500",
     cartao: "border-l-4 border-l-teal-500 bg-teal-50/60 dark:bg-teal-950/20",
     amostra: "bg-teal-500",
@@ -154,24 +163,24 @@ const COR_TIPO: Record<string, { tr: string; faixa: string; cartao: string; amos
 };
 
 /** Cor da linha: estado primeiro (erro > a eliminar > por gravar/alterada > concluída/cancelada), depois o tipo. */
-function corDaLinha(l: Linha): { tr: string; faixa: string; cartao: string } {
+function corDaLinha(l: Linha): { tr: string; faixa: string; cartao: string; fixo: string } {
   if (l.erro || (l.conflito && l.conflito.length > 0)) {
-    return { tr: "bg-destructive/10", faixa: "border-l-4 border-l-destructive", cartao: "border-l-4 border-l-destructive bg-destructive/5" };
+    return { tr: "bg-destructive/10", fixo: "bg-background bg-gradient-to-r from-destructive/10 to-destructive/10", faixa: "border-l-4 border-l-destructive", cartao: "border-l-4 border-l-destructive bg-destructive/5" };
   }
   if (l.eliminada) {
-    return { tr: "bg-destructive/5 opacity-70", faixa: "border-l-4 border-l-destructive", cartao: "border-l-4 border-l-destructive opacity-70" };
+    return { tr: "bg-destructive/5 opacity-70", fixo: "bg-background bg-gradient-to-r from-destructive/5 to-destructive/5", faixa: "border-l-4 border-l-destructive", cartao: "border-l-4 border-l-destructive opacity-70" };
   }
   if (l.nova || l.pendentes.size > 0) {
-    return { tr: "bg-amber-50/70 dark:bg-amber-950/25", faixa: "border-l-4 border-l-amber-600", cartao: "border-l-4 border-l-amber-600 bg-amber-50 dark:bg-amber-950/30" };
+    return { tr: "bg-amber-50/70 dark:bg-amber-950/25", fixo: "bg-background bg-gradient-to-r from-amber-50/70 to-amber-50/70 dark:from-amber-950/25 dark:to-amber-950/25", faixa: "border-l-4 border-l-amber-600", cartao: "border-l-4 border-l-amber-600 bg-amber-50 dark:bg-amber-950/30" };
   }
   if (l.estado === "concluida") {
-    return { tr: "bg-emerald-50/60 dark:bg-emerald-950/20", faixa: "border-l-4 border-l-emerald-600", cartao: "border-l-4 border-l-emerald-600 bg-emerald-50/50 dark:bg-emerald-950/20" };
+    return { tr: "bg-emerald-50/60 dark:bg-emerald-950/20", fixo: "bg-background bg-gradient-to-r from-emerald-50/60 to-emerald-50/60 dark:from-emerald-950/20 dark:to-emerald-950/20", faixa: "border-l-4 border-l-emerald-600", cartao: "border-l-4 border-l-emerald-600 bg-emerald-50/50 dark:bg-emerald-950/20" };
   }
   if (l.estado === "cancelada") {
-    return { tr: "bg-muted/40 text-muted-foreground", faixa: "border-l-4 border-l-muted-foreground/50", cartao: "border-l-4 border-l-muted-foreground/50 bg-muted/40" };
+    return { tr: "bg-muted/40 text-muted-foreground", fixo: "bg-background bg-gradient-to-r from-muted/40 to-muted/40", faixa: "border-l-4 border-l-muted-foreground/50", cartao: "border-l-4 border-l-muted-foreground/50 bg-muted/40" };
   }
   const t = COR_TIPO[tipoOuNormal(l.valores.tipo_limpeza)];
-  return { tr: t.tr, faixa: t.faixa, cartao: t.cartao };
+  return { tr: t.tr, fixo: t.fixo, faixa: t.faixa, cartao: t.cartao };
 }
 
 /** Legenda curta das cores (cada cor leva sempre o nome ao lado). */
@@ -439,6 +448,8 @@ interface Linha {
   valores: Valores;
   pendentes: Set<Campo>;
   estado: string | null;
+  /** Hora de conclusão da limpeza (só quando concluída). */
+  horaConclusao?: string | null;
   bloqueada: boolean;
   /** Marcada para eliminar (só se elimina ao Gravar). */
   eliminada?: boolean;
@@ -991,6 +1002,7 @@ export default function ParceiroReservasPage() {
         valores: valoresEfetivos(doServidor(r), e),
         pendentes: new Set<Campo>(e ? (Object.keys(e.campos) as Campo[]) : []),
         estado: r.tarefa_gerada_id?.estado ?? null,
+        horaConclusao: r.tarefa_gerada_id?.hora_conclusao ?? r.tarefa_gerada_id?.concluida_em ?? null,
         bloqueada: r.tarefa_gerada_id?.estado === "em_curso" || r.tarefa_gerada_id?.estado === "concluida",
         eliminada: r._id in rascunho.eliminar,
         semEdicao: gravando || r._id in rascunho.eliminar || r.tarefa_gerada_id?.estado === "em_curso" || r.tarefa_gerada_id?.estado === "concluida",
@@ -1199,8 +1211,8 @@ export default function ParceiroReservasPage() {
                   <Cab chave="data_limpeza" rotulo="Data da limpeza" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[11rem]" />
                   <Cab chave="horario_preferido" rotulo="Horário pref. limpeza" ordem={ordem} onOrdenar={ordenarPorColuna} />
                   <Cab chave="observacoes" rotulo="Notas" ordem={ordem} onOrdenar={ordenarPorColuna} />
-                  <Cab chave="estado" rotulo="Limpeza" ordem={ordem} onOrdenar={ordenarPorColuna} />
-                  <th className="px-2 py-2" />
+                  <Cab chave="estado" rotulo="Limpeza" ordem={ordem} onOrdenar={ordenarPorColuna} className={`${FIXO_ESTADO} z-[2] bg-background bg-gradient-to-r from-muted/40 to-muted/40`} />
+                  <th className={`${FIXO_ACOES} z-[2] bg-background bg-gradient-to-r from-muted/40 to-muted/40 px-2 py-2`}><span className="sr-only">Ações</span></th>
                 </tr>
               </thead>
               <tbody>
@@ -1256,8 +1268,8 @@ export default function ParceiroReservasPage() {
                   <td className="p-0">
                     <input value={nova.observacoes} onChange={(e) => setN("observacoes")(e.target.value)} className={CELULA} disabled={gravando} aria-label="Nova reserva: notas" />
                   </td>
-                  <td className="px-2 text-xs text-muted-foreground">nova</td>
-                  <td className="px-1 text-right">
+                  <td className={`${FIXO_ESTADO} bg-background bg-gradient-to-r from-primary/5 to-primary/5 px-2 text-xs text-muted-foreground`}>nova</td>
+                  <td className={`${FIXO_ACOES} bg-background bg-gradient-to-r from-primary/5 to-primary/5 px-1 text-right`}>
                     <Button size="sm" onClick={acrescentarNova} title="Acrescentar às reservas por gravar (Enter)" disabled={gravando} aria-label="Acrescentar reserva por gravar">
                       <Plus className="h-4 w-4" />
                     </Button>
@@ -1317,14 +1329,18 @@ export default function ParceiroReservasPage() {
                         <td className="p-0">
                           <Celula value={l.valores.observacoes} pendente={p("observacoes")} rotulo={`Observações, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "observacoes", v)} />
                         </td>
-                        <td className="whitespace-nowrap px-2">
+                        <td className={`${FIXO_ESTADO} whitespace-nowrap px-2 ${cor.fixo}`}>
                           {l.nova ? (
                             <span className="rounded bg-amber-200 px-1.5 py-0.5 text-xs font-medium text-amber-900">Por gravar</span>
                           ) : l.eliminada ? (
                             <span className="rounded bg-destructive/15 px-1.5 py-0.5 text-xs font-medium text-destructive">A eliminar</span>
                           ) : l.estado ? (
                             <span className="inline-flex items-center gap-1">
-                              <EstadoTarefaBadge estado={estadoParaParceiro(l.estado)} />
+                              {l.estado === "concluida" && l.reserva ? (
+                                <LimpezaConcluida reservaId={l.reserva._id} hora={l.horaConclusao ?? null} casa={nome} />
+                              ) : (
+                                <EstadoTarefaBadge estado={estadoParaParceiro(l.estado)} />
+                              )}
                               {l.pendentes.size > 0 && (
                                 <span className="rounded bg-amber-200 px-1.5 py-0.5 text-xs font-medium text-amber-900">Alterada</span>
                               )}
@@ -1333,7 +1349,7 @@ export default function ParceiroReservasPage() {
                             "—"
                           )}
                         </td>
-                        <td className="px-1 text-right">
+                        <td className={`${FIXO_ACOES} px-1 text-right ${cor.fixo}`}>
                           {l.nova ? (
                             <Button variant="ghost" size="sm" onClick={() => removerNova(l.key)} title="Tirar das reservas por gravar" aria-label={`Tirar a reserva nova de ${nome} das alterações por gravar`}>
                               <X className="h-4 w-4" />
@@ -1486,6 +1502,8 @@ export default function ParceiroReservasPage() {
                           <span className="rounded bg-amber-200 px-1.5 py-0.5 text-xs font-medium text-amber-900">Por gravar</span>
                         ) : l.eliminada ? (
                           <span className="rounded bg-destructive/15 px-1.5 py-0.5 text-xs font-medium text-destructive">A eliminar</span>
+                        ) : l.estado === "concluida" && l.reserva ? (
+                          <LimpezaConcluida reservaId={l.reserva._id} hora={l.horaConclusao ?? null} casa={nome} compacto />
                         ) : l.estado ? (
                           <EstadoTarefaBadge estado={estadoParaParceiro(l.estado)} />
                         ) : (

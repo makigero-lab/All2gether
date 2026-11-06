@@ -2,7 +2,7 @@
 
 import { ResultadoImportacao, lerDetalheErros } from "@/components/resultado-importacao";
 import { TipoLimpezaBadge } from "@/components/tipo-limpeza-badge";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Plus,
   ClipboardList,
@@ -20,6 +20,7 @@ import {
   UserMinus,
   Upload,
   Download,
+  ChevronDown,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -275,6 +276,26 @@ export default function AdminTarefasPage() {
   // devolve um warning com a palavra "horário". Em vez de fechar o form,
   // mostramos um aviso inline e pedimos um 2º clique ("Forçar Agendamento").
   const [conflitoForcar, setConflitoForcar] = useState(false);
+  // Menu «Ações» (telemóvel).
+  const [menuAcoes, setMenuAcoes] = useState(false);
+  const menuAcoesRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!menuAcoes) return;
+    const fora = (e: MouseEvent) => {
+      if (menuAcoesRef.current && !menuAcoesRef.current.contains(e.target as Node)) setMenuAcoes(false);
+    };
+    const esc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuAcoes(false);
+    };
+    document.addEventListener("mousedown", fora);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("mousedown", fora);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [menuAcoes]);
+  // A limpeza em conflito JÁ foi criada no 1.º clique: o 2.º clique só a confirma (não volta a criar).
+  const [tarefaConflitoId, setTarefaConflitoId] = useState<string | null>(null);
 
   // Modal de atribuição
   const [atribuindo, setAtribuindo] = useState<TarefaAdmin | null>(null);
@@ -361,6 +382,20 @@ export default function AdminTarefasPage() {
       return;
     }
 
+    // 2.º clique de «Forçar Agendamento»: a limpeza já existe (criada no 1.º clique). Confirmar é
+    // fechar o formulário, sem pedir outra criação (daria 409 «já existe») nem duplicar.
+    if (conflitoForcar && tarefaConflitoId) {
+      setConflitoForcar(false);
+      setTarefaConflitoId(null);
+      setForm({
+        propriedade_id: "", utilizador_id: "", data: "", hora: "", check_in: "", check_out: "",
+        hospedes: "", nome_hospede: "", tempo_limpeza_minutos: "45", tipo: "limpeza",
+      });
+      setMostrarForm(false);
+      await carregar();
+      return;
+    }
+
     setSubmitting(true);
     try {
       // Prompt 114 — Captura warning de distância (Haversine > 15km entre
@@ -402,8 +437,10 @@ export default function AdminTarefasPage() {
       const temConflitoHorario = res.conflito_horario === true;
 
       if (temConflitoHorario && !conflitoForcar) {
-        // 1º clique com conflito: ativa o modo "Forçar Agendamento".
+        // 1º clique com conflito: ativa o modo "Forçar Agendamento". A limpeza já ficou criada.
         setConflitoForcar(true);
+        setTarefaConflitoId(res.tarefa?._id ?? null);
+        await carregar();
         // Não mostra como toast global — o aviso aparece inline acima do botão.
         setSubmitting(false);
         return;
@@ -703,6 +740,7 @@ export default function AdminTarefasPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 max-sm:[&>button]:h-11 max-sm:[&>button]:min-w-[44px]">
+          <div className="contents max-sm:hidden">
           <Button
             variant={soAvarias ? "destructive" : "outline"}
             size="sm"
@@ -718,6 +756,7 @@ export default function AdminTarefasPage() {
               {soAvarias ? "A mostrar avarias" : "Só avarias"}
             </span>
           </Button>
+          </div>
           <Button
             variant="outline"
             size="icon"
@@ -731,6 +770,7 @@ export default function AdminTarefasPage() {
               "Importar do Smoobu" removidos da barra principal para não
               confundir o gestor no dia a dia. Essas ações avançadas ficam
               disponíveis em /gestor/configuracoes/integracoes. */}
+          <div className="contents max-sm:hidden">
           {/* FIX — Botão "Auto-Atribuir Pendentes" reposto na página de Limpezas.
               O gestor precisa de poder disparar o load balancer diretamente daqui. */}
           <Button
@@ -748,6 +788,7 @@ export default function AdminTarefasPage() {
               {autoAtribuindo ? "A atribuir…" : "Auto-Atribuir Pendentes"}
             </span>
           </Button>
+          </div>
           <Button onClick={() => {
             setMostrarForm((v) => !v);
             setConflitoForcar(false);
@@ -755,6 +796,77 @@ export default function AdminTarefasPage() {
             <Plus className="h-4 w-4" />
             Nova limpeza
           </Button>
+          {/* Telemóvel: as ações secundárias ficam num menu «Ações» com texto (em vez de 5 ícones soltos). */}
+          <div className="relative sm:hidden" ref={menuAcoesRef}>
+            <Button
+              variant="outline"
+              className="gap-1.5"
+              aria-haspopup="menu"
+              aria-expanded={menuAcoes}
+              onClick={() => setMenuAcoes((v) => !v)}
+            >
+              Ações
+              <ChevronDown className="h-4 w-4" aria-hidden="true" />
+            </Button>
+            {menuAcoes && (
+              <div role="menu" className="absolute right-0 z-40 mt-1 w-64 rounded-md border bg-popover p-1 shadow-md">
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="flex min-h-11 w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent"
+                  onClick={() => { setMenuAcoes(false); setSoAvarias((v) => !v); setPagina(1); }}
+                >
+                  <Wrench className="h-4 w-4" aria-hidden="true" />
+                  {soAvarias ? "Mostrar todas as limpezas" : "Só limpezas com avarias"}
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="flex min-h-11 w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent disabled:opacity-50"
+                  disabled={autoAtribuindo}
+                  onClick={() => { setMenuAcoes(false); setConfirmarAutoAtribuir(true); }}
+                >
+                  <Sparkles className="h-4 w-4" aria-hidden="true" />
+                  Auto-atribuir pendentes
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="flex min-h-11 w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent"
+                  onClick={() => {
+                    setMenuAcoes(false);
+                    setEspontaneaOpen(true);
+                    setEspontaneaErro(null);
+                    setEspontaneaForm({ propriedade_id: "", data: "", hora: "", observacoes: "", utilizador_id: "" });
+                  }}
+                >
+                  <SprayCan className="h-4 w-4" aria-hidden="true" />
+                  Limpeza espontânea
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="flex min-h-11 w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent disabled:opacity-50"
+                  disabled={loading}
+                  onClick={() => { setMenuAcoes(false); handleExportarExcel(); }}
+                >
+                  <Download className="h-4 w-4" aria-hidden="true" />
+                  Exportar Excel
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="flex min-h-11 w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent disabled:opacity-50"
+                  disabled={importLoading}
+                  onClick={() => { setMenuAcoes(false); setImportOpen(true); setImportFile(null); setImportResult(null); }}
+                >
+                  <Upload className="h-4 w-4" aria-hidden="true" />
+                  Importar Excel
+                </button>
+              </div>
+            )}
+          </div>
+          <div className="contents max-sm:hidden">
           {/* HF18 — Botão "Nova Limpeza Espontânea" — abre um Dialog simples
               para criar uma tarefa manual (origem: 'manual') sem reserva
               Smoobu associada. Endpoint: POST /api/gestor/tarefas/espontanea. */}
@@ -801,6 +913,7 @@ export default function AdminTarefasPage() {
             <Upload className="h-4 w-4" />
             <span className="hidden sm:inline">Importar Excel</span>
           </Button>
+          </div>
         </div>
       </div>
 
@@ -920,7 +1033,7 @@ export default function AdminTarefasPage() {
               {conflitoForcar && (
                 <p className="flex items-center gap-2 rounded-md border border-amber-500/50 bg-amber-50 dark:bg-amber-950/20 px-3 py-2 text-sm font-medium text-amber-700 dark:text-amber-300">
                   <AlertCircle className="h-4 w-4 shrink-0" />
-                  ⚠️ Conflito de horário detetado. Confirma o agendamento?
+                  ⚠️ Conflito de horário detetado. A limpeza já ficou criada: confirma para a manter ou desfaz.
                 </p>
               )}
               <div className="flex items-center gap-2">
@@ -941,13 +1054,23 @@ export default function AdminTarefasPage() {
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => {
+                  onClick={async () => {
+                    // Em conflito a limpeza já foi criada: «Cancelar» desfaz-a (sem deixar lixo).
+                    if (conflitoForcar && tarefaConflitoId) {
+                      try {
+                        await adminPatch(`/api/gestor/tarefas/${tarefaConflitoId}/estado`, { estado: "cancelada" });
+                        await carregar();
+                      } catch (e) {
+                        setErro(e instanceof Error ? e.message : "Não foi possível cancelar a limpeza em conflito.");
+                      }
+                    }
                     setMostrarForm(false);
                     setConflitoForcar(false);
+                    setTarefaConflitoId(null);
                   }}
                   disabled={submitting}
                 >
-                  Cancelar
+                  {conflitoForcar && tarefaConflitoId ? "Desfazer limpeza" : "Cancelar"}
                 </Button>
               </div>
             </form>
@@ -1369,7 +1492,7 @@ export default function AdminTarefasPage() {
           <p className="text-sm text-muted-foreground">
             O sistema vai procurar o funcionário com menor carga para cada
             tarefa, respeitando férias, folgas fixas, tempo de viagem e hora
-            de almoço (13h-14h). As tarefas que não conseguirem ser atribuídas
+            de almoço (1 h, a começar entre as 12:00 e as 14:00). As tarefas que não conseguirem ser atribuídas
             (sem staff disponível) continuam por atribuir.
           </p>
         </DialogContent>
@@ -1586,6 +1709,7 @@ export default function AdminTarefasPage() {
 
       {/* Prompt 95 — Modal de detalhe da limpeza (card de detalhes_reserva) */}
       <DetalheTarefaModal
+        onAvariaAlterada={carregar}
         tarefa={detalheTarefa}
         open={detalheTarefa !== null}
         onOpenChange={(o) => !o && setDetalheTarefa(null)}

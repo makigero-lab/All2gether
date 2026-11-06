@@ -245,7 +245,7 @@ exports.minhasTarefas = async (req, res) => {
       data: { $gte: limitePassado },
       estado: { $ne: 'cancelada' },
     }, req.user.id))
-      .populate({ path: 'propriedade_id', select: 'nome morada coordenadas checklist capacidade_hospedes observacoes' })
+      .populate({ path: 'propriedade_id', select: 'nome morada coordenadas checklist capacidade_hospedes observacoes fornecedor_id' })
       .sort({ data: 1 })
       .lean();
 
@@ -308,7 +308,7 @@ exports.minhaTarefaDetalhe = async (req, res) => {
     const tarefa = await Tarefa.findOne(comMembro({ _id: id }, req.user.id))
       // Prompt 114 — Inclui capacidade_hospedes para destaque no detalhe.
       // Prompt 133 — Inclui modelo_checklist_id e observacoes.
-      .populate({ path: 'propriedade_id', select: 'nome morada coordenadas checklist capacidade_hospedes observacoes modelo_checklist_id' })
+      .populate({ path: 'propriedade_id', select: 'nome morada coordenadas checklist capacidade_hospedes observacoes modelo_checklist_id fornecedor_id' })
       .lean();
 
     if (!tarefa) {
@@ -379,6 +379,15 @@ exports.minhaTarefaDetalhe = async (req, res) => {
     }
 
     const [comEquipa] = await juntarNomesEquipa([tarefa], req.user.id);
+    // Avarias por resolver nesta casa (reportadas noutras limpezas): aviso no detalhe.
+    try {
+      const pid = tarefa.propriedade_id && tarefa.propriedade_id._id;
+      comEquipa.avarias_abertas_casa = pid && tarefa.tipo === 'limpeza'
+        ? await require('../utils/avarias').avariasAbertasDaCasa(pid, tarefa._id)
+        : [];
+    } catch (e) {
+      comEquipa.avarias_abertas_casa = [];
+    }
     return res.status(200).json({ tarefa: comEquipa });
   } catch (err) {
     console.error('❌ minhaTarefaDetalhe:', err.message);
@@ -422,7 +431,8 @@ exports.concluirMinhaTarefa = async (req, res) => {
     }
 
     // Atómico: conclusão simultânea dá 400 "já concluída" em vez de 500.
-    const set = { estado: 'concluida', concluida_em: new Date() };
+    const agoraConcl = new Date();
+    const set = { estado: 'concluida', concluida_em: agoraConcl, hora_conclusao: agoraConcl, data_conclusao: agoraConcl };
     if (req.body?.observacoes !== undefined) set.observacoes = String(req.body.observacoes || '');
     const atualizada = await Tarefa.findOneAndUpdate(
       comMembro({ _id: id, estado: { $nin: ['concluida', 'cancelada'] } }, req.user.id),
@@ -432,6 +442,8 @@ exports.concluirMinhaTarefa = async (req, res) => {
     if (!atualizada) {
       return res.status(400).json({ erro: 'Tarefa já concluída (ou entretanto cancelada).' });
     }
+
+    await require('../utils/cicloTarefa').aoConcluirTarefa(atualizada);
 
     const resp = atualizada.toObject();
     delete resp.password_hash;
