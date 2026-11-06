@@ -184,7 +184,7 @@ export function PerfilContent({ portalLabel }: { portalLabel: string }) {
                   className="pl-8"
                 />
               </div>
-              <Button onClick={handleSalvar} disabled={saving}>
+              <Button size="touch" onClick={handleSalvar} disabled={saving}>
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Guardar"}
               </Button>
             </div>
@@ -197,7 +197,7 @@ export function PerfilContent({ portalLabel }: { portalLabel: string }) {
           <div className="border-t pt-4">
             <Button
               variant="outline"
-              className="w-full gap-2 text-destructive hover:bg-destructive/5"
+              className="h-11 w-full gap-2 text-destructive hover:bg-destructive/5"
               onClick={() => fazerLogout()}
             >
               Terminar sessão

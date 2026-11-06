@@ -816,7 +816,7 @@ export function DetalheTarefaClient({
                 Concluir limpeza
               </>
             ) : (
-              `Concluir Limpeza (${itensConcluidos}/${totalItens})`
+              `Concluir limpeza (${itensConcluidos}/${totalItens})`
             )}
           </Button>
         )}

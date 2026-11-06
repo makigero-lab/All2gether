@@ -552,8 +552,9 @@ exports.criarTarefa = async (req, res) => {
     // tem prioridade sobre o warning logístico (distância).
     const resposta = { tarefa: nova };
     if (warning) resposta.warning = warning;
-    if (conflitoWarning) resposta.warning = conflitoWarning;
-    if (avisoHorario) resposta.warning = [resposta.warning, avisoHorario].filter(Boolean).join(' | ');
+    if (conflitoWarning) { resposta.warning = conflitoWarning; resposta.conflito_horario = true; }
+    // Campo próprio: o aviso de «fora do horário de trabalho» não é um conflito de agenda.
+    if (avisoHorario) resposta.aviso_horario = avisoHorario;
 
     // Prompt 137 — Debug log para confirmar que a tarefa guardada tem nome_hospede.
     console.log('📋 criarTarefa — tarefa criada detalhes_reserva:', JSON.stringify(nova.detalhes_reserva));
@@ -742,7 +743,7 @@ exports.atribuirTarefa = async (req, res) => {
 
     const resposta = { tarefa };
     if (warning) resposta.warning = warning;
-    if (avisoHorario) resposta.warning = [resposta.warning, avisoHorario].filter(Boolean).join(' | ');
+    if (avisoHorario) resposta.aviso_horario = avisoHorario;
     return res.status(200).json(resposta);
   } catch (err) {
     console.error('❌ atribuirTarefa:', err.message);
@@ -925,8 +926,11 @@ exports.reatribuirTarefa = async (req, res) => {
     //    anterior fica intacta e a tarefa nunca fica com o responsável a null.
     const equipaAntes = idsEquipa(tarefa);
     const antigoResp = tarefa.utilizador_id ? String(tarefa.utilizador_id) : null;
+    // A hora calcula-se para a equipa RESULTANTE (novo responsável + os membros que ficam).
+    const eq = normalizarEquipa(novoUser._id, equipaAntes.filter((i) => i !== antigoResp));
+    const idsResultantes = [...new Set([String(novoUser._id), ...eq.equipa_atribuida.map(String)])];
     let resultadoScheduler = await calcularInicioTarefaUtilizador(
-      utilizador_id,
+      idsResultantes.length > 1 ? idsResultantes : utilizador_id,
       tarefa.data,
       propriedade.coordenadas,
       tarefa.tempo_limpeza_minutos || 45,
@@ -941,14 +945,15 @@ exports.reatribuirTarefa = async (req, res) => {
       const dataManter = Horario.temHoraReal(tarefa.data)
         ? new Date(tarefa.data)
         : Horario.utcDeMinutosLocais(diaT, Horario.HORARIO.INICIO_DIA);
-      avisoHorario = `${novoUser.nome} fica fora do horário neste dia: ${resultadoScheduler.motivo}.`;
+      avisoHorario = idsResultantes.length > 1
+        ? `A equipa fica fora do horário neste dia: ${resultadoScheduler.motivo}.`
+        : `${novoUser.nome} fica fora do horário neste dia: ${resultadoScheduler.motivo}.`;
       resultadoScheduler = { ...resultadoScheduler, data: dataManter, origem: 'manual_fora_do_horario', tempoViagem: 0 };
     }
 
     // 8. Guarda a tarefa com o novo utilizador + nova data.
     // Prompt 138 (136 V2) — guarda o tempo de viagem calculado pelo scheduler.
     // O novo responsável substitui o anterior; os outros membros mantêm-se.
-    const eq = normalizarEquipa(novoUser._id, equipaAntes.filter((i) => i !== antigoResp));
     tarefa.utilizador_id = eq.utilizador_id;
     tarefa.equipa_atribuida = eq.equipa_atribuida.length > 1 || equipaAntes.length > 1 ? eq.equipa_atribuida : [];
     tarefa.data = resultadoScheduler.data;
@@ -1003,7 +1008,7 @@ exports.reatribuirTarefa = async (req, res) => {
       tempo_viagem: resultadoScheduler.tempoViagem,
     };
     if (warning) resposta.warning = warning;
-    if (avisoHorario) resposta.warning = [resposta.warning, avisoHorario].filter(Boolean).join(' | ');
+    if (avisoHorario) resposta.aviso_horario = avisoHorario;
     return res.status(200).json(resposta);
   } catch (err) {
     console.error('❌ reatribuirTarefa:', err.message);
@@ -1518,7 +1523,7 @@ exports.criarTarefaEspontanea = async (req, res) => {
         (utilizadorValidado ? `, staff=${utilizadorValidado}` : ', por_atribuir') + ').'
     );
 
-    return res.status(201).json({ tarefa: nova, ...(avisoHorarioE ? { warning: avisoHorarioE } : {}) });
+    return res.status(201).json({ tarefa: nova, ...(avisoHorarioE ? { aviso_horario: avisoHorarioE } : {}) });
   } catch (err) {
     console.error('❌ criarTarefaEspontanea:', err.message);
     if (err.name === 'ValidationError') {

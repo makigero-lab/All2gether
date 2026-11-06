@@ -13,6 +13,7 @@ const {
   obterStaffDisponivel,
   determinarUtilizadorAtribuido,
   determinarEquipaAtribuida,
+  cabeNoHorario,
 } = require('./loadBalancer');
 const { calcularInicioEquipa, obterRangeDia, carregarAgenda, prepararViagens, motivoNaoCabe } = require('./scheduler');
 const H = require('./horario');
@@ -22,6 +23,10 @@ const { idsEquipa, comMembro, normalizarEquipa } = require('./equipaTarefa');
 const MOTIVO_SEM_EQUIPA = 'Sem equipa ativa';
 const MOTIVO_INDISPONIVEL = 'Toda a equipa ausente, de folga ou fora da equipa exclusiva neste dia';
 const MOTIVO_LOTACAO = 'Não cabe no horário de ninguém (09:00-18:00, com almoço e viagens)';
+const MOTIVO_SEM_HORA_COMUM = 'Sem hora comum para a equipa (09:00-18:00, com almoço e viagens)';
+// Limites para não multiplicar chamadas de viagem (pagas): candidatos extra e combinações testadas.
+const MAX_CANDIDATOS_EXTRA = 4;
+const MAX_COMBINACOES = 6;
 const MOTIVO_ERRO = 'Erro ao verificar disponibilidade da equipa';
 
 /**
@@ -44,6 +49,44 @@ async function diagnosticarFaltaDeStaff(empresaId, range, propriedadeId = null, 
     // Se falha a verificação, mantém por_atribuir (seguro).
     return { causa: 'erro', motivo: MOTIVO_ERRO, estado: 'por_atribuir' };
   }
+}
+
+/** Combinações de `k` elementos de `arr`, por ordem (os primeiros candidatos primeiro). */
+function combinacoes(arr, k) {
+  const out = [];
+  const rec = (ini, atual) => {
+    if (atual.length === k) { out.push([...atual]); return; }
+    for (let i = ini; i < arr.length; i++) { atual.push(arr[i]); rec(i + 1, atual); atual.pop(); }
+  };
+  rec(0, []);
+  return out;
+}
+
+/**
+ * Equipa com várias pessoas sem hora comum: tenta outras combinações entre os candidatos
+ * elegíveis (disponíveis e que cabem sozinhos), com limites pequenos de candidatos e de
+ * combinações para não multiplicar chamadas de viagem pagas.
+ * @returns {Promise<{ ids: any[], s: object }|null>}
+ */
+async function procurarEquipaComHoraComum({ empresaId, range, propriedade, tempo, escolhidos }) {
+  const k = escolhidos.length;
+  const jaTentada = escolhidos.map(String).sort().join('|');
+  const { disponiveis } = await obterStaffDisponivel(empresaId, range, propriedade._id, null);
+  const pool = [...escolhidos];
+  let extra = 0;
+  for (const u of disponiveis) {
+    if (extra >= MAX_CANDIDATOS_EXTRA) break;
+    if (pool.some((x) => String(x) === String(u._id))) continue;
+    if (await cabeNoHorario(u._id, range, propriedade.coordenadas, tempo, propriedade._id)) { pool.push(u._id); extra++; }
+  }
+  let tentadas = 0;
+  for (const combo of combinacoes(pool, k)) {
+    if (combo.map(String).sort().join('|') === jaTentada) continue;
+    if (tentadas++ >= MAX_COMBINACOES) break;
+    const s = await calcularInicioEquipa(combo, range.start, propriedade.coordenadas, tempo, null, propriedade._id);
+    if (s.cabe) return { ids: combo, s };
+  }
+  return null;
 }
 
 /**
@@ -100,11 +143,16 @@ async function planearAtribuicao({ empresaId, propriedade, dia, tempoLimpeza }) 
     }
 
     // Todos os membros têm de estar presentes: começa quando todos conseguem (horario.js).
-    const s = await calcularInicioEquipa(ids, range.start, propriedade.coordenadas, tempo, null, propriedade._id);
+    let s = await calcularInicioEquipa(ids, range.start, propriedade.coordenadas, tempo, null, propriedade._id);
+    if (!s.cabe && ids.length > 1) {
+      // A dupla escolhida não tem hora comum: tenta outras combinações de candidatos elegíveis.
+      const alt = await procurarEquipaComHoraComum({ empresaId, range, propriedade, tempo, escolhidos: ids });
+      if (alt) { ids = alt.ids; s = alt.s; }
+    }
     if (!s.cabe) {
       // Cada um cabia sozinho, mas não há hora comum: fica por atribuir, com o motivo real.
       plano.estado = 'nao_atribuida';
-      plano.motivo_nao_atribuicao = s.motivo || MOTIVO_LOTACAO;
+      plano.motivo_nao_atribuicao = ids.length > 1 ? MOTIVO_SEM_HORA_COMUM : (s.motivo || MOTIVO_LOTACAO);
       return plano;
     }
     const dataAgendada = s.data;

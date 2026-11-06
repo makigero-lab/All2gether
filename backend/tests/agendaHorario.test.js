@@ -185,7 +185,9 @@ describe('caminho do gestor (à mão): nunca fica à meia-noite e só avisa', ()
     const r = await request(app).post('/api/gestor/tarefas').set(auth(c.token))
       .send({ propriedade_id: String(p._id), data: '2036-01-25', hora: '07:00', utilizador_id: String(c.ana._id), tempo_limpeza_minutos: 60 });
     expect(r.status).toBe(201);
-    expect(r.body.warning).toMatch(/fora do horário/);
+    expect(r.body.aviso_horario).toMatch(/fora do horário/);
+    expect(r.body.conflito_horario).toBeUndefined();
+    expect(r.body.warning).toBeUndefined();
   });
 
   test('atribuir à mão uma tarefa sem hora real (00:00) calcula a hora', async () => {
@@ -205,7 +207,7 @@ describe('caminho do gestor (à mão): nunca fica à meia-noite e só avisa', ()
     const t = await tar(c, p, c.ana, '2036-01-27', '10:00:00');
     const r = await request(app).patch(`/api/gestor/tarefas/${t._id}/reatribuir`).set(auth(c.token)).send({ utilizador_id: String(c.bia._id) });
     expect(r.status).toBe(200);
-    expect(r.body.warning).toMatch(/fora do horário/);
+    expect(r.body.aviso_horario).toMatch(/fora do horário/);
     expect(String(r.body.tarefa.utilizador_id)).toBe(String(c.bia._id));
   });
 });

@@ -54,6 +54,30 @@ const {
   calcularInicioEquipa,
 } = require('../utils/scheduler');
 const { minutosLocais } = require('../utils/horario');
+const { avisarGestores } = require('../utils/notificar');
+
+/**
+ * Avisa os gestores de que limpezas ficaram por atribuir. Com `opcoes.porAtribuir` (array)
+ * só acumula (a sincronização envia UM aviso agregado no fim); sem ele envia já.
+ * Best-effort: nunca lança.
+ */
+async function avisarPorAtribuirSmoobu(empresaId, item, opcoes = {}) {
+  if (Array.isArray(opcoes.porAtribuir)) { opcoes.porAtribuir.push({ empresaId, ...item }); return; }
+  await enviarAvisoPorAtribuir(empresaId, [item]);
+}
+
+async function enviarAvisoPorAtribuir(empresaId, itens) {
+  try {
+    if (!itens.length) return;
+    const fmt = (d) => new Date(d).toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit', timeZone: 'Europe/Lisbon' });
+    const texto = itens.length === 1
+      ? `"${itens[0].nome}" (${fmt(itens[0].dia)}) ficou por atribuir: ${itens[0].motivo || 'sem motivo registado'}.`
+      : `${itens.length} limpezas do Smoobu ficaram por atribuir (${itens.slice(0, 3).map((i) => `${i.nome} ${fmt(i.dia)}`).join(', ')}${itens.length > 3 ? '…' : ''}). Vê o motivo em cada tarefa.`;
+    await avisarGestores(empresaId, '⚠️ Limpeza por atribuir', texto, '/gestor/tarefas');
+  } catch (e) {
+    console.error('⚠️  [Smoobu] aviso de por atribuir:', e.message);
+  }
+}
 
 // Constantes de ações do Smoobu (com variantes legacy).
 const ACOES_CRIAR = [
@@ -511,7 +535,8 @@ async function criarTarefaPorReserva(
           detalhesReserva,
           content,
           empresaRestrita,
-          contacto
+          contacto,
+          opcoes
         );
         console.log(
           `🔄 [Smoobu] tarefa ${existente._id} reativada (reserva ${reservaId} re-ativada).`
@@ -997,6 +1022,11 @@ async function criarTarefaPorReserva(
 
   await guardarContactoHospede(novaTarefa, contacto);
 
+  // Só aqui (tarefa criada agora; reenvios e corridas devolvem antes): avisa o gestor.
+  if (['por_atribuir', 'nao_atribuida'].includes(novaTarefa.estado)) {
+    await avisarPorAtribuirSmoobu(empresaId, { nome: propriedade.nome, dia: dataAgendada, motivo: novaTarefa.motivo_nao_atribuicao }, opcoes);
+  }
+
   console.log(
     `🧹 [Smoobu] tarefa ${novaTarefa._id} criada (reserva ${reservaId}, ` +
       `propriedade "${propriedade.nome}", estado ${estadoInicial}` +
@@ -1080,7 +1110,8 @@ async function atualizarTarefaPorReserva(
   detalhesReserva,
   content,
   empresaRestrita = null,
-  contacto = null
+  contacto = null,
+  opcoes = {}
 ) {
   if (!reservaId) return null;
 
@@ -1092,6 +1123,7 @@ async function atualizarTarefaPorReserva(
 
   // Tarefas concluídas são intocáveis.
   if (tarefa.estado === 'concluida') return tarefa;
+  const jaEstavaPorAtribuir = ['por_atribuir', 'nao_atribuida'].includes(tarefa.estado);
 
   let mudou = false;
   let mudouData = false;
@@ -1282,6 +1314,14 @@ async function atualizarTarefaPorReserva(
               { _id: tarefa._id },
               { $set: { estado: plano.estado, motivo_nao_atribuicao: plano.motivo_nao_atribuicao || 'Sem equipa disponível após update de data (Smoobu)' } }
             );
+            // Só avisa na passagem para «por atribuir»; um reenvio sem mudança de data não chega aqui.
+            if (!jaEstavaPorAtribuir) {
+              await avisarPorAtribuirSmoobu(
+                propriedade.empresa_id,
+                { nome: propriedade.nome, dia: tarefa.data, motivo: plano.motivo_nao_atribuicao },
+                opcoes
+              );
+            }
           }
         }
       } catch (errReatrib) {
@@ -1400,7 +1440,8 @@ async function processarReservaSmoobu(payload, empresaId, empresaRestrita = null
       detalhesFinal,
       content,
       empresaRestrita,
-      contactoFinal
+      contactoFinal,
+      opcoes
     );
     if (atualizada) return atualizada;
     // Sem tarefa existente → cai para criar (reserva pode ter sido criada
@@ -2001,6 +2042,7 @@ async function sincronizarReservas(req, res) {
       });
     }
 
+    const porAtribuir = []; // limpezas que ficaram por atribuir: UM aviso agregado no fim
     let criadas = 0;
     let existentes = 0;
     let erros = 0;
@@ -2100,7 +2142,7 @@ async function sincronizarReservas(req, res) {
           continue;
         }
 
-        const resultado = await processarReservaSmoobu(payloadWebhook, empresaId, empresaId);
+        const resultado = await processarReservaSmoobu(payloadWebhook, empresaId, empresaId, { porAtribuir });
 
         if (jaExistia) {
           existentes++;
@@ -2121,6 +2163,8 @@ async function sincronizarReservas(req, res) {
         // Continua para a próxima reserva.
       }
     }
+
+    if (porAtribuir.length > 0) await enviarAvisoPorAtribuir(empresaId, porAtribuir);
 
     console.log(
       `✅ [Smoobu] sincronizarReservas: ${reservas.length} recebidas, ${criadas} criadas, ` +
