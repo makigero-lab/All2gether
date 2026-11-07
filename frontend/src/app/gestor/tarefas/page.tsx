@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { EstadoTarefaBadge } from "@/components/ui/estado-tarefa-badge";
+import { OfertaVagaBadge } from "@/components/gestor/oferta-vaga-badge";
 import {
   Card,
   CardContent,
@@ -65,6 +66,8 @@ interface TarefaAdmin {
   equipa_atribuida?: { _id?: string; nome: string }[] | null;
   // > 0 quando faltou alguém e não houve substituto.
   pessoas_em_falta?: number;
+  oferta_estado?: string | null;
+  oferta_expira_em?: string | null;
   data: string;
   tipo: string;
   estado: string;
@@ -653,8 +656,9 @@ export default function AdminTarefasPage() {
     const estadoExibido =
       (t.estado === "atribuida" || t.estado === "em_curso") && !t.utilizador_id ? "por_atribuir" : t.estado;
     return (
-      <div className="flex items-center gap-1">
+      <div className="flex flex-wrap items-center gap-1">
         <EstadoTarefaBadge estado={estadoExibido} />
+        <OfertaVagaBadge tarefa={t} />
         {(t.estado === "por_atribuir" || t.estado === "nao_atribuida") && t.motivo_nao_atribuicao && (
           <span title={t.motivo_nao_atribuicao} className="cursor-help">
             <Info className="h-3.5 w-3.5 text-muted-foreground" />
@@ -665,7 +669,7 @@ export default function AdminTarefasPage() {
   }
 
   return (
-    <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
+    <div className="flex min-w-0 max-w-full flex-col gap-6 overflow-x-hidden p-4 sm:p-6 lg:p-8">
       {/* Cabeçalho */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="hidden flex-col gap-1 lg:flex">
@@ -987,32 +991,32 @@ export default function AdminTarefasPage() {
       {/* FIX (filtros avançados) — Barra de filtros: datas, propriedade, staff. */}
       <Card>
         <CardContent className="flex flex-wrap items-end gap-3 p-4">
-          <div className="flex flex-col gap-1.5">
+          <div className="flex min-w-0 flex-col gap-1.5 max-sm:w-full">
             <label className="text-xs font-medium text-muted-foreground">Data de início</label>
             <Input
               type="date"
               aria-label="Data de início"
               value={filtroDataInicio}
               onChange={(e) => { setFiltroDataInicio(e.target.value); setPagina(1); }}
-              className="h-9 w-[150px]"
+              className="h-9 w-full min-w-0 sm:w-[150px]"
             />
           </div>
-          <div className="flex flex-col gap-1.5">
+          <div className="flex min-w-0 flex-col gap-1.5 max-sm:w-full">
             <label className="text-xs font-medium text-muted-foreground">Data de fim</label>
             <Input
               type="date"
               aria-label="Data de fim"
               value={filtroDataFim}
               onChange={(e) => { setFiltroDataFim(e.target.value); setPagina(1); }}
-              className="h-9 w-[150px]"
+              className="h-9 w-full min-w-0 sm:w-[150px]"
             />
           </div>
-          <div className="flex flex-col gap-1.5">
+          <div className="flex min-w-0 flex-col gap-1.5 max-sm:w-full">
             <label className="text-xs font-medium text-muted-foreground">Propriedade</label>
             <select
               value={filtroPropriedade}
               onChange={(e) => { setFiltroPropriedade(e.target.value); setPagina(1); }}
-              className="h-9 rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
+              className="h-11 w-full min-w-0 max-w-full truncate rounded-md border border-input bg-background px-3 text-sm ring-offset-background sm:h-9 sm:w-auto sm:max-w-[16rem] focus:outline-none focus:ring-2 focus:ring-ring"
               aria-label="Filtrar por propriedade"
             >
               <option value="">Todas</option>
@@ -1021,12 +1025,12 @@ export default function AdminTarefasPage() {
               ))}
             </select>
           </div>
-          <div className="flex flex-col gap-1.5">
+          <div className="flex min-w-0 flex-col gap-1.5 max-sm:w-full">
             <label className="text-xs font-medium text-muted-foreground">Equipa</label>
             <select
               value={filtroStaff}
               onChange={(e) => { setFiltroStaff(e.target.value); setPagina(1); }}
-              className="h-9 rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
+              className="h-11 w-full min-w-0 max-w-full truncate rounded-md border border-input bg-background px-3 text-sm ring-offset-background sm:h-9 sm:w-auto sm:max-w-[16rem] focus:outline-none focus:ring-2 focus:ring-ring"
               aria-label="Filtrar por funcionário"
             >
               <option value="">Todos</option>
@@ -1134,17 +1138,17 @@ export default function AdminTarefasPage() {
                 <thead>
                   <tr className="border-b bg-muted/40 text-left">
                     <th className="px-4 py-3 font-medium">Data</th>
-                    <th className="px-4 py-3 font-medium">Propriedade</th>
+                    <th className="min-w-[10rem] px-4 py-3 font-medium">Propriedade</th>
                     <th className="px-4 py-3 font-medium">Tipo</th>
                     {/* Prompt 136 — Coluna Hóspede (nome_hospede da reserva). */}
-                    <th className="px-4 py-3 font-medium">Hóspede</th>
+                    <th className="hidden px-4 py-3 font-medium min-[1440px]:table-cell">Hóspede</th>
                     {/* FIX (qtd hóspedes) — Coluna Qtd. Hóspedes com fallback à lotação. */}
-                    <th className="px-4 py-3 font-medium">Qtd. Hóspedes</th>
+                    <th className="hidden px-4 py-3 font-medium min-[1440px]:table-cell">Qtd. Hóspedes</th>
                     <th className="px-4 py-3 font-medium">Equipa</th>
                     <th className="px-4 py-3 font-medium">Estado</th>
                     {/* v1.68.0 (Prompt 91) — Coluna Observações / Avaria */}
-                    <th className="px-4 py-3 font-medium">Observações / Avaria</th>
-                    <th className="px-4 py-3 text-right font-medium">Ações</th>
+                    <th className="hidden px-4 py-3 font-medium min-[1440px]:table-cell">Observações / Avaria</th>
+                    <th className="sticky right-0 z-10 bg-muted px-4 py-3 text-right font-medium shadow-[-6px_0_6px_-6px_rgba(0,0,0,0.25)]">Ações</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
@@ -1154,9 +1158,9 @@ export default function AdminTarefasPage() {
                     <tr key={t._id} className="hover:bg-muted/30">
                       {/* v1.68.0 (Prompt 91) — Data + hora (ex: 06/07/2026 - 14:30) */}
                       <td className="px-4 py-3 whitespace-nowrap tabular-nums">{formatarDataHora(t.data)}</td>
-                      <td className="px-4 py-3 font-medium">
+                      <td className="min-w-[10rem] max-w-[16rem] px-4 py-3 font-medium">
                         <div className="flex items-center gap-2">
-                          <span>{t.propriedade_id?.nome ?? "—"}</span>
+                          <span className="line-clamp-2 min-w-0 break-words" title={t.propriedade_id?.nome ?? undefined}>{t.propriedade_id?.nome ?? "—"}</span>
                           {/* FIX (sync parceiros) — Badge “🤝 Parceiro” se a tarefa
                               veio de uma reserva de parceiro. */}
                           {t.origem_parceiro && (
@@ -1165,7 +1169,7 @@ export default function AdminTarefasPage() {
                               className="shrink-0 gap-1 whitespace-nowrap text-xs px-1.5 py-0"
                               title="Limpeza gerada por reserva de proprietário"
                             >
-                              🤝 Parceiro
+                              🤝 Proprietário
                             </Badge>
                           )}
                           {temAvarias && (
@@ -1182,14 +1186,14 @@ export default function AdminTarefasPage() {
                       </td>
                       <td className="px-4 py-3"><TipoMarca tipo={t.tipo_limpeza} /></td>
                       {/* Prompt 136 — Nome do hóspede (da reserva Smoobu ou manual). */}
-                      <td className="px-4 py-3 text-muted-foreground">
-                        {t.detalhes_reserva?.nome_hospede ?? "—"}
+                      <td className="hidden min-w-[11rem] max-w-[14rem] px-4 py-3 text-muted-foreground min-[1440px]:table-cell">
+                        <span className="line-clamp-2 break-words" title={t.detalhes_reserva?.nome_hospede ?? undefined}>{t.detalhes_reserva?.nome_hospede ?? "—"}</span>
                       </td>
                       {/* FIX (qtd hóspedes) — Quantidade de hóspedes com fallback.
                           Mostra t.hospedes (vindo do Smoobu). Se for null/0/inválido,
                           usa propriedade_id.capacidade_hospedes (lotação máxima) e
                           mostra visualmente que é o limite da casa "(Máx: N)". */}
-                      <td className="px-4 py-3">
+                      <td className="hidden px-4 py-3 min-[1440px]:table-cell">
                         {(() => {
                           const hospedesReal = t.hospedes ?? t.detalhes_reserva?.pax ?? null;
                           const capacidade = t.propriedade_id?.capacidade_hospedes ?? null;
@@ -1218,7 +1222,7 @@ export default function AdminTarefasPage() {
                       <td className="px-4 py-3 text-muted-foreground"><EquipaTarefa t={t} /></td>
                       <td className="px-4 py-3">{estadoTarefa(t)}</td>
                       {/* v1.68.0 (Prompt 91) — Excerto das observações (descrição da avaria) */}
-                      <td className="px-4 py-3 max-w-xs">
+                      <td className="hidden max-w-xs px-4 py-3 min-[1440px]:table-cell">
                         {t.observacoes ? (
                           <span
                             className={`line-clamp-2 text-xs ${
@@ -1234,7 +1238,7 @@ export default function AdminTarefasPage() {
                           <span className="text-xs text-muted-foreground">—</span>
                         )}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="sticky right-0 z-10 bg-card px-4 py-3 shadow-[-6px_0_6px_-6px_rgba(0,0,0,0.25)]">
                         <div className="flex items-center justify-end gap-1">{acoesTarefa(t, "h-11 w-11 md:h-8 md:w-8")}</div>
                       </td>
                     </tr>

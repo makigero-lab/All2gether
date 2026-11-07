@@ -20,7 +20,7 @@ import {
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 
-import { cn, parsearDataSegura, googleMapsUrl } from "@/lib/utils";
+import { cn, parsearDataSegura, googleMapsUrl, extrairHoraISO } from "@/lib/utils";
 import { textoEquipa } from "@/lib/equipa";
 import { EstadoTarefaBadge } from "@/components/ui/estado-tarefa-badge";
 import { buttonVariants } from "@/components/ui/button";
@@ -62,16 +62,8 @@ function formatarMinutos(min: number) {
  * Retorna "—" se a data for inválida ou não tiver componente de tempo.
  */
 function horaInicio(dataISO?: string): string {
-  if (!dataISO) return "—";
-  try {
-    const d = parsearDataSegura(dataISO);
-    if (!d) return "—";
-    // Se for meia-noite exata (00:00), considera "sem hora definida".
-    if (d.getHours() === 0 && d.getMinutes() === 0) return "—";
-    return format(d, "HH:mm", { locale: pt });
-  } catch {
-    return "—";
-  }
+  // Hora de Lisboa (com hora de verão), seja qual for o fuso do telemóvel; 00:00 = sem hora definida.
+  return extrairHoraISO(dataISO);
 }
 
 /**

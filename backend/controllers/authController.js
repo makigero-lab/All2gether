@@ -201,6 +201,8 @@ exports.meuCalendario = async (req, res) => {
     }, utilizadorId))
       .populate({ path: 'propriedade_id', select: 'nome' })
       .sort({ data: 1 })
+      // Listagem leve: as fotos (base64) só vão no detalhe/prova.
+      .select('-fotos_conclusao -avarias.fotos')
       .lean();
 
     // Ausências do utilizador a partir de hoje.
@@ -247,6 +249,8 @@ exports.minhasTarefas = async (req, res) => {
     }, req.user.id))
       .populate({ path: 'propriedade_id', select: 'nome morada coordenadas checklist capacidade_hospedes observacoes fornecedor_id' })
       .sort({ data: 1 })
+      // Listagem leve: as fotos (base64) só vão no detalhe/prova.
+      .select('-fotos_conclusao -avarias.fotos')
       .lean();
 
     // Prompt 139 — Cálculo on-the-fly de tempo_viagem_minutos para tarefas
@@ -405,54 +409,10 @@ exports.minhaTarefaDetalhe = async (req, res) => {
  *
  * Resposta 200: { tarefa: { ... } }
  */
-exports.concluirMinhaTarefa = async (req, res) => {
-  try {
-    if (!req.user || !req.user.id) {
-      return res.status(401).json({ erro: 'Não autenticado.' });
-    }
-
-    const { id } = req.params;
-    const mongoose = require('mongoose');
-    if (!mongoose.isValidObjectId(id)) {
-      return res.status(400).json({ erro: 'ID inválido.' });
-    }
-
-    const tarefa = await Tarefa.findOne(comMembro({ _id: id }, req.user.id));
-
-    if (!tarefa) {
-      return res.status(404).json({ erro: 'Tarefa não encontrada.' });
-    }
-
-    if (tarefa.estado === 'concluida') {
-      return res.status(400).json({ erro: 'Tarefa já concluída.' });
-    }
-    if (tarefa.estado === 'cancelada') {
-      return res.status(400).json({ erro: 'Não podes concluir uma tarefa cancelada.' });
-    }
-
-    // Atómico: conclusão simultânea dá 400 "já concluída" em vez de 500.
-    const agoraConcl = new Date();
-    const set = { estado: 'concluida', concluida_em: agoraConcl, hora_conclusao: agoraConcl, data_conclusao: agoraConcl };
-    if (req.body?.observacoes !== undefined) set.observacoes = String(req.body.observacoes || '');
-    const atualizada = await Tarefa.findOneAndUpdate(
-      comMembro({ _id: id, estado: { $nin: ['concluida', 'cancelada'] } }, req.user.id),
-      { $set: set },
-      { new: true }
-    );
-    if (!atualizada) {
-      return res.status(400).json({ erro: 'Tarefa já concluída (ou entretanto cancelada).' });
-    }
-
-    await require('../utils/cicloTarefa').aoConcluirTarefa(atualizada);
-
-    const resp = atualizada.toObject();
-    delete resp.password_hash;
-
-    return res.status(200).json({ tarefa: resp });
-  } catch (err) {
-    console.error('❌ concluirMinhaTarefa:', err.message);
-    return res.status(500).json({ erro: 'Erro interno do servidor.' });
-  }
+exports.concluirMinhaTarefa = (req, res) => {
+  // Mesma regra do /api/staff/tarefas/:id/concluir (inclui as fotos obrigatórias): este
+  // caminho não pode ser um atalho para concluir sem prova.
+  return require('./staffController').concluirTarefa(req, res);
 };
 
 /* ------------------------------------------------------------------ */

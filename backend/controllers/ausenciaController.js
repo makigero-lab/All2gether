@@ -182,9 +182,9 @@ exports.registarAusencia = async (req, res) => {
 
     // Valida tipo (v1.24.0: enum alargado para ferias/doenca/outro).
     const tipoFinal = tipo || 'ferias';
-    if (!['ferias', 'doenca', 'outro'].includes(tipoFinal)) {
+    if (!['ferias', 'doenca', 'falta', 'outro'].includes(tipoFinal)) {
       return res.status(400).json({
-        erro: 'tipo inválido. Valores permitidos: ferias, doenca, outro.',
+        erro: 'tipo inválido. Valores permitidos: ferias, doenca, falta, outro.',
       });
     }
 
@@ -308,7 +308,10 @@ exports.eliminarAusencia = async (req, res) => {
       });
     }
 
-    await Ausencia.deleteOne({ _id: id });
+    const apagada = await Ausencia.deleteOne({ _id: id });
+    if (apagada.deletedCount === 0) {
+      return res.status(409).json({ erro: 'Esta ausência acabou de ser alterada ou eliminada; atualiza a página.', codigo: 'CONFLITO_CONCORRENCIA' });
+    }
 
     // Se bloqueava a pessoa, deixou de bloquear: preenche já as vagas (best-effort, depois de apagar).
     let preenchimento = null;
@@ -322,6 +325,7 @@ exports.eliminarAusencia = async (req, res) => {
       ausencia_id: id,
     });
   } catch (err) {
+    if (require('../utils/concorrencia').responderSeConflito(res, err, 'Esta ausência acabou de ser alterada; atualiza a página.')) return;
     console.error('❌ eliminarAusencia:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
   }
@@ -488,6 +492,7 @@ exports.aprovarRejeitarAusencia = async (req, res) => {
       preenchimento,
     });
   } catch (err) {
+    if (require('../utils/concorrencia').responderSeConflito(res, err, 'Esta ausência acabou de ser alterada; atualiza a página.')) return;
     console.error('❌ aprovarRejeitarAusencia:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
   }
@@ -535,11 +540,16 @@ exports.cancelarAusencia = async (req, res) => {
     const empresaId = req.user && req.user.empresa_id;
 
     const filtro = { _id: id };
+    // Só staff (as suas), gestor e admin (da empresa). Parceiro e fornecedor não cancelam ausências.
+    if (!['staff', 'gestor', 'admin'].includes(role)) {
+      return res.status(403).json({ erro: 'Sem permissão para cancelar ausências.' });
+    }
     if (role === 'staff') {
       if (!userId) {
         return res.status(401).json({ erro: 'Não autenticado.' });
       }
       filtro.utilizador_id = userId;
+      if (empresaId) filtro.empresa_id = empresaId;
     } else {
       // gestor/admin — valida empresa_id do token.
       const { ok, empresaId: empId } = obterEmpresaId(req, res);
@@ -563,8 +573,12 @@ exports.cancelarAusencia = async (req, res) => {
     }
 
     const estadoAnterior = ausencia.estado;
+    // Atómico: só cancela se o estado ainda for o que vimos (DELETE ou outro cancelar em simultâneo -> 409).
+    const cancelada = await Ausencia.findOneAndUpdate({ _id: ausencia._id, estado: estadoAnterior }, { $set: { estado: 'cancelada' } }, { new: true });
+    if (!cancelada) {
+      return res.status(409).json({ erro: 'Esta ausência acabou de ser alterada ou eliminada; atualiza a página.', codigo: 'CONFLITO_CONCORRENCIA' });
+    }
     ausencia.estado = 'cancelada';
-    await ausencia.save();
 
     // Se bloqueava a pessoa, preenche já as vagas do período (motor partilhado).
     let preenchimento = null;
@@ -630,6 +644,7 @@ exports.cancelarAusencia = async (req, res) => {
       preenchimento,
     });
   } catch (err) {
+    if (require('../utils/concorrencia').responderSeConflito(res, err, 'Esta ausência acabou de ser alterada; atualiza a página.')) return;
     console.error('❌ cancelarAusencia:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
   }
@@ -1160,8 +1175,8 @@ exports.diagnosticoAusencia = async (req, res) => {
       return res.status(400).json({ erro: 'utilizadorId inválido.' });
     }
 
-    // Busca o utilizador SEM filtro de empresa (para detetar mismatch).
-    const utilizador = await Utilizador.findById(utilizadorId)
+    // Só dados da empresa do gestor: nunca se lê um utilizador/ausência de outra empresa.
+    const utilizador = await Utilizador.findOne({ _id: utilizadorId, empresa_id: empresaId })
       .select('nome email role empresa_id eliminado_em ativo')
       .lean();
 
@@ -1171,8 +1186,8 @@ exports.diagnosticoAusencia = async (req, res) => {
       });
     }
 
-    // Busca TODAS as ausências do utilizador (sem filtro de empresa).
-    const ausencias = await Ausencia.find({ utilizador_id: utilizadorId })
+    // Todas as ausências do utilizador, desta empresa.
+    const ausencias = await Ausencia.find({ utilizador_id: utilizadorId, empresa_id: empresaId })
       .sort({ data_inicio: -1 })
       .select('empresa_id data_inicio data_fim tipo estado createdAt updatedAt')
       .lean();

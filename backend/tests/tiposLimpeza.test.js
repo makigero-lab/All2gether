@@ -240,16 +240,18 @@ describe('duplicados', () => {
     expect(dia).toBe(2);
   });
 
-  it('duas saídas (normal + profunda) no mesmo dia e casa -> 409; duas intermédias iguais -> 409', async () => {
+  it('duas saídas (normal + profunda) no mesmo dia e casa -> associa à existente; duas intermédias iguais também', async () => {
     const a = await reservar({ check_in: '2042-02-01', check_out: '2042-02-05' });
     expect(a.status).toBe(201);
     const b = await reservar({ check_in: '2042-02-02', check_out: '2042-02-05', tipo_limpeza: 'profunda' });
-    expect(b.status).toBe(409);
-    expect(b.body.codigo).toBe('RESERVA_DUPLICADA');
+    expect(b.status).toBe(201);
+    expect(b.body.associada_a_existente).toBe(true);
+    expect(String(b.body.tarefa._id)).toBe(String(a.body.tarefa._id));
     const i1 = await reservar({ check_in: '2042-03-01', check_out: '2042-03-09', tipo_limpeza: 'intermedia' });
     expect(i1.status).toBe(201);
     const i2 = await reservar({ check_in: '2042-03-01', check_out: '2042-03-10', tipo_limpeza: 'intermedia' });
-    expect(i2.status).toBe(409);
+    expect(i2.status).toBe(201);
+    expect(i2.body.associada_a_existente).toBe(true);
     // intermédia e preparação no mesmo dia são limpezas diferentes
     const p = await reservar({ check_in: '2042-03-05', check_out: '2042-03-08', tipo_limpeza: 'preparacao' });
     expect(p.status).toBe(201);
@@ -328,12 +330,13 @@ describe('alterar tipo e datas de uma reserva gravada', () => {
 });
 
 describe('reservas e tarefas antigas (sem o campo) contam como normal', () => {
-  it('uma tarefa sem tipo_limpeza bloqueia uma nova saída no mesmo dia e a lista devolve normal', async () => {
+  it('uma tarefa sem tipo_limpeza conta como normal: a nova saída associa-se a ela e a lista devolve normal', async () => {
     const antiga = await reservar({ check_in: '2044-01-01', check_out: '2044-01-05' });
     await Tarefa.collection.updateOne({ _id: new mongoose.Types.ObjectId(antiga.body.tarefa._id) }, { $unset: { tipo_limpeza: '' } });
     await ReservaManual.collection.updateOne({ _id: new mongoose.Types.ObjectId(antiga.body.reserva._id) }, { $unset: { tipo_limpeza: '', data_limpeza: '' } });
     const dup = await reservar({ check_in: '2044-01-02', check_out: '2044-01-05' });
-    expect(dup.status).toBe(409);
+    expect(dup.status).toBe(201);
+    expect(dup.body.associada_a_existente).toBe(true);
     const lista = await request(app).get('/api/parceiro/reservas').set(auth(parceiroToken));
     const rs = lista.body.reservas.find((x) => String(x._id) === String(antiga.body.reserva._id));
     expect(rs.tipo_limpeza ?? 'normal').toBe('normal');
@@ -465,25 +468,26 @@ describe('S4/S5: data automática e limites', () => {
 });
 
 describe('S2: alterar o tipo no mesmo dia também verifica duplicados', () => {
-  it('A preparação e B intermédia no mesmo dia: PUT B -> preparação = 409; nada muda', async () => {
+  it('A preparação e B intermédia no mesmo dia: PUT B -> preparação = junta-se à de A (B cancela-se)', async () => {
     const A = await reservar({ check_in: '2062-01-03', check_out: '2062-01-06', tipo_limpeza: 'preparacao' });
     const B = await reservar({ check_in: '2062-01-03', check_out: '2062-01-08', tipo_limpeza: 'intermedia' });
     expect([A.status, B.status]).toEqual([201, 201]);
     const u = await request(app).put(`/api/parceiro/reservas/${B.body.reserva._id}`).set(auth(parceiroToken)).send({ tipo_limpeza: 'preparacao' });
-    expect(u.status).toBe(409);
-    expect(u.body.codigo).toBe('RESERVA_DUPLICADA');
-    expect((await Tarefa.findById(B.body.tarefa._id)).tipo_limpeza).toBe('intermedia');
+    expect(u.status).toBe(200);
+    expect(u.body.aviso).toMatch(/Já havia uma limpeza/);
+    expect((await Tarefa.findById(B.body.tarefa._id)).estado).toBe('cancelada');
+    expect(String((await ReservaManual.findById(B.body.reserva._id)).tarefa_gerada_id)).toBe(String(A.body.tarefa._id));
   });
 
-  it('B normal (saída) e A intermédia no mesmo dia: PUT A -> normal = 409', async () => {
+  it('B normal (saída) e A intermédia no mesmo dia: PUT A -> normal = junta-se à de B', async () => {
     const B = await reservar({ check_in: '2062-02-01', check_out: '2062-02-05' });
     const A = await reservar({ check_in: '2062-02-03', check_out: '2062-02-05', tipo_limpeza: 'intermedia' });
     expect([B.status, A.status]).toEqual([201, 201]);
     const u = await request(app).put(`/api/parceiro/reservas/${A.body.reserva._id}`).set(auth(parceiroToken)).send({ tipo_limpeza: 'normal' });
-    expect(u.status).toBe(409);
-    expect(u.body.codigo).toBe('RESERVA_DUPLICADA');
-    expect((await Tarefa.findById(A.body.tarefa._id)).tipo_limpeza).toBe('intermedia');
-    expect((await ReservaManual.findById(A.body.reserva._id)).tipo_limpeza).toBe('intermedia');
+    expect(u.status).toBe(200);
+    expect((await Tarefa.findById(A.body.tarefa._id)).estado).toBe('cancelada');
+    expect(String((await ReservaManual.findById(A.body.reserva._id)).tarefa_gerada_id)).toBe(String(B.body.tarefa._id));
+    expect((await ReservaManual.findById(A.body.reserva._id)).tipo_limpeza).toBe('normal');
   });
 
   it('normal -> profunda (mesma classe, mesmo dia) continua a passar', async () => {

@@ -40,6 +40,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EstadoTarefaBadge } from "@/components/ui/estado-tarefa-badge";
+import { OfertaVagaBadge } from "@/components/gestor/oferta-vaga-badge";
 import {
   Card,
   CardContent,
@@ -82,6 +83,8 @@ export interface TarefaDetalheGestor {
   utilizador_id?: { _id?: string; nome: string } | null;
   equipa_atribuida?: { _id?: string; nome: string }[] | null;
   pessoas_em_falta?: number;
+  oferta_estado?: string | null;
+  oferta_expira_em?: string | null;
   // Início da limpeza e alertas (ex.: «Não consegui começar»).
   iniciada_em?: string | null;
   inicio_origem?: "botao" | "automatico" | null;
@@ -162,12 +165,14 @@ function formatarDataHora(iso: string): string {
       day: "2-digit",
       month: "2-digit",
       year: "numeric",
+      timeZone: "Europe/Lisbon",
     });
-    if (d.getHours() === 0 && d.getMinutes() === 0) return data;
     const hora = d.toLocaleTimeString("pt-PT", {
       hour: "2-digit",
       minute: "2-digit",
+      timeZone: "Europe/Lisbon",
     });
+    if (hora === "00:00") return data;
     return `${data} - ${hora}`;
   } catch {
     return iso;
@@ -302,6 +307,7 @@ export function DetalheTarefaModal({
               </h3>
               <Badge variant="outline">{tipoLabel[tarefa.tipo] ?? tarefa.tipo}</Badge>
               <EstadoTarefaBadge estado={tarefa.estado} />
+              <OfertaVagaBadge tarefa={tarefa} />
               {tarefa.tipo === "limpeza" && podeMudarDia(tarefa) && (
                 <Button type="button" variant="outline" size="sm" className="ml-auto h-9 gap-1.5" onClick={() => setMudarDiaAberto(true)}>
                   <CalendarClock className="h-4 w-4" aria-hidden="true" />

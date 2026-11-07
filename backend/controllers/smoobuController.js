@@ -1027,6 +1027,10 @@ async function criarTarefaPorReserva(
   if (['por_atribuir', 'nao_atribuida'].includes(novaTarefa.estado)) {
     await avisarPorAtribuirSmoobu(empresaId, { nome: propriedade.nome, dia: dataAgendada, motivo: novaTarefa.motivo_nao_atribuicao }, opcoes);
   }
+  // Sem ninguém disponível (ou equipa incompleta): oferece a vaga a toda a equipa não ausente.
+  if (['por_atribuir', 'nao_atribuida'].includes(novaTarefa.estado) || (Number(novaTarefa.pessoas_em_falta) || 0) > 0) {
+    await require('../utils/ofertaVaga').abrirOfertaMelhorEsforco(novaTarefa._id);
+  }
 
   console.log(
     `🧹 [Smoobu] tarefa ${novaTarefa._id} criada (reserva ${reservaId}, ` +
@@ -2234,6 +2238,8 @@ async function sincronizarReservas(req, res) {
           check_out: { $gte: hoje },
         }).lean());
 
+      // Reservas que partilham a mesma limpeza (mesma casa, dia e tipo) recriam UMA só.
+      const recriadas = new Map();
       for (const rm of reservasManuais) {
         // Verifica se a tarefa gerada ainda existe.
         let tarefaExiste = false;
@@ -2261,6 +2267,11 @@ async function sincronizarReservas(req, res) {
         });
         const diaRM = rdRM.erro ? new Date(rm.check_out).toISOString().slice(0, 10) : rdRM.dia;
         const dataTarefaRM = new Date(`${diaRM}T10:00:00Z`);
+        const chaveRM = `${rm.propriedade_id}|${diaRM}|${tipoRM}`;
+        if (recriadas.has(chaveRM)) {
+          await ReservaManual.updateOne({ _id: rm._id }, { $set: { tarefa_gerada_id: recriadas.get(chaveRM) } });
+          continue;
+        }
 
         const numHospedesRM = rm.hospedes || propriedadeRM.capacidade_hospedes || null;
 
@@ -2288,6 +2299,7 @@ async function sincronizarReservas(req, res) {
           },
         });
 
+        recriadas.set(chaveRM, novaTarefaRM._id);
         // Associa a nova tarefa à reserva manual.
         await ReservaManual.updateOne(
           { _id: rm._id },

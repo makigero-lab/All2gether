@@ -288,7 +288,7 @@ function EquipaPage() {
 
   // Modal de baixa prolongada
   const [baixaModal, setBaixaModal] = useState<UtilizadorDTO | null>(null);
-  const [baixaForm, setBaixaForm] = useState({ data_inicio: "", data_fim: "" });
+  const [baixaForm, setBaixaForm] = useState({ data_inicio: "", data_fim: "", tipo: "ferias" });
   const [baixaSubmitting, setBaixaSubmitting] = useState(false);
   const [baixaResultado, setBaixaResultado] = useState<string | null>(null);
   // Nº de tarefas que SOBRARAM por atribuir depois da reatribuição automática
@@ -1276,7 +1276,7 @@ function EquipaPage() {
                                   className="h-8 w-8 text-blue-500 hover:text-blue-600"
                                   onClick={() => {
                                     setBaixaModal(u);
-                                    setBaixaForm({ data_inicio: "", data_fim: "" });
+                                    setBaixaForm({ data_inicio: "", data_fim: "", tipo: "ferias" });
                                     setBaixaResultado(null);
                                   }}
                                   aria-label={`Registar baixa ou férias de ${u.nome}`}
@@ -1922,6 +1922,22 @@ function EquipaPage() {
                     Registar baixa para{" "}
                     <span className="font-semibold">{baixaModal?.nome}</span>?
                   </p>
+                  <div className="space-y-1.5">
+                    <label htmlFor="baixa-tipo" className="text-sm font-medium">
+                      Tipo
+                    </label>
+                    <select
+                      id="baixa-tipo"
+                      value={baixaForm.tipo}
+                      onChange={(e) => setBaixaForm((f) => ({ ...f, tipo: e.target.value }))}
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                    >
+                      <option value="ferias">Férias</option>
+                      <option value="doenca">Baixa (doença)</option>
+                      <option value="falta">Falta</option>
+                      <option value="outro">Outro</option>
+                    </select>
+                  </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5">
                       <label htmlFor="baixa-inicio" className="text-sm font-medium">
@@ -1995,7 +2011,7 @@ function EquipaPage() {
                       const res = await adminPost<RedistribuicaoDTO>(`/api/gestor/equipa/${baixaModal._id}/baixa`, {
                         data_inicio: baixaForm.data_inicio,
                         data_fim: baixaForm.data_fim,
-                        tipo: "ferias",
+                        tipo: baixaForm.tipo,
                       });
                       setBaixaPorAtribuir(tarefasPorAtribuir(res));
                       setBaixaAviso(res.aviso ?? null);

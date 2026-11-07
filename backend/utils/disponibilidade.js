@@ -107,6 +107,7 @@ function mensagemIndisponivel(ausencia) {
   const tipoLabel =
     ausencia.tipo === 'ferias' ? 'Férias'
     : ausencia.tipo === 'doenca' ? 'Baixa por doença'
+    : ausencia.tipo === 'falta' ? 'Falta'
     : 'Ausência aprovada';
 
   const inicio = dataLisboa(ausencia.data_inicio);

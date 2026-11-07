@@ -61,7 +61,7 @@ import { mensagemErro } from "@/lib/rascunho-staff";
 
 // Alargamento local do TipoAusencia (o backend usa mais valores que o tipo
 // estrito do api.ts: ferias, doenca, folga, outro).
-type TipoAusenciaAmp = "ferias" | "doenca" | "folga_rotativa" | "folga" | "outro";
+type TipoAusenciaAmp = "ferias" | "doenca" | "folga_rotativa" | "folga" | "falta" | "outro";
 
 interface AusenciaAmp extends Omit<AusenciaDTO, "tipo"> {
   tipo: TipoAusenciaAmp;
@@ -74,6 +74,7 @@ const TIPO_LABEL: Record<TipoAusenciaAmp, string> = {
   doenca: "Doença",
   folga_rotativa: "Folga Rotativa",
   folga: "Folga",
+  falta: "Falta",
   outro: "Outro",
 };
 
@@ -82,6 +83,7 @@ const TIPO_ICON: Record<TipoAusenciaAmp, React.ComponentType<{ className?: strin
   doenca: Stethoscope,
   folga_rotativa: CalendarX,
   folga: CalendarX,
+  falta: CalendarX,
   outro: CircleDot,
 };
 
@@ -1030,6 +1032,7 @@ export default function AusenciasPage() {
               <option value="ferias">Férias</option>
               <option value="doenca">Doença</option>
               <option value="folga_rotativa">Folga Rotativa</option>
+              <option value="falta">Falta</option>
               <option value="outro">Outro</option>
             </select>
           </div>

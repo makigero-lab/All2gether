@@ -15,6 +15,7 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { TaskCard } from "@/components/staff/task-card";
+import { LimpezasLivres } from "@/components/staff/limpezas-livres";
 import {
   Dialog,
   DialogHeader,
@@ -337,6 +338,9 @@ export default function StaffPage() {
           </div>
         ) : (
           <>
+            {/* Limpezas livres oferecidas a toda a equipa (aceita quem chegar primeiro) */}
+            <LimpezasLivres onAceite={carregar} />
+
             {/* Prompt 124 — Navegação de dias (1 dia de cada vez) */}
             <div className="flex items-center justify-between gap-2">
               <Button

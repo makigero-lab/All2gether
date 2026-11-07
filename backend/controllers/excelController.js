@@ -75,6 +75,8 @@ exports.exportarExcel = async (req, res) => {
       .populate({ path: 'utilizador_id', select: 'nome' })
       .populate({ path: 'equipa_atribuida', select: 'nome' })
       .sort({ data: 1 })
+      // Listagem leve: as fotos (base64) só vão no detalhe/prova.
+      .select('-fotos_conclusao -avarias.fotos')
       .lean();
 
     const linhas = tarefas.map((t) => ({
@@ -137,6 +139,8 @@ exports.exportarExcelParceiro = async (req, res) => {
     })
       .populate({ path: 'propriedade_id', select: 'nome' })
       .sort({ data: 1 })
+      // Listagem leve: as fotos (base64) só vão no detalhe/prova.
+      .select('-fotos_conclusao -avarias.fotos')
       .lean();
 
     const linhas = tarefas.map((t) => ({

@@ -124,10 +124,14 @@ describe('mudar o dia de uma limpeza', () => {
     // duplicado: outra reserva já tem limpeza a 12/07
     const o = await reservar(c, { check_in: '2070-07-08', check_out: '2070-07-12' });
     expect(o.status).toBe(201);
+    // mover para um dia que já tem limpeza do mesmo tipo: junta as duas (sem 409)
     const dup = await mudar(c, tid, { data: '2070-07-12' });
-    expect(dup.status).toBe(409);
-    expect(dup.body.codigo).toBe('RESERVA_DUPLICADA');
-    expect(dia((await Tarefa.findById(tid)).data)).toBe('2070-07-05');
+    expect(dup.status).toBe(200);
+    expect(dup.body.juntada).toBe(true);
+    expect(dup.body.aviso).toMatch(/juntadas/);
+    expect((await Tarefa.findById(tid)).estado).toBe('cancelada');
+    expect(String((await ReservaManual.findById(r.body.reserva._id)).tarefa_gerada_id)).toBe(String(o.body.tarefa._id));
+    await Tarefa.updateOne({ _id: tid }, { $set: { estado: 'por_atribuir' } });
     for (const estado of ['em_curso', 'concluida', 'cancelada']) {
       await Tarefa.updateOne({ _id: tid }, { $set: { estado } });
       const x = await mudar(c, tid, { data: '2070-07-20' });

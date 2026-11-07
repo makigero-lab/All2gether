@@ -858,6 +858,8 @@ export default function ParceiroReservasPage() {
     let semSessao = false;
     setSessaoTerminou(false);
     const conflitosRestantes = { ...conflitos };
+    // Avisos do servidor (ex.: «já havia uma limpeza nesse dia; ficou associada a ela»): a linha foi gravada.
+    const avisosServidor: string[] = [];
 
     const sincronizar = () => setRascunho({ edicoes: { ...edicoes }, novas: [...novas], eliminar: { ...eliminar } });
 
@@ -881,7 +883,8 @@ export default function ParceiroReservasPage() {
         continue;
       }
       try {
-        const res = await adminPut<{ reserva: ReservaDTO }>(`/api/parceiro/reservas/${id}`, paraPayload(campos));
+        const res = await adminPut<{ reserva: ReservaDTO; aviso?: string }>(`/api/parceiro/reservas/${id}`, paraPayload(campos));
+        if (res.aviso) avisosServidor.push(res.aviso);
         setReservas((rs) => rs.map((r) => (r._id === id ? res.reserva : r)));
         gravadas++;
         const resto: Partial<Valores> = {};
@@ -952,13 +955,14 @@ export default function ParceiroReservasPage() {
         continue;
       }
       try {
-        await adminPost("/api/parceiro/reservas", {
+        const resp = await adminPost<{ aviso?: string }>("/api/parceiro/reservas", {
           propriedade_id: n.propriedade_id,
           // Chave de idempotência: se a resposta se perder, o Gravar seguinte não duplica.
           chave_idempotencia: n.tmp,
           ...paraPayload(n),
           hospedes: n.hospedes.trim() === "" ? undefined : Number(n.hospedes),
         });
+        if (resp?.aviso) avisosServidor.push(resp.aviso);
         criadas++;
         novas = novas.filter((x) => x.tmp !== n.tmp);
         sincronizar();
@@ -986,6 +990,7 @@ export default function ParceiroReservasPage() {
         ? `${resultado}. As limpezas foram criadas/reatribuídas.`
         : `${resultado}.`
     );
+    if (avisosServidor.length > 0) setAviso(avisosServidor.join(" "));
     if (semSessao) {
       setErro("A tua sessão terminou. Inicia sessão outra vez, as alterações ficam guardadas.");
       setSessaoTerminou(true);
@@ -1297,7 +1302,7 @@ export default function ParceiroReservasPage() {
                   <Cab chave="nome_hospede" rotulo="Hóspede" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[11rem]" />
                   <Cab chave="plataforma" rotulo="Plataforma" ordem={ordem} onOrdenar={ordenarPorColuna} />
                   <Cab chave="tipo_limpeza" rotulo="Tipo de limpeza" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[11rem]" />
-                  <Cab chave="horario_preferido" rotulo="Horário pref. limpeza" ordem={ordem} onOrdenar={ordenarPorColuna} />
+                  <Cab chave="horario_preferido" rotulo="Horário" ordem={ordem} onOrdenar={ordenarPorColuna} />
                   <Cab chave="observacoes" rotulo="Notas" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[20rem]" />
                   <Cab chave="estado" rotulo="Limpeza" ordem={ordem} onOrdenar={ordenarPorColuna} className={`${FIXO_ESTADO} z-[2] bg-background bg-gradient-to-r from-muted/40 to-muted/40`} />
                   <th className={`${FIXO_ACOES} z-[2] bg-background bg-gradient-to-r from-muted/40 to-muted/40 px-2 py-2`}><span className="sr-only">Ações</span></th>
@@ -1351,7 +1356,7 @@ export default function ParceiroReservasPage() {
                     <input value={nova.horario_preferido} onChange={(e) => setN("horario_preferido")(e.target.value)} placeholder="11h - 14h" className={CELULA} disabled={gravando} aria-label="Nova reserva: horário preferido de limpeza" />
                   </td>
                   <td className="p-0">
-                    <textarea value={nova.observacoes} onChange={(e) => setN("observacoes")(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") e.stopPropagation(); }} rows={2} className={`${CELULA} h-auto min-h-[3.25rem] resize-y py-1.5`} disabled={gravando} aria-label="Nova reserva: notas" />
+                    <textarea value={nova.observacoes} onChange={(e) => { setN("observacoes")(e.target.value); e.currentTarget.style.height = "auto"; e.currentTarget.style.height = `${e.currentTarget.scrollHeight + 2}px`; }} onKeyDown={(e) => { if (e.key === "Enter") e.stopPropagation(); }} rows={4} className={`${CELULA} h-auto min-h-[6.5rem] resize-y py-1.5`} disabled={gravando} aria-label="Nova reserva: notas" />
                   </td>
                   <td className={`${FIXO_ESTADO} bg-background bg-gradient-to-r from-primary/5 to-primary/5 px-2 text-xs text-muted-foreground`}>nova</td>
                   <td className={`${FIXO_ACOES} bg-background bg-gradient-to-r from-primary/5 to-primary/5 px-1 text-right`}>

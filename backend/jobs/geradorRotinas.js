@@ -190,7 +190,7 @@ function iniciarGeradorRotinas() {
     } catch (err) {
       console.error('❌ [GeradorRotinas] erro não capturado no cron:', err.message);
     }
-  });
+  }, { timezone: 'Europe/Lisbon' });
 
   return { executarGeradorRotinas };
 }

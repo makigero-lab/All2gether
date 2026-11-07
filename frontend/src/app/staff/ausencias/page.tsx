@@ -46,7 +46,7 @@ type EstadoAusencia =
   | "aprovada"
   | "rejeitada"
   | "cancelada";
-type TipoAusencia = "ferias" | "doenca" | "outro";
+type TipoAusencia = "ferias" | "doenca" | "falta" | "outro";
 
 interface AusenciaDTO {
   _id: string;
@@ -65,6 +65,7 @@ interface AusenciaDTO {
 const TIPO_LABEL: Record<TipoAusencia, string> = {
   ferias: "Férias",
   doenca: "Doença",
+  falta: "Falta",
   outro: "Outro",
 };
 
@@ -436,6 +437,7 @@ export default function StaffAusenciasPage() {
               >
                 <option value="ferias">Férias</option>
                 <option value="doenca">Doença</option>
+                <option value="falta">Falta</option>
                 <option value="outro">Outro</option>
               </select>
             </div>

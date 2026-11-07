@@ -133,6 +133,9 @@ function resolverDiaLimpeza({ tipo, check_in, check_out, data_gravada, ajustada 
   if (tipo === 'preparacao' && !gravadaValida && hoje && d < hoje) {
     return { erro: 'A limpeza de preparação é no dia do check-in, que já passou.' };
   }
+  if (tipo === 'intermedia' && !gravadaValida && hoje && d < hoje) {
+    return { erro: 'A limpeza intermédia calculada para esta estadia já passou.' };
+  }
   return { dataLimpeza: new Date(`${d}T00:00:00Z`), dia: d };
 }
 

@@ -353,16 +353,62 @@ async function limpezasDoDia({ empresaId, propriedadeId, inicioDia, tipoLimpeza 
   };
   if (excluirTarefaId) filtro._id = { $ne: excluirTarefaId };
   const tarefas = await Tarefa.find(filtro).select('_id').lean();
-  if (tarefas.length === 0) return { doParceiro: false, deOutraOrigem: false };
+  if (tarefas.length === 0) return { doParceiro: false, deOutraOrigem: false, tarefaParceiroId: null };
   const ids = tarefas.map((t) => t._id);
   const doParceiroIds = new Set(
     (await ReservaManual.find({ tarefa_gerada_id: { $in: ids } }).select('tarefa_gerada_id').lean())
       .map((r) => String(r.tarefa_gerada_id))
   );
+  // A limpeza do parceiro a que uma reserva nova se associa (a primeira, se houver várias).
+  const alvo = ids.find((id) => doParceiroIds.has(String(id))) || null;
   return {
     doParceiro: doParceiroIds.size > 0,
     deOutraOrigem: ids.some((id) => !doParceiroIds.has(String(id))),
+    tarefaParceiroId: alvo,
   };
+}
+
+/** Aviso mostrado quando uma reserva fica associada a uma limpeza que já existia nesse dia. */
+function avisoLimpezaPartilhada(nomeCasa, tipo, dia) {
+  return `Já havia uma limpeza para "${nomeCasa}" ${textoDuplicada(tipo, dia)}; esta reserva ficou associada a ela (não foi criada outra limpeza).`;
+}
+
+/**
+ * Larga a ligação de uma reserva à sua limpeza (mudou de dia/tipo, foi eliminada ou juntou-se a
+ * outra). Se ainda houver outras reservas associadas, a limpeza FICA (passa a descrever a primeira
+ * delas); só se cancela quando já não sobra nenhuma. Devolve true se cancelou a limpeza.
+ */
+async function largarTarefaDaReserva(tarefa, reservaId, propriedade, motivo) {
+  const outras = await ReservaManual.find({ tarefa_gerada_id: tarefa._id, _id: { $ne: reservaId } })
+    .sort({ createdAt: 1 }).lean();
+  if (outras.length > 0) {
+    const o = outras[0];
+    const d = (x) => (x ? new Date(x).toISOString().slice(0, 10) : null);
+    tarefa.hospedes = o.hospedes ?? tarefa.hospedes;
+    tarefa.observacoes = o.observacoes || '';
+    tarefa.detalhes_reserva = {
+      ...(tarefa.detalhes_reserva?.toObject?.() ?? tarefa.detalhes_reserva ?? {}),
+      checkin: d(o.check_in),
+      checkout: d(o.check_out),
+      pax: o.hospedes ?? tarefa.hospedes,
+      nome_hospede: o.nome_hospede || null,
+      hora_checkin: o.hora_checkin || null,
+      horario_preferido: o.horario_preferido || null,
+    };
+    await tarefa.save();
+    return false;
+  }
+  if (tarefa.estado !== 'cancelada') {
+    const equipaAntes = idsEquipa(tarefa);
+    const dataAntiga = tarefa.data;
+    tarefa.estado = 'cancelada';
+    tarefa.utilizador_id = null;
+    tarefa.equipa_atribuida = [];
+    tarefa.pessoas_em_falta = 0;
+    await tarefa.save();
+    if (propriedade) avisarEquipaSaiu(equipaAntes, propriedade, dataAntiga, motivo);
+  }
+  return true;
 }
 
 /** Texto do dia duplicado conforme o tipo. */
@@ -572,15 +618,11 @@ async function criarReserva(req, res) {
     // existem; entradas e saídas no mesmo dia são reservas diferentes (outro
     // dia de check-out) e passam. Casas diferentes no mesmo dia também.
     const inicioDiaSaida = new Date(`${rd.dia}T00:00:00Z`);
-    const { doParceiro, deOutraOrigem } = await limpezasDoDia({
+    // Segunda saída no mesmo dia e casa: a reserva é gravada e fica associada à limpeza que já
+    // existe (uma casa só precisa de uma limpeza por dia de saída), com aviso.
+    const { doParceiro, deOutraOrigem, tarefaParceiroId } = await limpezasDoDia({
       empresaId, propriedadeId: propriedade._id, inicioDia: inicioDiaSaida, tipoLimpeza,
     });
-    if (doParceiro) {
-      return res.status(409).json({
-        erro: `Já existe uma limpeza para "${propriedade.nome}" ${textoDuplicada(tipoLimpeza, inicioDiaSaida)}. Se é a mesma reserva, já está registada: tira esta linha das alterações por gravar.`,
-        codigo: 'RESERVA_DUPLICADA',
-      });
-    }
 
     // FIX (fallback hospedes estrito) — Se hospedes for null, 0 ou undefined,
     // usa a capacidade_hospedes da propriedade (lotação máxima da casa).
@@ -608,6 +650,7 @@ async function criarReserva(req, res) {
         ...(chave ? { chave_idempotencia: chave } : {}),
         tipo_limpeza: tipoLimpeza,
         data_limpeza: rd.dataLimpeza,
+        ...(doParceiro && tarefaParceiroId ? { tarefa_gerada_id: tarefaParceiroId } : {}),
         ...extras,
       });
     } catch (e) {
@@ -616,6 +659,22 @@ async function criarReserva(req, res) {
         if (outra) return respostaReservaRepetida(res, outra);
       }
       throw e;
+    }
+
+    if (doParceiro && tarefaParceiroId) {
+      const existente = await Tarefa.findById(tarefaParceiroId);
+      // As observações da segunda reserva não se perdem: juntam-se às da limpeza.
+      const obs = observacoes ? String(observacoes).trim() : '';
+      if (existente && obs && !String(existente.observacoes || '').includes(obs)) {
+        existente.observacoes = [existente.observacoes, obs].filter(Boolean).join(' | ');
+        await existente.save();
+      }
+      return res.status(201).json({
+        reserva: novaReserva,
+        tarefa: existente,
+        associada_a_existente: true,
+        aviso: avisoLimpezaPartilhada(propriedade.nome, tipoLimpeza, inicioDiaSaida),
+      });
     }
 
     const detalhesTarefa = detalhesDaReserva(extras);
@@ -644,6 +703,10 @@ async function criarReserva(req, res) {
 
     // Avisa a equipa atribuída (uma notificação por pessoa e gravação).
     avisarEquipaNova(novaTarefa, propriedade);
+    // Sem ninguém disponível (ou equipa incompleta): oferece a vaga à equipa.
+    if (['por_atribuir', 'nao_atribuida'].includes(novaTarefa.estado) || (Number(novaTarefa.pessoas_em_falta) || 0) > 0) {
+      await require('../utils/ofertaVaga').abrirOfertaMelhorEsforco(novaTarefa._id);
+    }
     if (deOutraOrigem) await avisarGestorDuasLimpezas(empresaId, propriedade, inicioDiaSaida);
 
     console.log(
@@ -766,6 +829,12 @@ async function atualizarReserva(req, res) {
     // recusa (a antiga fica intacta). A própria tarefa fica de fora.
     let deOutraOrigem = false;
     let inicioNovoDia = null;
+    let juntarA = null; // limpeza do parceiro já existente nesse dia a que a reserva se associa
+    let aviso = null;
+    // Várias reservas podem partilhar a mesma limpeza (mesma casa, mesmo dia de saída).
+    const partilhada = tarefa
+      ? (await ReservaManual.countDocuments({ tarefa_gerada_id: tarefa._id, _id: { $ne: reserva._id } })) > 0
+      : false;
     // (também quando só muda o tipo: pode passar para uma classe/tipo que já existe nesse dia)
     if (tarefa && (checkOutMudou || tipoMudou)) {
       inicioNovoDia = new Date(`${rd.dia}T00:00:00Z`);
@@ -773,12 +842,10 @@ async function atualizarReserva(req, res) {
         empresaId: reserva.empresa_id, propriedadeId: reserva.propriedade_id,
         inicioDia: inicioNovoDia, tipoLimpeza: tipoNovo, excluirTarefaId: tarefa._id,
       });
-      if (r.doParceiro) {
+      if (r.doParceiro && r.tarefaParceiroId) {
+        juntarA = r.tarefaParceiroId;
         const p = await Propriedade.findById(reserva.propriedade_id).select('nome').lean();
-        return res.status(409).json({
-          erro: `Já existe outra limpeza para "${p?.nome || 'esta casa'}" ${textoDuplicada(tipoNovo, inicioNovoDia)}. Escolhe outro dia ou elimina a outra reserva primeiro.`,
-          codigo: 'RESERVA_DUPLICADA',
-        });
+        aviso = avisoLimpezaPartilhada(p?.nome || 'esta casa', tipoNovo, inicioNovoDia);
       }
       deOutraOrigem = r.deOutraOrigem;
     }
@@ -794,11 +861,14 @@ async function atualizarReserva(req, res) {
     reserva.data_limpeza_ajustada = !!rd.ajustada;
 
     const detalhesExtra = detalhesDaReserva(extras);
-    if (tarefa && checkOutMudou) {
+    if (tarefa && juntarA) {
+      // Passa a ficar associada à limpeza que já existia nesse dia; a antiga só se cancela
+      // se já não houver mais nenhuma reserva ligada a ela.
       const propriedade = await Propriedade.findById(reserva.propriedade_id).lean();
-      // Quem estava na limpeza antiga (para avisar que saiu).
-      const equipaAntes = idsEquipa(tarefa);
-      const dataAntiga = tarefa.data;
+      await largarTarefaDaReserva(tarefa, reserva._id, propriedade, 'foi cancelada (a reserva mudou de datas).');
+      reserva.tarefa_gerada_id = juntarA;
+    } else if (tarefa && (checkOutMudou || (tipoMudou && partilhada))) {
+      const propriedade = await Propriedade.findById(reserva.propriedade_id).lean();
       // Primeiro gera a nova (se falhar, a antiga fica intacta); só depois cancela a antiga.
       const nova = await gerarTarefaLimpezaReserva({
         propriedade,
@@ -815,18 +885,15 @@ async function atualizarReserva(req, res) {
         tipoLimpeza: tipoNovo,
         diaLimpeza: rd.dia,
       });
-      tarefa.estado = 'cancelada';
-      tarefa.utilizador_id = null;
-      tarefa.equipa_atribuida = [];
-      tarefa.pessoas_em_falta = 0;
-      await tarefa.save();
+      // Se outra reserva continua ligada à limpeza antiga, ela fica (e passa a ser dessa reserva).
+      // Se cancelar, toda a equipa antiga é avisada (mesmo quem volta a ser escalado na nova).
+      await largarTarefaDaReserva(tarefa, reserva._id, propriedade, 'foi cancelada (a reserva mudou de datas).');
       reserva.tarefa_gerada_id = nova._id;
-
-      // Toda a equipa da limpeza antiga é avisada de que essa data foi cancelada
-      // (mesmo quem volta a ser escalado na nova) e a da nova é avisada da nova.
-      avisarEquipaSaiu(equipaAntes, propriedade, dataAntiga, 'foi cancelada (a reserva mudou de datas).');
       avisarEquipaNova(nova, propriedade);
       if (deOutraOrigem) await avisarGestorDuasLimpezas(reserva.empresa_id, propriedade, inicioNovoDia);
+    } else if (tarefa && partilhada) {
+      // Limpeza partilhada com outras reservas e o dia/tipo não mudou: não se mexe nela
+      // (os dados desta reserva ficam só na própria reserva).
     } else if (tarefa) {
       if (tipoMudou) {
         // Mesmo dia, outro tipo: atualiza tipo, tempo e checklist da mesma tarefa (mantém equipa
@@ -857,7 +924,8 @@ async function atualizarReserva(req, res) {
       await tarefa.save();
     }
     await reserva.save();
-    if (perdeuAjuste) {
+    // Só avisa se o dia da limpeza mudou de facto (mudar só notas ou hóspedes não conta).
+    if (perdeuAjuste && checkOutMudou) {
       try {
         const pAj = await Propriedade.findById(reserva.propriedade_id).select('nome').lean();
         await avisarGestores(reserva.empresa_id, 'Dia da limpeza recalculado',
@@ -869,7 +937,7 @@ async function atualizarReserva(req, res) {
       .populate('propriedade_id', 'nome morada')
       .populate('tarefa_gerada_id', 'estado data')
       .lean();
-    return res.status(200).json({ reserva: atualizada });
+    return res.status(200).json({ reserva: atualizada, ...(aviso ? { aviso, associada_a_existente: true } : {}) });
   } catch (err) {
     console.error('❌ parceiroController.atualizarReserva:', err.message);
     return res.status(500).json({ erro: 'Erro interno.' });
@@ -899,15 +967,9 @@ async function eliminarReserva(req, res) {
       });
     }
     if (tarefa && tarefa.estado !== 'cancelada') {
-      const equipaAntes = idsEquipa(tarefa);
-      const dataAntiga = tarefa.data;
-      tarefa.estado = 'cancelada';
-      tarefa.utilizador_id = null;
-      tarefa.equipa_atribuida = [];
-      tarefa.pessoas_em_falta = 0;
-      await tarefa.save();
       const prop = await Propriedade.findById(reserva.propriedade_id).select('nome').lean();
-      if (prop) avisarEquipaSaiu(equipaAntes, prop, dataAntiga, 'foi cancelada (reserva eliminada).');
+      // Se outra reserva continua associada, a limpeza fica e passa a pertencer-lhe.
+      await largarTarefaDaReserva(tarefa, reserva._id, prop, 'foi cancelada (reserva eliminada).');
     }
     await reserva.deleteOne();
     return res.status(200).json({ mensagem: 'Reserva eliminada.' });

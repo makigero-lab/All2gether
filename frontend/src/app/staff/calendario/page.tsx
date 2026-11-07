@@ -25,7 +25,7 @@ import {
   Card,
   CardContent,
 } from "@/components/ui/card";
-import { cn, parsearDataSegura } from "@/lib/utils";
+import { cn, parsearDataSegura, extrairHoraISO } from "@/lib/utils";
 import { fazerLogout } from "@/lib/auth";
 
 /**
@@ -73,15 +73,8 @@ const tipoIcon: Record<string, React.ComponentType<{ className?: string }>> = {
 
 /** Extrai HH:mm de um ISO; "—" se meia-noite (sem hora definida). */
 function horaInicio(dataISO?: string): string {
-  if (!dataISO) return "—";
-  try {
-    const d = parsearDataSegura(dataISO);
-    if (!d) return "—";
-    if (d.getHours() === 0 && d.getMinutes() === 0) return "—";
-    return format(d, "HH:mm", { locale: pt });
-  } catch {
-    return "—";
-  }
+  // Hora de Lisboa (com hora de verão), seja qual for o fuso do telemóvel; 00:00 = sem hora definida.
+  return extrairHoraISO(dataISO);
 }
 
 export default function StaffCalendarioPage() {

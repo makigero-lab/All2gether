@@ -202,7 +202,7 @@ exports.getDashboard = async (req, res) => {
       estado: { $in: ['por_atribuir', 'nao_atribuida', 'atribuida'] },
     })
       .populate({ path: 'propriedade_id', select: 'nome' })
-      .select('data estado propriedade_id tipo_limpeza')
+      .select('data estado propriedade_id tipo_limpeza utilizador_id pessoas_em_falta oferta_estado oferta_expira_em')
       .sort({ data: 1 })
       .limit(12)
       .lean();
@@ -212,6 +212,10 @@ exports.getDashboard = async (req, res) => {
       estado: t.estado,
       tipo_limpeza: t.tipo_limpeza || 'normal',
       propriedade_nome: t.propriedade_id?.nome ?? '—',
+      utilizador_id: t.utilizador_id ? String(t.utilizador_id) : null,
+      pessoas_em_falta: t.pessoas_em_falta || 0,
+      oferta_estado: t.oferta_estado || null,
+      oferta_expira_em: t.oferta_expira_em || null,
     }));
 
     // «A decorrer agora»: limpezas em curso (início por botão ou automático).
@@ -883,6 +887,7 @@ exports.getDadosCalendario = async (req, res) => {
         const tituloPorTipo =
           a.tipo === 'ferias' ? '🌴 Férias'
           : a.tipo === 'doenca' ? '🤒 Doença'
+          : a.tipo === 'falta' ? '📅 Falta'
           : '📅 Ausência';
 
         return {
@@ -917,6 +922,7 @@ exports.getDadosCalendario = async (req, res) => {
         const tituloPorTipo =
           a.tipo === 'ferias' ? '🌴 Férias'
           : a.tipo === 'doenca' ? '🤒 Doença'
+          : a.tipo === 'falta' ? '📅 Falta'
           : '📅 Ausência';
         const sufixoEmergencia =
           a.estado === 'pendente_emergencia' ? ' (Emergência)' : '';
@@ -1728,6 +1734,23 @@ exports.getFornecedores = async (req, res) => {
 };
 
 /**
+ * Só o Super Admin mexe em gestores (criar, editar, ativar/inativar, eliminar). Um gestor pode
+ * editar-se a si próprio (nome, password...), mas não o seu role nem os de outros gestores.
+ * Devolve true (e responde 403) quando o pedido deve ser recusado.
+ */
+function recusaMexerEmGestor(req, res, { alvo = null, roleNovo = undefined } = {}) {
+  if (req.user && req.user.role === 'admin') return false;
+  const eOutroGestor = alvo && alvo.role === 'gestor' && String(alvo._id) !== String(req.user && req.user.id);
+  const mudaParaGestor = roleNovo === 'gestor' && !(alvo && alvo.role === 'gestor');
+  const mudaOProprioRole = alvo && alvo.role === 'gestor' && roleNovo !== undefined && roleNovo !== 'gestor';
+  if (eOutroGestor || mudaParaGestor || mudaOProprioRole) {
+    res.status(403).json({ erro: 'Só o administrador pode criar ou alterar gestores.' });
+    return true;
+  }
+  return false;
+}
+
+/**
  * POST /api/admin/equipa
  * Cria um novo membro de equipa (Utilizador) para a empresa.
  *
@@ -1771,6 +1794,7 @@ exports.criarMembroEquipa = async (req, res) => {
       });
     }
 
+    if (recusaMexerEmGestor(req, res, { roleNovo: roleFinal })) return;
     // SEGURANÇA: Não é possível criar utilizadores com role 'admin'.
     // O admin é criado apenas via /api/admin/setup (bootstrap) ou processo separado.
     if (roleFinal === 'admin') {
@@ -1971,6 +1995,8 @@ exports.atualizarMembroEquipa = async (req, res) => {
         erro: 'Não é possível modificar um administrador.',
       });
     }
+    // SEGURANÇA: só o admin altera outros gestores (email/password = tomar a conta).
+    if (recusaMexerEmGestor(req, res, { alvo: utilizador, roleNovo: role })) return;
 
     // --- Nome ---
     if (nome !== undefined) {
@@ -2239,6 +2265,7 @@ exports.alternarEstadoMembro = async (req, res) => {
         erro: 'Não é possível modificar o estado de um administrador.',
       });
     }
+    if (recusaMexerEmGestor(req, res, { alvo: utilizador })) return;
 
     // Se vier `ativo` no body, usa-o; senão alterna.
     const novoEstado =
@@ -2341,6 +2368,7 @@ exports.eliminarMembroEquipa = async (req, res) => {
         erro: 'Não é possível eliminar um administrador.',
       });
     }
+    if (recusaMexerEmGestor(req, res, { alvo: utilizador })) return;
 
     const nomeEliminado = utilizador.nome;
     // Soft delete: marca eliminado_em em vez de remover fisicamente.
@@ -2490,7 +2518,7 @@ exports.reportarFaltaSubita = async (req, res) => {
         empresa_id: empresaId,
         data_inicio: hojeInicio,
         data_fim: hojeInicio,
-        tipo: 'outro',
+        tipo: 'falta',
         estado: 'aprovada',
         notas: 'Falta súbita reportada pelo admin',
       });
@@ -2660,9 +2688,9 @@ exports.registarBaixaProlongada = async (req, res) => {
     }
 
     const tipoBaixa = tipo || 'ferias';
-    if (!['ferias', 'doenca', 'outro'].includes(tipoBaixa)) {
+    if (!['ferias', 'doenca', 'falta', 'outro'].includes(tipoBaixa)) {
       return res.status(400).json({
-        erro: 'tipo inválido. Valores permitidos: ferias, doenca, outro.',
+        erro: 'tipo inválido. Valores permitidos: ferias, doenca, falta, outro.',
       });
     }
 
@@ -2802,6 +2830,8 @@ exports.exportarTarefasCSV = async (req, res) => {
       .populate({ path: 'utilizador_id', select: 'nome' })
       .populate({ path: 'equipa_atribuida', select: 'nome' })
       .sort({ data: 1 })
+      // Listagem leve: as fotos (base64) só vão no detalhe/prova.
+      .select('-fotos_conclusao -avarias.fotos')
       .lean();
 
     // Cabeçalho CSV.

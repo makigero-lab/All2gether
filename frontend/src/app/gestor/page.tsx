@@ -31,6 +31,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { adminGet, adminPatch } from "@/lib/api";
 import { EstadoTarefaBadge } from "@/components/ui/estado-tarefa-badge";
+import { OfertaVagaBadge } from "@/components/gestor/oferta-vaga-badge";
 import { TipoMarca } from "@/components/tipo-limpeza-badge";
 import { PushNotificationSetup } from "@/components/gestor/push-notification-setup";
 import { formatarDataSegura, textoRedistribuicao, type RedistribuicaoDTO, plural } from "@/lib/utils";
@@ -45,7 +46,7 @@ interface DashboardData {
   tarefasEquipaIncompleta?: number;
   tarefasConcluidasHoje: number;
   // Próximas 48 h (limpezas ativas), para a coluna do dashboard.
-  proximas48h?: { _id: string; data: string; estado: string; tipo_limpeza: string; propriedade_nome: string }[];
+  proximas48h?: { _id: string; data: string; estado: string; tipo_limpeza: string; propriedade_nome: string; utilizador_id?: string | null; pessoas_em_falta?: number; oferta_estado?: string | null; oferta_expira_em?: string | null }[];
   // Limpezas em curso neste momento (início por botão ou automático).
   aDecorrerAgora?: {
     total: number;
@@ -319,8 +320,8 @@ export default function AdminDashboardPage() {
           </div>
 
           {/* 3 colunas: a decorrer, próximas 48 h, equipa hoje */}
-          <div className="grid gap-4 lg:grid-cols-3">
-            <section aria-labelledby="dash-decorrer" className="rounded-lg border bg-card">
+          <div className="grid min-w-0 gap-4 lg:grid-cols-3">
+            <section aria-labelledby="dash-decorrer" className="min-w-0 overflow-hidden rounded-lg border bg-card">
               <h2 id="dash-decorrer" className="flex items-center gap-2 border-b px-4 py-2.5 text-sm font-bold">
                 <Play className="h-4 w-4" aria-hidden="true" />
                 A decorrer agora
@@ -333,8 +334,8 @@ export default function AdminDashboardPage() {
                   {data.aDecorrerAgora.tarefas.map((x) => (
                     <li key={x._id} className="flex items-center justify-between gap-2 px-4 py-2.5 text-sm">
                       <div className="min-w-0">
-                        <p className="truncate font-medium">{x.propriedade_nome}</p>
-                        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <p className="line-clamp-2 break-words font-medium" title={x.propriedade_nome}>{x.propriedade_nome}</p>
+                        <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
                           <TipoMarca tipo={x.tipo_limpeza} className="text-xs" />
                           {x.iniciada_em ? ` · desde as ${formatarDataSegura(x.iniciada_em, (d) => format(d, "HH:mm"), "—")}` : ""}
                           {x.inicio_origem === "automatico" ? " · início automático" : x.inicio_origem === "botao" ? " · pelo botão" : ""}
@@ -349,7 +350,7 @@ export default function AdminDashboardPage() {
               )}
             </section>
 
-            <section aria-labelledby="dash-48h" className="rounded-lg border bg-card">
+            <section aria-labelledby="dash-48h" className="min-w-0 overflow-hidden rounded-lg border bg-card">
               <h2 id="dash-48h" className="flex items-center gap-2 border-b px-4 py-2.5 text-sm font-bold">
                 <ClipboardList className="h-4 w-4" aria-hidden="true" />
                 Próximas 48 h
@@ -365,20 +366,23 @@ export default function AdminDashboardPage() {
                   {data.proximas48h.map((x) => (
                     <li key={x._id} className="flex items-center justify-between gap-2 px-4 py-2.5 text-sm">
                       <div className="min-w-0">
-                        <p className="truncate font-medium">{x.propriedade_nome}</p>
-                        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <p className="line-clamp-2 break-words font-medium" title={x.propriedade_nome}>{x.propriedade_nome}</p>
+                        <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
                           <TipoMarca tipo={x.tipo_limpeza} className="text-xs" />
                           · {formatarDataSegura(x.data, (d) => format(d, "EEE HH:mm", { locale: pt }), x.data)}
                         </p>
                       </div>
-                      <EstadoTarefaBadge estado={x.estado} className="shrink-0" />
+                      <div className="flex shrink-0 flex-col items-end gap-1">
+                        <EstadoTarefaBadge estado={x.estado} />
+                        <OfertaVagaBadge tarefa={x} />
+                      </div>
                     </li>
                   ))}
                 </ul>
               )}
             </section>
 
-            <section aria-labelledby="dash-equipa" className="rounded-lg border bg-card">
+            <section aria-labelledby="dash-equipa" className="min-w-0 overflow-hidden rounded-lg border bg-card">
               <h2 id="dash-equipa" className="flex items-center gap-2 border-b px-4 py-2.5 text-sm font-bold">
                 <Users className="h-4 w-4" aria-hidden="true" />
                 Equipa hoje

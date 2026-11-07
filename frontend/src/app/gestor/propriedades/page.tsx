@@ -1111,7 +1111,7 @@ export default function PropriedadesPage() {
                             className="text-xs"
                             title={
                               p.parceiro_id && typeof p.parceiro_id === "object"
-                                ? `Parceiro Associado: ${p.parceiro_id.nome}`
+                                ? `Proprietário associado: ${p.parceiro_id.nome}`
                                 : "Propriedade All2gether"
                             }
                           >

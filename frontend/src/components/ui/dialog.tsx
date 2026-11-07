@@ -115,7 +115,7 @@ export function Dialog({ open, onOpenChange, children, ecraInteiroNoTelemovel = 
         aria-labelledby={titleId}
         tabIndex={-1}
         className={cn(
-          "relative z-10 w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-md border border-border/60 bg-card shadow-lg outline-none",
+          "relative z-10 w-full max-w-[min(32rem,calc(100vw-2rem))] max-h-[90vh] overflow-y-auto rounded-md border border-border/60 bg-card shadow-lg outline-none",
           ecraInteiroNoTelemovel && "flex flex-col overflow-hidden sm:max-w-3xl max-sm:h-full max-sm:max-h-full max-sm:max-w-none max-sm:rounded-none max-sm:border-0"
         )}
       >

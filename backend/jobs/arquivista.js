@@ -18,48 +18,86 @@ const cron = require('node-cron');
 const Tarefa = require('../models/Tarefa');
 const TarefaArquivo = require('../models/TarefaArquivo');
 
-async function executarArquivista() {
+const MESES_PADRAO = 3;
+const MESES_MIN = 1;
+const MESES_MAX = 120;
+const LOTE = 500;
+
+/** Valida os meses de antiguidade: inteiro entre 1 e 120 (por omissão 3). Lança erro se inválido. */
+function validarMeses(meses) {
+  if (meses === undefined || meses === null) return MESES_PADRAO;
+  const n = typeof meses === 'string' && meses.trim() !== '' ? Number(meses) : meses;
+  if (typeof n !== 'number' || !Number.isInteger(n) || n < MESES_MIN || n > MESES_MAX) {
+    throw new RangeError(`meses inválido (inteiro entre ${MESES_MIN} e ${MESES_MAX}).`);
+  }
+  return n;
+}
+
+/**
+ * Arquiva tarefas concluídas/canceladas com mais de `meses` meses (por omissão 3).
+ * Validação: `meses` tem de ser um inteiro razoável; cada tarefa é validada contra o schema do
+ * arquivo antes de ser copiada e só se apaga da coleção principal o que ficou mesmo no arquivo
+ * (uma tarefa inválida fica onde está e é registada no log, em vez de fazer falhar o lote todo).
+ */
+async function executarArquivista({ meses } = {}) {
   console.log('📦 [Arquivista] A iniciar às', new Date().toISOString());
 
   try {
-    // 1) Calcula a data limite (3 meses atrás).
-    const agora = new Date();
-    const limite = new Date(agora);
-    limite.setMonth(limite.getMonth() - 3);
+    const mesesValidos = validarMeses(meses);
+    // 1) Data limite.
+    const limite = new Date();
+    limite.setMonth(limite.getMonth() - mesesValidos);
 
-    // 2) Procura tarefas concluídas/canceladas com mais de 3 meses.
-    const tarefas = await Tarefa.find({
-      estado: { $in: ['concluida', 'cancelada'] },
-      data: { $lt: limite },
-    }).lean();
+    let arquivadas = 0;
+    let invalidas = 0;
+    let ultimoId = null;
 
-    if (tarefas.length === 0) {
+    // 2) Em lotes (não carrega tudo para memória), percorridos por _id.
+    for (;;) {
+      const filtro = {
+        estado: { $in: ['concluida', 'cancelada'] },
+        data: { $lt: limite },
+        ...(ultimoId ? { _id: { $gt: ultimoId } } : {}),
+      };
+      const tarefas = await Tarefa.find(filtro).sort({ _id: 1 }).limit(LOTE).lean();
+      if (tarefas.length === 0) break;
+      ultimoId = tarefas[tarefas.length - 1]._id;
+
+      const ja = new Set(
+        (await TarefaArquivo.find({ tarefa_original_id: { $in: tarefas.map((t) => t._id) } }).select('tarefa_original_id').lean())
+          .map((d) => String(d.tarefa_original_id))
+      );
+      const agora = new Date();
+      const paraInserir = [];
+      const idsApagar = [];
+      for (const t of tarefas) {
+        if (ja.has(String(t._id))) { idsApagar.push(t._id); continue; } // copiada antes de uma falha: só falta apagar
+        const doc = { ...t, arquivado_em: agora, tarefa_original_id: t._id };
+        delete doc._id;
+        const erro = new TarefaArquivo(doc).validateSync();
+        if (erro) {
+          invalidas++;
+          console.warn(`⚠️  [Arquivista] tarefa ${t._id} não arquivada (inválida): ${erro.message}`);
+          continue;
+        }
+        paraInserir.push(doc);
+        idsApagar.push(t._id);
+      }
+
+      // 3) Copia e só depois apaga (se a cópia falhar, nada é apagado).
+      if (paraInserir.length > 0) await TarefaArquivo.insertMany(paraInserir);
+      if (idsApagar.length > 0) {
+        const r = await Tarefa.deleteMany({ _id: { $in: idsApagar } });
+        arquivadas += r.deletedCount || 0;
+      }
+    }
+
+    if (arquivadas === 0 && invalidas === 0) {
       console.log('ℹ️  [Arquivista] Sem tarefas para arquivar.');
       return { arquivadas: 0 };
     }
-
-    console.log(`📦 [Arquivista] ${tarefas.length} tarefa(s) para arquivar (anteriores a ${limite.toISOString().slice(0, 10)}).`);
-
-    // 3) Copia para TarefaArquivo (adicionando arquivado_em).
-    const docsArquivo = tarefas.map((t) => ({
-      ...t,
-      arquivado_em: new Date(),
-      _id: undefined, // deixa o MongoDB gerar um novo _id no arquivo
-      // Mantém o _id original como referência (campo extra).
-      tarefa_original_id: t._id,
-    }));
-
-    await TarefaArquivo.insertMany(docsArquivo);
-
-    // 4) Apaga da coleção principal.
-    const ids = tarefas.map((t) => t._id);
-    const resultado = await Tarefa.deleteMany({ _id: { $in: ids } });
-
-    console.log(
-      `✅ [Arquivista] ${resultado.deletedCount} tarefa(s) arquivada(s) e removida(s) da coleção principal.`
-    );
-
-    return { arquivadas: resultado.deletedCount };
+    console.log(`✅ [Arquivista] ${arquivadas} tarefa(s) arquivada(s) (anteriores a ${limite.toISOString().slice(0, 10)}), ${invalidas} inválida(s) ignorada(s).`);
+    return { arquivadas, invalidas };
   } catch (err) {
     console.error('❌ [Arquivista] Erro:', err.message);
     return { arquivadas: 0, erro: err.message };
@@ -82,4 +120,4 @@ function iniciarArquivista() {
   return { executarArquivista };
 }
 
-module.exports = { iniciarArquivista, executarArquivista };
+module.exports = { iniciarArquivista, executarArquivista, validarMeses };
