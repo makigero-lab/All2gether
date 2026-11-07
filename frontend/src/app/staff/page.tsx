@@ -15,6 +15,7 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { TaskCard } from "@/components/staff/task-card";
+import { LimpezasLivres } from "@/components/staff/limpezas-livres";
 import {
   Dialog,
   DialogHeader,
@@ -109,8 +110,10 @@ export default function StaffPage() {
   const [submetendoFalta, setSubmetendoFalta] = useState(false);
   const [erroFalta, setErroFalta] = useState<string | null>(null);
 
-  const carregar = useCallback(async () => {
-    setLoading(true);
+  // `silencioso`: recarrega sem o ecrã de carregamento (não desmonta as Limpezas livres,
+  // que mostram a confirmação depois de Aceitar).
+  const carregar = useCallback(async (silencioso = false) => {
+    if (!silencioso) setLoading(true);
     try {
       // Prompt 113 — Usa lerUtilizador() (com cache temporal) em vez de
       // fetch direto a /api/auth/me. Isto evita:
@@ -313,17 +316,18 @@ export default function StaffPage() {
             </span>
           </div>
         ) : (
-          <div className="flex justify-end">
+          <div className="-my-2 flex justify-end">
+            {/* Discreto (texto pequeno) mas com a área de toque de 44 px (size touch). */}
             <Button
               variant="ghost"
               size="touch"
-              className="gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              className="gap-1.5 px-2 text-xs font-normal text-destructive hover:bg-destructive/10 hover:text-destructive"
               onClick={() => {
                 setMostrarDialogFalta(true);
                 setErroFalta(null);
               }}
             >
-              <AlertTriangle className="h-4 w-4" />
+              <AlertTriangle className="h-3.5 w-3.5" />
               Reportar falta hoje
             </Button>
           </div>
@@ -349,13 +353,13 @@ export default function StaffPage() {
                 Anterior
               </Button>
               <div className="flex flex-col items-center">
-                <span className={`text-sm font-bold ${offsetDia === 0 ? "text-gold-text" : "text-foreground"}`}>
+                <span className={`text-sm font-bold ${offsetDia === 0 ? "text-brand-text" : "text-foreground"}`}>
                   {diaLabel}
                 </span>
                 {offsetDia !== 0 && (
                   <button
                     onClick={() => setOffsetDia(0)}
-                    className="px-2 py-2 text-xs font-medium text-gold-text hover:underline"
+                    className="px-2 py-2 text-xs font-medium text-brand-text hover:underline"
                   >
                     Voltar a Hoje
                   </button>
@@ -381,6 +385,9 @@ export default function StaffPage() {
                 ))}
               </div>
             )}
+
+            {/* Limpezas livres oferecidas a toda a equipa (aceita quem chegar primeiro): depois do trabalho do dia */}
+            <LimpezasLivres onAceite={() => carregar(true)} limite={3} />
 
             {/* Tarefas concluídas do dia selecionado */}
             {tarefasConcluidasDia.length > 0 && (

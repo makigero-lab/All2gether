@@ -352,31 +352,63 @@ exports.getRelatorioTempoReal = async (req, res) => {
  * Body: payload do relatório (resumo + porStaff + porDia + ...).
  * Resposta 200: { resumo: "..." }
  */
+/**
+ * RGPD: os nomes das pessoas nunca saem para a IA. Troca cada nome de `porStaff` por «Pessoa N»
+ * e devolve também `repor(texto)`, que volta a pôr os nomes verdadeiros na resposta.
+ * («Por atribuir» e «Desconhecido» não são pessoas e ficam como estão.)
+ */
+function pseudonimizarContexto(contexto) {
+  const mapa = new Map(); // «Pessoa N» -> nome real
+  const nomeParaAlias = new Map();
+  const NAO_PESSOAS = new Set(['Por atribuir', 'Desconhecido']);
+  const porStaff = (contexto.porStaff || []).map((s) => {
+    if (!s || typeof s.nome !== 'string' || NAO_PESSOAS.has(s.nome)) return s;
+    if (!nomeParaAlias.has(s.nome)) {
+      const alias = `Pessoa ${nomeParaAlias.size + 1}`;
+      nomeParaAlias.set(s.nome, alias);
+      mapa.set(alias, s.nome);
+    }
+    return { ...s, nome: nomeParaAlias.get(s.nome) };
+  });
+  const repor = (texto) => {
+    let out = String(texto ?? '');
+    // «Pessoa 10» antes de «Pessoa 1»;  evita trocar parte de outro número.
+    const aliases = [...mapa.keys()].sort((a, b) => b.length - a.length);
+    for (const alias of aliases) {
+      out = out.replace(new RegExp(`${alias}(?![0-9])`, 'g'), () => mapa.get(alias));
+    }
+    return out;
+  };
+  return { contexto: { ...contexto, porStaff }, repor };
+}
+
 exports.getResumoIA = async (req, res) => {
   try {
     const dados = req.body || {};
 
     // Payload normalizado para construir o prompt / o placeholder.
-    const contexto = construirContexto(dados);
+    const contextoReal = construirContexto(dados);
+    // Só o contexto pseudonimizado vai para a IA; o placeholder local usa os nomes reais.
+    const { contexto, repor } = pseudonimizarContexto(contextoReal);
 
     /* ---- Tentativa LLM (best-effort) — Prompt 125: Gemini tem prioridade ---- */
     let resumoLLM = null;
 
     if (process.env.GEMINI_API_KEY) {
       try {
-        resumoLLM = await chamarGemini(contexto);
+        resumoLLM = repor(await chamarGemini(contexto));
       } catch (err) {
         console.warn('⚠️  Gemini falhou, a usar placeholder:', err.message);
       }
     } else if (process.env.OPENAI_API_KEY) {
       try {
-        resumoLLM = await chamarOpenAI(contexto);
+        resumoLLM = repor(await chamarOpenAI(contexto));
       } catch (err) {
         console.warn('⚠️  OpenAI falhou, a usar placeholder:', err.message);
       }
     }
 
-    const resumo = resumoLLM || gerarPlaceholder(contexto);
+    const resumo = resumoLLM || gerarPlaceholder(contextoReal);
 
     // Notifica o portal Autocell de que um relatório foi submetido/gerado.
     // Fire-and-forget (sem await): o envio do webhook não deve bloquear a
@@ -740,3 +772,7 @@ function gerarPlaceholder(contexto) {
     recFinal.map((r) => `- ${r}`).join('\n'),
   ].join('\n');
 }
+
+exports.pseudonimizarContexto = pseudonimizarContexto;
+exports.construirPrompt = construirPrompt;
+exports.construirContexto = construirContexto;

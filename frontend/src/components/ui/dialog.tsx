@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -14,6 +15,8 @@ interface DialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   children: React.ReactNode;
+  /** No telemóvel o painel ocupa o ecrã inteiro (formulários longos). */
+  ecraInteiroNoTelemovel?: boolean;
 }
 
 /** Liga o DialogTitle ao painel (aria-labelledby). */
@@ -25,7 +28,7 @@ const pilhaDialogs: string[] = [];
 const FOCAVEIS =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-export function Dialog({ open, onOpenChange, children }: DialogProps) {
+export function Dialog({ open, onOpenChange, children, ecraInteiroNoTelemovel = false }: DialogProps) {
   const id = React.useId();
   const titleId = `${id}-titulo`;
   const painelRef = React.useRef<HTMLDivElement>(null);
@@ -92,10 +95,12 @@ export function Dialog({ open, onOpenChange, children }: DialogProps) {
     }
   }, [open]);
 
-  if (!open) return null;
+  if (!open || typeof document === "undefined") return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+  // Em portal no body: dentro de um pai com transform (ex.: cartão com active:scale) o
+  // "fixed" deixava de ser relativo ao ecrã e o diálogo saltava ao carregar nele.
+  return createPortal(
+    <div className={cn("fixed inset-0 z-50 flex items-center justify-center p-4", ecraInteiroNoTelemovel && "max-sm:p-0")}>
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/50"
@@ -109,13 +114,17 @@ export function Dialog({ open, onOpenChange, children }: DialogProps) {
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="relative z-10 w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-md border border-border/60 bg-card shadow-lg outline-none"
+        className={cn(
+          "relative z-10 w-full max-w-[min(32rem,calc(100vw-2rem))] max-h-[90vh] overflow-y-auto rounded-md border border-border/60 bg-card shadow-lg outline-none",
+          ecraInteiroNoTelemovel && "flex flex-col overflow-hidden sm:max-w-3xl max-sm:h-full max-sm:max-h-full max-sm:max-w-none max-sm:rounded-none max-sm:border-0"
+        )}
       >
         <DialogTitleIdContext.Provider value={titleId}>
           {children}
         </DialogTitleIdContext.Provider>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

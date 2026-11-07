@@ -102,7 +102,7 @@ interface RelatorioData {
 
 // Paleta coesa com o tema dourado do All2gether.
 const CORES = {
-  dourado: "hsl(43, 74%, 49%)",
+  dourado: "hsl(190, 80%, 23%)",
   verde: "hsl(142, 71%, 45%)",
   vermelho: "hsl(0, 72%, 51%)",
   amber: "hsl(38, 92%, 50%)",
@@ -112,7 +112,7 @@ const CORES = {
 // Cor do TEXTO (≥ 4,5:1 nos dois temas) para cada cor de série: as cores de série
 // servem só para ícones e gráficos (não chegam a 4,5:1 como texto).
 const TEXTO_POR_COR: Record<string, string> = {
-  [CORES.dourado]: "hsl(var(--gold-text))",
+  [CORES.dourado]: "hsl(var(--brand-text))",
   [CORES.verde]: "hsl(var(--status-conc))",
   [CORES.vermelho]: "hsl(var(--status-naoat))",
   [CORES.amber]: "hsl(var(--status-porat))",
@@ -299,8 +299,8 @@ export default function RelatoriosPage() {
         '* { box-sizing: border-box; margin: 0; padding: 0; }',
         'body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color: #0f172a; font-size: 12px; line-height: 1.5; padding: 20px; }',
         'h1 { font-size: 18px; font-weight: 700; }',
-        'h2 { font-size: 14px; font-weight: 700; margin-top: 16px; margin-bottom: 6px; color: #c9a227; }',
-        '.header { border-bottom: 2px solid #c9a227; padding-bottom: 8px; margin-bottom: 16px; }',
+        'h2 { font-size: 14px; font-weight: 700; margin-top: 16px; margin-bottom: 6px; color: #0B5D6B; }',
+        '.header { border-bottom: 2px solid #0B5D6B; padding-bottom: 8px; margin-bottom: 16px; }',
         '.ia-box { background: #fffaf0; border: 1px solid #fde68a; border-radius: 6px; padding: 10px; font-size: 11.5px; color: #1f2937; white-space: pre-wrap; margin-bottom: 16px; }',
         '.kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 16px; }',
         '.kpi { border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px; text-align: center; }',
@@ -310,7 +310,7 @@ export default function RelatoriosPage() {
         'table { width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 11px; }',
         'th { background: #f1f5f9; padding: 6px 8px; text-align: left; font-weight: 600; border-bottom: 1px solid #e2e8f0; }',
         'td { padding: 6px 8px; border-bottom: 1px solid #f1f5f9; }',
-        '.barra { height: 12px; border-radius: 3px; background: #c9a227; }',
+        '.barra { height: 12px; border-radius: 3px; background: #0B5D6B; }',
         '.barra-container { width: 100%; height: 12px; background: #f1f5f9; border-radius: 3px; overflow: hidden; }',
         '@media print { body { padding: 0; } }',
         '</style></head><body>',
@@ -575,7 +575,7 @@ export default function RelatoriosPage() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <TrendingUp className="h-5 w-5 text-gold-text" />
+                <TrendingUp className="h-5 w-5 text-brand-text" />
                 Evolução diária
               </CardTitle>
               <CardDescription>
@@ -632,7 +632,7 @@ export default function RelatoriosPage() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <BarChart3 className="h-5 w-5 text-gold-text" />
+                  <BarChart3 className="h-5 w-5 text-brand-text" />
                   Produtividade por funcionário
                 </CardTitle>
                 <CardDescription>Concluídas vs. total de tarefas atribuídas.</CardDescription>
@@ -674,7 +674,7 @@ export default function RelatoriosPage() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <BarChart3 className="h-5 w-5 text-gold-text" />
+                  <BarChart3 className="h-5 w-5 text-brand-text" />
                   Distribuição por estado
                 </CardTitle>
                 <CardDescription>Repartição das tarefas no período.</CardDescription>
@@ -734,7 +734,7 @@ export default function RelatoriosPage() {
                 </p>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
+                  <table className="rt w-full text-sm">
                     <thead>
                       <tr className="border-b text-left text-muted-foreground">
                         <th className="py-2 pr-4 font-medium">Propriedade</th>
@@ -784,7 +784,7 @@ export default function RelatoriosPage() {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="space-y-1">
                   <CardTitle className="flex items-center gap-2">
-                    <Sparkles className="h-5 w-5 text-gold-text" />
+                    <Sparkles className="h-5 w-5 text-brand-text" />
                     Resumo Executivo IA
                   </CardTitle>
                   <CardDescription>
@@ -881,7 +881,7 @@ function ResumoIATexto({ texto }: { texto: string }) {
       blocos.push(
         <h3
           key={`h-${idx}`}
-          className="mt-4 mb-1 text-sm font-semibold text-gold-text first:mt-0"
+          className="mt-4 mb-1 text-sm font-semibold text-brand-text first:mt-0"
         >
           {t.slice(3).trim()}
         </h3>

@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  CalendarClock,
   Clock,
   Timer,
   MapPin,
@@ -39,6 +40,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EstadoTarefaBadge } from "@/components/ui/estado-tarefa-badge";
+import { OfertaVagaBadge } from "@/components/gestor/oferta-vaga-badge";
 import {
   Card,
   CardContent,
@@ -46,6 +48,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { DetalhesReservaCard } from "@/components/detalhes-reserva-card";
+import { MudarDiaDialog, podeMudarDia } from "@/components/gestor/mudar-dia-dialog";
 
 /** Tarefa no formato devolvido pelo GET /api/gestor/tarefas (com populate). */
 export interface AvariaDTO {
@@ -80,6 +83,8 @@ export interface TarefaDetalheGestor {
   utilizador_id?: { _id?: string; nome: string } | null;
   equipa_atribuida?: { _id?: string; nome: string }[] | null;
   pessoas_em_falta?: number;
+  oferta_estado?: string | null;
+  oferta_expira_em?: string | null;
   // Início da limpeza e alertas (ex.: «Não consegui começar»).
   iniciada_em?: string | null;
   inicio_origem?: "botao" | "automatico" | null;
@@ -160,12 +165,14 @@ function formatarDataHora(iso: string): string {
       day: "2-digit",
       month: "2-digit",
       year: "numeric",
+      timeZone: "Europe/Lisbon",
     });
-    if (d.getHours() === 0 && d.getMinutes() === 0) return data;
     const hora = d.toLocaleTimeString("pt-PT", {
       hour: "2-digit",
       minute: "2-digit",
+      timeZone: "Europe/Lisbon",
     });
+    if (hora === "00:00") return data;
     return `${data} - ${hora}`;
   } catch {
     return iso;
@@ -191,13 +198,17 @@ export function DetalheTarefaModal({
   open,
   onOpenChange,
   onAvariaAlterada,
+  onDiaAlterado,
 }: {
   tarefa: TarefaDetalheGestor | null;
   open: boolean;
   onOpenChange: (o: boolean) => void;
   /** Chamado depois de marcar uma avaria como resolvida (para a lista recarregar). */
   onAvariaAlterada?: () => void;
+  /** Chamado depois de «Mudar dia» (a lista recarrega); `aviso` = ficou por atribuir, falta gente... */
+  onDiaAlterado?: (aviso: string | null) => void;
 }) {
+  const [mudarDiaAberto, setMudarDiaAberto] = useState(false);
   const Icon = tarefa ? (tipoIcon[tarefa.tipo] ?? SprayCan) : SprayCan;
 
   // Prova da limpeza: fotos, hora de conclusão e checklist, só ao abrir.
@@ -277,7 +288,7 @@ export function DetalheTarefaModal({
       <DialogHeader>
         <div>
           <DialogTitle className="flex items-center gap-2">
-            {tarefa && <Icon className="h-5 w-5 text-gold-text" />}
+            {tarefa && <Icon className="h-5 w-5 text-brand-text" />}
             Detalhe da Limpeza
           </DialogTitle>
           <DialogDescription>
@@ -296,6 +307,13 @@ export function DetalheTarefaModal({
               </h3>
               <Badge variant="outline">{tipoLabel[tarefa.tipo] ?? tarefa.tipo}</Badge>
               <EstadoTarefaBadge estado={tarefa.estado} />
+              <OfertaVagaBadge tarefa={tarefa} />
+              {tarefa.tipo === "limpeza" && podeMudarDia(tarefa) && (
+                <Button type="button" variant="outline" size="sm" className="ml-auto h-9 gap-1.5" onClick={() => setMudarDiaAberto(true)}>
+                  <CalendarClock className="h-4 w-4" aria-hidden="true" />
+                  Mudar dia
+                </Button>
+              )}
             </div>
 
             {/* Metadados rápidos */}
@@ -386,7 +404,7 @@ export function DetalheTarefaModal({
             {/* Início da limpeza */}
             {tarefa.iniciada_em && (
               <p className="flex items-center gap-2 text-sm">
-                <Play className="h-4 w-4 text-gold-text" aria-hidden="true" />
+                <Play className="h-4 w-4 text-brand-text" aria-hidden="true" />
                 Começou às <strong>{horaCurta(tarefa.iniciada_em)}</strong>
                 <span className="text-muted-foreground">
                   ({tarefa.inicio_origem === "automatico" ? "início automático, à hora marcada" : "pelo botão «Comecei»"})
@@ -457,7 +475,7 @@ export function DetalheTarefaModal({
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="flex items-center gap-2 text-sm">
-                    <StickyNote className="h-4 w-4 text-gold-text" />
+                    <StickyNote className="h-4 w-4 text-brand-text" />
                     Observações
                   </CardTitle>
                 </CardHeader>
@@ -565,6 +583,15 @@ export function DetalheTarefaModal({
           </>
         )}
       </DialogContent>
+      <MudarDiaDialog
+        tarefa={tarefa}
+        open={mudarDiaAberto}
+        onOpenChange={setMudarDiaAberto}
+        onFeito={(aviso) => {
+          onOpenChange(false);
+          onDiaAlterado?.(aviso);
+        }}
+      />
     </Dialog>
   );
 }

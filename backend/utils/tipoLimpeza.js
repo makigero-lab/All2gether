@@ -91,38 +91,50 @@ function diaTexto(v) {
 
 const diasEntre = (de, ate) => Math.round((Date.parse(`${ate}T00:00:00Z`) - Date.parse(`${de}T00:00:00Z`)) / 86400000);
 
-/** Máximo de dias que a limpeza de preparação pode anteceder o check-in. */
-const MAX_DIAS_PREPARACAO = 30;
+/** Soma `n` dias a um dia AAAA-MM-DD. */
+const somarDias = (dia, n) => new Date(Date.parse(`${dia}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
 
 /**
- * Data (dia) da limpeza e validações por tipo.
- * `data_limpeza` só aceita texto AAAA-MM-DD (ou ISO, pelos 10 primeiros caracteres) ou Date;
- * números, booleanos, listas e objetos dão erro. `hoje` (AAAA-MM-DD), se vier, recusa uma
- * preparação no passado.
+ * Dia automático da limpeza (o parceiro não o escolhe):
+ *  - normal e profunda: check-out;
+ *  - intermédia: a meio da estadia = check-in + metade das noites (arredondado para baixo);
+ *    numa estadia de 1 noite (ou sem noites) fica no check-out;
+ *  - preparação: dia do check-in.
+ * @returns {string} AAAA-MM-DD
+ */
+function diaAutomatico(tipo, ci, co) {
+  if (tipo === 'preparacao') return ci;
+  if (tipo === 'intermedia') {
+    const noites = diasEntre(ci, co);
+    return noites <= 1 ? co : somarDias(ci, Math.floor(noites / 2));
+  }
+  return co;
+}
+
+/**
+ * Dia da limpeza e validações por tipo. O dia é AUTOMÁTICO (ver `diaAutomatico`).
+ * `data_gravada` é a data já guardada numa reserva antiga (ou ajustada): se ainda é
+ * válida para o tipo e para a estadia, continua a valer; o que o parceiro enviar
+ * como `data_limpeza` nunca chega aqui (é ignorado pelos controladores).
+ * `ajustada`: a data gravada foi escolhida pelo gestor («Mudar dia») e prevalece.
+ * `hoje` (AAAA-MM-DD), se vier, recusa uma preparação cujo check-in já passou.
  * @returns {{ erro: string } | { dataLimpeza: Date|null, dia: string }}
  */
-function resolverDiaLimpeza({ tipo, check_in, check_out, data_limpeza, hoje }) {
+function resolverDiaLimpeza({ tipo, check_in, check_out, data_gravada, ajustada = false, hoje }) {
   const ci = diaTexto(check_in);
   const co = diaTexto(check_out);
   if (!ci || !co) return { erro: 'Datas inválidas.' };
-  const vazio = data_limpeza === undefined || data_limpeza === null || data_limpeza === '';
-  if (!vazio && typeof data_limpeza !== 'string' && !(data_limpeza instanceof Date)) {
-    return { erro: 'data_limpeza inválida (usa o formato AAAA-MM-DD).' };
-  }
+  const g = diaTexto(data_gravada);
+  // Dia ajustado pelo gestor: vale tal como está (qualquer tipo) enquanto o tipo e a estadia não mudarem.
+  if (ajustada && g) return { dataLimpeza: new Date(`${g}T00:00:00Z`), dia: g, ajustada: true };
   if (eSaida(tipo)) return { dataLimpeza: null, dia: co };
-  const nome = ROTULOS_TIPO[tipo].toLowerCase();
-  if (vazio) return { erro: `A data da limpeza é obrigatória na limpeza ${nome}.` };
-  const d = diaTexto(data_limpeza);
-  if (!d) return { erro: 'data_limpeza inválida (usa o formato AAAA-MM-DD).' };
-  if (tipo === 'intermedia' && (d < ci || d > co)) {
-    return { erro: 'A limpeza intermédia tem de ser entre o check-in e o check-out.' };
+  const gravadaValida = g && (tipo === 'intermedia' ? g >= ci && g <= co : g <= ci);
+  const d = gravadaValida ? g : diaAutomatico(tipo, ci, co);
+  if (tipo === 'preparacao' && !gravadaValida && hoje && d < hoje) {
+    return { erro: 'A limpeza de preparação é no dia do check-in, que já passou.' };
   }
-  if (tipo === 'preparacao') {
-    if (d > ci) return { erro: 'A limpeza de preparação tem de ser até ao check-in.' };
-    if (hoje && d < hoje) return { erro: 'A limpeza de preparação não pode ser no passado.' };
-    if (diasEntre(d, ci) > MAX_DIAS_PREPARACAO) {
-      return { erro: `A limpeza de preparação pode ser no máximo ${MAX_DIAS_PREPARACAO} dias antes do check-in.` };
-    }
+  if (tipo === 'intermedia' && !gravadaValida && hoje && d < hoje) {
+    return { erro: 'A limpeza intermédia calculada para esta estadia já passou.' };
   }
   return { dataLimpeza: new Date(`${d}T00:00:00Z`), dia: d };
 }
@@ -168,7 +180,7 @@ function lerConfigTipos(body) {
 
 module.exports = {
   diaTexto,
-  MAX_DIAS_PREPARACAO,
+  diaAutomatico,
   lerConfigTipos,
   TIPOS_LIMPEZA,
   TIPOS_COM_DATA,

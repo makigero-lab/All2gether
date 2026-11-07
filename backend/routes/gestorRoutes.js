@@ -26,7 +26,6 @@
 const express = require('express');
 const router = express.Router();
 
-const rawXlsx = require('../middleware/rawXlsx');
 const { auth } = require('../middleware/auth');
 const { isGestor, isAdmin } = require('../middleware/requireRole');
 const {
@@ -55,14 +54,14 @@ const {
   getFornecedores,
   getContactoHospede,
 } = require('../controllers/gestorController');
-const { reportarAtrasoTarefa, criarTarefa, atribuirTarefa, reatribuirTarefa, atualizarEstadoTarefa, apagarTarefasFuturas, listarIndisponiveisData, autoAtribuirTarefas, criarTarefaEspontanea } = require('../controllers/tarefaController');
+const { reportarAtrasoTarefa, criarTarefa, atribuirTarefa, reatribuirTarefa, atualizarEstadoTarefa, apagarTarefasFuturas, listarIndisponiveisData, autoAtribuirTarefas, criarTarefaEspontanea, listarDisponiveisTarefa, mudarDiaTarefa } = require('../controllers/tarefaController');
 // CRUD de Modelos de Checklist (futuro: Modelos de Protocolo Clínico)
 const { getProvaLimpeza, resolverAvaria } = require('../controllers/provaController');
 const { listarModelos, criarModelo, obterModelo, atualizarModelo, apagarModelo } = require('../controllers/checklistController');
 // Smoobu — importação/sincronização de propriedades (HF5) + reservas (HF7).
 const { getPropriedadesSmoobu, importarPropriedades, sincronizarReservas, reconciliarCancelamentos } = require('../controllers/smoobuController');
 // FIX (import/export excel) — Controller de importação/exportação de Excel.
-const { exportarExcel, importarExcel } = require('../controllers/excelController');
+const { exportarExcel } = require('../controllers/excelController');
 
 // SEGURANÇA: a rota pública GET /setup foi removida (criava admin com password fixa).
 // O admin inicial é criado por `seed-admin.js` (npm start / npm run seed:admin).
@@ -137,9 +136,8 @@ router.get('/calendario/dados', auth, isGestor, getDadosCalendario);
 // Exportação CSV de tarefas.
 router.get('/tarefas/export', auth, isGestor, exportarTarefasCSV);
 
-// FIX (import/export excel) — Rotas de importação/exportação de reservas.
+// FIX (import/export excel) — Exportação de reservas.
 router.get('/reservas/exportar-excel', auth, isGestor, exportarExcel);
-router.post('/reservas/importar-excel', auth, isGestor, rawXlsx, importarExcel);
 
 // Reportar atraso numa tarefa.
 router.post('/tarefas/:id/atraso', auth, isGestor, reportarAtrasoTarefa);
@@ -150,6 +148,8 @@ router.patch('/tarefas/:id/avarias/:avariaId/resolver', auth, isGestor, resolver
 // Gestão manual de tarefas.
 router.post('/tarefas', auth, isGestor, criarTarefa);
 router.post('/tarefas/espontanea', auth, isGestor, criarTarefaEspontanea);
+router.get('/tarefas/:id/disponiveis', auth, isGestor, listarDisponiveisTarefa);
+router.patch('/tarefas/:id/data', auth, isGestor, mudarDiaTarefa);
 router.patch('/tarefas/:id/atribuir', auth, isGestor, atribuirTarefa);
 router.patch('/tarefas/:id/reatribuir', auth, isGestor, reatribuirTarefa);
 router.patch('/tarefas/:id/estado', auth, isGestor, atualizarEstadoTarefa);

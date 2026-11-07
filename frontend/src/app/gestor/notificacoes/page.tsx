@@ -176,7 +176,7 @@ export default function GestorNotificacoesPage() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Bell className="h-5 w-5 text-gold-text" />
+            <Bell className="h-5 w-5 text-brand-text" />
             Notificações
           </CardTitle>
           <CardDescription>
@@ -197,7 +197,7 @@ export default function GestorNotificacoesPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="rt w-full text-sm">
                 <thead>
                   <tr className="border-b bg-muted/40 text-left">
                     <th className="px-4 py-3 font-medium">Mensagem</th>

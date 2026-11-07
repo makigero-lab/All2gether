@@ -362,6 +362,7 @@ async function atribuirTarefaEmFalta(tarefa, dia) {
           tempo_viagem_minutos: plano.tempo_viagem_minutos,
           motivo_nao_atribuicao: null,
           pessoas_em_falta: plano.faltam,
+          desatribuida_manual: false,
         },
       }
     );
@@ -409,7 +410,8 @@ async function preencherVagasPeriodo(empresaId, inicio, fim) {
       empresa_id: empresaId,
       data: { $gte: de, $lt: ate },
       $or: [
-        { estado: { $in: ['por_atribuir', 'nao_atribuida'] }, utilizador_id: null },
+        // Tarefas que o gestor desatribuiu à mão de propósito ficam de fora.
+        { estado: { $in: ['por_atribuir', 'nao_atribuida'] }, utilizador_id: null, desatribuida_manual: { $ne: true } },
         { estado: 'atribuida', pessoas_em_falta: { $gt: 0 } },
         FILTRO_SEM_PESSOA,
       ],

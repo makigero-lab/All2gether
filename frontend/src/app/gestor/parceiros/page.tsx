@@ -94,7 +94,7 @@ export default function ParceirosPage() {
       );
       setParceiros(data.utilizadores ?? []);
     } catch (e) {
-      setErro(e instanceof Error ? e.message : "Erro ao carregar parceiros.");
+      setErro(e instanceof Error ? e.message : "Erro ao carregar proprietários.");
     } finally {
       setLoading(false);
     }
@@ -130,7 +130,7 @@ export default function ParceirosPage() {
       setCriarOpen(false);
       await carregar();
     } catch (e) {
-      setCriarErro(e instanceof Error ? e.message : "Erro ao criar parceiro.");
+      setCriarErro(e instanceof Error ? e.message : "Erro ao criar proprietário.");
     } finally {
       setCriarSubmitting(false);
     }
@@ -176,7 +176,7 @@ export default function ParceirosPage() {
       setEditando(null);
       await carregar();
     } catch (e) {
-      setEditErro(e instanceof Error ? e.message : "Erro ao editar parceiro.");
+      setEditErro(e instanceof Error ? e.message : "Erro ao editar proprietário.");
     } finally {
       setEditSubmitting(false);
     }
@@ -205,7 +205,7 @@ export default function ParceirosPage() {
         <div className="hidden flex-col gap-1 lg:flex">
           <h1 className="text-2xl font-bold tracking-tight">Proprietários</h1>
           <p className="text-sm text-muted-foreground">
-            Gestão de parceiros B2B externos (criam reservas no portal /parceiro).
+            Gestão de proprietários externos (criam reservas no portal do proprietário).
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -220,7 +220,7 @@ export default function ParceirosPage() {
           </Button>
           <Button onClick={() => { setCriarOpen(true); setCriarErro(null); }}>
             <Plus className="h-4 w-4" />
-            Novo parceiro
+            Novo proprietário
           </Button>
         </div>
       </div>
@@ -241,17 +241,17 @@ export default function ParceirosPage() {
         <CardContent className="p-0">
           {loading ? (
             <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
-              <Loader2 className="h-5 w-5 animate-spin" />A carregar parceiros…
+              <Loader2 className="h-5 w-5 animate-spin" />A carregar proprietários…
             </div>
           ) : parceiros.length === 0 ? (
             <div className="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">
               <Handshake className="h-10 w-10 opacity-40" />
-              <p className="text-sm">Ainda não há parceiros.</p>
+              <p className="text-sm">Ainda não há proprietários.</p>
               <p className="text-xs">Clica em &quot;Novo Proprietário&quot; para adicionar o primeiro.</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="rt w-full text-sm">
                 <thead>
                   <tr className="border-b bg-muted/40 text-left">
                     <th className="px-4 py-3 font-medium">Nome</th>
@@ -315,11 +315,11 @@ export default function ParceirosPage() {
       <Dialog open={criarOpen} onOpenChange={setCriarOpen}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Handshake className="h-5 w-5 text-gold-text" />
-            Novo parceiro
+            <Handshake className="h-5 w-5 text-brand-text" />
+            Novo proprietário
           </DialogTitle>
           <DialogDescription>
-            Cria um parceiro B2B. Ele terá acesso ao portal /parceiro para criar reservas.
+            Cria um proprietário. Terá acesso ao portal do proprietário para criar reservas.
           </DialogDescription>
           <DialogClose onClick={() => setCriarOpen(false)} />
         </DialogHeader>
@@ -347,7 +347,7 @@ export default function ParceirosPage() {
                 type="email"
                 value={criarForm.email}
                 onChange={(e) => setCriarForm((f) => ({ ...f, email: e.target.value }))}
-                placeholder="parceiro@empresa.com"
+                placeholder="proprietario@empresa.com"
                 required
               />
             </div>
@@ -432,8 +432,8 @@ export default function ParceirosPage() {
       <Dialog open={editando !== null} onOpenChange={(o) => !o && setEditando(null)}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Pencil className="h-5 w-5 text-gold-text" />
-            Editar parceiro
+            <Pencil className="h-5 w-5 text-brand-text" />
+            Editar proprietário
           </DialogTitle>
           <DialogDescription>{editando?.email}</DialogDescription>
           <DialogClose onClick={() => setEditando(null)} />

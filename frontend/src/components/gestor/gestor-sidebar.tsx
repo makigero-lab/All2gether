@@ -135,7 +135,7 @@ export function GestorSidebar() {
     href === basePath ? pathname === href : pathname.startsWith(href);
 
   const NavLinks = () => (
-    <nav className="flex flex-col gap-1 px-3 py-4">
+    <nav aria-label="Menu do gestor" className="flex flex-col gap-0.5 px-3 py-2">
       {/* FIX (configs restritas a admin) — Filtra itens exclusivos do admin.
           "Configurações" só aparece para role === 'admin'. O gestor não vê
           nem acede a /gestor/configuracoes (exclusivo do Super Admin). */}
@@ -157,13 +157,13 @@ export function GestorSidebar() {
             prefetch
             onClick={() => setOpen(false)}
             className={cn(
-              "flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors",
+              "flex min-h-10 items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
               active
-                ? "bg-primary/10 text-gold-text"
-                : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                ? "bg-side-active text-side-active-foreground"
+                : "text-side-foreground hover:bg-side-active/60"
             )}
           >
-            <Icon className="h-5 w-5 shrink-0" />
+            <Icon className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
             {item.label}
           </Link>
         );
@@ -172,14 +172,14 @@ export function GestorSidebar() {
   );
 
   const Brand = () => (
-    <div className="flex h-16 items-center gap-2 border-b px-6">
+    <div className="flex h-16 items-center gap-2.5 px-5">
       <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
         <Sparkles className="h-5 w-5" />
       </div>
       <div className="flex flex-col leading-none">
         <span className="text-sm font-bold">All2gether</span>
         {/* FIX (perfil admin dinâmico) — label reflete o role real do utilizador */}
-        <span className="text-xs text-muted-foreground">{roleLabel}</span>
+        <span className="text-xs text-side-muted">{roleLabel}</span>
       </div>
     </div>
   );
@@ -202,27 +202,27 @@ export function GestorSidebar() {
       </header>
 
       {/* Sidebar — desktop */}
-      <aside className="hidden w-64 shrink-0 border-r bg-card lg:flex lg:flex-col">
+      <aside className="hidden w-56 shrink-0 border-r bg-side text-side-foreground lg:flex lg:flex-col">
         <Brand />
         <NavLinks />
-        <div className="mt-auto space-y-2 border-t p-4">
+        <div className="mt-auto space-y-2 border-t p-3">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-xs text-muted-foreground">Notificações</span>
+            <span className="text-xs text-side-muted">Notificações</span>
             <NotificationBell paraCima />
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-xs text-muted-foreground">Tema</span>
+            <span className="text-xs text-side-muted">Tema</span>
             <ThemeToggle />
           </div>
           <Button
             variant="ghost"
-            className="w-full justify-start gap-2 text-sm text-muted-foreground hover:text-destructive"
+            className="w-full justify-start gap-2 text-sm text-side-muted hover:text-destructive"
             onClick={() => fazerLogout()}
           >
             <LogOut className="h-4 w-4" />
             Terminar sessão
           </Button>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-side-muted">
             © {new Date().getFullYear()} All2gether
           </p>
         </div>
@@ -236,7 +236,7 @@ export function GestorSidebar() {
             onClick={() => setOpen(false)}
             aria-hidden
           />
-          <div className="absolute left-0 top-0 flex h-full w-72 max-w-[80%] flex-col bg-card shadow-xl">
+          <div className="absolute left-0 top-0 flex h-full w-72 max-w-[80%] flex-col bg-side text-side-foreground shadow-xl">
             <div className="flex h-16 items-center justify-between border-b px-4">
               <div className="flex items-center gap-2">
                 <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
@@ -257,24 +257,24 @@ export function GestorSidebar() {
             {/* HF15 — Footer do menu mobile com notificações, tema e logout.
                 Antes o overlay mobile só tinha Brand + NavLinks — o logout
                 ficava inacessível em telemóveis/tablets. */}
-            <div className="mt-auto space-y-2 border-t p-4">
+            <div className="mt-auto space-y-2 border-t p-3">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-xs text-muted-foreground">Notificações</span>
+                <span className="text-xs text-side-muted">Notificações</span>
                 <NotificationBell />
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">Tema</span>
+                <span className="text-xs text-side-muted">Tema</span>
                 <ThemeToggle />
               </div>
               <Button
                 variant="ghost"
-                className="w-full justify-start gap-2 text-sm text-muted-foreground hover:text-destructive"
+                className="w-full justify-start gap-2 text-sm text-side-muted hover:text-destructive"
                 onClick={() => fazerLogout()}
               >
                 <LogOut className="h-4 w-4" />
                 Terminar sessão
               </Button>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs text-side-muted">
                 © {new Date().getFullYear()} All2gether
               </p>
             </div>

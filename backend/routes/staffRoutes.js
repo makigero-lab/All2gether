@@ -26,6 +26,9 @@ const express = require('express');
 const router = express.Router();
 
 const { auth } = require('../middleware/auth');
+const { requireRole } = require('../middleware/requireRole');
+// Ausências e faltas: só quem faz limpezas (staff) ou gere (gestor/admin); parceiros e fornecedores não.
+const equipaOuGestor = requireRole('staff', 'gestor', 'admin');
 const {
   minhasAusencias,
   criarAusencia,
@@ -38,13 +41,17 @@ const {
   toggleChecklistItem,
 } = require('../controllers/staffController');
 const { iniciarTarefa, naoConseguiComecar } = require('../controllers/staffInicioController');
+const { listarVagasLivres, aceitarVagaLivre } = require('../controllers/staffVagasController');
 
-router.get('/ausencias', auth, minhasAusencias);
-router.post('/ausencias', auth, criarAusencia);
-router.delete('/ausencias/:id', auth, cancelarAusencia);
+router.get('/ausencias', auth, equipaOuGestor, minhasAusencias);
+router.post('/ausencias', auth, equipaOuGestor, criarAusencia);
+router.delete('/ausencias/:id', auth, equipaOuGestor, cancelarAusencia);
 // Prompt 132 — Soft cancel (mantém histórico)
-router.patch('/ausencias/:id/cancelar', auth, cancelarAusenciaSoft);
-router.post('/falta-hoje', auth, faltaHoje);
+router.patch('/ausencias/:id/cancelar', auth, equipaOuGestor, cancelarAusenciaSoft);
+// Limpezas livres: vagas que ninguém tinha disponibilidade para fazer, oferecidas à equipa.
+router.get('/vagas-livres', auth, requireRole('staff'), listarVagasLivres);
+router.post('/vagas-livres/:id/aceitar', auth, requireRole('staff'), aceitarVagaLivre);
+router.post('/falta-hoje', auth, equipaOuGestor, faltaHoje);
 router.patch('/tarefas/:id/iniciar', auth, iniciarTarefa);
 router.post('/tarefas/:id/nao-consegui', auth, naoConseguiComecar);
 router.patch('/tarefas/:id/concluir', auth, concluirTarefa);

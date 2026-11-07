@@ -255,6 +255,8 @@ const tarefaSchema = new mongoose.Schema(
     // A checklist desta tarefa veio de uma checklist PRÓPRIA do tipo (e não da checklist base da casa).
     // O staff vê «segue a checklist própria desta casa» só quando é verdade.
     checklist_do_tipo: { type: Boolean, default: false },
+    // true quando o gestor mudou o dia («Mudar dia»): o sistema não o recalcula sozinho.
+    data_ajustada_gestor: { type: Boolean, default: false },
     tipo_limpeza: {
       type: String,
       enum: ['normal', 'intermedia', 'profunda', 'preparacao'],
@@ -295,6 +297,20 @@ tarefaSchema.add({
 // duas instâncias do cron (ou duas execuções simultâneas) não duplicam. Índice parcial: só
 // afeta documentos com `rotina_dia` preenchido.
 tarefaSchema.add({ rotina_dia: { type: String, default: undefined } });
+// O gestor desatribuiu à mão de propósito: o preenchimento automático de vagas não lhe mexe
+// (limpa-se sozinho assim que a tarefa volta a ter responsável).
+tarefaSchema.add({ desatribuida_manual: { type: Boolean, default: false } });
+tarefaSchema.pre('validate', function limparDesatribuicaoManual() {
+  if (this.utilizador_id && this.desatribuida_manual) this.desatribuida_manual = false;
+});
+// Oferta da vaga à equipa (ver utils/ofertaVaga.js): quando ninguém está disponível, a vaga é oferecida
+// a toda a equipa não ausente; fica com ela quem aceitar primeiro, até ao prazo.
+tarefaSchema.add({
+  oferta_estado: { type: String, enum: ['aberta', 'aceite', 'expirada', 'fechada'], default: null, index: true },
+  oferta_aberta_em: { type: Date, default: null },
+  oferta_expira_em: { type: Date, default: null },
+  oferta_dia: { type: String, default: null }, // AAAA-MM-DD a que a oferta se refere (se a limpeza mudar de dia, recomeça)
+});
 // O responsável (utilizador_id) é sempre membro da equipa quando esta existe.
 // Tarefas antigas com equipa vazia ficam como estão (equivalem a equipa de 1).
 // Se a limpeza deixa de estar em curso e volta ao circuito (reatribuída, desatribuída), o início

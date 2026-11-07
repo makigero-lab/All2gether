@@ -1,7 +1,6 @@
 "use client";
 
-import { ResultadoImportacao, lerDetalheErros } from "@/components/resultado-importacao";
-import { TipoLimpezaBadge } from "@/components/tipo-limpeza-badge";
+import { TipoMarca, TipoLimpezaBadge } from "@/components/tipo-limpeza-badge";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Plus,
@@ -18,7 +17,6 @@ import {
   Eye,
   Info,
   UserMinus,
-  Upload,
   Download,
   ChevronDown,
 } from "lucide-react";
@@ -27,6 +25,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { EstadoTarefaBadge } from "@/components/ui/estado-tarefa-badge";
+import { OfertaVagaBadge } from "@/components/gestor/oferta-vaga-badge";
 import {
   Card,
   CardContent,
@@ -55,6 +54,7 @@ import {
 import { PaginationBar } from "@/components/admin/pagination-bar";
 import { DetalheTarefaModal } from "@/components/gestor/detalhe-tarefa-modal";
 import { parsearDataSegura, extrairHoraISO, plural } from "@/lib/utils";
+import { SeletorDisponiveis, corpoAtribuicao, type InfoDisponiveis } from "@/components/gestor/seletor-disponiveis";
 
 interface TarefaAdmin {
   _id: string;
@@ -66,6 +66,8 @@ interface TarefaAdmin {
   equipa_atribuida?: { _id?: string; nome: string }[] | null;
   // > 0 quando faltou alguém e não houve substituto.
   pessoas_em_falta?: number;
+  oferta_estado?: string | null;
+  oferta_expira_em?: string | null;
   data: string;
   tipo: string;
   estado: string;
@@ -305,35 +307,8 @@ export default function AdminTarefasPage() {
   // Prompt 95 — Modal de detalhe da tarefa (card de detalhes_reserva).
   const [detalheTarefa, setDetalheTarefa] = useState<TarefaAdmin | null>(null);
 
-  // v1.59.0 (Prompt 81) — Staff indisponíveis (férias/doença) no dia da tarefa.
-  const [indisponiveis, setIndisponiveis] = useState<Array<{
-    utilizador_id: string;
-    tipo: string;
-    data_inicio: string;
-    data_fim: string;
-  }>>([]);
-
-  // Busca indisponíveis quando o modal de atribuição abre.
-  useEffect(() => {
-    if (!atribuindo) {
-      setIndisponiveis([]);
-      return;
-    }
-    let cancelado = false;
-    (async () => {
-      try {
-        const dia = atribuindo.data?.slice(0, 10);
-        if (!dia) return;
-        const res = await adminGet<{ indisponiveis: typeof indisponiveis }>(
-          `/api/gestor/tarefas/indisponiveis?data=${dia}`
-        );
-        if (!cancelado) setIndisponiveis(res.indisponiveis ?? []);
-      } catch {
-        if (!cancelado) setIndisponiveis([]);
-      }
-    })();
-    return () => { cancelado = true; };
-  }, [atribuindo]);
+  // Quem pode fazer a limpeza (o seletor pergunta ao servidor) e se é uma vaga de equipa.
+  const [infoDisp, setInfoDisp] = useState<InfoDisponiveis | null>(null);
 
   const carregar = useCallback(async () => {
     setLoading(true);
@@ -484,7 +459,7 @@ export default function AdminTarefasPage() {
       // Prompt 114 — Captura warning de distância.
       const res = await adminPatch<{ tarefa: TarefaAdmin; warning?: string; aviso_horario?: string }>(
         `/api/gestor/tarefas/${atribuindo._id}/atribuir`,
-        { utilizador_id: atribuirUserId }
+        corpoAtribuicao(atribuirUserId, infoDisp, atribuindo.utilizador_id, atribuindo.equipa_atribuida)
       );
       const avisoAtribuir = [res.warning, res.aviso_horario].filter(Boolean).join(" | ");
       if (avisoAtribuir) setWarningToast(avisoAtribuir);
@@ -518,13 +493,6 @@ export default function AdminTarefasPage() {
   // Origem: 'manual' (sem reserva Smoobu associada).
   // Reaproveita as listas `propriedades` e `staff` já carregadas na página.
   const [espontaneaOpen, setEspontaneaOpen] = useState(false);
-  // FIX (import/export excel) — Estado para o modal de importação de Excel.
-  const [importOpen, setImportOpen] = useState(false);
-  const [importFile, setImportFile] = useState<File | null>(null);
-  const [importLoading, setImportLoading] = useState(false);
-  const [importResult, setImportResult] = useState<string | null>(null);
-  const [importErros, setImportErros] = useState<string[]>([]);
-  const [importNaoAtribuidas, setImportNaoAtribuidas] = useState<string[]>([]);
   const [espontaneaForm, setEspontaneaForm] = useState({
     propriedade_id: "",
     data: "",
@@ -657,36 +625,6 @@ export default function AdminTarefasPage() {
     }
   }
 
-  // FIX (import/export excel) — Importa reservas de um ficheiro .xlsx.
-  async function handleImportarExcel() {
-    if (!importFile) return;
-    setImportLoading(true);
-    setImportResult(null);
-    setImportErros([]);
-    setImportNaoAtribuidas([]);
-    try {
-      // Lê o ficheiro como ArrayBuffer e envia como raw body.
-      const arrayBuffer = await importFile.arrayBuffer();
-      const res = await fetch("/api/gestor/reservas/importar-excel", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
-        body: arrayBuffer,
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.erro || `Erro ${res.status}`);
-      setImportErros(lerDetalheErros(data.detalheErros));
-      setImportNaoAtribuidas(lerDetalheErros(data.detalheNaoAtribuidas, 50));
-      setImportResult(data.message || `${data.criadas} criadas, ${data.ignoradas} ignoradas, ${data.erros} erros.`);
-      // Recarrega as tarefas para mostrar as importadas.
-      await carregar();
-    } catch (e) {
-      setImportResult(e instanceof Error ? e.message : "Erro ao importar Excel.");
-    } finally {
-      setImportLoading(false);
-    }
-  }
-
   /** Ações da limpeza (iguais na tabela e nos cartões; `tam` ajusta o alvo de toque). */
   function acoesTarefa(t: TarefaAdmin, tam: string) {
     return (
@@ -695,7 +633,7 @@ export default function AdminTarefasPage() {
           <Eye className="h-4 w-4" />
         </Button>
         {(t.estado === "por_atribuir" || t.estado === "atribuida" || t.estado === "nao_atribuida") && (
-          <Button variant="ghost" size="icon" className={tam} onClick={() => { setAtribuindo(t); setAtribuirUserId(""); }} aria-label="Atribuir" title="Atribuir / Reatribuir">
+          <Button variant="ghost" size="icon" className={tam} onClick={() => { setAtribuindo(t); setAtribuirUserId(""); setInfoDisp(null); }} aria-label="Atribuir" title="Atribuir / Reatribuir">
             <UserCheck className="h-4 w-4" />
           </Button>
         )}
@@ -703,6 +641,9 @@ export default function AdminTarefasPage() {
           <Button variant="ghost" size="icon" className={`${tam} text-amber-600 hover:text-amber-700`} onClick={() => handleDesatribuir(t)} aria-label="Desatribuir (por atribuir)" title="Desatribuir (colocar por atribuir)">
             <UserMinus className="h-4 w-4" />
           </Button>
+        )}
+        {t.estado !== "cancelada" && t.estado !== "concluida" && (
+          <span className="ml-2 h-6 w-px shrink-0 bg-border md:hidden" aria-hidden="true" />
         )}
         {t.estado !== "cancelada" && t.estado !== "concluida" && (
           <Button variant="ghost" size="icon" className={`${tam} text-destructive hover:text-destructive`} onClick={() => handleCancelar(t)} aria-label="Cancelar tarefa" title="Cancelar">
@@ -718,8 +659,9 @@ export default function AdminTarefasPage() {
     const estadoExibido =
       (t.estado === "atribuida" || t.estado === "em_curso") && !t.utilizador_id ? "por_atribuir" : t.estado;
     return (
-      <div className="flex items-center gap-1">
+      <div className="flex flex-wrap items-center gap-1">
         <EstadoTarefaBadge estado={estadoExibido} />
+        <OfertaVagaBadge tarefa={t} className="basis-full" />
         {(t.estado === "por_atribuir" || t.estado === "nao_atribuida") && t.motivo_nao_atribuicao && (
           <span title={t.motivo_nao_atribuicao} className="cursor-help">
             <Info className="h-3.5 w-3.5 text-muted-foreground" />
@@ -730,7 +672,7 @@ export default function AdminTarefasPage() {
   }
 
   return (
-    <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
+    <div className="flex min-w-0 max-w-full flex-col gap-6 overflow-x-hidden p-4 sm:p-6 lg:p-8">
       {/* Cabeçalho */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="hidden flex-col gap-1 lg:flex">
@@ -740,64 +682,12 @@ export default function AdminTarefasPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 max-sm:[&>button]:h-11 max-sm:[&>button]:min-w-[44px]">
-          <div className="contents max-sm:hidden">
-          <Button
-            variant={soAvarias ? "destructive" : "outline"}
-            size="sm"
-            onClick={() => {
-              setSoAvarias((v) => !v);
-              setPagina(1);
-            }}
-            title="Mostrar só tarefas com avarias reportadas"
-            aria-pressed={soAvarias}
-          >
-            <Wrench className="h-4 w-4" />
-            <span className="hidden sm:inline">
-              {soAvarias ? "A mostrar avarias" : "Só avarias"}
-            </span>
+          {/* Cabeçalho da opção A: Exportar, Mais (secundárias), Nova limpeza e a ação principal em petróleo. */}
+          <Button variant="outline" onClick={handleExportarExcel} disabled={loading} title="Exporta todas as limpezas para um ficheiro Excel (.xlsx)." className="gap-2 max-sm:hidden">
+            <Download className="h-4 w-4" aria-hidden="true" />
+            Exportar
           </Button>
-          </div>
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={carregar}
-            disabled={loading}
-            aria-label="Atualizar"
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-          </Button>
-          {/* HF24 — Botões "Sincronizar Reservas", "Limpar Futuras" e
-              "Importar do Smoobu" removidos da barra principal para não
-              confundir o gestor no dia a dia. Essas ações avançadas ficam
-              disponíveis em /gestor/configuracoes/integracoes. */}
-          <div className="contents max-sm:hidden">
-          {/* FIX — Botão "Auto-Atribuir Pendentes" reposto na página de Limpezas.
-              O gestor precisa de poder disparar o load balancer diretamente daqui. */}
-          <Button
-            onClick={() => setConfirmarAutoAtribuir(true)}
-            disabled={autoAtribuindo}
-            title="Atribui automaticamente todas as tarefas futuras sem funcionário."
-            className="bg-primary text-primary-foreground hover:bg-primary/90"
-          >
-            {autoAtribuindo ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Sparkles className="h-4 w-4" />
-            )}
-            <span className="hidden sm:inline">
-              {autoAtribuindo ? "A atribuir…" : "Auto-Atribuir Pendentes"}
-            </span>
-          </Button>
-          </div>
-          <Button onClick={() => {
-            setMostrarForm((v) => !v);
-            setConflitoForcar(false);
-          }}>
-            <Plus className="h-4 w-4" />
-            Nova limpeza
-          </Button>
-          {/* Telemóvel: as ações secundárias ficam num menu «Ações» com texto (em vez de 5 ícones soltos). */}
-          <div className="relative sm:hidden" ref={menuAcoesRef}>
+          <div className="relative" ref={menuAcoesRef}>
             <Button
               variant="outline"
               className="gap-1.5"
@@ -805,7 +695,7 @@ export default function AdminTarefasPage() {
               aria-expanded={menuAcoes}
               onClick={() => setMenuAcoes((v) => !v)}
             >
-              Ações
+              Mais
               <ChevronDown className="h-4 w-4" aria-hidden="true" />
             </Button>
             {menuAcoes && (
@@ -818,16 +708,6 @@ export default function AdminTarefasPage() {
                 >
                   <Wrench className="h-4 w-4" aria-hidden="true" />
                   {soAvarias ? "Mostrar todas as limpezas" : "Só limpezas com avarias"}
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="flex min-h-11 w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent disabled:opacity-50"
-                  disabled={autoAtribuindo}
-                  onClick={() => { setMenuAcoes(false); setConfirmarAutoAtribuir(true); }}
-                >
-                  <Sparkles className="h-4 w-4" aria-hidden="true" />
-                  Auto-atribuir pendentes
                 </button>
                 <button
                   type="button"
@@ -848,72 +728,47 @@ export default function AdminTarefasPage() {
                   role="menuitem"
                   className="flex min-h-11 w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent disabled:opacity-50"
                   disabled={loading}
+                  onClick={() => { setMenuAcoes(false); carregar(); }}
+                >
+                  <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                  Atualizar a lista
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="flex min-h-11 w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent disabled:opacity-50 sm:hidden"
+                  disabled={autoAtribuindo}
+                  onClick={() => { setMenuAcoes(false); setConfirmarAutoAtribuir(true); }}
+                >
+                  <Sparkles className="h-4 w-4" aria-hidden="true" />
+                  Auto-atribuir pendentes
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="flex min-h-11 w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent disabled:opacity-50 sm:hidden"
+                  disabled={loading}
                   onClick={() => { setMenuAcoes(false); handleExportarExcel(); }}
                 >
                   <Download className="h-4 w-4" aria-hidden="true" />
                   Exportar Excel
                 </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="flex min-h-11 w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent disabled:opacity-50"
-                  disabled={importLoading}
-                  onClick={() => { setMenuAcoes(false); setImportOpen(true); setImportFile(null); setImportResult(null); }}
-                >
-                  <Upload className="h-4 w-4" aria-hidden="true" />
-                  Importar Excel
-                </button>
               </div>
             )}
           </div>
-          <div className="contents max-sm:hidden">
-          {/* HF18 — Botão "Nova Limpeza Espontânea" — abre um Dialog simples
-              para criar uma tarefa manual (origem: 'manual') sem reserva
-              Smoobu associada. Endpoint: POST /api/gestor/tarefas/espontanea. */}
-          <Button
-            variant="secondary"
-            onClick={() => {
-              setEspontaneaOpen(true);
-              setEspontaneaErro(null);
-              setEspontaneaForm({
-                propriedade_id: "",
-                data: "",
-                hora: "",
-                observacoes: "",
-                utilizador_id: "",
-              });
-            }}
-            title="Cria uma limpeza avulsa (sem reserva Smoobu). Útil para limpezas extra solicitadas pelo proprietário ou parceiro."
-          >
-            <SprayCan className="h-4 w-4" />
-            <span className="hidden sm:inline">Limpeza espontânea</span>
-          </Button>
-          {/* FIX (import/export excel) — Botões de importar/exportar Excel. */}
-          <Button
-            variant="outline"
-            onClick={handleExportarExcel}
-            disabled={loading}
-            title="Exporta todas as reservas/tarefas para um ficheiro Excel (.xlsx)."
-            className="gap-2"
-          >
-            <Download className="h-4 w-4" />
-            <span className="hidden sm:inline">Exportar Excel</span>
+          <Button variant="outline" onClick={() => { setMostrarForm((v) => !v); setConflitoForcar(false); }}>
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            Nova limpeza
           </Button>
           <Button
-            variant="outline"
-            onClick={() => {
-              setImportOpen(true);
-              setImportFile(null);
-              setImportResult(null);
-            }}
-            disabled={importLoading}
-            title="Importa reservas em massa a partir de um ficheiro Excel (.xlsx)."
-            className="gap-2"
+            onClick={() => setConfirmarAutoAtribuir(true)}
+            disabled={autoAtribuindo}
+            title="Atribui automaticamente todas as tarefas futuras sem funcionário."
+            className="max-sm:hidden"
           >
-            <Upload className="h-4 w-4" />
-            <span className="hidden sm:inline">Importar Excel</span>
+            {autoAtribuindo ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" aria-hidden="true" />}
+            {autoAtribuindo ? "A atribuir…" : "Auto-atribuir pendentes"}
           </Button>
-          </div>
         </div>
       </div>
 
@@ -940,7 +795,7 @@ export default function AdminTarefasPage() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
-              <SprayCan className="h-5 w-5 text-gold-text" />
+              <SprayCan className="h-5 w-5 text-brand-text" />
               Nova limpeza manual
             </CardTitle>
           </CardHeader>
@@ -1139,32 +994,32 @@ export default function AdminTarefasPage() {
       {/* FIX (filtros avançados) — Barra de filtros: datas, propriedade, staff. */}
       <Card>
         <CardContent className="flex flex-wrap items-end gap-3 p-4">
-          <div className="flex flex-col gap-1.5">
+          <div className="flex min-w-0 flex-col gap-1.5 max-sm:w-full">
             <label className="text-xs font-medium text-muted-foreground">Data de início</label>
             <Input
               type="date"
               aria-label="Data de início"
               value={filtroDataInicio}
               onChange={(e) => { setFiltroDataInicio(e.target.value); setPagina(1); }}
-              className="h-9 w-[150px]"
+              className="h-11 w-full min-w-0 sm:h-9 sm:w-[150px]"
             />
           </div>
-          <div className="flex flex-col gap-1.5">
+          <div className="flex min-w-0 flex-col gap-1.5 max-sm:w-full">
             <label className="text-xs font-medium text-muted-foreground">Data de fim</label>
             <Input
               type="date"
               aria-label="Data de fim"
               value={filtroDataFim}
               onChange={(e) => { setFiltroDataFim(e.target.value); setPagina(1); }}
-              className="h-9 w-[150px]"
+              className="h-11 w-full min-w-0 sm:h-9 sm:w-[150px]"
             />
           </div>
-          <div className="flex flex-col gap-1.5">
+          <div className="flex min-w-0 flex-col gap-1.5 max-sm:w-full">
             <label className="text-xs font-medium text-muted-foreground">Propriedade</label>
             <select
               value={filtroPropriedade}
               onChange={(e) => { setFiltroPropriedade(e.target.value); setPagina(1); }}
-              className="h-9 rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
+              className="h-11 w-full min-w-0 max-w-full truncate rounded-md border border-input bg-background px-3 text-sm ring-offset-background sm:h-9 sm:w-auto sm:max-w-[16rem] focus:outline-none focus:ring-2 focus:ring-ring"
               aria-label="Filtrar por propriedade"
             >
               <option value="">Todas</option>
@@ -1173,12 +1028,12 @@ export default function AdminTarefasPage() {
               ))}
             </select>
           </div>
-          <div className="flex flex-col gap-1.5">
+          <div className="flex min-w-0 flex-col gap-1.5 max-sm:w-full">
             <label className="text-xs font-medium text-muted-foreground">Equipa</label>
             <select
               value={filtroStaff}
               onChange={(e) => { setFiltroStaff(e.target.value); setPagina(1); }}
-              className="h-9 rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
+              className="h-11 w-full min-w-0 max-w-full truncate rounded-md border border-input bg-background px-3 text-sm ring-offset-background sm:h-9 sm:w-auto sm:max-w-[16rem] focus:outline-none focus:ring-2 focus:ring-ring"
               aria-label="Filtrar por funcionário"
             >
               <option value="">Todos</option>
@@ -1194,9 +1049,9 @@ export default function AdminTarefasPage() {
             className="h-9 gap-1.5"
             onClick={() => { setSoParceiros((v) => !v); setPagina(1); }}
             aria-pressed={soParceiros}
-            title="Mostrar só tarefas geradas por reservas de parceiros"
+            title="Mostrar só limpezas geradas por reservas de proprietários"
           >
-            🤝 Apenas Parceiros
+            🤝 Apenas proprietários
           </Button>
           {(filtroDataInicio || filtroDataFim || filtroPropriedade || filtroStaff || soParceiros) && (
             <Button
@@ -1249,12 +1104,10 @@ export default function AdminTarefasPage() {
             <ul className="divide-y md:hidden" aria-label="Limpezas">
               {tarefasPagina.map((t) => (
                 <li key={t._id} className="space-y-2 p-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="break-words font-medium">{t.propriedade_id?.nome ?? "—"}</p>
-                      <p className="text-xs tabular-nums text-muted-foreground">{formatarDataHora(t.data)}</p>
-                    </div>
-                    <div className="shrink-0">{estadoTarefa(t)}</div>
+                  <div className="min-w-0">
+                    <p className="break-words font-medium">{t.propriedade_id?.nome ?? "—"}</p>
+                    <p className="text-xs tabular-nums text-muted-foreground">{formatarDataHora(t.data)}</p>
+                    <div className="mt-1.5">{estadoTarefa(t)}</div>
                   </div>
                   <p className="break-words text-sm text-muted-foreground">
                     <span className="text-xs uppercase tracking-wide">Equipa: </span>
@@ -1264,7 +1117,7 @@ export default function AdminTarefasPage() {
                     <div className="flex flex-wrap gap-1">
                       <TipoLimpezaBadge tipo={t.tipo_limpeza} />
                       {t.origem_parceiro && (
-                        <Badge variant="secondary" className="px-1.5 py-0 text-xs">🤝 Parceiro</Badge>
+                        <Badge variant="secondary" className="px-1.5 py-0 text-xs">🤝 Proprietário</Badge>
                       )}
                       {Array.isArray(t.avarias) && t.avarias.length > 0 && (
                         <Badge variant="destructive" className="gap-1 px-1.5 py-0 text-xs">
@@ -1282,20 +1135,21 @@ export default function AdminTarefasPage() {
               ))}
             </ul>
             <div className="hidden overflow-x-auto md:block">
-              <table className="w-full text-sm">
+              <table className="rt w-full text-sm">
                 <thead>
                   <tr className="border-b bg-muted/40 text-left">
                     <th className="px-4 py-3 font-medium">Data</th>
-                    <th className="px-4 py-3 font-medium">Propriedade</th>
+                    <th className="min-w-[10rem] px-4 py-3 font-medium">Propriedade</th>
+                    <th className="px-4 py-3 font-medium">Tipo</th>
                     {/* Prompt 136 — Coluna Hóspede (nome_hospede da reserva). */}
-                    <th className="px-4 py-3 font-medium">Hóspede</th>
+                    <th className="hidden px-4 py-3 font-medium min-[1440px]:table-cell">Hóspede</th>
                     {/* FIX (qtd hóspedes) — Coluna Qtd. Hóspedes com fallback à lotação. */}
-                    <th className="px-4 py-3 font-medium">Qtd. Hóspedes</th>
+                    <th className="hidden px-4 py-3 font-medium min-[1440px]:table-cell">Qtd. Hóspedes</th>
                     <th className="px-4 py-3 font-medium">Equipa</th>
                     <th className="px-4 py-3 font-medium">Estado</th>
                     {/* v1.68.0 (Prompt 91) — Coluna Observações / Avaria */}
-                    <th className="px-4 py-3 font-medium">Observações / Avaria</th>
-                    <th className="px-4 py-3 text-right font-medium">Ações</th>
+                    <th className="hidden px-4 py-3 font-medium min-[1440px]:table-cell">Observações / Avaria</th>
+                    <th className="sticky right-0 z-10 bg-muted px-4 py-3 text-right font-medium shadow-[-6px_0_6px_-6px_rgba(0,0,0,0.25)]">Ações</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
@@ -1305,21 +1159,20 @@ export default function AdminTarefasPage() {
                     <tr key={t._id} className="hover:bg-muted/30">
                       {/* v1.68.0 (Prompt 91) — Data + hora (ex: 06/07/2026 - 14:30) */}
                       <td className="px-4 py-3 whitespace-nowrap tabular-nums">{formatarDataHora(t.data)}</td>
-                      <td className="px-4 py-3 font-medium">
+                      <td className="min-w-[10rem] max-w-[16rem] px-4 py-3 font-medium">
                         <div className="flex items-center gap-2">
-                          <span>{t.propriedade_id?.nome ?? "—"}</span>
+                          <span className="line-clamp-2 min-w-0 break-words" title={t.propriedade_id?.nome ?? undefined}>{t.propriedade_id?.nome ?? "—"}</span>
                           {/* FIX (sync parceiros) — Badge “🤝 Parceiro” se a tarefa
                               veio de uma reserva de parceiro. */}
                           {t.origem_parceiro && (
                             <Badge
                               variant="secondary"
                               className="shrink-0 gap-1 whitespace-nowrap text-xs px-1.5 py-0"
-                              title="Tarefa gerada por reserva de parceiro B2B"
+                              title="Limpeza gerada por reserva de proprietário"
                             >
-                              🤝 Parceiro
+                              🤝 Proprietário
                             </Badge>
                           )}
-                          <TipoLimpezaBadge tipo={t.tipo_limpeza} />
                           {temAvarias && (
                             <Badge
                               variant="destructive"
@@ -1332,15 +1185,16 @@ export default function AdminTarefasPage() {
                           )}
                         </div>
                       </td>
+                      <td className="px-4 py-3"><TipoMarca tipo={t.tipo_limpeza} /></td>
                       {/* Prompt 136 — Nome do hóspede (da reserva Smoobu ou manual). */}
-                      <td className="px-4 py-3 text-muted-foreground">
-                        {t.detalhes_reserva?.nome_hospede ?? "—"}
+                      <td className="hidden min-w-[11rem] max-w-[14rem] px-4 py-3 text-muted-foreground min-[1440px]:table-cell">
+                        <span className="line-clamp-2 break-words" title={t.detalhes_reserva?.nome_hospede ?? undefined}>{t.detalhes_reserva?.nome_hospede ?? "—"}</span>
                       </td>
                       {/* FIX (qtd hóspedes) — Quantidade de hóspedes com fallback.
                           Mostra t.hospedes (vindo do Smoobu). Se for null/0/inválido,
                           usa propriedade_id.capacidade_hospedes (lotação máxima) e
                           mostra visualmente que é o limite da casa "(Máx: N)". */}
-                      <td className="px-4 py-3">
+                      <td className="hidden px-4 py-3 min-[1440px]:table-cell">
                         {(() => {
                           const hospedesReal = t.hospedes ?? t.detalhes_reserva?.pax ?? null;
                           const capacidade = t.propriedade_id?.capacidade_hospedes ?? null;
@@ -1369,7 +1223,7 @@ export default function AdminTarefasPage() {
                       <td className="px-4 py-3 text-muted-foreground"><EquipaTarefa t={t} /></td>
                       <td className="px-4 py-3">{estadoTarefa(t)}</td>
                       {/* v1.68.0 (Prompt 91) — Excerto das observações (descrição da avaria) */}
-                      <td className="px-4 py-3 max-w-xs">
+                      <td className="hidden max-w-xs px-4 py-3 min-[1440px]:table-cell">
                         {t.observacoes ? (
                           <span
                             className={`line-clamp-2 text-xs ${
@@ -1385,7 +1239,7 @@ export default function AdminTarefasPage() {
                           <span className="text-xs text-muted-foreground">—</span>
                         )}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="sticky right-0 z-10 bg-card px-4 py-3 shadow-[-6px_0_6px_-6px_rgba(0,0,0,0.25)]">
                         <div className="flex items-center justify-end gap-1">{acoesTarefa(t, "h-11 w-11 md:h-8 md:w-8")}</div>
                       </td>
                     </tr>
@@ -1423,7 +1277,7 @@ export default function AdminTarefasPage() {
               {atribuindo?.propriedade_id?.nome} — {atribuindo ? formatarData(atribuindo.data) : ""}
               {atribuindo && nomesEquipa(atribuindo).length > 1 && (
                 <span className="mt-1 block text-xs">
-                  Equipa atual: {nomesEquipa(atribuindo).join(" + ")}. A pessoa escolhida passa a responsável e os outros membros mantêm-se.
+                  Equipa atual: {nomesEquipa(atribuindo).join(" + ")}. {infoDisp?.modo === "vaga" ? "A pessoa escolhida entra na equipa e preenche a vaga." : "A pessoa escolhida passa a responsável e os outros membros mantêm-se."}
                 </span>
               )}
             </DialogDescription>
@@ -1432,38 +1286,15 @@ export default function AdminTarefasPage() {
         </DialogHeader>
         <DialogContent className="space-y-4">
           <div className="space-y-1.5">
-            <label className="text-sm font-medium">Equipa</label>
-            <select
-              value={atribuirUserId}
-              onChange={(e) => setAtribuirUserId(e.target.value)}
-              className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <option value="">Selecionar…</option>
-              {staff.map((u) => {
-                // FIX (folgas/férias) — Em vez de OMITIR os staff
-                // indisponíveis (férias/doença/ausência nesse dia), mostramos
-                // TODOS no dropdown com a option disabled e a label
-                // " [Indisponível]" ao lado do nome. Assim o gestor vê quem
-                // existe mas não consegue selecionar quem está de folga/férias.
-                const indisponivel = indisponiveis.some(
-                  (i) => i.utilizador_id === u._id
-                );
-                return (
-                  <option
-                    key={u._id}
-                    value={indisponivel ? "" : u._id}
-                    disabled={indisponivel}
-                  >
-                    {u.nome}
-                    {indisponivel ? " — [Indisponível]" : ""}
-                  </option>
-                );
-              })}
-            </select>
-            {indisponiveis.length > 0 && (
-              <p className="text-xs text-amber-600 dark:text-amber-400">
-                ⚠️ {plural(indisponiveis.length, "membro")} da equipa está(ão) de folga/férias neste dia e apareceram como [Indisponível] na lista (não selecionáveis).
-              </p>
+            <label className="text-sm font-medium">{infoDisp?.modo === "vaga" ? "Quem entra na equipa" : "Equipa"}</label>
+            {atribuindo && (
+              <SeletorDisponiveis
+                tarefaId={atribuindo._id}
+                acao="atribuir"
+                value={atribuirUserId}
+                onChange={setAtribuirUserId}
+                onInfo={setInfoDisp}
+              />
             )}
           </div>
         </DialogContent>
@@ -1479,7 +1310,7 @@ export default function AdminTarefasPage() {
       <Dialog open={confirmarAutoAtribuir} onOpenChange={setConfirmarAutoAtribuir}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Sparkles className="h-5 w-5 text-gold-text" />
+            <Sparkles className="h-5 w-5 text-brand-text" />
             Auto-Atribuir Pendentes
           </DialogTitle>
           <DialogDescription>
@@ -1535,7 +1366,7 @@ export default function AdminTarefasPage() {
         <DialogHeader>
           <div>
             <DialogTitle className="flex items-center gap-2">
-              <SprayCan className="h-5 w-5 text-gold-text" />
+              <SprayCan className="h-5 w-5 text-brand-text" />
               Nova limpeza espontânea
             </DialogTitle>
             <DialogDescription>
@@ -1710,6 +1541,7 @@ export default function AdminTarefasPage() {
       {/* Prompt 95 — Modal de detalhe da limpeza (card de detalhes_reserva) */}
       <DetalheTarefaModal
         onAvariaAlterada={carregar}
+        onDiaAlterado={(aviso) => { if (aviso) setWarningToast(aviso); carregar(); }}
         tarefa={detalheTarefa}
         open={detalheTarefa !== null}
         onOpenChange={(o) => !o && setDetalheTarefa(null)}
@@ -1751,67 +1583,6 @@ export default function AdminTarefasPage() {
         </DialogFooter>
       </Dialog>
 
-      {/* FIX (import/export excel) — Modal de importação de Excel. */}
-      <Dialog open={importOpen} onOpenChange={(o) => !o && !importLoading && setImportOpen(o)}>
-        <DialogHeader>
-          <div>
-            <DialogTitle className="flex items-center gap-2">
-              <Upload className="h-5 w-5 text-gold-text" />
-              Importar Reservas (Excel)
-            </DialogTitle>
-            <DialogDescription>
-              Carrega um ficheiro .xlsx com as colunas: Propriedade, Data (ou Check-out),
-              Hóspedes (opcional), Check-in (opcional), Nome Hóspede (opcional).
-              O sistema faz match do nome da propriedade e cria as reservas/tarefas.
-            </DialogDescription>
-          </div>
-          <DialogClose onClick={() => !importLoading && setImportOpen(false)} />
-        </DialogHeader>
-        <DialogContent className="space-y-4">
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Ficheiro Excel (.xlsx)</label>
-            <input
-              type="file"
-              accept=".xlsx,.xls"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                setImportFile(f ?? null);
-                setImportResult(null);
-              }}
-              className="flex w-full cursor-pointer items-center gap-2 rounded-md border border-dashed border-input bg-muted/30 px-3 py-2 text-sm text-muted-foreground hover:bg-muted/50"
-            />
-            {importFile && (
-              <p className="text-xs text-muted-foreground">
-                Ficheiro selecionado: {importFile.name} ({(importFile.size / 1024).toFixed(0)} KB)
-              </p>
-            )}
-          </div>
-          {importResult && (
-            <ResultadoImportacao resumo={importResult} detalheErros={importErros} naoAtribuidas={importNaoAtribuidas} />
-          )}
-        </DialogContent>
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setImportOpen(false)}
-            disabled={importLoading}
-          >
-            Cancelar
-          </Button>
-          <Button
-            type="button"
-            onClick={handleImportarExcel}
-            disabled={!importFile || importLoading}
-          >
-            {importLoading ? (
-              <><Loader2 className="mr-2 h-4 w-4 animate-spin" />A importar…</>
-            ) : (
-              <><Upload className="mr-2 h-4 w-4" />Importar</>
-            )}
-          </Button>
-        </DialogFooter>
-      </Dialog>
     </div>
   );
 }

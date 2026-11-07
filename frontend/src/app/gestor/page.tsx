@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
-  Building2,
+  Plus,
   Users,
   ClipboardList,
   AlertCircle,
@@ -30,6 +30,9 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { adminGet, adminPatch } from "@/lib/api";
+import { EstadoTarefaBadge } from "@/components/ui/estado-tarefa-badge";
+import { OfertaVagaBadge } from "@/components/gestor/oferta-vaga-badge";
+import { TipoMarca } from "@/components/tipo-limpeza-badge";
 import { PushNotificationSetup } from "@/components/gestor/push-notification-setup";
 import { formatarDataSegura, textoRedistribuicao, type RedistribuicaoDTO, plural } from "@/lib/utils";
 
@@ -42,6 +45,8 @@ interface DashboardData {
   // Limpezas a que falta pelo menos uma pessoa (sem substituto).
   tarefasEquipaIncompleta?: number;
   tarefasConcluidasHoje: number;
+  // Próximas 48 h (limpezas ativas), para a coluna do dashboard.
+  proximas48h?: { _id: string; data: string; estado: string; tipo_limpeza: string; propriedade_nome: string; utilizador_id?: string | null; pessoas_em_falta?: number; oferta_estado?: string | null; oferta_expira_em?: string | null }[];
   // Limpezas em curso neste momento (início por botão ou automático).
   aDecorrerAgora?: {
     total: number;
@@ -52,6 +57,7 @@ interface DashboardData {
       iniciada_em: string | null;
       inicio_origem: "botao" | "automatico" | null;
       tipo: string;
+      tipo_limpeza?: string;
     }[];
   };
   // Avarias reportadas por resolver (ciclo fechado ao concluir a manutenção).
@@ -150,92 +156,53 @@ export default function AdminDashboardPage() {
     }
   }
 
-  const stats = data
+  const kpis: { label: string; value: number | string; de?: number; alerta?: boolean }[] = data
     ? [
-        { label: "Propriedades", value: `${data.propriedadesAtivas}/${data.totalPropriedades}`, icon: Building2 },
-        { label: "Equipa ativa", value: data.membrosEquipaAtivos, icon: Users },
-        { label: "Limpezas hoje", value: data.tarefasHoje, icon: ClipboardList },
-        { label: "Por atribuir hoje", value: data.tarefasPorAtribuir, icon: AlertCircle },
-        ...((data.tarefasEquipaIncompleta ?? 0) > 0
-          ? [{ label: "Falta pessoa", value: data.tarefasEquipaIncompleta ?? 0, icon: Users }]
-          : []),
-        { label: "Concluídas hoje", value: data.tarefasConcluidasHoje, icon: CheckCircle2 },
-        ...((data.avariasAbertas ?? 0) > 0
-          ? [{ label: "Avarias abertas", value: data.avariasAbertas ?? 0, icon: Wrench }]
-          : []),
-        ...((data.limpezasSemRoupa ?? 0) > 0
-          ? [{ label: "Limpezas de hoje sem roupa entregue", value: data.limpezasSemRoupa ?? 0, icon: Shirt }]
-          : []),
+        { label: "Propriedades", value: data.propriedadesAtivas, de: data.totalPropriedades },
+        { label: "Equipa ativa", value: data.membrosEquipaAtivos },
+        { label: "Limpezas hoje", value: data.tarefasHoje },
+        { label: "Por atribuir (48 h)", value: data.checkinsEmRisco?.total ?? data.tarefasPorAtribuir, alerta: (data.checkinsEmRisco?.total ?? data.tarefasPorAtribuir) > 0 },
+        { label: "Concluídas hoje", value: data.tarefasConcluidasHoje },
+        { label: "Sem roupa entregue", value: data.limpezasSemRoupa ?? 0 },
+        ...((data.tarefasEquipaIncompleta ?? 0) > 0 ? [{ label: "Falta pessoa", value: data.tarefasEquipaIncompleta ?? 0, alerta: true }] : []),
+        ...((data.avariasAbertas ?? 0) > 0 ? [{ label: "Avarias abertas", value: data.avariasAbertas ?? 0, alerta: true }] : []),
       ]
     : [];
 
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
-      <div className="hidden flex-col gap-1 lg:flex">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
+      <div className="flex flex-wrap items-center gap-3">
+        <h1 className="text-xl font-bold tracking-tight">Dashboard</h1>
+        <span className="order-last w-full text-sm text-muted-foreground sm:order-none sm:w-auto">
+          {formatarDataSegura(new Date().toISOString(), (d) => format(d, "EEEE, d 'de' MMMM", { locale: pt }), "")} · tempo real
+        </span>
+        <div className="ml-auto flex items-center gap-2">
           <Button variant="outline" size="icon" onClick={carregar} disabled={loading} aria-label="Atualizar">
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           </Button>
+          <Link href="/gestor/tarefas" className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 max-sm:h-11 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90">
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            Nova limpeza
+          </Link>
         </div>
-        <p className="text-sm text-muted-foreground">
-          Visão operacional das limpezas de hoje (dados em tempo real).
-        </p>
       </div>
 
       {/* Banner para ativar notificações push */}
       <PushNotificationSetup />
 
-      {/* Radar de Risco (Prompt 76) — check-ins sem limpeza nas próximas 48h */}
+      {/* Radar de risco: limpezas por atribuir nas próximas 48 h (uma linha, com «Resolver») */}
       {!loading && !erro && data?.checkinsEmRisco && data.checkinsEmRisco.total > 0 && (
-        <div className="rounded-lg border-2 border-orange-500/60 bg-orange-50 p-4 shadow-lg dark:bg-orange-950/30">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-status-porat text-status-foreground">
-                <TriangleAlert className="h-5 w-5" />
-              </div>
-              <div className="flex-1">
-                <p className="text-sm font-semibold text-orange-900 dark:text-orange-100">
-                  ⚠️ Próximas 48 h: {plural(data.checkinsEmRisco.total, "limpeza")} por atribuir
-                </p>
-                <p className="mt-0.5 text-xs text-orange-800/80 dark:text-orange-200/80">
-                  Contam-se as próximas 48 horas a partir de agora (não só o dia de hoje), por isso o número
-                  pode ser diferente de «Por atribuir hoje». Podem comprometer check-ins.
-                </p>
-                {/* Lista das tarefas em risco (máx. 3, depois "e mais N") */}
-                <ul className="mt-2 space-y-1">
-                  {data.checkinsEmRisco.tarefas.slice(0, 3).map((t) => (
-                    <li key={t._id} className="flex items-center gap-2 text-xs text-orange-900 dark:text-orange-100">
-                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-orange-600" />
-                      <span className="font-medium">{t.propriedade_nome}</span>
-                      <span className="text-orange-700/70 dark:text-orange-300/70">·</span>
-                      <span>
-                        {(() => {
-                          return formatarDataSegura(
-                            t.data,
-                            (d) => format(d, "EEE d MMM 'às' HH:mm", { locale: pt }),
-                            t.data
-                          );
-                        })()}
-                      </span>
-                    </li>
-                  ))}
-                  {data.checkinsEmRisco.total > 3 && (
-                    <li className="text-xs italic text-orange-700/70 dark:text-orange-300/70">
-                      e mais {data.checkinsEmRisco.total - 3}…
-                    </li>
-                  )}
-                </ul>
-              </div>
-            </div>
-            <Link
-              href="/gestor/calendario"
-              className="inline-flex h-8 shrink-0 items-center gap-2 rounded-md bg-status-porat px-3 text-xs font-medium text-status-foreground transition-colors hover:bg-status-porat/90"
-            >
-              Resolver agora
-              <ArrowRight className="h-4 w-4" />
-            </Link>
-          </div>
+        <div role="alert" className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-status-porat/30 bg-status-porat-bg px-3 py-2 text-sm text-status-porat">
+          <TriangleAlert className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <p className="min-w-0 flex-1">
+            <strong>{plural(data.checkinsEmRisco.total, "limpeza")} por atribuir nas próximas 48 h:</strong>{" "}
+            {data.checkinsEmRisco.tarefas.slice(0, 3).map((x) => `${x.propriedade_nome} (${formatarDataSegura(x.data, (d) => format(d, "EEE HH:mm", { locale: pt }), x.data)})`).join(", ")}
+            {data.checkinsEmRisco.total > 3 ? ` e mais ${data.checkinsEmRisco.total - 3}` : ""}
+          </p>
+          <Link href="/gestor/calendario" className="inline-flex h-11 shrink-0 items-center gap-1.5 rounded-md bg-primary px-4 text-xs font-medium md:h-8 md:px-3 text-primary-foreground hover:bg-primary/90">
+            Resolver
+            <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+          </Link>
         </div>
       )}
 
@@ -339,96 +306,111 @@ export default function AdminDashboardPage() {
         </Card>
       ) : data ? (
         <>
-          {/* Cartões de estatística */}
-          <div className="grid gap-4 sm:grid-cols-3 xl:grid-cols-5">
-            {stats.map((s) => {
-              const Icon = s.icon;
-              return (
-                <Card key={s.label}>
-                  <CardContent className="flex items-center gap-4 p-5">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10 text-gold-text">
-                      <Icon className="h-6 w-6" />
-                    </div>
-                    <div className="flex flex-col">
-                      <span className="text-2xl font-bold leading-none">
-                        {s.value}
-                      </span>
-                      <span className="mt-1 text-sm text-muted-foreground">
-                        {s.label}
-                      </span>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
+          {/* Faixa compacta de KPI */}
+          <div className="grid grid-cols-2 overflow-hidden rounded-lg border bg-card sm:grid-cols-3 lg:grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]">
+            {kpis.map((s) => (
+              <div key={s.label} className="border-b border-r px-4 py-3 [&:nth-child(2n)]:border-r-0 sm:[&:nth-child(2n)]:border-r sm:[&:nth-child(3n)]:border-r-0 lg:border-b-0 lg:[&:nth-child(n)]:border-r lg:last:border-r-0">
+                <p className={`text-2xl font-bold leading-none tabular-nums ${s.alerta ? "text-status-naoat" : ""}`}>
+                  {s.value}
+                  {s.de && <span className="ml-1 text-xs font-normal text-muted-foreground">/{s.de}</span>}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">{s.label}</p>
+              </div>
+            ))}
           </div>
 
-          {/* A decorrer agora: limpezas em curso */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Play className="h-4 w-4 text-gold-text" aria-hidden="true" />
+          {/* 3 colunas: a decorrer, próximas 48 h, equipa hoje */}
+          <div className="grid min-w-0 gap-4 lg:grid-cols-3">
+            <section aria-labelledby="dash-decorrer" className="min-w-0 overflow-hidden rounded-lg border bg-card">
+              <h2 id="dash-decorrer" className="flex items-center gap-2 border-b px-4 py-2.5 text-sm font-bold">
+                <Play className="h-4 w-4" aria-hidden="true" />
                 A decorrer agora
-              </CardTitle>
-              <CardDescription>Limpezas em curso neste momento.</CardDescription>
-            </CardHeader>
-            <CardContent>
+                <span className="ml-auto text-xs font-medium text-muted-foreground">{data.aDecorrerAgora?.total ?? 0}</span>
+              </h2>
               {!data.aDecorrerAgora || data.aDecorrerAgora.total === 0 ? (
-                <p className="text-sm text-muted-foreground">Nenhuma limpeza em curso.</p>
+                <p className="p-4 text-sm text-muted-foreground">Nenhuma limpeza em curso.</p>
               ) : (
-                <ul className="space-y-2">
-                  {data.aDecorrerAgora.tarefas.map((t) => (
-                    <li key={t._id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
-                      <span className="font-medium">{t.propriedade_nome}</span>
-                      <span className="text-muted-foreground">
-                        {t.pessoa ?? "Sem pessoa"}
-                        {t.iniciada_em
-                          ? ` · desde as ${formatarDataSegura(t.iniciada_em, (d) => format(d, "HH:mm"), "—")}`
-                          : ""}
-                        {t.inicio_origem === "automatico" ? " · início automático" : t.inicio_origem === "botao" ? " · começou pelo botão" : ""}
+                <ul className="divide-y">
+                  {data.aDecorrerAgora.tarefas.map((x) => (
+                    <li key={x._id} className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 px-4 py-2.5 text-sm">
+                      <div className="min-w-0 flex-1 basis-40">
+                        <p className="line-clamp-2 break-words font-medium" title={x.propriedade_nome}>{x.propriedade_nome}</p>
+                        <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
+                          <TipoMarca tipo={x.tipo_limpeza} className="text-xs" />
+                          {x.iniciada_em ? ` · desde as ${formatarDataSegura(x.iniciada_em, (d) => format(d, "HH:mm"), "—")}` : ""}
+                          {x.inicio_origem === "automatico" ? " · início automático" : x.inicio_origem === "botao" ? " · pelo botão" : ""}
+                        </p>
+                      </div>
+                      <span className="shrink-0 rounded-full bg-brand-soft px-2 py-0.5 text-xs font-semibold text-brand-text" title={x.pessoa ?? "Sem pessoa"}>
+                        {(x.pessoa ?? "?").split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase()}
                       </span>
                     </li>
                   ))}
                 </ul>
               )}
-            </CardContent>
-          </Card>
+            </section>
 
-          {/* Carga por staff */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Estado da equipa</CardTitle>
-              <CardDescription>Carga de trabalho de hoje.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {data.tarefasPorStaff.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  Sem tarefas atribuídas hoje.
-                </p>
+            <section aria-labelledby="dash-48h" className="min-w-0 overflow-hidden rounded-lg border bg-card">
+              <h2 id="dash-48h" className="flex items-center gap-2 border-b px-4 py-2.5 text-sm font-bold">
+                <ClipboardList className="h-4 w-4" aria-hidden="true" />
+                Próximas 48 h
+                <span className="ml-auto text-xs font-medium text-muted-foreground">
+                  {data.proximas48h?.length ?? 0}
+                  {(data.checkinsEmRisco?.total ?? 0) > 0 && <span className="font-semibold text-status-naoat"> · {data.checkinsEmRisco?.total} por atribuir</span>}
+                </span>
+              </h2>
+              {!data.proximas48h || data.proximas48h.length === 0 ? (
+                <p className="p-4 text-sm text-muted-foreground">Sem limpezas nas próximas 48 horas.</p>
               ) : (
-                <ul className="space-y-3">
-                  {data.tarefasPorStaff.map((s) => (
-                    <li key={s.utilizador_id} className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-3">
-                        <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                        <div className="flex flex-col">
-                          <span className="text-sm font-medium">{s.nome}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {s.tarefas} tarefas
-                          </span>
-                        </div>
+                <ul className="divide-y">
+                  {data.proximas48h.map((x) => (
+                    <li key={x._id} className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 px-4 py-2.5 text-sm">
+                      <div className="min-w-0 flex-1 basis-40">
+                        <p className="line-clamp-2 break-words font-medium" title={x.propriedade_nome}>{x.propriedade_nome}</p>
+                        <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
+                          <TipoMarca tipo={x.tipo_limpeza} className="text-xs" />
+                          · {formatarDataSegura(x.data, (d) => format(d, "EEE HH:mm", { locale: pt }), x.data)}
+                        </p>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <Badge variant={s.carga_minutos > 420 ? "destructive" : "secondary"}>
-                          {Math.floor(s.carga_minutos / 60)}h{String(s.carga_minutos % 60).padStart(2, "0")}
-                        </Badge>
-                      </div>
+                      <EstadoTarefaBadge estado={x.estado} />
+                      <OfertaVagaBadge tarefa={x} className="basis-full" />
                     </li>
                   ))}
                 </ul>
               )}
-            </CardContent>
-          </Card>
+            </section>
+
+            <section aria-labelledby="dash-equipa" className="min-w-0 overflow-hidden rounded-lg border bg-card">
+              <h2 id="dash-equipa" className="flex items-center gap-2 border-b px-4 py-2.5 text-sm font-bold">
+                <Users className="h-4 w-4" aria-hidden="true" />
+                Equipa hoje
+                <span className="ml-auto text-xs font-medium text-muted-foreground">{data.membrosEquipaAtivos} ativos</span>
+              </h2>
+              {data.tarefasPorStaff.length === 0 ? (
+                <p className="p-4 text-sm text-muted-foreground">Sem tarefas atribuídas hoje.</p>
+              ) : (
+                <ul className="divide-y">
+                  {data.tarefasPorStaff.map((s) => {
+                    const pct = Math.min(100, Math.round((s.carga_minutos / 480) * 100));
+                    return (
+                      <li key={s.utilizador_id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
+                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-soft text-[10.5px] font-bold text-brand-text" aria-hidden="true">
+                          {s.nome.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase()}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate">{s.nome}</span>
+                        <span className="h-1.5 w-20 shrink-0 overflow-hidden rounded-full bg-border" role="img" aria-label={`Carga de ${pct}% das 8 h`}>
+                          <span className={`block h-full rounded-full ${s.carga_minutos > 420 ? "bg-status-naoat" : "bg-primary"}`} style={{ width: `${pct}%` }} />
+                        </span>
+                        <span className="w-12 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                          {Math.floor(s.carga_minutos / 60)}h{String(s.carga_minutos % 60).padStart(2, "0")}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </section>
+          </div>
         </>
       ) : null}
     </div>

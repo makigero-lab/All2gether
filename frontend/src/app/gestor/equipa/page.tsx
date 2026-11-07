@@ -288,7 +288,7 @@ function EquipaPage() {
 
   // Modal de baixa prolongada
   const [baixaModal, setBaixaModal] = useState<UtilizadorDTO | null>(null);
-  const [baixaForm, setBaixaForm] = useState({ data_inicio: "", data_fim: "" });
+  const [baixaForm, setBaixaForm] = useState({ data_inicio: "", data_fim: "", tipo: "ferias" });
   const [baixaSubmitting, setBaixaSubmitting] = useState(false);
   const [baixaResultado, setBaixaResultado] = useState<string | null>(null);
   // Nº de tarefas que SOBRARAM por atribuir depois da reatribuição automática
@@ -748,7 +748,7 @@ function EquipaPage() {
                 setFiltroEstado(e.target.value as "todos" | "ativos" | "inativos");
                 setPagina(1);
               }}
-              className="h-9 rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
+              className="h-11 md:h-9 rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
               aria-label="Filtrar por estado"
             >
               <option value="todos">Estado: Todos</option>
@@ -761,7 +761,7 @@ function EquipaPage() {
                 setFiltroRole(e.target.value as "todos" | "staff" | "gestor" | "parceiro");
                 setPagina(1);
               }}
-              className="h-9 rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
+              className="h-11 md:h-9 rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
               aria-label="Filtrar por role"
             >
               <option value="todos">Função: Todas</option>
@@ -776,7 +776,7 @@ function EquipaPage() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-base">
-                  <Users className="h-5 w-5 text-gold-text" />
+                  <Users className="h-5 w-5 text-brand-text" />
                   Novo funcionário
                 </CardTitle>
               </CardHeader>
@@ -862,7 +862,7 @@ function EquipaPage() {
                         onChange={(e) =>
                           setForm((f) => ({ ...f, role: e.target.value as Role }))
                         }
-                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        className="flex h-11 md:h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                       >
                         <option value="staff">Equipa (limpezas)</option>
                         <option value="gestor">Responsável (gere a equipa)</option>
@@ -871,7 +871,7 @@ function EquipaPage() {
                       </select>
                       {form.role === "parceiro" && (
                         <p className="text-xs text-muted-foreground">
-                          Parceiros são externos: não têm folgas semanais nem responsável hierárquico.
+                          Os proprietários são externos: não têm folgas semanais nem responsável hierárquico.
                           Acedem ao portal B2B para criar reservas manuais nas suas propriedades.
                         </p>
                       )}
@@ -890,7 +890,7 @@ function EquipaPage() {
                           onChange={(e) =>
                             setForm((f) => ({ ...f, responsavel_id: e.target.value }))
                           }
-                          className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                          className="flex h-11 md:h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                         >
                           <option value="">— Sem responsável —</option>
                           {responsaveisPossiveis.map((r) => (
@@ -959,7 +959,7 @@ function EquipaPage() {
                                 key={p._id}
                                 className={`flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm transition-colors ${
                                   checked
-                                    ? "border-primary bg-primary/10 text-gold-text"
+                                    ? "border-primary bg-primary/10 text-brand-text"
                                     : "border-input text-muted-foreground hover:bg-muted/50"
                                 }`}
                               >
@@ -1039,7 +1039,7 @@ function EquipaPage() {
                                 key={p._id}
                                 className={`flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm transition-colors ${
                                   checked
-                                    ? "border-primary bg-primary/10 text-gold-text"
+                                    ? "border-primary bg-primary/10 text-brand-text"
                                     : "border-input text-muted-foreground hover:bg-muted/50"
                                 }`}
                               >
@@ -1140,7 +1140,7 @@ function EquipaPage() {
                 </div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
+                  <table className="rt w-full text-sm">
                     <thead>
                       <tr className="border-b bg-muted/40 text-left">
                         <th className="px-4 py-3 font-medium">Nome</th>
@@ -1231,18 +1231,20 @@ function EquipaPage() {
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  className="h-8 w-8"
+                                  className="h-11 w-11 md:h-8 md:w-8"
                                   onClick={() => abrirEdicao(u)}
                                   aria-label={`Editar ${u.nome}`}
                                   title="Editar"
                                 >
                                   <Pencil className="h-4 w-4" />
                                 </Button>
+                                {/* Separador (só telemóvel): afasta as ações de desativar, falta e baixa das de edição */}
+                                <span className="ml-3 h-6 w-px shrink-0 bg-border md:hidden" aria-hidden="true" />
                                 {/* Ativar/Desativar */}
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  className="h-8 w-8"
+                                  className="h-11 w-11 md:h-8 md:w-8"
                                   onClick={() => handleToggleAtivo(u)}
                                   aria-label={u.ativo ? "Desativar" : "Ativar"}
                                   title={u.ativo ? "Desativar" : "Ativar"}
@@ -1259,7 +1261,7 @@ function EquipaPage() {
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  className="h-8 w-8 text-amber-500 hover:text-amber-600"
+                                  className="h-11 w-11 md:h-8 md:w-8 text-amber-500 hover:text-amber-600"
                                   onClick={() => {
                                     setFaltaSubita(u);
                                     setFaltaResultado(null);
@@ -1273,10 +1275,10 @@ function EquipaPage() {
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  className="h-8 w-8 text-blue-500 hover:text-blue-600"
+                                  className="h-11 w-11 md:h-8 md:w-8 text-blue-500 hover:text-blue-600"
                                   onClick={() => {
                                     setBaixaModal(u);
-                                    setBaixaForm({ data_inicio: "", data_fim: "" });
+                                    setBaixaForm({ data_inicio: "", data_fim: "", tipo: "ferias" });
                                     setBaixaResultado(null);
                                   }}
                                   aria-label={`Registar baixa ou férias de ${u.nome}`}
@@ -1380,7 +1382,7 @@ function EquipaPage() {
                     onChange={(e) =>
                       setEditForm((f) => ({ ...f, role: e.target.value as Role }))
                     }
-                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    className="flex h-11 md:h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                   >
                     <option value="staff">Equipa (limpezas)</option>
                     <option value="gestor">Responsável (gere a equipa)</option>
@@ -1389,7 +1391,7 @@ function EquipaPage() {
                   </select>
                   {editForm.role === "parceiro" && (
                     <p className="text-xs text-muted-foreground">
-                      Parceiros são externos: não têm folgas semanais nem responsável hierárquico.
+                      Os proprietários são externos: não têm folgas semanais nem responsável hierárquico.
                       Acedem ao portal B2B para criar reservas manuais nas suas propriedades.
                     </p>
                   )}
@@ -1411,7 +1413,7 @@ function EquipaPage() {
                           responsavel_id: e.target.value,
                         }))
                       }
-                      className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      className="flex h-11 md:h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                     >
                       <option value="">— Sem responsável —</option>
                       {responsaveisPossiveis
@@ -1470,7 +1472,7 @@ function EquipaPage() {
                 {editForm.role !== "parceiro" && (
                 <div className="space-y-3 rounded-md border p-3">
                   <div className="flex items-center gap-2">
-                    <Calendar className="h-4 w-4 text-gold-text" />
+                    <Calendar className="h-4 w-4 text-brand-text" />
                     <h4 className="text-sm font-medium leading-none">
                       Folgas Específicas / Rotativas
                     </h4>
@@ -1494,7 +1496,7 @@ function EquipaPage() {
                         onChange={(e) =>
                           setNovaFolga((nf) => ({ ...nf, data: e.target.value }))
                         }
-                        className="h-9"
+                        className="h-11 md:h-9"
                       />
                     </div>
                     <div className="flex-[2] space-y-1">
@@ -1509,7 +1511,7 @@ function EquipaPage() {
                         onChange={(e) =>
                           setNovaFolga((nf) => ({ ...nf, motivo: e.target.value }))
                         }
-                        className="h-9"
+                        className="h-11 md:h-9"
                         maxLength={200}
                       />
                     </div>
@@ -1517,7 +1519,7 @@ function EquipaPage() {
                       type="button"
                       variant="outline"
                       size="sm"
-                      className="h-9"
+                      className="h-11 md:h-9"
                       onClick={adicionarFolgaRotativa}
                       disabled={!novaFolga.data}
                     >
@@ -1629,7 +1631,7 @@ function EquipaPage() {
                               key={p._id}
                               className={`flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm transition-colors ${
                                 checked
-                                  ? "border-primary bg-primary/10 text-gold-text"
+                                  ? "border-primary bg-primary/10 text-brand-text"
                                   : "border-input text-muted-foreground hover:bg-muted/50"
                               }`}
                             >
@@ -1707,7 +1709,7 @@ function EquipaPage() {
                               key={p._id}
                               className={`flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm transition-colors ${
                                 checked
-                                  ? "border-primary bg-primary/10 text-gold-text"
+                                  ? "border-primary bg-primary/10 text-brand-text"
                                   : "border-input text-muted-foreground hover:bg-muted/50"
                               }`}
                             >
@@ -1922,6 +1924,22 @@ function EquipaPage() {
                     Registar baixa para{" "}
                     <span className="font-semibold">{baixaModal?.nome}</span>?
                   </p>
+                  <div className="space-y-1.5">
+                    <label htmlFor="baixa-tipo" className="text-sm font-medium">
+                      Tipo
+                    </label>
+                    <select
+                      id="baixa-tipo"
+                      value={baixaForm.tipo}
+                      onChange={(e) => setBaixaForm((f) => ({ ...f, tipo: e.target.value }))}
+                      className="flex h-11 md:h-10 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                    >
+                      <option value="ferias">Férias</option>
+                      <option value="doenca">Baixa (doença)</option>
+                      <option value="falta">Falta</option>
+                      <option value="outro">Outro</option>
+                    </select>
+                  </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5">
                       <label htmlFor="baixa-inicio" className="text-sm font-medium">
@@ -1995,7 +2013,7 @@ function EquipaPage() {
                       const res = await adminPost<RedistribuicaoDTO>(`/api/gestor/equipa/${baixaModal._id}/baixa`, {
                         data_inicio: baixaForm.data_inicio,
                         data_fim: baixaForm.data_fim,
-                        tipo: "ferias",
+                        tipo: baixaForm.tipo,
                       });
                       setBaixaPorAtribuir(tarefasPorAtribuir(res));
                       setBaixaAviso(res.aviso ?? null);

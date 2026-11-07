@@ -99,6 +99,7 @@ async function auth(req, res, next) {
     id: payload.id,
     role: payload.role,
     empresa_id: payload.empresa_id,
+    ...(payload.imp ? { impersonado_por: payload.imp } : {}),
   };
   return next();
 }

@@ -30,6 +30,8 @@ const { JWT_SECRET } = require('../middleware/auth');
 const { registarAuditoria } = require('../utils/auditoria');
 
 const TOKEN_EXPIRACAO = process.env.JWT_EXPIRACAO || '7d';
+// Impersonation: sessão curta (o admin pode repetir), nunca os 7 dias de um login normal.
+const TOKEN_IMPERSONACAO = process.env.JWT_EXPIRACAO_IMPERSONACAO || '2h';
 
 /* ------------------------------------------------------------------ */
 /* GET /api/admin/empresas — listar empresas com gestor principal      */
@@ -179,10 +181,24 @@ exports.impersonarGestor = async (req, res) => {
         id: tokenUser.id,
         role: tokenUser.role,
         empresa_id: tokenUser.empresa_id,
+        imp: String(req.user.id), // quem está realmente por trás (admin)
       },
       JWT_SECRET,
-      { expiresIn: TOKEN_EXPIRACAO }
+      { expiresIn: TOKEN_IMPERSONACAO }
     );
+
+    // Auditoria: cada impersonation fica registada (quem, que empresa, como quem).
+    const quem = await Utilizador.findById(req.user.id).select('nome').lean();
+    await registarAuditoria({
+      utilizador_id: req.user.id,
+      utilizador_nome: (quem && quem.nome) || 'Admin',
+      empresa_id: empresa._id,
+      acao: 'impersonar',
+      recurso: 'empresa',
+      recurso_id: empresa._id,
+      descricao: `Admin entrou como ${tokenUser.role} na empresa "${empresa.nome}" (sessão de ${TOKEN_IMPERSONACAO}).`,
+      detalhes: { como_utilizador_id: tokenUser.id },
+    });
 
     return res.status(200).json({
       token,

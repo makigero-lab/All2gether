@@ -46,7 +46,7 @@ type EstadoAusencia =
   | "aprovada"
   | "rejeitada"
   | "cancelada";
-type TipoAusencia = "ferias" | "doenca" | "outro";
+type TipoAusencia = "ferias" | "doenca" | "falta" | "outro";
 
 interface AusenciaDTO {
   _id: string;
@@ -65,6 +65,7 @@ interface AusenciaDTO {
 const TIPO_LABEL: Record<TipoAusencia, string> = {
   ferias: "Férias",
   doenca: "Doença",
+  falta: "Falta",
   outro: "Outro",
 };
 
@@ -268,7 +269,7 @@ export default function StaffAusenciasPage() {
               Voltar
             </Link>
             <div className="flex items-center gap-2">
-              <CalendarOff className="h-5 w-5 text-gold-text" />
+              <CalendarOff className="h-5 w-5 text-brand-text" />
               <h1 className="text-xl font-semibold tracking-tight">
                 Pedidos de Ausência
               </h1>
@@ -436,6 +437,7 @@ export default function StaffAusenciasPage() {
               >
                 <option value="ferias">Férias</option>
                 <option value="doenca">Doença</option>
+                <option value="falta">Falta</option>
                 <option value="outro">Outro</option>
               </select>
             </div>
@@ -526,7 +528,7 @@ export default function StaffAusenciasPage() {
       <Dialog open={mostrarConfirmacao} onOpenChange={setMostrarConfirmacao}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <CheckCircle2 className="h-5 w-5 text-gold-text" />
+            <CheckCircle2 className="h-5 w-5 text-brand-text" />
             Confirmar Pedido de Ausência
           </DialogTitle>
           <DialogDescription>

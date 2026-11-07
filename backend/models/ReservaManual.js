@@ -53,10 +53,13 @@ const reservaManualSchema = new mongoose.Schema(
     // É só uma preferência: a hora real da tarefa é decidida pelo sistema.
     horario_preferido: { type: String, default: null, trim: true, maxlength: 60 },
     // Tipo de limpeza (normal, intermedia, profunda, preparacao). Sem o campo = normal.
-    // Normal e profunda ficam no check-out; intermedia e preparacao usam `data_limpeza`.
+    // Normal e profunda ficam no check-out; intermedia a meio da estadia e preparacao no check-in (automático).
     tipo_limpeza: { type: String, enum: ['normal', 'intermedia', 'profunda', 'preparacao'], default: 'normal' },
-    // Dia da limpeza escolhido pelo parceiro (só intermedia/preparacao; null nos outros).
+    // Dia da limpeza calculado pelo sistema (só intermedia/preparacao; null nos outros). O parceiro não o escolhe; o valor gravado numa reserva antiga continua a valer.
     data_limpeza: { type: Date, default: null },
+    // true quando o gestor mudou o dia da limpeza: o sistema deixa de a recalcular (notas, hóspedes...);
+    // se o parceiro mudar check-in/check-out ou tipo, recalcula e avisa o gestor.
+    data_limpeza_ajustada: { type: Boolean, default: false },
     // ID da tarefa de limpeza gerada automaticamente para o check-out.
     tarefa_gerada_id: {
       type: mongoose.Schema.Types.ObjectId,

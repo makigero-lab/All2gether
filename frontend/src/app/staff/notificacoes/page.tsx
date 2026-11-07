@@ -156,7 +156,7 @@ export default function StaffNotificacoesPage() {
               Voltar
             </Link>
             <div className="flex items-center gap-2">
-              <Bell className="h-5 w-5 text-gold-text" />
+              <Bell className="h-5 w-5 text-brand-text" />
               <h1 className="text-xl font-semibold tracking-tight">Notificações</h1>
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
@@ -284,7 +284,7 @@ export default function StaffNotificacoesPage() {
             <Card className="hidden sm:block">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <Bell className="h-5 w-5 text-gold-text" />
+                  <Bell className="h-5 w-5 text-brand-text" />
                   Notificações
                 </CardTitle>
                 <CardDescription>

@@ -68,7 +68,7 @@ export default function ParceiroTarefasPage() {
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
       <div>
         <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-          <ClipboardList className="h-6 w-6 text-gold-text" />
+          <ClipboardList className="h-6 w-6 text-brand-text" />
           Tarefas de Limpeza
         </h1>
         <p className="text-sm text-muted-foreground">
@@ -102,7 +102,7 @@ export default function ParceiroTarefasPage() {
             <Card key={t._id}>
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center gap-2 text-sm">
-                  <Building2 className="h-4 w-4 text-gold-text" />
+                  <Building2 className="h-4 w-4 text-brand-text" />
                   {t.propriedade_id?.nome ?? "Propriedade"}
                 </CardTitle>
               </CardHeader>

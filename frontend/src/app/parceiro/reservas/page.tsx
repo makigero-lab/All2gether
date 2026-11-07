@@ -61,9 +61,7 @@ import {
   paraPayload,
   TIPOS_LIMPEZA,
   ROTULO_TIPO,
-  tipoPedeData,
   tipoOuNormal,
-  limitesDataLimpeza,
   reconciliar,
   validarReserva,
   valoresEfetivos,
@@ -87,8 +85,6 @@ interface ReservaDTO {
   horario_preferido?: string | null;
   /** Tipo de limpeza; sem o campo (reservas antigas) = normal. */
   tipo_limpeza?: string | null;
-  /** Dia da limpeza escolhido (só intermédia/preparação). */
-  data_limpeza?: string | null;
   tarefa_gerada_id: { estado: string; data: string; hora_conclusao?: string | null; concluida_em?: string | null } | null;
   createdAt: string;
 }
@@ -104,12 +100,12 @@ const CELULA =
 
 /** Campo do cartão (telemóvel): alvo de toque >= 44 px, 16 px (o iOS não faz zoom). */
 const CELULA_CARTAO =
-  "h-11 w-full min-w-0 rounded-md border border-input bg-background px-3 text-base outline-none focus:border-gold-text focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60";
+  "h-11 w-full min-w-0 rounded-md border border-input bg-background px-3 text-base outline-none focus:border-brand-text focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60";
 
 /** Marca visual de "por gravar" (não depende só da cor: leva também um traço e o aviso da linha). */
 // Colunas «Limpeza» (estado) e apagar coladas à direita ao fazer scroll na tabela larga (desktop).
 const FIXO_ACOES = "sticky right-0 z-[1] w-12 min-w-[3rem]";
-const FIXO_ESTADO = "sticky right-12 z-[1] w-[15rem] min-w-[15rem] shadow-[-8px_0_8px_-8px_rgba(0,0,0,0.25)]";
+const FIXO_ESTADO = "sticky right-12 z-[1] w-[9rem] min-w-[9rem] min-[1600px]:w-[11rem] min-[1600px]:min-w-[11rem] shadow-[-8px_0_8px_-8px_rgba(0,0,0,0.25)]";
 const PENDENTE_TABELA = "bg-amber-100 dark:bg-amber-900/40 shadow-[inset_3px_0_0_0_rgb(217_119_6)]";
 const PENDENTE_CARTAO = "border-amber-600 bg-amber-50 dark:bg-amber-950/30";
 
@@ -218,8 +214,6 @@ interface ColunaOrdem {
   valor: (l: Linha) => string | number | null | undefined;
 }
 
-const dataDaLimpeza = (l: Linha) => (tipoPedeData(l.valores.tipo_limpeza) ? l.valores.data_limpeza : l.valores.check_out);
-
 /** Colunas ordenáveis (desktop: cabeçalho; telemóvel: seletor). */
 const COLUNAS_ORDEM: ColunaOrdem[] = [
   { chave: "propriedade", rotulo: "Propriedade", tipo: "texto", valor: (l) => l.propNome },
@@ -231,7 +225,6 @@ const COLUNAS_ORDEM: ColunaOrdem[] = [
   { chave: "nome_hospede", rotulo: "Hóspede", tipo: "texto", valor: (l) => l.valores.nome_hospede },
   { chave: "plataforma", rotulo: "Plataforma", tipo: "texto", valor: (l) => l.valores.plataforma },
   { chave: "tipo_limpeza", rotulo: "Tipo de limpeza", tipo: "texto", valor: (l) => ROTULO_TIPO[tipoOuNormal(l.valores.tipo_limpeza)] },
-  { chave: "data_limpeza", rotulo: "Data da limpeza", tipo: "data", valor: dataDaLimpeza },
   { chave: "horario_preferido", rotulo: "Horário preferido", tipo: "texto", valor: (l) => l.valores.horario_preferido },
   { chave: "observacoes", rotulo: "Notas", tipo: "texto", valor: (l) => l.valores.observacoes },
   { chave: "estado", rotulo: "Estado da limpeza", tipo: "texto", valor: (l) => (l.estado ? estadoParaParceiro(l.estado) : "") },
@@ -282,7 +275,6 @@ function doServidor(r: ReservaDTO): Valores {
     horario_preferido: r.horario_preferido ?? "",
     observacoes: r.observacoes ?? "",
     tipo_limpeza: tipoOuNormal(r.tipo_limpeza),
-    data_limpeza: r.data_limpeza ? dia(r.data_limpeza) : "",
   };
 }
 
@@ -296,7 +288,6 @@ const ROTULO_CAMPO: Record<Campo, string> = {
   horario_preferido: "Horário preferido",
   observacoes: "Notas",
   tipo_limpeza: "Tipo de limpeza",
-  data_limpeza: "Data da limpeza",
 };
 
 /**
@@ -414,6 +405,117 @@ function Celula({
   );
 }
 
+/** Notas no cartão (telemóvel): caixa de várias linhas que cresce com o texto. */
+const CELULA_NOTAS_CARTAO =
+  "min-h-[5.5rem] w-full min-w-0 resize-none overflow-hidden rounded-md border border-input bg-background px-3 py-2 text-base outline-none focus:border-brand-text focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60";
+
+/** Faz a caixa de texto crescer com o conteúdo. */
+function cresce(e: React.FormEvent<HTMLTextAreaElement>) {
+  const el = e.currentTarget;
+  el.style.height = "auto";
+  el.style.height = `${el.scrollHeight + 2}px`;
+}
+
+/**
+ * Notas (texto longo). Tabela: mostra o início do texto numa célula larga (o texto completo
+ * aparece ao pousar o rato) e, ao clicar, abre uma caixa de 4 linhas na própria célula.
+ * Cartão: caixa de 3 linhas que cresce. Como as outras células: sair do campo guarda SÓ no
+ * rascunho, Esc anula (repõe o valor anterior) e o Gravar envia. Enter escreve uma nova linha.
+ */
+function CelulaNotas({
+  value, disabled, rotulo, cartao, pendente, onCommit,
+}: {
+  value: string;
+  disabled?: boolean;
+  rotulo: string;
+  cartao?: boolean;
+  pendente?: boolean;
+  onCommit: (novo: string) => void;
+}) {
+  const [v, setV] = useState(value);
+  const [aberto, setAberto] = useState(false);
+  const cancelar = useRef(false);
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    setV(value);
+  }, [value]);
+  useEffect(() => {
+    if (aberto) {
+      ref.current?.focus();
+      ref.current?.setSelectionRange(ref.current.value.length, ref.current.value.length);
+    }
+  }, [aberto]);
+  useEffect(() => {
+    if (cartao && ref.current) {
+      ref.current.style.height = "auto";
+      ref.current.style.height = `${ref.current.scrollHeight + 2}px`;
+    }
+  }, [cartao, v]);
+
+  const nomeAcessivel = pendente ? `${rotulo} (por gravar)` : rotulo;
+  const fechar = () => {
+    if (cancelar.current) {
+      cancelar.current = false;
+    } else if (v !== value) {
+      onCommit(v);
+    }
+    setAberto(false);
+  };
+  const teclas = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Enter é nova linha (não aciona atalhos da linha); Esc anula.
+    if (e.key === "Enter") e.stopPropagation();
+    if (e.key === "Escape") {
+      cancelar.current = true;
+      setV(value);
+      ref.current?.blur();
+    }
+  };
+
+  if (cartao) {
+    return (
+      <textarea
+        ref={ref}
+        value={v}
+        rows={3}
+        disabled={disabled}
+        aria-label={nomeAcessivel}
+        onChange={(e) => setV(e.target.value)}
+        onBlur={fechar}
+        onKeyDown={teclas}
+        className={`${CELULA_NOTAS_CARTAO} ${pendente ? PENDENTE_CARTAO : ""}`}
+      />
+    );
+  }
+  if (aberto) {
+    return (
+      <textarea
+        ref={ref}
+        value={v}
+        rows={4}
+        disabled={disabled}
+        aria-label={nomeAcessivel}
+        onChange={(e) => setV(e.target.value)}
+        onBlur={fechar}
+        onKeyDown={teclas}
+        className={`block w-full min-w-[26rem] resize-y bg-primary/5 px-2 py-1.5 text-sm outline-none ring-2 ring-inset ring-primary ${pendente ? PENDENTE_TABELA : ""}`}
+      />
+    );
+  }
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      aria-label={`${nomeAcessivel}: ${value || "vazio"}. Carregar para editar`}
+      title={value || undefined}
+      onClick={() => setAberto(true)}
+      className={`block h-9 w-full max-w-[28rem] truncate px-2 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-60 ${pendente ? PENDENTE_TABELA : ""}`}
+    >
+      {value ? value.replace(/\s*\n\s*/g, " ") : <span className="text-muted-foreground">—</span>}
+    </button>
+  );
+}
+
 /** Campo de cartão com etiqueta visível (o controlo tem o seu próprio aria-label). */
 function Campo({ texto, className, children }: { texto: string; className?: string; children: React.ReactNode }) {
   return (
@@ -437,7 +539,6 @@ const NOVA_VAZIA = {
   horario_preferido: "",
   observacoes: "",
   tipo_limpeza: "normal",
-  data_limpeza: "",
 };
 
 /** Linha (existente ou nova) pronta a desenhar, igual para a tabela e para os cartões. */
@@ -509,6 +610,15 @@ export default function ParceiroReservasPage() {
   const [sessaoTerminou, setSessaoTerminou] = useState(false);
   const [resumo, setResumo] = useState("");
   const [aviso, setAviso] = useState<string | null>(null);
+  /** Resultado visível junto à barra de baixo (o topo da página pode estar fora do ecrã). */
+  const [toast, setToast] = useState<{ texto: string; tipo: "ok" | "aviso" | "erro"; fixo: boolean } | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mostrarToast = useCallback((texto: string, tipo: "ok" | "aviso" | "erro", fixo = false) => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast({ texto, tipo, fixo });
+    if (!fixo) toastTimer.current = setTimeout(() => setToast(null), 4500);
+  }, []);
+  useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
   const [descartarAberto, setDescartarAberto] = useState(false);
   const reconciliarNoProximo = useRef(true);
   const rascunhoRef = useRef(rascunho);
@@ -518,6 +628,26 @@ export default function ParceiroReservasPage() {
   const [eliminar, setEliminar] = useState<ReservaDTO | null>(null);
 
   const pendentes = contarPendentes(rascunho);
+  // P1: a linha «Nova reserva» com um rascunho válido também ativa o Gravar (acrescenta-a e grava tudo).
+  const novaPronta =
+    nova.check_in !== "" &&
+    nova.check_out !== "" &&
+    validarReserva(
+      {
+        check_in: nova.check_in,
+        check_out: nova.check_out,
+        hora_checkin: nova.hora_checkin,
+        hospedes: nova.hospedes,
+        nome_hospede: nova.nome_hospede,
+        plataforma: nova.plataforma,
+        horario_preferido: nova.horario_preferido,
+        observacoes: nova.observacoes,
+        tipo_limpeza: nova.tipo_limpeza,
+      },
+      nova.propriedade_id
+    ) === null;
+  const [gravarAposNova, setGravarAposNova] = useState(false);
+  const podeGravar = pendentes > 0 || novaPronta;
 
   const carregar = useCallback(async (silencioso = false) => {
     if (!silencioso) setLoading(true);
@@ -639,16 +769,7 @@ export default function ParceiroReservasPage() {
       const { [linha.key]: _x, ...resto } = e;
       return resto;
     });
-    // Mudar o tipo acerta a data da limpeza: limpa-a em Normal/Profunda e, em Intermédia/Preparação
-    // sem data, sugere o check-in.
     const extras: Array<[Campo, string]> = [];
-    if (c === "tipo_limpeza") {
-      if (!tipoPedeData(valor)) {
-        if (linha.valores.data_limpeza !== "") extras.push(["data_limpeza", ""]);
-      } else if (!linha.valores.data_limpeza && linha.valores.check_in) {
-        extras.push(["data_limpeza", linha.valores.check_in]);
-      }
-    }
     if (linha.nova) {
       setRascunho((r) => ({
         ...r,
@@ -678,7 +799,6 @@ export default function ParceiroReservasPage() {
       horario_preferido: nova.horario_preferido,
       observacoes: nova.observacoes,
       tipo_limpeza: nova.tipo_limpeza,
-      data_limpeza: tipoPedeData(nova.tipo_limpeza) ? nova.data_limpeza : "",
     };
     const msg = validarReserva(v, nova.propriedade_id);
     if (msg) {
@@ -691,6 +811,7 @@ export default function ParceiroReservasPage() {
     const item: NovaReserva = { ...v, propriedade_id: nova.propriedade_id, tmp: `nova-${Date.now()}-${contadorTmp.current}` };
     setRascunho((r) => ({ ...r, novas: [item, ...r.novas] }));
     setNova({ ...NOVA_VAZIA, propriedade_id: nova.propriedade_id });
+    mostrarToast("Reserva acrescentada. Fica por gravar: carrega em Gravar para a enviar.", "ok");
   }
 
   /** Conflito: mantém a minha alteração (aceita o valor atual do sistema como ponto de partida). */
@@ -767,6 +888,8 @@ export default function ParceiroReservasPage() {
     let semSessao = false;
     setSessaoTerminou(false);
     const conflitosRestantes = { ...conflitos };
+    // Avisos do servidor (ex.: «já havia uma limpeza nesse dia; ficou associada a ela»): a linha foi gravada.
+    const avisosServidor: string[] = [];
 
     const sincronizar = () => setRascunho({ edicoes: { ...edicoes }, novas: [...novas], eliminar: { ...eliminar } });
 
@@ -790,7 +913,8 @@ export default function ParceiroReservasPage() {
         continue;
       }
       try {
-        const res = await adminPut<{ reserva: ReservaDTO }>(`/api/parceiro/reservas/${id}`, paraPayload(campos));
+        const res = await adminPut<{ reserva: ReservaDTO; aviso?: string }>(`/api/parceiro/reservas/${id}`, paraPayload(campos));
+        if (res.aviso) avisosServidor.push(res.aviso);
         setReservas((rs) => rs.map((r) => (r._id === id ? res.reserva : r)));
         gravadas++;
         const resto: Partial<Valores> = {};
@@ -861,13 +985,14 @@ export default function ParceiroReservasPage() {
         continue;
       }
       try {
-        await adminPost("/api/parceiro/reservas", {
+        const resp = await adminPost<{ aviso?: string }>("/api/parceiro/reservas", {
           propriedade_id: n.propriedade_id,
           // Chave de idempotência: se a resposta se perder, o Gravar seguinte não duplica.
           chave_idempotencia: n.tmp,
           ...paraPayload(n),
           hospedes: n.hospedes.trim() === "" ? undefined : Number(n.hospedes),
         });
+        if (resp?.aviso) avisosServidor.push(resp.aviso);
         criadas++;
         novas = novas.filter((x) => x.tmp !== n.tmp);
         sincronizar();
@@ -886,7 +1011,7 @@ export default function ParceiroReservasPage() {
     if (criadas) partes.push(`${plural(plural(criadas, "reserva"), "criada")}`);
     if (eliminadas) partes.push(`${plural(plural(eliminadas, "reserva"), "eliminada")}`);
     const resultado = partes.length ? partes.join(", ") : "Nada foi gravado";
-    setResumo(
+    const textoResumo =
       semRede || semSessao
         ? `${resultado}. O resto continua por gravar.`
         : comErro > 0
@@ -894,7 +1019,17 @@ export default function ParceiroReservasPage() {
         : criadas > 0 || gravadas > 0
         ? `${resultado}. As limpezas foram criadas/reatribuídas.`
         : `${resultado}.`
-    );
+    ;
+    setResumo(textoResumo);
+    if (avisosServidor.length > 0) setAviso(avisosServidor.join(" "));
+    // Resultado também junto à barra de baixo (no telemóvel o topo fica fora do ecrã). Avisos e erros ficam até fechar.
+    {
+      const falhou = semRede || semSessao || comErro > 0;
+      const textoToast = [semSessao ? "A tua sessão terminou. Inicia sessão outra vez, as alterações ficam guardadas." : semRede ? "Sem ligação. As alterações continuam aqui." : "", textoResumo, ...avisosServidor]
+        .filter(Boolean)
+        .join(" ");
+      mostrarToast(textoToast, falhou ? "erro" : avisosServidor.length > 0 ? "aviso" : "ok", falhou || avisosServidor.length > 0);
+    }
     if (semSessao) {
       setErro("A tua sessão terminou. Inicia sessão outra vez, as alterações ficam guardadas.");
       setSessaoTerminou(true);
@@ -971,9 +1106,7 @@ export default function ParceiroReservasPage() {
   }
 
   const setN = (k: keyof typeof NOVA_VAZIA) => (v: string) => setNova((n) => ({ ...n, [k]: v }));
-  /** Tipo da reserva nova: limpa a data em Normal/Profunda; em Intermédia/Preparação sugere o check-in. */
-  const mudarTipoNova = (v: string) =>
-    setNova((n) => ({ ...n, tipo_limpeza: v, data_limpeza: tipoPedeData(v) ? n.data_limpeza || n.check_in : "" }));
+  const mudarTipoNova = (v: string) => setNova((n) => ({ ...n, tipo_limpeza: v }));
   const enterAdiciona = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") acrescentarNova();
   };
@@ -1072,39 +1205,50 @@ export default function ParceiroReservasPage() {
     );
   };
 
+  // Depois de acrescentar a linha «Nova reserva» ao rascunho, grava tudo no render seguinte.
+  useEffect(() => {
+    if (gravarAposNova && pendentes > 0) {
+      setGravarAposNova(false);
+      gravar();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gravarAposNova, pendentes]);
+
+  const aoGravar = () => {
+    if (novaPronta) {
+      acrescentarNova();
+      setGravarAposNova(true);
+    } else gravar();
+  };
+
+  const total = pendentes + (novaPronta ? 1 : 0);
   const botaoGravar = (extra = "") => (
     <Button
-      onClick={gravar}
-      disabled={gravando || pendentes === 0}
+      onClick={aoGravar}
+      disabled={gravando || !podeGravar}
       className={`gap-2 ${extra}`}
-      aria-label={pendentes === 0 ? "Gravar (sem alterações por gravar)" : `Gravar: ${textoPendentes(pendentes)}`}
+      aria-label={!podeGravar ? "Gravar (sem alterações por gravar)" : novaPronta ? `Gravar: ${textoPendentes(pendentes)} e a nova reserva` : `Gravar: ${textoPendentes(pendentes)}`}
     >
       {gravando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-      Gravar{pendentes > 0 ? ` (${pendentes})` : ""}
+      Gravar{total > 0 ? ` (${total})` : ""}
     </Button>
   );
 
   return (
-    <main className={`flex flex-col gap-6 p-4 sm:p-6 lg:p-8 ${pendentes > 0 ? "pb-28 md:pb-8" : ""}`}>
+    <main className={`flex flex-col gap-6 p-4 sm:p-6 lg:p-8 ${podeGravar ? "pb-28 md:pb-8" : ""}`}>
       {/* Anúncio para leitores de ecrã: pendentes e resultado da gravação. */}
       <div className="sr-only" aria-live="polite" role="status">
         {pendentes === 0 ? "Sem alterações por gravar." : `${textoPendentes(pendentes)}.`} {resumo}
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
+      <div className="flex flex-col gap-1">
+        <div className="flex items-center justify-between gap-3">
           <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
-            <Table2 className="h-6 w-6 text-gold-text" />
+            <Table2 className="h-6 w-6 text-brand-text" />
             Minhas reservas
           </h1>
-          <p className="text-sm text-muted-foreground">
-            Clica num campo para editar. Sair do campo guarda só neste aparelho (rascunho): nada é enviado nem
-            atribuído até carregares em <strong>Gravar</strong>. Para uma reserva nova, preenche a linha do topo
-            (ou o cartão &quot;Nova reserva&quot; no telemóvel) e carrega em Enter ou em +; ela fica por gravar.
-            Cada reserva gerada gera uma limpeza.
-          </p>
-        </div>
-        <div className="flex gap-2">
+
+          <div className="flex shrink-0 gap-2">
           <span className="hidden md:inline-flex">{botaoGravar()}</span>
           <Button
             variant="outline"
@@ -1119,9 +1263,24 @@ export default function ParceiroReservasPage() {
             aria-label="Exportar reservas gravadas para Excel"
           >
             <Download className="h-4 w-4" />
-            <span className="hidden sm:inline">Exportar</span>
+            <span>Exportar</span>
           </Button>
         </div>
+        </div>
+          <p className="text-sm text-muted-foreground">
+          Edita os campos e carrega em <strong>Gravar</strong>: até lá nada é enviado.
+        </p>
+        <details className="group mt-1 text-sm text-muted-foreground">
+          <summary className="inline-flex min-h-11 cursor-pointer items-center font-medium text-brand-text marker:content-none sm:min-h-9">
+            Como funciona?
+          </summary>
+          <p className="max-w-3xl pb-1">
+            Clica num campo para editar. Sair do campo guarda só neste aparelho (rascunho): nada é enviado nem
+            atribuído até carregares em <strong>Gravar</strong>. Para uma reserva nova, preenche a linha do topo
+            (ou o cartão &quot;Nova reserva&quot; no telemóvel) e carrega em Gravar, Enter ou +. Cada reserva
+            gera uma limpeza.
+          </p>
+        </details>
       </div>
 
       {erro && (
@@ -1155,23 +1314,38 @@ export default function ParceiroReservasPage() {
         </Card>
       )}
 
+      {toast && (
+        <div
+          role={toast.tipo === "ok" ? "status" : "alert"}
+          className={`fixed inset-x-3 ${podeGravar ? "bottom-[5.5rem]" : "bottom-4"} z-40 mx-auto flex max-w-xl items-start gap-2 rounded-lg border bg-background p-3 text-sm shadow-lg md:bottom-4 md:left-auto md:right-4 md:mx-0 md:w-[28rem] ${
+            toast.tipo === "erro" ? "border-destructive/60 text-destructive" : toast.tipo === "aviso" ? "border-amber-500/60" : "border-emerald-600/50"
+          }`}
+        >
+          <AlertCircle className={`mt-0.5 h-4 w-4 shrink-0 ${toast.tipo === "aviso" ? "text-amber-600" : ""}`} aria-hidden="true" />
+          <span className="min-w-0 flex-1 break-words">{toast.texto}</span>
+          <button type="button" onClick={() => setToast(null)} aria-label="Fechar mensagem" className="-m-2 min-h-[44px] min-w-[44px] shrink-0">
+            <X className="mx-auto h-4 w-4" />
+          </button>
+        </div>
+      )}
+
       {/* Barra de alterações por gravar: fixa em baixo no telemóvel; no desktop fica visível ao rolar. */}
-      {pendentes > 0 && (
+      {podeGravar && (
         <>
           <div className="sticky top-2 z-20 hidden items-center justify-between gap-3 rounded-lg border border-amber-500/60 bg-background px-4 py-2 shadow md:flex">
             <p className="text-sm font-medium">
-              {textoPendentes(pendentes)}{" "}
-              <span className="font-normal text-muted-foreground">(guardadas neste aparelho)</span>
+              {pendentes > 0 ? textoPendentes(pendentes) : "Nova reserva pronta a gravar"}{" "}
+              <span className="font-normal text-muted-foreground">{pendentes > 0 ? "(guardadas neste aparelho)" : ""}</span>
             </p>
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={() => setDescartarAberto(true)} disabled={gravando}>
+              <Button variant="outline" size="sm" onClick={() => setDescartarAberto(true)} disabled={gravando || pendentes === 0}>
                 Descartar
               </Button>
               {botaoGravar()}
             </div>
           </div>
           <div className="fixed inset-x-0 bottom-0 z-30 flex items-center gap-2 border-t bg-background p-3 shadow-[0_-2px_8px_rgba(0,0,0,0.12)] md:hidden">
-            <Button variant="outline" size="touch" onClick={() => setDescartarAberto(true)} disabled={gravando}>
+            <Button variant="outline" size="touch" onClick={() => setDescartarAberto(true)} disabled={gravando || pendentes === 0}>
               Descartar
             </Button>
             {botaoGravar("min-h-[44px] flex-1")}
@@ -1196,21 +1370,20 @@ export default function ParceiroReservasPage() {
         {/* Desktop (md+): tabela editável tipo folha de cálculo. */}
         <Card className="hidden md:block" onFocus={aoFocar} onBlur={aoDesfocar}>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1450px] border-collapse text-sm">
+            <table className="w-full min-w-[1000px] border-collapse text-sm min-[1600px]:min-w-[1500px]">
               <thead>
                 <tr className="border-b bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
                   <Cab chave="propriedade" rotulo="Propriedade" ordem={ordem} onOrdenar={ordenarPorColuna} />
-                  <Cab chave="check_in" rotulo="Check-in" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[11rem]" />
-                  <Cab chave="hora_checkin" rotulo="Hora c/in" ordem={ordem} onOrdenar={ordenarPorColuna} />
-                  <Cab chave="check_out" rotulo="Check-out" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[11rem]" />
-                  <Cab chave="noites" rotulo="Noites" ordem={ordem} onOrdenar={ordenarPorColuna} direita />
+                  <Cab chave="check_in" rotulo="Check-in" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[9rem] min-[1600px]:min-w-[11rem]" />
+                  <Cab chave="hora_checkin" rotulo="Hora c/in" ordem={ordem} onOrdenar={ordenarPorColuna} className="hidden min-[1600px]:table-cell" />
+                  <Cab chave="check_out" rotulo="Check-out" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[9rem] min-[1600px]:min-w-[11rem]" />
+                  <Cab chave="noites" rotulo="Noites" ordem={ordem} onOrdenar={ordenarPorColuna} direita className="hidden min-[1600px]:table-cell" />
                   <Cab chave="hospedes" rotulo="Hósp." ordem={ordem} onOrdenar={ordenarPorColuna} direita />
-                  <Cab chave="nome_hospede" rotulo="Hóspede" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[11rem]" />
+                  <Cab chave="nome_hospede" rotulo="Hóspede" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[8rem] min-[1600px]:min-w-[9rem]" />
                   <Cab chave="plataforma" rotulo="Plataforma" ordem={ordem} onOrdenar={ordenarPorColuna} />
-                  <Cab chave="tipo_limpeza" rotulo="Tipo de limpeza" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[11rem]" />
-                  <Cab chave="data_limpeza" rotulo="Data da limpeza" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[11rem]" />
-                  <Cab chave="horario_preferido" rotulo="Horário pref. limpeza" ordem={ordem} onOrdenar={ordenarPorColuna} />
-                  <Cab chave="observacoes" rotulo="Notas" ordem={ordem} onOrdenar={ordenarPorColuna} />
+                  <Cab chave="tipo_limpeza" rotulo="Tipo de limpeza" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[9rem] min-[1600px]:min-w-[11rem]" />
+                  <Cab chave="horario_preferido" rotulo="Horário" ordem={ordem} onOrdenar={ordenarPorColuna} className="hidden min-[1600px]:table-cell" />
+                  <Cab chave="observacoes" rotulo="Notas" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[12rem] min-[1600px]:min-w-[28rem]" />
                   <Cab chave="estado" rotulo="Limpeza" ordem={ordem} onOrdenar={ordenarPorColuna} className={`${FIXO_ESTADO} z-[2] bg-background bg-gradient-to-r from-muted/40 to-muted/40`} />
                   <th className={`${FIXO_ACOES} z-[2] bg-background bg-gradient-to-r from-muted/40 to-muted/40 px-2 py-2`}><span className="sr-only">Ações</span></th>
                 </tr>
@@ -1218,7 +1391,7 @@ export default function ParceiroReservasPage() {
               <tbody>
                 {/* Linha de entrada: Enter ou + acrescentam-na às reservas por gravar */}
                 <tr className="border-b bg-primary/5" onKeyDown={enterAdiciona}>
-                  <td className="p-0">
+                  <td className="max-w-[10rem] p-0 min-[1600px]:max-w-[16rem]">
                     <select
                       value={nova.propriedade_id}
                       onChange={(e) => setN("propriedade_id")(e.target.value)}
@@ -1235,13 +1408,13 @@ export default function ParceiroReservasPage() {
                     <input type="date" value={nova.check_in} className={CELULA} disabled={gravando} aria-label="Nova reserva: check-in"
                       onChange={(e) => setNova((n) => ({ ...n, check_in: e.target.value, check_out: n.check_out || e.target.value }))} />
                   </td>
-                  <td className="p-0">
+                  <td className="hidden p-0 min-[1600px]:table-cell">
                     <input value={nova.hora_checkin} onChange={(e) => setN("hora_checkin")(e.target.value)} placeholder="18:00" className={CELULA} disabled={gravando} aria-label="Nova reserva: hora de check-in" />
                   </td>
                   <td className="p-0">
                     <input type="date" value={nova.check_out} onChange={(e) => setN("check_out")(e.target.value)} className={CELULA} disabled={gravando} aria-label="Nova reserva: check-out" />
                   </td>
-                  <td className="px-2 text-right text-muted-foreground">{noites(nova.check_in, nova.check_out) || ""}</td>
+                  <td className="hidden px-2 text-right text-muted-foreground min-[1600px]:table-cell">{noites(nova.check_in, nova.check_out) || ""}</td>
                   <td className="p-0">
                     <input type="number" min={0} value={nova.hospedes} onChange={(e) => setN("hospedes")(e.target.value)} className={`${CELULA} text-right`} disabled={gravando} aria-label="Nova reserva: hóspedes" />
                   </td>
@@ -1259,14 +1432,11 @@ export default function ParceiroReservasPage() {
                       {OPCOES_TIPO.map((o) => <option key={o.valor} value={o.valor}>{o.rotulo}</option>)}
                     </select>
                   </td>
-                  <td className="p-0">
-                    <input type="date" {...limitesDataLimpeza(nova.tipo_limpeza, nova.check_in, nova.check_out)} value={tipoPedeData(nova.tipo_limpeza) ? nova.data_limpeza : ""} onChange={(e) => setN("data_limpeza")(e.target.value)} className={CELULA} disabled={gravando || !tipoPedeData(nova.tipo_limpeza)} aria-label="Nova reserva: data da limpeza (intermédia ou preparação)" />
-                  </td>
-                  <td className="p-0">
+                  <td className="hidden p-0 min-[1600px]:table-cell">
                     <input value={nova.horario_preferido} onChange={(e) => setN("horario_preferido")(e.target.value)} placeholder="11h - 14h" className={CELULA} disabled={gravando} aria-label="Nova reserva: horário preferido de limpeza" />
                   </td>
                   <td className="p-0">
-                    <input value={nova.observacoes} onChange={(e) => setN("observacoes")(e.target.value)} className={CELULA} disabled={gravando} aria-label="Nova reserva: notas" />
+                    <textarea value={nova.observacoes} onChange={(e) => { setN("observacoes")(e.target.value); e.currentTarget.style.height = "auto"; e.currentTarget.style.height = `${e.currentTarget.scrollHeight + 2}px`; }} onKeyDown={(e) => { if (e.key === "Enter") e.stopPropagation(); }} rows={4} className={`${CELULA} h-auto min-h-[6.5rem] resize-y py-1.5`} disabled={gravando} aria-label="Nova reserva: notas" />
                   </td>
                   <td className={`${FIXO_ESTADO} bg-background bg-gradient-to-r from-primary/5 to-primary/5 px-2 text-xs text-muted-foreground`}>nova</td>
                   <td className={`${FIXO_ACOES} bg-background bg-gradient-to-r from-primary/5 to-primary/5 px-1 text-right`}>
@@ -1291,17 +1461,17 @@ export default function ParceiroReservasPage() {
                   return (
                     <FragmentoLinha key={l.key} avisos={avisos}>
                       <tr className={`border-b last:border-0 hover:bg-muted/30 ${cor.tr}`}>
-                        <td className={`whitespace-nowrap px-2 py-1 font-medium ${cor.faixa}`}>{nome}</td>
+                        <td title={nome} className={`max-w-[10rem] truncate px-2 min-[1600px]:max-w-[16rem] py-1 font-medium ${cor.faixa}`}>{nome}</td>
                         <td className="p-0">
                           <Celula type="date" value={ci} pendente={p("check_in")} rotulo={`Check-in, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "check_in", v)} />
                         </td>
-                        <td className="p-0">
+                        <td className="hidden p-0 min-[1600px]:table-cell">
                           <Celula value={l.valores.hora_checkin} pendente={p("hora_checkin")} rotulo={`Hora de check-in, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "hora_checkin", v)} />
                         </td>
                         <td className="p-0">
                           <Celula type="date" value={co} pendente={p("check_out")} rotulo={`Check-out, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "check_out", v)} />
                         </td>
-                        <td className="w-16 p-0">
+                        <td className="hidden w-16 p-0 min-[1600px]:table-cell">
                           <Celula type="number" align="right" pendente={p("check_out")} rotulo={`Noites, ${nome}`} value={String(noites(ci, co))} disabled={l.semEdicao} onCommit={(v) => alterar(l, "noites", v)} />
                         </td>
                         <td className="w-16 p-0">
@@ -1316,18 +1486,11 @@ export default function ParceiroReservasPage() {
                         <td className="p-0">
                           <Celula type="select" opcoes={OPCOES_TIPO} pendente={p("tipo_limpeza")} rotulo={`Tipo de limpeza, ${nome}`} value={tipoOuNormal(l.valores.tipo_limpeza)} disabled={l.semEdicao} onCommit={(v) => alterar(l, "tipo_limpeza", v)} />
                         </td>
-                        <td className="p-0">
-                          {tipoPedeData(l.valores.tipo_limpeza) ? (
-                            <Celula type="date" {...limitesDataLimpeza(l.valores.tipo_limpeza, l.valores.check_in, l.valores.check_out)} pendente={p("data_limpeza")} rotulo={`Data da limpeza, ${nome}`} value={l.valores.data_limpeza} disabled={l.semEdicao} onCommit={(v) => alterar(l, "data_limpeza", v)} />
-                          ) : (
-                            <span className="px-2 text-xs text-muted-foreground" title="Normal e profunda ficam no check-out">No check-out</span>
-                          )}
-                        </td>
-                        <td className="p-0">
+                        <td className="hidden p-0 min-[1600px]:table-cell">
                           <Celula value={l.valores.horario_preferido} pendente={p("horario_preferido")} rotulo={`Horário preferido, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "horario_preferido", v)} />
                         </td>
                         <td className="p-0">
-                          <Celula value={l.valores.observacoes} pendente={p("observacoes")} rotulo={`Observações, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "observacoes", v)} />
+                          <CelulaNotas value={l.valores.observacoes} pendente={p("observacoes")} rotulo={`Observações, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "observacoes", v)} />
                         </td>
                         <td className={`${FIXO_ESTADO} whitespace-nowrap px-2 ${cor.fixo}`}>
                           {l.nova ? (
@@ -1435,16 +1598,11 @@ export default function ParceiroReservasPage() {
                   {OPCOES_TIPO.map((o) => <option key={o.valor} value={o.valor}>{o.rotulo}</option>)}
                 </select>
               </Campo>
-              {tipoPedeData(nova.tipo_limpeza) && (
-                <Campo texto="Data da limpeza">
-                  <input type="date" {...limitesDataLimpeza(nova.tipo_limpeza, nova.check_in, nova.check_out)} value={nova.data_limpeza} onChange={(e) => setN("data_limpeza")(e.target.value)} className={CELULA_CARTAO} disabled={gravando} aria-label="Nova reserva: data da limpeza" />
-                </Campo>
-              )}
               <Campo texto="Horário preferido de limpeza">
                 <input value={nova.horario_preferido} onChange={(e) => setN("horario_preferido")(e.target.value)} placeholder="11h - 14h" className={CELULA_CARTAO} disabled={gravando} aria-label="Nova reserva: horário preferido de limpeza" />
               </Campo>
               <Campo texto="Notas">
-                <input value={nova.observacoes} onChange={(e) => setN("observacoes")(e.target.value)} className={CELULA_CARTAO} disabled={gravando} aria-label="Nova reserva: notas" />
+                <textarea value={nova.observacoes} onChange={(e) => setN("observacoes")(e.target.value)} onInput={cresce} rows={3} className={CELULA_NOTAS_CARTAO} disabled={gravando} aria-label="Nova reserva: notas" />
               </Campo>
               {novaErro && <p role="alert" className="text-sm text-destructive">{novaErro}</p>}
               <Button size="touch" variant="outline" className="w-full" onClick={acrescentarNova} disabled={gravando} aria-label="Acrescentar reserva por gravar">
@@ -1570,16 +1728,11 @@ export default function ParceiroReservasPage() {
                   <Campo texto="Tipo de limpeza">
                     <Celula cartao type="select" opcoes={OPCOES_TIPO} value={tipoOuNormal(l.valores.tipo_limpeza)} pendente={p("tipo_limpeza")} rotulo={`Tipo de limpeza, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "tipo_limpeza", v)} />
                   </Campo>
-                  {tipoPedeData(l.valores.tipo_limpeza) && (
-                    <Campo texto="Data da limpeza">
-                      <Celula cartao type="date" {...limitesDataLimpeza(l.valores.tipo_limpeza, l.valores.check_in, l.valores.check_out)} value={l.valores.data_limpeza} pendente={p("data_limpeza")} rotulo={`Data da limpeza, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "data_limpeza", v)} />
-                    </Campo>
-                  )}
                   <Campo texto="Horário preferido de limpeza">
                     <Celula cartao value={l.valores.horario_preferido} pendente={p("horario_preferido")} rotulo={`Horário preferido, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "horario_preferido", v)} />
                   </Campo>
                   <Campo texto="Notas">
-                    <Celula cartao value={l.valores.observacoes} pendente={p("observacoes")} rotulo={`Observações, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "observacoes", v)} />
+                    <CelulaNotas cartao value={l.valores.observacoes} pendente={p("observacoes")} rotulo={`Observações, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "observacoes", v)} />
                   </Campo>
                 </CardContent>
               </Card>

@@ -3,117 +3,123 @@
 @tailwind utilities;
 
 /**
- * Tema All2gether — Rebranding Premium Dourado
- * -------------------------------------------
- * Inspirado em sites corporativos de Property Management de luxo (ex.: All2Gether).
- *
- * Paleta:
- *   - Background: branco puro (#fff).
- *   - Foreground: azul/cinza muito escuro (texto principal).
- *   - Primary: tom Dourado/Areia elegante (43 74% 49%) — luxo, sofisticado.
- *     Texto SEMPRE escuro sobre dourado (branco só dava 2,25:1); para texto,
- *     links e anel de foco sobre fundo claro usa-se --gold-text (dourado escuro).
- *   - Muted/Secondary: cinza super suave (210 40% 96%) para fundos secundários.
- *   - Border/Input: hairline discreto (214.3 31.8% 91.4%).
- *   - Radius: 0.5rem (opção aprovada "Dourado refinado").
- *   - Sombras: shadow-sm (flat), sem elevação pesada.
+ * Tema All2gether — Opção A «Petróleo» (aprovada).
+ * Tokens em HSL a partir de trabalho-local/design-gestor/opcao-a/tokens.css. Contrastes medidos em
+ * trabalho-local/design-gestor/contraste-resultado.txt (texto >= 4,5:1; estados >= 6:1).
+ * Os nomes das variáveis mantêm-se (--primary, --status-*...); a marca para texto/realces é --brand-*
+ * (antes --gold-*). Radius 8px. Botões principais em petróleo.
  */
 
 @layer base {
   :root {
-    /* Fundos */
-    --background: 0 0% 100%;              /* branco puro */
-    --foreground: 222 47% 11%;            /* azul/cinza muito escuro — texto */
-
-    --card: 0 0% 100%;                    /* branco puro */
-    --card-foreground: 222 47% 11%;
-
+    /* Opção A · Petróleo (trabalho-local/design-gestor/opcao-a/tokens.css), em HSL */
+    --background: 200 18% 97%;
+    --foreground: 202 39% 10%;
+    --card: 0 0% 100%;
+    --card-foreground: 202 39% 10%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222 47% 11%;
+    --popover-foreground: 202 39% 10%;
 
-    /* Primary — Dourado/Areia elegante */
-    --primary: 43 74% 49%;
-    --primary-foreground: 222 47% 11%;    /* texto escuro sobre dourado (7,96:1) */
+    --primary: 189 81% 23%;
+    --primary-foreground: 0 0% 100%;
 
-    /* Secondary / muted / accent — cinza super suave */
-    --secondary: 210 40% 96%;
-    --secondary-foreground: 222 47% 11%;
-    --muted: 210 40% 96%;                 /* fundos secundários */
-    --muted-foreground: 215 19% 38%;      /* texto secundário (6,6:1 sobre branco) */
-    --accent: 210 40% 96%;
-    --accent-foreground: 222 47% 11%;
+    --secondary: 200 20% 94%;
+    --secondary-foreground: 202 39% 10%;
+    --muted: 200 20% 94%;
+    --muted-foreground: 204 15% 35%;
+    --accent: 187 38% 92%;
+    --accent-foreground: 189 81% 23%;
 
-    /* Destructive (vermelho) */
-    --destructive: 0 70% 42%;
-    --destructive-foreground: 0 0% 98%;
+    --destructive: 4 76% 40%;
+    --destructive-foreground: 0 0% 100%;
 
-    /* Borders hairline */
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 40 90% 25%;                   /* dourado escuro: o dourado da marca dava 2,25:1 sobre branco */
-
+    --border: 204 19% 89%;
+    --input: 204 19% 89%;
+    --ring: 189 81% 23%;
     --radius: 0.5rem;
 
-    /* Dourado para texto/links/realces (o --primary é para fundos) */
-    --gold-text: 40 90% 25%;
-    --gold-soft: 43 80% 94%;
-    --gold-border: 44 69% 76%;
+    /* Marca (petróleo) para texto/realces; --primary é para fundos */
+    --brand-text: 189 81% 23%;
+    --brand-soft: 187 38% 92%;
+    --brand-border: 188 34% 75%;
 
-    /*
-     * Estados da tarefa — UMA SÓ fonte de verdade (cor forte + fundo suave).
-     * Usar via classes Tailwind `text-status-*` / `bg-status-*-bg` ou via
-     * <EstadoTarefaBadge/> / variantes do <Badge/>. Nunca com cores à mão.
-     *   porAtribuir  = ainda ninguém (espera normal, p. ex. libertada por uma ausência)
-     *   naoAtribuida = tentou-se e falhou (equipa sem folga/lotada): exige ação do gestor
-     */
-    --status-porat: 30 90% 28%;   --status-porat-bg: 38 95% 92%;
-    --status-naoat: 0 70% 38%;    --status-naoat-bg: 0 90% 96%;
-    --status-atrib: 215 70% 38%;  --status-atrib-bg: 213 77% 95%;
-    --status-curso: 262 55% 40%;  --status-curso-bg: 263 69% 95%;
-    --status-conc: 150 59% 25%;   --status-conc-bg: 150 50% 93%;
-    --status-canc: 213 14% 38%;   --status-canc-bg: 210 17% 93%;
-    /* Texto sobre fundo sólido --status-* (botões): branco no claro (≥5,0:1), escuro no tema escuro (≥8,3:1; hover ≥7,0:1) */
+    /* Barra lateral */
+    --side: 0 0% 100%;
+    --side-foreground: 202 39% 10%;
+    --side-muted: 204 15% 35%;
+    --side-active: 187 38% 92%;
+    --side-active-foreground: 189 81% 23%;
+
+    /* Estados da tarefa (nomes --status-* mantidos): cor forte + fundo suave */
+    --status-porat: 33 100% 27%;   --status-porat-bg: 38 89% 93%;
+    --status-naoat: 0 67% 38%;   --status-naoat-bg: 0 81% 96%;
+    --status-atrib: 214 67% 34%;   --status-atrib-bg: 215 70% 95%;
+    --status-curso: 260 46% 42%;   --status-curso-bg: 261 68% 95%;
+    --status-conc: 146 61% 25%;     --status-conc-bg: 140 41% 93%;
+    --status-canc: 215 14% 34%;     --status-canc-bg: 216 16% 94%;
+    /* Texto sobre fundo sólido --status-* (botões) */
     --status-foreground: 0 0% 100%;
+
+    /* Tipo de limpeza: forma + cor (nunca só a cor) */
+    --tipo-normal: 215 16% 47%;
+    --tipo-intermedia: 200 98% 39%;
+    --tipo-profunda: 295 72% 40%;
+    --tipo-preparacao: 86 78% 27%;
   }
 
   .dark {
-    /* Dark mode luxuoso: azul/cinza escuro + acentos dourados */
-    --background: 222 47% 11%;            /* azul/cinza muito escuro */
-    --foreground: 0 0% 98%;
-    --card: 222 40% 14%;                  /* um toque acima do background */
-    --card-foreground: 0 0% 98%;
-    --popover: 222 40% 14%;
-    --popover-foreground: 0 0% 98%;
+    /* Opção A · Petróleo (trabalho-local/design-gestor/opcao-a/tokens.css), em HSL */
+    --background: 202 33% 6%;
+    --foreground: 200 24% 93%;
+    --card: 203 32% 10%;
+    --card-foreground: 200 24% 93%;
+    --popover: 203 32% 10%;
+    --popover-foreground: 200 24% 93%;
 
-    /* Primary ligeiramente mais brilhante no dark para visibilidade */
-    --primary: 43 74% 55%;
-    --primary-foreground: 222 47% 11%;    /* texto escuro sobre dourado */
+    --primary: 188 53% 55%;
+    --primary-foreground: 190 74% 6%;
 
-    --secondary: 215 28% 17%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 215 28% 17%;
-    --muted-foreground: 215 16% 65%;
-    --accent: 215 28% 17%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62% 40%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 215 28% 20%;
-    --input: 215 28% 20%;
-    --ring: 43 74% 55%;
+    --secondary: 201 29% 13%;
+    --secondary-foreground: 200 24% 93%;
+    --muted: 201 29% 13%;
+    --muted-foreground: 202 16% 67%;
+    --accent: 195 53% 15%;
+    --accent-foreground: 188 56% 67%;
 
-    /* Dourado para texto sobre fundo escuro */
-    --gold-text: 43 74% 60%;
-    --gold-soft: 43 30% 18%;
-    --gold-border: 43 35% 32%;
+    --destructive: 358 75% 59%;
+    --destructive-foreground: 0 0% 100%;
 
-    /* Estados: texto claro sobre fundo escuro tingido */
-    --status-porat: 38 92% 70%;   --status-porat-bg: 30 60% 16%;
-    --status-naoat: 0 90% 78%;    --status-naoat-bg: 0 50% 18%;
-    --status-atrib: 213 90% 76%;  --status-atrib-bg: 215 55% 20%;
-    --status-curso: 262 85% 82%;  --status-curso-bg: 262 40% 22%;
-    --status-conc: 150 55% 66%;   --status-conc-bg: 150 40% 15%;
-    --status-canc: 213 15% 72%;   --status-canc-bg: 215 14% 20%;
-    --status-foreground: 222 47% 11%;
+    --border: 201 25% 18%;
+    --input: 201 25% 18%;
+    --ring: 188 53% 55%;
+
+    /* Marca (petróleo) para texto/realces; --primary é para fundos */
+    --brand-text: 188 56% 67%;
+    --brand-soft: 195 53% 15%;
+    --brand-border: 192 41% 28%;
+
+    /* Barra lateral */
+    --side: 201 33% 8%;
+    --side-foreground: 200 24% 93%;
+    --side-muted: 202 16% 67%;
+    --side-active: 195 53% 15%;
+    --side-active-foreground: 188 56% 67%;
+
+    /* Estados da tarefa (nomes --status-* mantidos): cor forte + fundo suave */
+    --status-porat: 37 85% 67%;   --status-porat-bg: 36 48% 12%;
+    --status-naoat: 0 82% 78%;   --status-naoat-bg: 358 40% 14%;
+    --status-atrib: 214 80% 75%;   --status-atrib-bg: 217 49% 15%;
+    --status-curso: 261 73% 81%;   --status-curso-bg: 260 37% 16%;
+    --status-conc: 145 50% 64%;     --status-conc-bg: 145 43% 11%;
+    --status-canc: 211 15% 71%;     --status-canc-bg: 208 21% 14%;
+    /* Texto sobre fundo sólido --status-* (botões) */
+    --status-foreground: 190 74% 6%;
+
+    /* Tipo de limpeza: forma + cor (nunca só a cor) */
+    --tipo-normal: 215 20% 65%;
+    --tipo-intermedia: 198 93% 60%;
+    --tipo-profunda: 292 91% 73%;
+    --tipo-preparacao: 83 78% 55%;
   }
 }
 
@@ -158,7 +164,7 @@
   box-shadow: 0 0 0 1px hsl(var(--background) / 0.85);
 }
 
-/* Toolbar — botões alinhados com o tema All2gether (dourado) */
+/* Toolbar — botões alinhados com o tema All2gether (petróleo) */
 .fc .fc-toolbar.fc-header-toolbar {
   gap: 0.5rem;
   flex-wrap: wrap;
@@ -803,3 +809,292 @@
   color: #475569;
 }
 
+
+/* ==========================================================================
+   Tabelas responsivas (`table.rt`): abaixo de 760 px cada linha vira um cartão, sem scroll lateral.
+   <TabelasResponsivas/> (layout do gestor) copia o texto de cada <th> para `data-l` nas células
+   (etiqueta no cartão); `data-k="1"..."9"` num <th> define a prioridade (1 = primeiro no cartão;
+   sem `data-k` segue a ordem das colunas; `data-k="0"` esconde a coluna no cartão).
+   ========================================================================== */
+@media (max-width: 759px) {
+  .rt,
+  .rt tbody {
+    display: block;
+    width: 100%;
+  }
+  .rt thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+  .rt tr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem 0.75rem;
+    margin: 0 0 0.5rem;
+    padding: 0.625rem 0.75rem;
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius);
+    background: hsl(var(--card));
+  }
+  .rt td {
+    display: block;
+    min-width: 0;
+    padding: 0 !important;
+    border: 0 !important;
+    text-align: left !important;
+    order: var(--k, 5);
+  }
+  .rt td[data-l]:not([data-l=""])::before {
+    content: attr(data-l);
+    display: block;
+    font-size: 0.6875rem;
+    line-height: 1.2;
+    color: hsl(var(--muted-foreground));
+  }
+  .rt td:first-child {
+    flex: 1 1 100%;
+    font-weight: 600;
+  }
+  .rt td[data-k="0"] {
+    display: none;
+  }
+  .rt td:empty {
+    display: none;
+  }
+}
+
+/* Tipo de limpeza: forma + cor (círculo normal, anel intermédia, quadrado profunda, losango preparação) */
+.tipo-marca {
+  display: inline-block;
+  width: 0.625rem;
+  height: 0.625rem;
+  flex: none;
+  background: hsl(var(--tipo-normal));
+  border-radius: 9999px;
+}
+.tipo-marca[data-tipo="intermedia"] {
+  background: transparent;
+  box-shadow: inset 0 0 0 0.15rem hsl(var(--tipo-intermedia));
+}
+.tipo-marca[data-tipo="profunda"] {
+  background: hsl(var(--tipo-profunda));
+  border-radius: 0.125rem;
+}
+.tipo-marca[data-tipo="preparacao"] {
+  background: hsl(var(--tipo-preparacao));
+  border-radius: 0.125rem;
+  transform: rotate(45deg) scale(0.9);
+}
+
+/* Calendário (opção A): estado pelo fundo + barra lateral com glifo; cancelada riscada */
+.fc .fc-event {
+  border-left-width: 4px;
+}
+.fc-evt-glifo {
+  font-size: 0.7rem;
+  font-weight: 800;
+  line-height: 1;
+}
+.fc-evt-cancelada .fc-evt-month__title,
+.fc-evt-cancelada .fc-evt-block__title,
+.fc-evt-cancelada .fc-evt-block__subtitle {
+  text-decoration: line-through;
+  opacity: 0.8;
+}
+.fc .fc-popover {
+  background: hsl(var(--popover));
+  border-color: hsl(var(--border));
+  z-index: 40;
+}
+
+/* ==========================================================================
+   Calendário do gestor: usabilidade (telemóvel e «+N mais»)
+   ========================================================================== */
+
+/* Botão Hoje desativado: continua legível (>= 3:1), não só "apagado" */
+.fc .fc-button:disabled {
+  opacity: 1;
+}
+.fc .fc-today-button:disabled {
+  background-color: hsl(var(--muted));
+  border-color: hsl(var(--muted-foreground) / 0.6);
+  color: hsl(var(--muted-foreground));
+  cursor: default;
+}
+
+/* «+N mais»: botão claro de uma linha (Mês e Semana) */
+.fc .fc-daygrid-more-link,
+.fc .fc-timegrid-more-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.5rem;
+  max-width: 100%;
+  margin: 2px 0;
+  padding: 0 0.5rem;
+  border: 1px solid hsl(var(--primary) / 0.55);
+  border-radius: calc(var(--radius) - 2px);
+  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--primary));
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.dark .fc .fc-daygrid-more-link,
+.dark .fc .fc-timegrid-more-link {
+  color: hsl(var(--foreground));
+}
+.fc .fc-daygrid-more-link:hover,
+.fc .fc-timegrid-more-link:hover {
+  background: hsl(var(--primary) / 0.2);
+  text-decoration: none;
+}
+.fc .fc-timegrid-more-link {
+  display: block;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: center;
+}
+.fc .fc-timegrid-more-link-inner {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.25rem;
+  padding: 0 0.375rem;
+  font-size: 0.6875rem;
+  border: 1px solid hsl(var(--primary) / 0.55);
+  border-radius: calc(var(--radius) - 2px);
+  background: hsl(var(--card));
+  box-shadow: 0 1px 2px hsl(var(--foreground) / 0.12);
+}
+
+/* Popover do «+N mais»: nunca passa a largura do ecrã e o X vê-se e toca-se bem */
+.fc .fc-popover {
+  max-width: calc(100vw - 1rem);
+}
+.fc .fc-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.25rem 0.25rem 0.25rem 0.625rem;
+}
+.fc .fc-popover-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  background: hsl(var(--background));
+  font-size: 1.25rem;
+  line-height: 1;
+  opacity: 1;
+  cursor: pointer;
+}
+.fc .fc-popover-body {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+/* Ícone de estado maior no Mês (desktop) */
+.fc-evt-glifo {
+  font-size: 0.85rem;
+}
+
+/* Pontos do Mês no telemóvel: forma = tipo de limpeza, cor = estado */
+.dia-ponto {
+  display: inline-block;
+  flex: none;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background: var(--c);
+}
+.dia-ponto[data-tipo="intermedia"] {
+  background: transparent;
+  box-shadow: inset 0 0 0 0.15rem var(--c);
+}
+.dia-ponto[data-tipo="profunda"] {
+  border-radius: 0.1rem;
+}
+.dia-ponto[data-tipo="preparacao"] {
+  border-radius: 0.1rem;
+  transform: rotate(45deg) scale(0.85);
+}
+.dia-resumo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+}
+.dia-resumo__pontos {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2px;
+  min-height: 0.625rem;
+}
+.dia-resumo__total {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0 0.25rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  line-height: 1.1;
+  color: hsl(var(--foreground));
+}
+.dia-resumo__sinal {
+  font-size: 0.625rem;
+}
+.dia-resumo__sinal--por {
+  color: hsl(var(--status-porat));
+}
+.dia-resumo__sinal--curso {
+  color: hsl(var(--status-curso));
+}
+
+@media (max-width: 639px) {
+  /* Mês: sem barras de eventos; o resumo vai na célula */
+  .fc-dayGridMonth-view .fc-daygrid-event-harness,
+  .fc-dayGridMonth-view .fc-daygrid-day-bottom,
+  .fc-dayGridMonth-view .fc-daygrid-more-link {
+    display: none !important;
+  }
+  .fc-dayGridMonth-view .fc-daygrid-day-frame {
+    min-height: 4.25rem;
+    cursor: pointer;
+  }
+  .fc-dayGridMonth-view .fc-daygrid-day-top {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .fc-dayGridMonth-view .fc-daygrid-day-number {
+    width: 100%;
+    padding: 2px 0;
+    text-align: center;
+    font-size: 0.8125rem;
+  }
+  .fc .fc-daygrid-day.dia-selecionado {
+    background: hsl(var(--primary) / 0.14);
+    box-shadow: inset 0 0 0 2px hsl(var(--primary));
+  }
+  /* Alvos de toque de 44 px na barra do calendário */
+  .fc .fc-button {
+    min-height: 2.75rem;
+    min-width: 2.75rem;
+  }
+  .fc .fc-toolbar-title {
+    font-size: 1.125rem;
+  }
+}

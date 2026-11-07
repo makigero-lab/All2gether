@@ -50,10 +50,23 @@ const config: Config = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
-        gold: {
-          text: "hsl(var(--gold-text))",
-          soft: "hsl(var(--gold-soft))",
-          border: "hsl(var(--gold-border))",
+        brand: {
+          text: "hsl(var(--brand-text))",
+          soft: "hsl(var(--brand-soft))",
+          border: "hsl(var(--brand-border))",
+        },
+        side: {
+          DEFAULT: "hsl(var(--side))",
+          foreground: "hsl(var(--side-foreground))",
+          muted: "hsl(var(--side-muted))",
+          active: "hsl(var(--side-active))",
+          "active-foreground": "hsl(var(--side-active-foreground))",
+        },
+        tipo: {
+          normal: "hsl(var(--tipo-normal))",
+          intermedia: "hsl(var(--tipo-intermedia))",
+          profunda: "hsl(var(--tipo-profunda))",
+          preparacao: "hsl(var(--tipo-preparacao))",
         },
         // Estados da tarefa (ver globals.css): `text-status-porat bg-status-porat-bg`.
         status: {

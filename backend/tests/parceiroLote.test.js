@@ -55,11 +55,19 @@ describe('B1 idempotência', () => {
     expect(await Tarefa.countDocuments({ propriedade_id: casa._id, data: { $gte: new Date('2031-04-03T00:00:00Z'), $lt: new Date('2031-04-04T00:00:00Z') }, estado: { $ne: 'cancelada' } })).toBe(1);
   });
 
-  it('chave diferente mas mesma casa e dia de check-out: 409 claro', async () => {
+  it('chave diferente mas mesma casa e dia de check-out: grava e associa à limpeza existente, com aviso', async () => {
     const r = await post({ ...base(), chave_idempotencia: 'outra-chave' });
-    expect(r.status).toBe(409);
-    expect(r.body.codigo).toBe('RESERVA_DUPLICADA');
-    expect(r.body.erro).toMatch(/Já existe uma limpeza/);
+    expect(r.status).toBe(201);
+    expect(r.body.associada_a_existente).toBe(true);
+    expect(r.body.aviso).toMatch(/Já havia uma limpeza/);
+    const primeira = await ReservaManual.findOne({ chave_idempotencia: 'nova-1' }).lean();
+    expect(String(r.body.reserva.tarefa_gerada_id)).toBe(String(primeira.tarefa_gerada_id));
+    expect(await ReservaManual.countDocuments({ chave_idempotencia: 'outra-chave' })).toBe(1);
+    // reenvio com a mesma chave continua idempotente
+    const again = await post({ ...base(), chave_idempotencia: 'outra-chave' });
+    expect(again.status).toBe(200);
+    expect(again.body.repetida).toBe(true);
+    expect(await Tarefa.countDocuments({ propriedade_id: casa._id, estado: { $ne: 'cancelada' }, data: { $gte: new Date('2031-03-03T00:00:00Z'), $lt: new Date('2031-03-04T00:00:00Z') } })).toBe(1);
   });
 
   it('casos legítimos passam: outra casa no mesmo dia e saída/entrada no mesmo dia', async () => {

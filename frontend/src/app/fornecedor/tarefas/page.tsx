@@ -209,7 +209,7 @@ export default function FornecedorTarefasPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-            <Shirt className="h-6 w-6 text-gold-text" />
+            <Shirt className="h-6 w-6 text-brand-text" />
             Tarefas de Lavandaria
           </h1>
           <p className="text-sm text-muted-foreground">
@@ -293,7 +293,7 @@ export default function FornecedorTarefasPage() {
         <div className="flex flex-col gap-4 md:hidden">
           {tarefasAgrupadas.map((grupo) => (
             <section key={grupo.dataKey} aria-label={grupo.dataLabel} className="space-y-2">
-              <h2 className="text-sm font-bold first-letter:uppercase text-gold-text">
+              <h2 className="text-sm font-bold first-letter:uppercase text-brand-text">
                 {grupo.dataLabel}
                 <span className="ml-2 text-xs font-normal text-muted-foreground">
                   {plural(grupo.tarefas.length, "tarefa")}
@@ -431,7 +431,7 @@ function GrupoTarefasLavandaria({
       {/* FIX (agrupamento por dias) — Linha separadora com a data em destaque. */}
       <tr className="border-y border-primary/20 bg-primary/5">
         <td colSpan={5} className="px-4 py-2.5">
-          <span className="text-sm font-bold inline-block first-letter:uppercase text-gold-text">
+          <span className="text-sm font-bold inline-block first-letter:uppercase text-brand-text">
             {grupo.dataLabel}
           </span>
           <span className="ml-2 text-xs text-muted-foreground">

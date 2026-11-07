@@ -329,7 +329,9 @@ export function textoRedistribuicao(
  * O plural regular acrescenta «s»; para outros passa-se a forma do plural.
  */
 export function plural(n: number | string | null | undefined, singular: string, pluralForma?: string): string {
-  return `${n ?? 0} ${Number(n) === 1 ? singular : pluralForma ?? `${singular}s`}`;
+  // parseFloat aceita «1 reserva» (encadeado: plural(plural(1, "reserva"), "criada") => «1 reserva criada»)
+  const num = typeof n === "string" ? parseFloat(n) : Number(n);
+  return `${n ?? 0} ${num === 1 ? singular : pluralForma ?? `${singular}s`}`;
 }
 
 /**

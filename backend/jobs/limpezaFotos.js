@@ -119,7 +119,7 @@ function iniciarLimpezaFotos() {
     } catch (err) {
       console.error('❌ [LimpezaFotos] erro não capturado no cron:', err.message);
     }
-  });
+  }, { timezone: 'Europe/Lisbon' });
 
   return { executarLimpezaFotos };
 }

@@ -117,26 +117,32 @@ describe('itens 5 e 6: duplicados do parceiro', () => {
     const avisos = await Notificacao.find({ utilizador_id: c.g._id }).lean();
     expect(JSON.stringify(avisos)).toMatch(/Duas limpezas/);
   });
-  test('dois check-outs de parceiro no mesmo dia continuam em 409 com data dd/mm/aaaa', async () => {
+  test('dois check-outs de parceiro no mesmo dia: a 2.ª reserva grava e fica associada, com aviso dd/mm/aaaa', async () => {
     const { casa, tp } = await parceiro();
-    expect((await criar(tp, casa, '2037-05-08', '2037-05-10')).status).toBe(201);
+    const a = await criar(tp, casa, '2037-05-08', '2037-05-10');
+    expect(a.status).toBe(201);
     const r = await criar(tp, casa, '2037-05-07', '2037-05-10');
-    expect(r.status).toBe(409);
-    expect(r.body.erro).toMatch(/10\/05\/2037/);
+    expect(r.status).toBe(201);
+    expect(r.body.aviso).toMatch(/10\/05\/2037/);
+    expect(String(r.body.reserva.tarefa_gerada_id)).toBe(String(a.body.tarefa._id));
   });
-  test('mudar o check-out para um dia ocupado dá 409 e não cancela a antiga; sem conflito muda', async () => {
+  test('mudar o check-out para um dia ocupado junta-se à limpeza existente (a antiga cancela-se); sem conflito muda', async () => {
     const { casa, tp } = await parceiro();
     const r1 = await criar(tp, casa, '2037-06-01', '2037-06-03');
     const r2 = await criar(tp, casa, '2037-06-04', '2037-06-06');
     const put = (id, co) => request(app).put(`/api/parceiro/reservas/${id}`).set(auth(tp)).send({ check_in: '2037-06-01', check_out: co });
-    const bad = await put(r2.body.reserva._id, '2037-06-03');
-    expect(bad.status).toBe(409);
-    expect(bad.body.erro).toMatch(/03\/06\/2037/);
-    expect((await Tarefa.findById(r2.body.tarefa._id)).estado).not.toBe('cancelada');
+    const junta = await put(r2.body.reserva._id, '2037-06-03');
+    expect(junta.status).toBe(200);
+    expect(junta.body.aviso).toMatch(/03\/06\/2037/);
+    expect((await Tarefa.findById(r2.body.tarefa._id)).estado).toBe('cancelada');
     expect((await Tarefa.findById(r1.body.tarefa._id)).estado).not.toBe('cancelada');
     const ok = await put(r2.body.reserva._id, '2037-06-07');
     expect(ok.status).toBe(200);
-    expect((await Tarefa.findById(r2.body.tarefa._id)).estado).toBe('cancelada');
+    // r2 já não partilha a limpeza de r1: a de r1 fica; r2 ganha uma nova a 07/06
+    expect((await Tarefa.findById(r1.body.tarefa._id)).estado).not.toBe('cancelada');
+    const rr2 = await request(app).get('/api/parceiro/reservas').set(auth(tp));
+    const nova = rr2.body.reservas.find((x) => x._id === r2.body.reserva._id);
+    expect(String(nova.tarefa_gerada_id._id)).not.toBe(String(r1.body.tarefa._id));
   });
 });
 

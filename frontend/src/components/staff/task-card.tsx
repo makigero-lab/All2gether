@@ -20,7 +20,7 @@ import {
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 
-import { cn, parsearDataSegura, googleMapsUrl } from "@/lib/utils";
+import { cn, parsearDataSegura, googleMapsUrl, extrairHoraISO } from "@/lib/utils";
 import { textoEquipa } from "@/lib/equipa";
 import { EstadoTarefaBadge } from "@/components/ui/estado-tarefa-badge";
 import { buttonVariants } from "@/components/ui/button";
@@ -62,16 +62,8 @@ function formatarMinutos(min: number) {
  * Retorna "—" se a data for inválida ou não tiver componente de tempo.
  */
 function horaInicio(dataISO?: string): string {
-  if (!dataISO) return "—";
-  try {
-    const d = parsearDataSegura(dataISO);
-    if (!d) return "—";
-    // Se for meia-noite exata (00:00), considera "sem hora definida".
-    if (d.getHours() === 0 && d.getMinutes() === 0) return "—";
-    return format(d, "HH:mm", { locale: pt });
-  } catch {
-    return "—";
-  }
+  // Hora de Lisboa (com hora de verão), seja qual for o fuso do telemóvel; 00:00 = sem hora definida.
+  return extrairHoraISO(dataISO);
 }
 
 /**
@@ -119,7 +111,7 @@ export function TaskCard({ tarefa, onAtualizar }: { tarefa: TarefaMock; onAtuali
                 "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg",
                 porAtribuir
                   ? "bg-status-porat-bg text-status-porat"
-                  : "bg-primary/10 text-gold-text"
+                  : "bg-primary/10 text-brand-text"
               )}
             >
               <Icon className="h-5 w-5" />
@@ -185,7 +177,7 @@ export function TaskCard({ tarefa, onAtualizar }: { tarefa: TarefaMock; onAtuali
                     href={url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="relative z-10 -my-3.5 -mr-3 inline-flex h-11 w-11 shrink-0 items-center justify-center self-center rounded text-gold-text hover:underline"
+                    className="relative z-10 -my-3.5 -mr-3 inline-flex h-11 w-11 shrink-0 items-center justify-center self-center rounded text-brand-text hover:underline"
                     title="Abrir no Google Maps"
                     aria-label="Abrir no Google Maps"
                   >
@@ -201,7 +193,7 @@ export function TaskCard({ tarefa, onAtualizar }: { tarefa: TarefaMock; onAtuali
               a quem vai receber. */}
           {nomeHospede && (
             <p className="flex items-center gap-1.5 rounded-md bg-primary/5 px-2 py-1.5 text-xs">
-              <User className="h-3.5 w-3.5 shrink-0 text-gold-text" />
+              <User className="h-3.5 w-3.5 shrink-0 text-brand-text" />
               <span className="font-medium text-foreground">{nomeHospede}</span>
             </p>
           )}
@@ -209,7 +201,7 @@ export function TaskCard({ tarefa, onAtualizar }: { tarefa: TarefaMock; onAtuali
           {/* Equipa da limpeza (2+ pessoas): com quem trabalhas. */}
           {equipa && (
             <p className="flex items-center gap-1.5 rounded-md bg-primary/5 px-2 py-1.5 text-xs">
-              <Users className="h-3.5 w-3.5 shrink-0 text-gold-text" />
+              <Users className="h-3.5 w-3.5 shrink-0 text-brand-text" />
               <span className="font-medium text-foreground">Equipa: {equipa}</span>
             </p>
           )}

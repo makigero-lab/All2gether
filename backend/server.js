@@ -41,6 +41,8 @@ const { iniciarDailyBriefing } = require('./jobs/dailyBriefing');
 const { iniciarAgendaAmanha } = require('./jobs/agendaAmanha');
 const { iniciarCaoGuarda } = require('./jobs/caoGuarda');
 const { iniciarArquivista } = require('./jobs/arquivista');
+const { iniciarRetencao } = require('./jobs/retencao');
+const { iniciarOfertasVagas } = require('./jobs/ofertaVagas');
 const { iniciarSincronizacaoSmoobu } = require('./jobs/sincronizacaoSmoobu');
 const { iniciarLimpezaFotos } = require('./jobs/limpezaFotos');
 const { iniciarGeradorRotinas } = require('./jobs/geradorRotinas');
@@ -72,9 +74,13 @@ app.use(
   })
 );
 
+// Webhook do Smoobu (aberto de propósito, sem autenticação): corpo pequeno. Um evento real tem
+// poucos KB; 256 KB chega com folga e impede encher a BD/memória com corpos de 10 MB.
+// Tem de vir ANTES do parser geral (que salta pedidos já lidos).
+app.use('/api/smoobu', express.json({ limit: process.env.SMOOBU_WEBHOOK_MAX_BODY || '256kb' }));
+
 // Permite receber e enviar JSON no corpo dos pedidos.
-// FIX (import/export excel) — Limite aumentado para 10mb para aceitar uploads
-// de ficheiros Excel (.xlsx) na rota /api/gestor/reservas/importar-excel.
+// Limite de 10mb: as fotos da limpeza (até 5, ~2 MB cada) seguem em base64 no JSON.
 app.use(express.json({ limit: '10mb' }));
 
 // Rate limiting global de /api/ (ver utils/limiteGlobal.js):
@@ -166,12 +172,11 @@ app.use((err, req, res, next) => {
   if (process.env.NODE_ENV !== 'production') {
     console.error(err.stack);
   }
-  // Corpo demasiado grande (express.raw do Excel: 5 MB; express.json: 10 MB).
+  // Corpo demasiado grande (express.json: 10 MB, por causa das fotos em base64; 256 KB no webhook Smoobu).
   if (err.status === 413 || err.type === 'entity.too.large') {
-    const excel = /importar-excel/.test(req.originalUrl || '');
     return res.status(413).json({
-      erro: excel
-        ? 'O ficheiro Excel é demasiado grande (o limite é de 5 MB). Guarda-o sem imagens nem formatação a mais, ou divide-o em ficheiros mais pequenos, e tenta outra vez.'
+      erro: req.originalUrl && req.originalUrl.startsWith('/api/smoobu')
+        ? 'Corpo do webhook demasiado grande (máximo 256 KB).'
         : 'O pedido é demasiado grande. Tenta com menos dados.',
     });
   }
@@ -278,6 +283,13 @@ if (require.main === module) {
       // Cron job "Arquivista": dia 1 de cada trimestre,
       // move tarefas concluídas/canceladas com mais de 3 meses para o arquivo.
       iniciarArquivista();
+
+      // Retenção RGPD: anonimiza nomes/notas de hóspedes após 90 dias e apaga ausências antigas.
+      iniciarRetencao();
+
+      // Vagas livres: oferece à equipa as limpezas sem ninguém disponível (aceita quem chegar primeiro)
+      // e expira as ofertas que chegaram ao prazo.
+      iniciarOfertasVagas();
 
       // Reconciliação Smoobu (rede de segurança dos webhooks) + retoma de webhooks presos.
       // HF8 tinha desligado a sincronização por causar 502 (pedidos em massa a pedido do

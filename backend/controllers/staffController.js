@@ -105,9 +105,9 @@ exports.criarAusencia = async (req, res) => {
 
     // Valida tipo.
     const tipoFinal = tipo || 'ferias';
-    if (!['ferias', 'doenca', 'outro'].includes(tipoFinal)) {
+    if (!['ferias', 'doenca', 'falta', 'outro'].includes(tipoFinal)) {
       return res.status(400).json({
-        erro: 'tipo inválido. Valores permitidos: ferias, doenca, outro.',
+        erro: 'tipo inválido. Valores permitidos: ferias, doenca, falta, outro.',
       });
     }
 
@@ -308,7 +308,7 @@ exports.cancelarAusencia = async (req, res) => {
 /**
  * POST /api/staff/falta-hoje
  *
- * Cria um pedido de falta de emergência para o dia atual (doença súbita).
+ * Cria um pedido de falta de emergência para o dia atual (tipo 'falta', sem presumir o motivo).
  * O pedido fica com estado 'pendente_emergencia' — o admin é notificado. As
  * tarefas de hoje da pessoa são desatribuídas e reatribuídas logo (sem esperar
  * pela aprovação); sem ninguém disponível ficam por atribuir e os gestores
@@ -369,7 +369,7 @@ exports.faltaHoje = async (req, res) => {
       empresa_id: empresaId,
       data_inicio: hoje,
       data_fim: hoje,
-      tipo: 'doenca',
+      tipo: 'falta', // uma falta não é uma doença: não se infere saúde (RGPD)
       estado: 'pendente_emergencia',
       justificacao: justificacao ? String(justificacao).trim() : '',
     });
@@ -448,7 +448,7 @@ exports.faltaHoje = async (req, res) => {
           empresa_id: req.user.empresa_id,
           data_inicio: new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate())),
           data_fim: new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate())),
-          tipo: 'doenca',
+          tipo: 'falta',
           estado: 'pendente_emergencia',
           justificacao: (req.body && req.body.justificacao) ? String(req.body.justificacao).trim() : '',
         });

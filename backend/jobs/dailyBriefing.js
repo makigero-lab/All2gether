@@ -176,9 +176,10 @@ async function executarBriefing() {
 function iniciarDailyBriefing() {
   console.log('⏰ [Daily Briefing] Cron agendado para 08:00 diariamente (0 8 * * *).');
 
+  // 08:00 de Lisboa (hora de verão incluída), não do servidor (UTC no Render).
   cron.schedule('0 8 * * *', async () => {
     await executarBriefing();
-  });
+  }, { timezone: 'Europe/Lisbon' });
 
   // Permite execução manual para teste (exporta a função).
   return { executarBriefing };
