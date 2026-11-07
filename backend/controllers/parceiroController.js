@@ -391,7 +391,7 @@ async function gerarTarefaLimpezaReserva({
   propriedade, empresaId, check_in, check_out, numHospedes, observacoes, detalhesExtra = {},
   tipoLimpeza = 'normal', diaLimpeza = null,
 }) {
-  // Normal/profunda: dia do check-out. Intermédia/preparação: o dia escolhido.
+  // Normal/profunda: dia do check-out. Intermédia a meio da estadia; preparação no check-in (automático).
   const dataCheckOut = new Date(diaLimpeza || check_out);
   // O tempo do tipo (ou o da casa) é o que chega ao motor, ao limite de 8h e ao scheduler.
   const tempoNovaTarefa = tempoDoTipo(propriedade, tipoLimpeza);
@@ -515,6 +515,8 @@ async function respostaReservaRepetida(res, reserva) {
  *   check_out: String "YYYY-MM-DD" (obrigatório)
  *   hospedes: Number (opcional — usa capacidade da propriedade se vazio)
  *   observacoes: String (opcional)
+ *   tipo_limpeza: normal|intermedia|profunda|preparacao (opcional; omissão = normal)
+ * O dia da limpeza é automático; `data_limpeza`, se vier, é ignorado.
  */
 async function criarReserva(req, res) {
   try {
@@ -539,7 +541,7 @@ async function criarReserva(req, res) {
     if (!tp.ok) return res.status(400).json({ erro: 'Tipo de limpeza inválido.' });
     const tipoLimpeza = tp.tipo;
     const rd = resolverDiaLimpeza({
-      tipo: tipoLimpeza, check_in, check_out, data_limpeza: req.body.data_limpeza, hoje: new Date().toISOString().slice(0, 10),
+      tipo: tipoLimpeza, check_in, check_out, hoje: new Date().toISOString().slice(0, 10),
     });
     if (rd.erro) return res.status(400).json({ erro: rd.erro });
 
@@ -722,21 +724,24 @@ async function atualizarReserva(req, res) {
 
     const dia = (d) => new Date(d).toISOString().slice(0, 10);
 
-    // Tipo e dia da limpeza (normal/profunda: check-out; intermédia/preparação: data escolhida).
+    // Tipo e dia da limpeza (normal/profunda: check-out; intermédia a meio da estadia; preparação no check-in: automático).
     const tp = body.tipo_limpeza !== undefined ? normalizarTipo(body.tipo_limpeza) : { ok: true, tipo: tipoDe(reserva) };
     if (!tp.ok) return res.status(400).json({ erro: 'Tipo de limpeza inválido.' });
     const tipoNovo = tp.tipo;
     // O «não pode ser no passado» só se aplica quando o tipo, a data da limpeza ou o check-in mudam.
-    const reverPassado = tipoNovo !== tipoDe(reserva) || body.data_limpeza !== undefined || body.check_in !== undefined;
+    const reverPassado = tipoNovo !== tipoDe(reserva) || body.check_in !== undefined;
+    // A data é automática: o que vier em data_limpeza é ignorado. A já gravada só continua a valer
+    // se o tipo e a estadia não mudaram (reservas antigas e datas ajustadas pelo gestor).
+    const estadiaIgual = tipoNovo === tipoDe(reserva) && dia(novoCheckIn) === dia(reserva.check_in) && dia(novoCheckOut) === dia(reserva.check_out);
     const rd = resolverDiaLimpeza({
       tipo: tipoNovo, check_in: novoCheckIn, check_out: novoCheckOut,
-      data_limpeza: body.data_limpeza !== undefined ? body.data_limpeza : reserva.data_limpeza,
+      data_gravada: estadiaIgual ? reserva.data_limpeza : null,
       hoje: reverPassado ? new Date().toISOString().slice(0, 10) : undefined,
     });
     if (rd.erro) return res.status(400).json({ erro: rd.erro });
     const tipoAntes = tipoDe(reserva);
     const rdAntes = resolverDiaLimpeza({
-      tipo: tipoAntes, check_in: reserva.check_in, check_out: reserva.check_out, data_limpeza: reserva.data_limpeza,
+      tipo: tipoAntes, check_in: reserva.check_in, check_out: reserva.check_out, data_gravada: reserva.data_limpeza,
     });
     const diaAntes = rdAntes.erro ? dia(reserva.check_out) : rdAntes.dia;
     const tipoMudou = tipoNovo !== tipoAntes;

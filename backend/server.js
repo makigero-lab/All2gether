@@ -73,8 +73,7 @@ app.use(
 );
 
 // Permite receber e enviar JSON no corpo dos pedidos.
-// FIX (import/export excel) — Limite aumentado para 10mb para aceitar uploads
-// de ficheiros Excel (.xlsx) na rota /api/gestor/reservas/importar-excel.
+// Limite de 10mb: as fotos da limpeza (até 5, ~2 MB cada) seguem em base64 no JSON.
 app.use(express.json({ limit: '10mb' }));
 
 // Rate limiting global de /api/ (ver utils/limiteGlobal.js):
@@ -166,13 +165,10 @@ app.use((err, req, res, next) => {
   if (process.env.NODE_ENV !== 'production') {
     console.error(err.stack);
   }
-  // Corpo demasiado grande (express.raw do Excel: 5 MB; express.json: 10 MB).
+  // Corpo demasiado grande (express.json: 10 MB, por causa das fotos em base64).
   if (err.status === 413 || err.type === 'entity.too.large') {
-    const excel = /importar-excel/.test(req.originalUrl || '');
     return res.status(413).json({
-      erro: excel
-        ? 'O ficheiro Excel é demasiado grande (o limite é de 5 MB). Guarda-o sem imagens nem formatação a mais, ou divide-o em ficheiros mais pequenos, e tenta outra vez.'
-        : 'O pedido é demasiado grande. Tenta com menos dados.',
+      erro: 'O pedido é demasiado grande. Tenta com menos dados.',
     });
   }
   if (err.type === 'entity.parse.failed') {

@@ -102,108 +102,15 @@ afterAll(async () => {
   if (mongod) await mongod.stop();
 });
 
-describe('Importação Excel — gestor', () => {
-  const URL = '/api/gestor/reservas/importar-excel';
-
-  it('importa um .xlsx real enviado como body cru e aplica fallback de hóspedes', async () => {
-    const buf = await xlsxBuffer([
-      { Propriedade: 'casa gestor', 'Check-in': '08/06/2030', 'Check-out': '10/06/2030', 'Hóspedes': '' },
-    ]);
-    const res = await importar(URL, gestorToken, buf);
-    expect(res.status).toBe(200);
-    expect(res.body.criadas).toBe(1);
-    const t = await Tarefa.findOne({ propriedade_id: casaGestor._id });
-    expect(t.hospedes).toBe(4); // capacidade da propriedade
-    expect(t.detalhes_reserva.checkout).toBe('2030-06-10');
-    expect(t.detalhes_reserva.checkin).toBe('2030-06-08');
-  });
-
-  it('é idempotente: re-importar o mesmo ficheiro ignora duplicados', async () => {
-    const buf = await xlsxBuffer([{ Propriedade: 'Casa Gestor', 'Check-out': '10/06/2030' }]);
-    const res = await importar(URL, gestorToken, buf);
-    expect(res.status).toBe(200);
-    expect(res.body.criadas).toBe(0);
-    expect(res.body.ignoradas).toBe(1);
-  });
-
-  it('uma tarefa de manutenção no mesmo dia NÃO bloqueia a limpeza', async () => {
-    await Tarefa.create({
-      empresa_id: empresa._id, propriedade_id: casaGestor._id, origem: 'manual',
-      data: new Date(Date.UTC(2030, 6, 15, 10)), tipo: 'manutencao', estado: 'por_atribuir',
-      tempo_limpeza_minutos: 30,
-    });
-    const buf = await xlsxBuffer([{ Propriedade: 'Casa Gestor', 'Check-out': '15/07/2030' }]);
-    const res = await importar(URL, gestorToken, buf);
-    expect(res.status).toBe(200);
-    expect(res.body.criadas).toBe(1);
-  });
-
-  it('aceita número serial do Excel como data', async () => {
-    // 47000 = 2028-09-... ; calculamos o esperado.
-    const serial = 47300;
-    const esperado = new Date(Date.UTC(1899, 11, 30) + serial * 86400000).toISOString().slice(0, 10);
-    const buf = await xlsxBuffer([{ Propriedade: 'Casa Gestor', 'Check-out': serial }]);
-    const res = await importar(URL, gestorToken, buf);
-    expect(res.status).toBe(200);
-    expect(res.body.criadas).toBe(1);
-    const t = await Tarefa.findOne({ 'detalhes_reserva.checkout': esperado });
-    expect(t).not.toBeNull();
-  });
-
-  it('aceita células de data reais do Excel (tipo Date)', async () => {
-    const buf = await xlsxBuffer([
-      { Propriedade: 'Casa Gestor', 'Check-in': new Date(Date.UTC(2031, 0, 3)), 'Check-out': new Date(Date.UTC(2031, 0, 5)) },
-    ]);
-    const res = await importar(URL, gestorToken, buf);
-    expect(res.status).toBe(200);
-    expect(res.body.criadas).toBe(1);
-    const t = await Tarefa.findOne({ 'detalhes_reserva.checkout': '2031-01-05' });
-    expect(t).not.toBeNull();
-    expect(t.detalhes_reserva.checkin).toBe('2031-01-03');
-  });
-
-  it('rejeita datas impossíveis (31/02 e 32/13) como erro de linha', async () => {
-    const buf = await xlsxBuffer([
-      { Propriedade: 'Casa Gestor', 'Check-out': '31/02/2030' },
-      { Propriedade: 'Casa Gestor', 'Check-out': '32/13/2030' },
-    ]);
-    const res = await importar(URL, gestorToken, buf);
-    expect(res.status).toBe(200);
-    expect(res.body.criadas).toBe(0);
-    expect(res.body.erros).toBe(2);
-  });
-
-  it('não encontra propriedades de outra empresa', async () => {
-    const buf = await xlsxBuffer([{ Propriedade: 'Casa Alheia', 'Check-out': '01/08/2030' }]);
-    const res = await importar(URL, gestorToken, buf);
-    expect(res.body.criadas).toBe(0);
-    expect(res.body.erros).toBe(1);
-    expect(await Tarefa.countDocuments({ propriedade_id: casaOutraEmpresa._id })).toBe(0);
-  });
-
-  it('rejeita ficheiro que não é xlsx (400) e body vazio (400)', async () => {
-    const lixo = await importar(URL, gestorToken, Buffer.from('isto nao e um xlsx'));
-    expect(lixo.status).toBe(400);
-    const vazio = await request(app).post(URL).set('Authorization', `Bearer ${gestorToken}`).send({});
-    expect(vazio.status).toBe(400);
-  });
-
-  it('staff e parceiro não podem usar a importação do gestor (403)', async () => {
-    const buf = await xlsxBuffer([{ Propriedade: 'Casa Gestor', 'Check-out': '01/09/2030' }]);
-    expect((await importar(URL, staffToken, buf)).status).toBe(403);
-    expect((await importar(URL, parceiroToken, buf)).status).toBe(403);
-  });
-});
-
-describe('Importação Excel — parceiro (rota retirada)', () => {
-  const URL = '/api/parceiro/reservas/importar-excel';
-
-  it('a rota já não existe (404) para parceiro, staff e gestor, e nada é criado', async () => {
+describe('Importação Excel — rota retirada', () => {
+  it('as rotas de importação (gestor e parceiro) já não existem: 404 para todos e nada é criado', async () => {
     const buf = await xlsxBuffer([{ Propriedade: 'Casa Parceiro', 'Check-out': '20/06/2030', 'Hóspedes': 3 }]);
-    for (const tk of [parceiroToken, staffToken, gestorToken]) {
-      expect((await importar(URL, tk, buf)).status).toBe(404);
+    for (const url of ['/api/gestor/reservas/importar-excel', '/api/parceiro/reservas/importar-excel']) {
+      for (const tk of [parceiroToken, staffToken, gestorToken]) {
+        expect((await importar(url, tk, buf)).status).toBe(404);
+      }
     }
-    expect(await Tarefa.countDocuments({ propriedade_id: casaParceiro._id })).toBe(0);
+    expect(await Tarefa.countDocuments({})).toBe(0);
   });
 });
 
@@ -214,7 +121,11 @@ describe('Exportação Excel', () => {
     res.on('end', () => cb(null, Buffer.concat(chunks)));
   };
 
-  it('gestor exporta um .xlsx válido que pode ser re-importado (round-trip de datas)', async () => {
+  it('gestor exporta um .xlsx válido com datas dd/mm/aaaa', async () => {
+    await Tarefa.create({
+      empresa_id: empresa._id, propriedade_id: casaGestor._id, origem: 'manual', tipo: 'limpeza',
+      data: new Date(Date.UTC(2030, 8, 9, 10)), estado: 'por_atribuir', tempo_limpeza_minutos: 30,
+    });
     const res = await request(app)
       .get('/api/gestor/reservas/exportar-excel')
       .set('Authorization', `Bearer ${gestorToken}`)

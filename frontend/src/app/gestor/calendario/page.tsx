@@ -23,6 +23,7 @@ import {
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 // Prompt Extra — parsearDataSegura para compatibilidade Safari/iOS.
+import { SeletorDisponiveis, corpoAtribuicao, type InfoDisponiveis } from "@/components/gestor/seletor-disponiveis";
 import { parsearDataSegura, formatarDataSegura, extrairHoraISO, calcularHoraFimISO, plural } from "@/lib/utils";
 
 import FullCalendar from "@fullcalendar/react";
@@ -333,13 +334,8 @@ export default function CalendarioOperacionalPage() {
   const [reatribuindoPara, setReatribuindoPara] = useState<string>("");
   const [reatribuindo, setReatribuindo] = useState(false);
 
-  // v1.59.0 (Prompt 81) — Staff indisponíveis (férias/doença) no dia da tarefa selecionada.
-  const [indisponiveis, setIndisponiveis] = useState<Array<{
-    utilizador_id: string;
-    tipo: string;
-    data_inicio: string;
-    data_fim: string;
-  }>>([]);
+  // Quem pode fazer a limpeza (o seletor pergunta ao servidor) e se é uma vaga de equipa.
+  const [infoDisp, setInfoDisp] = useState<InfoDisponiveis | null>(null);
 
   /* --- Marca montação no cliente (inibe o SSR do FullCalendar) --- */
   useEffect(() => {
@@ -825,38 +821,9 @@ export default function CalendarioOperacionalPage() {
   const handleEventClick = useCallback((arg: EventClickArg) => {
     const tarefa = arg.event.extendedProps as TarefaCalendario;
     setTarefaSelecionada(tarefa);
-    setReatribuindoPara(tarefa.utilizador_id?._id ?? "");
+    setReatribuindoPara("");
+    setInfoDisp(null);
   }, []);
-
-  /* --- v1.59.0 (Prompt 81): busca staff indisponíveis para o dia da tarefa --- */
-  useEffect(() => {
-    if (!tarefaSelecionada) {
-      setIndisponiveis([]);
-      return;
-    }
-    let cancelado = false;
-    (async () => {
-      try {
-        // Extrai YYYY-MM-DD da data da tarefa.
-        const dia = tarefaSelecionada.data?.slice(0, 10);
-        if (!dia) {
-          setIndisponiveis([]);
-          return;
-        }
-        const res = await adminGet<{ indisponiveis: typeof indisponiveis }>(
-          `/api/gestor/tarefas/indisponiveis?data=${dia}`
-        );
-        if (!cancelado) {
-          setIndisponiveis(res.indisponiveis ?? []);
-        }
-      } catch {
-        if (!cancelado) setIndisponiveis([]);
-      }
-    })();
-    return () => {
-      cancelado = true;
-    };
-  }, [tarefaSelecionada]);
 
   /* --- Reatribuição Inteligente (Prompt 75) --- */
   // Chama PATCH /api/gestor/tarefas/:id/reatribuir, que recalcula a hora de
@@ -866,6 +833,7 @@ export default function CalendarioOperacionalPage() {
     setReatribuindo(true);
     try {
       // Prompt 114 — Captura warning de distância.
+      const vaga = infoDisp?.modo === "vaga";
       const res = await adminPatch<{
         tarefa: TarefaCalendario;
         novo_inicio: string;
@@ -873,9 +841,21 @@ export default function CalendarioOperacionalPage() {
         tempo_viagem: number;
         warning?: string;
         aviso_horario?: string;
-      }>(`/api/gestor/tarefas/${tarefaSelecionada._id}/reatribuir`, {
-        utilizador_id: reatribuindoPara,
-      });
+      }>(
+        vaga ? `/api/gestor/tarefas/${tarefaSelecionada._id}/atribuir` : `/api/gestor/tarefas/${tarefaSelecionada._id}/reatribuir`,
+        vaga
+          ? corpoAtribuicao(reatribuindoPara, infoDisp, tarefaSelecionada.utilizador_id, tarefaSelecionada.equipa_atribuida)
+          : { utilizador_id: reatribuindoPara }
+      );
+      if (vaga) {
+        // A equipa mudou: volta a pedir a lista (traz a equipa completa e as vagas atualizadas).
+        const avisoVaga = [res.warning, res.aviso_horario].filter(Boolean).join(" | ");
+        if (avisoVaga) setWarningToast(avisoVaga);
+        setTarefaSelecionada(null);
+        setReatribuindoPara("");
+        await carregarTarefas();
+        return;
+      }
       const avisoReatribuir = [res.warning, res.aviso_horario].filter(Boolean).join(" | ");
       if (avisoReatribuir) setWarningToast(avisoReatribuir);
 
@@ -1602,7 +1582,8 @@ export default function CalendarioOperacionalPage() {
                 onClick={() => {
                   setDiaAberto(null);
                   setTarefaSelecionada(t);
-                  setReatribuindoPara(t.utilizador_id?._id ?? "");
+                  setReatribuindoPara("");
+                  setInfoDisp(null);
                 }}
                 className="flex min-h-11 w-full items-center justify-between gap-2 rounded-md border px-3 py-2 text-left text-sm disabled:cursor-default"
               >
@@ -1711,50 +1692,32 @@ export default function CalendarioOperacionalPage() {
             </div>
 
             {/* Reatribuição Inteligente (Prompt 75) */}
-            <div className="space-y-1.5">
-              <label htmlFor="reatribuir" className="text-sm font-medium">
-                Reatribuir a (recalcula horário)
-              </label>
-              <p className="text-xs text-muted-foreground">
-                O sistema recalcula a hora de início com base nas tarefas
-                existentes do staff, tempo de viagem e hora de almoço (1 h, a começar entre as 12:00 e as 14:00).
-              </p>
-              <select
-                id="reatribuir"
-                value={reatribuindoPara}
-                onChange={(e) => setReatribuindoPara(e.target.value)}
-                disabled={tarefaSelecionada.estado === "concluida"}
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <option value="">— Selecionar staff —</option>
-                {equipa.map((u) => {
-                  // FIX (folgas/férias) — Em vez de OMITIR os staff
-                  // indisponíveis (férias/doença/ausência nesse dia), mostramos
-                  // TODOS no dropdown com a option disabled e a label
-                  // " [Indisponível]" ao lado do nome. Assim o gestor vê quem
-                  // existe mas não consegue selecionar quem está de folga/férias.
-                  const indisponivel = indisponiveis.some(
-                    (i) => i.utilizador_id === u._id
-                  );
-                  return (
-                    <option
-                      key={u._id}
-                      value={indisponivel ? "" : u._id}
-                      disabled={indisponivel}
-                    >
-                      {u.nome}
-                      {indisponivel ? " — [Indisponível]" : ""}
-                    </option>
-                  );
-                })}
-              </select>
-              {/* Aviso visual de staff indisponível (mostrados como disabled) */}
-              {indisponiveis.length > 0 && (
-                <p className="text-xs text-amber-600 dark:text-amber-400">
-                  ⚠️ {plural(indisponiveis.length, "membro")} da equipa está(ão) de folga/férias neste dia e apareceram como [Indisponível] na lista (não selecionáveis).
+            {/* Folgas e ausências também abrem este detalhe, mas não são limpezas: sem atribuição. */}
+            {tarefaSelecionada.tipo !== "ausencia" && tarefaSelecionada.tipo !== "ausencia_pendente" && tarefaSelecionada.tipo !== "folga_fixa" && (
+              <div className="space-y-1.5">
+                <label htmlFor="reatribuir" className="text-sm font-medium">
+                  {infoDisp?.modo === "vaga" ? "Preencher a vaga (a hora mantém-se)" : "Reatribuir a (recalcula horário)"}
+                </label>
+                <p className="text-xs text-muted-foreground">
+                  O sistema recalcula a hora de início com base nas tarefas
+                  existentes do staff, tempo de viagem e hora de almoço (1 h, a começar entre as 12:00 e as 14:00).
                 </p>
-              )}
-            </div>
+                {tarefaSelecionada.estado === "concluida" || tarefaSelecionada.estado === "cancelada" ? (
+                  <p className="text-sm text-muted-foreground">Limpeza {tarefaSelecionada.estado === "concluida" ? "concluída" : "cancelada"}: já não pode ser reatribuída.</p>
+                ) : (
+                  <SeletorDisponiveis
+                    id="reatribuir"
+                    tarefaId={tarefaSelecionada._id}
+                    acao="reatribuir"
+                    value={reatribuindoPara}
+                    onChange={setReatribuindoPara}
+                    onInfo={setInfoDisp}
+                    disabled={tarefaSelecionada.estado === "concluida"}
+                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+                  />
+                )}
+              </div>
+            )}
 
             {/* v1.68.0 (Prompt 91) — Bloco de destaque para observações.
                 Se for manutenção (avaria), fundo amarelado/vermelho claro

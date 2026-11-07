@@ -21,11 +21,10 @@ const Tarefa = require('../models/Tarefa');
 const Notificacao = require('../models/Notificacao');
 const ReservaManual = require('../models/ReservaManual');
 const {
-  normalizarTipo, tempoDoTipo, checklistDoTipo, resolverDiaLimpeza, lerConfigTipos,
+  normalizarTipo, tempoDoTipo, checklistDoTipo, diaAutomatico, resolverDiaLimpeza, lerConfigTipos,
 } = require('../utils/tipoLimpeza');
 
 const PASSWORD = 'teste123';
-const MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 let mongod;
 let empresa;
 let parceiroToken;
@@ -43,9 +42,6 @@ async function xlsx(linhas) {
   for (const l of linhas) ws.addRow(cols.map((c) => (l[c] === undefined ? null : l[c])));
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
-const importar = async (linhas) =>
-  request(app).post('/api/gestor/reservas/importar-excel').set(auth(gestorToken))
-    .set('Content-Type', MIME).send(await xlsx(linhas));
 
 // Cada teste usa um mês/ano próprio para não colidir com limpezas dos outros.
 const reservar = (corpo, propriedade = casa) =>
@@ -101,17 +97,24 @@ describe('utilitários do tipo', () => {
     expect(checklistDoTipo(casa.toObject(), 'intermedia')).toEqual(['Item da casa']);
     expect(checklistDoTipo(casa.toObject(), 'normal')).toEqual(['Item da casa']);
   });
-  it('datas: intermédia entre check-in e check-out, preparação até ao check-in', () => {
-    const base = { check_in: '2040-05-10', check_out: '2040-05-15' };
-    expect(resolverDiaLimpeza({ ...base, tipo: 'normal' }).dia).toBe('2040-05-15');
-    expect(resolverDiaLimpeza({ ...base, tipo: 'profunda' }).dia).toBe('2040-05-15');
-    expect(resolverDiaLimpeza({ ...base, tipo: 'intermedia' }).erro).toMatch(/obrigatória/);
-    expect(resolverDiaLimpeza({ ...base, tipo: 'intermedia', data_limpeza: '2040-05-12' }).dia).toBe('2040-05-12');
-    expect(resolverDiaLimpeza({ ...base, tipo: 'intermedia', data_limpeza: '2040-05-09' }).erro).toMatch(/entre/);
-    expect(resolverDiaLimpeza({ ...base, tipo: 'intermedia', data_limpeza: '2040-05-16' }).erro).toMatch(/entre/);
-    expect(resolverDiaLimpeza({ ...base, tipo: 'preparacao', data_limpeza: '2040-05-09' }).dia).toBe('2040-05-09');
-    expect(resolverDiaLimpeza({ ...base, tipo: 'preparacao', data_limpeza: '2040-05-10' }).dia).toBe('2040-05-10');
-    expect(resolverDiaLimpeza({ ...base, tipo: 'preparacao', data_limpeza: '2040-05-11' }).erro).toMatch(/até ao check-in/);
+  it('datas: automáticas (normal/profunda no check-out, intermédia a meio, preparação no check-in)', () => {
+    const r = (tipo, ci, co, extra = {}) => resolverDiaLimpeza({ tipo, check_in: ci, check_out: co, ...extra });
+    expect(r('normal', '2040-05-10', '2040-05-15').dia).toBe('2040-05-15');
+    expect(r('profunda', '2040-05-10', '2040-05-15').dia).toBe('2040-05-15');
+    expect(r('preparacao', '2040-05-10', '2040-05-15').dia).toBe('2040-05-10');
+    // intermédia: check-in + metade das noites (para baixo); 1 noite = check-out
+    expect(r('intermedia', '2040-05-10', '2040-05-11').dia).toBe('2040-05-11'); // 1 noite
+    expect(r('intermedia', '2040-05-10', '2040-05-12').dia).toBe('2040-05-11'); // 2 noites
+    expect(r('intermedia', '2040-05-10', '2040-05-15').dia).toBe('2040-05-12'); // 5 noites
+    expect(r('intermedia', '2040-05-10', '2040-05-18').dia).toBe('2040-05-14'); // 8 noites
+    expect(diaAutomatico('intermedia', '2040-02-27', '2040-03-04')).toBe('2040-03-01'); // 6 noites, fim de mês
+    // data gravada (reserva antiga ou ajustada): vale se ainda é válida para o tipo e a estadia
+    expect(r('intermedia', '2040-05-10', '2040-05-15', { data_gravada: new Date('2040-05-13T00:00:00Z') }).dia).toBe('2040-05-13');
+    expect(r('intermedia', '2040-05-10', '2040-05-15', { data_gravada: new Date('2040-05-20T00:00:00Z') }).dia).toBe('2040-05-12');
+    expect(r('preparacao', '2040-05-10', '2040-05-15', { data_gravada: new Date('2040-05-08T00:00:00Z') }).dia).toBe('2040-05-08');
+    expect(r('preparacao', '2040-05-10', '2040-05-15', { data_gravada: new Date('2040-05-11T00:00:00Z') }).dia).toBe('2040-05-10');
+    // o campo antigo 'data_limpeza' já não é lido
+    expect(r('intermedia', '2040-05-10', '2040-05-15', { data_limpeza: '2040-05-13' }).dia).toBe('2040-05-12');
   });
   it('lerConfigTipos valida tempos e listas', () => {
     expect(lerConfigTipos({}).set).toEqual({});
@@ -152,8 +155,8 @@ describe('parceiro: criar reservas por tipo', () => {
     expect(t.estado).toBe('atribuida');
   });
 
-  it('intermédia: no dia escolhido, com o tempo do tipo e checklist da casa (recurso)', async () => {
-    const r = await reservar({ check_in: '2041-03-01', check_out: '2041-03-08', tipo_limpeza: 'intermedia', data_limpeza: '2041-03-04' });
+  it('intermédia: a meio da estadia, com o tempo do tipo e checklist da casa (recurso)', async () => {
+    const r = await reservar({ check_in: '2041-03-01', check_out: '2041-03-08', tipo_limpeza: 'intermedia' });
     expect(r.status).toBe(201);
     const t = await Tarefa.findById(r.body.tarefa._id).lean();
     expect(t.tipo_limpeza).toBe('intermedia');
@@ -165,13 +168,13 @@ describe('parceiro: criar reservas por tipo', () => {
     expect(new Date(r.body.reserva.data_limpeza).toISOString().slice(0, 10)).toBe('2041-03-04');
   });
 
-  it('preparação: antes do check-in; sem tempo configurado usa o da casa', async () => {
-    const r = await reservar({ check_in: '2041-04-10', check_out: '2041-04-12', tipo_limpeza: 'preparacao', data_limpeza: '2041-04-09' });
+  it('preparação: no dia do check-in; sem tempo configurado usa o da casa', async () => {
+    const r = await reservar({ check_in: '2041-04-10', check_out: '2041-04-12', tipo_limpeza: 'preparacao' });
     expect(r.status).toBe(201);
     const t = await Tarefa.findById(r.body.tarefa._id).lean();
     expect(t.tipo_limpeza).toBe('preparacao');
     expect(t.tempo_limpeza_minutos).toBe(60);
-    expect(new Date(t.data).toISOString().slice(0, 10)).toBe('2041-04-09');
+    expect(new Date(t.data).toISOString().slice(0, 10)).toBe('2041-04-10');
   });
 
   it('casa sem configuração por tipo: usa tempo e checklist da casa em todos os tipos', async () => {
@@ -182,27 +185,41 @@ describe('parceiro: criar reservas por tipo', () => {
     expect(t.checklist).toEqual(['Só da casa']);
   });
 
-  it('validações: tipo inválido, data em falta ou fora do intervalo -> 400 e nada criado', async () => {
+  it('validações: tipo inválido ou preparação com check-in já passado -> 400 e nada criado', async () => {
     const antes = await ReservaManual.countDocuments({});
-    const casos = [
-      { tipo_limpeza: 'luxo' },
-      { tipo_limpeza: 7 },
-      { tipo_limpeza: 'intermedia' },
-      { tipo_limpeza: 'intermedia', data_limpeza: '2041-06-01' },
-      { tipo_limpeza: 'intermedia', data_limpeza: '2041-06-20' },
-      { tipo_limpeza: 'intermedia', data_limpeza: 'abc' },
-      { tipo_limpeza: 'preparacao' },
-      { tipo_limpeza: 'preparacao', data_limpeza: '2041-06-06' },
-    ];
-    for (const c of casos) {
+    for (const c of [{ tipo_limpeza: 'luxo' }, { tipo_limpeza: 7 }]) {
       const r = await reservar({ check_in: '2041-06-05', check_out: '2041-06-10', ...c });
       expect([c, r.status]).toEqual([c, 400]);
     }
+    const passado = await reservar({ check_in: '2001-06-05', check_out: '2001-06-10', tipo_limpeza: 'preparacao' });
+    expect(passado.status).toBe(400);
+    expect(passado.body.erro).toMatch(/já passou/);
     expect(await ReservaManual.countDocuments({})).toBe(antes);
   });
 
+  it('o parceiro não escolhe a data: data_limpeza (qualquer valor) é ignorada e o dia é automático (1, 2, 5 e 8 noites)', async () => {
+    const casos = [
+      ['2065-01-10', '2065-01-11', '2065-01-11'],
+      ['2065-02-10', '2065-02-12', '2065-02-11'],
+      ['2065-03-10', '2065-03-15', '2065-03-12'],
+      ['2065-04-10', '2065-04-18', '2065-04-14'],
+    ];
+    for (const [ci, co, esperado] of casos) {
+      const r = await reservar({ check_in: ci, check_out: co, tipo_limpeza: 'intermedia', data_limpeza: ci }); // tenta o check-in
+      expect([ci, co, r.status]).toEqual([ci, co, 201]);
+      expect(new Date(r.body.tarefa.data).toISOString().slice(0, 10)).toBe(esperado);
+      expect(new Date(r.body.reserva.data_limpeza).toISOString().slice(0, 10)).toBe(esperado);
+    }
+    for (const dl of [0, true, ['2066-01-01'], { $gt: '' }, 'abc', '1999-01-01']) {
+      const r = await reservar({ check_in: '2066-02-01', check_out: '2066-02-05', tipo_limpeza: 'preparacao', data_limpeza: dl });
+      expect([JSON.stringify(dl), r.status]).toEqual([JSON.stringify(dl), 201]);
+      expect(new Date(r.body.tarefa.data).toISOString().slice(0, 10)).toBe('2066-02-01');
+      await Tarefa.deleteOne({ _id: r.body.tarefa._id }); await ReservaManual.deleteOne({ _id: r.body.reserva._id });
+    }
+  });
+
   it('data_limpeza é ignorada em normal/profunda (fica no check-out)', async () => {
-    const r = await reservar({ check_in: '2041-07-01', check_out: '2041-07-05', tipo_limpeza: 'normal', data_limpeza: '2041-07-02' });
+    const r = await reservar({ check_in: '2041-07-01', check_out: '2041-07-05', tipo_limpeza: 'normal' });
     expect(r.status).toBe(201);
     expect(new Date((await Tarefa.findById(r.body.tarefa._id)).data).toISOString().slice(0, 10)).toBe('2041-07-05');
     expect(r.body.reserva.data_limpeza).toBeNull();
@@ -213,7 +230,7 @@ describe('duplicados', () => {
   it('intermédia no dia da saída de outra reserva da casa NÃO dá 409 e não duplica', async () => {
     const a = await reservar({ check_in: '2042-01-01', check_out: '2042-01-10' });
     expect(a.status).toBe(201);
-    const b = await reservar({ check_in: '2042-01-05', check_out: '2042-01-20', tipo_limpeza: 'intermedia', data_limpeza: '2042-01-10' });
+    const b = await reservar({ check_in: '2042-01-05', check_out: '2042-01-15', tipo_limpeza: 'intermedia' });
     expect(b.status).toBe(201);
     expect(String(b.body.tarefa._id)).not.toBe(String(a.body.tarefa._id));
     const dia = await Tarefa.countDocuments({
@@ -229,17 +246,17 @@ describe('duplicados', () => {
     const b = await reservar({ check_in: '2042-02-02', check_out: '2042-02-05', tipo_limpeza: 'profunda' });
     expect(b.status).toBe(409);
     expect(b.body.codigo).toBe('RESERVA_DUPLICADA');
-    const i1 = await reservar({ check_in: '2042-03-01', check_out: '2042-03-09', tipo_limpeza: 'intermedia', data_limpeza: '2042-03-04' });
+    const i1 = await reservar({ check_in: '2042-03-01', check_out: '2042-03-09', tipo_limpeza: 'intermedia' });
     expect(i1.status).toBe(201);
-    const i2 = await reservar({ check_in: '2042-03-02', check_out: '2042-03-10', tipo_limpeza: 'intermedia', data_limpeza: '2042-03-04' });
+    const i2 = await reservar({ check_in: '2042-03-01', check_out: '2042-03-10', tipo_limpeza: 'intermedia' });
     expect(i2.status).toBe(409);
     // intermédia e preparação no mesmo dia são limpezas diferentes
-    const p = await reservar({ check_in: '2042-03-05', check_out: '2042-03-08', tipo_limpeza: 'preparacao', data_limpeza: '2042-03-04' });
+    const p = await reservar({ check_in: '2042-03-05', check_out: '2042-03-08', tipo_limpeza: 'preparacao' });
     expect(p.status).toBe(201);
   });
 
   it('uma saída normal ignora intermédias existentes nesse dia', async () => {
-    const i = await reservar({ check_in: '2042-04-01', check_out: '2042-04-20', tipo_limpeza: 'intermedia', data_limpeza: '2042-04-10' });
+    const i = await reservar({ check_in: '2042-04-01', check_out: '2042-04-20', tipo_limpeza: 'intermedia' });
     expect(i.status).toBe(201);
     const s = await reservar({ check_in: '2042-04-05', check_out: '2042-04-10' });
     expect(s.status).toBe(201);
@@ -262,14 +279,10 @@ describe('alterar tipo e datas de uma reserva gravada', () => {
     expect(await Tarefa.countDocuments({ propriedade_id: casa._id, 'detalhes_reserva.checkout': '2043-01-04', estado: { $ne: 'cancelada' } })).toBe(1);
   });
 
-  it('normal -> intermédia: muda o dia, cancela a antiga e gera outra; exige data', async () => {
+  it('normal -> intermédia: o dia passa a ser a meio da estadia, cancela a antiga e gera outra', async () => {
     const r = await reservar({ check_in: '2043-02-01', check_out: '2043-02-10' });
-    const semData = await request(app).put(`/api/parceiro/reservas/${r.body.reserva._id}`).set(auth(parceiroToken)).send({ tipo_limpeza: 'intermedia' });
-    expect(semData.status).toBe(400);
-    expect((await Tarefa.findById(r.body.tarefa._id)).estado).not.toBe('cancelada');
-
     const u = await request(app).put(`/api/parceiro/reservas/${r.body.reserva._id}`).set(auth(parceiroToken))
-      .send({ tipo_limpeza: 'intermedia', data_limpeza: '2043-02-05' });
+      .send({ tipo_limpeza: 'intermedia', data_limpeza: '2043-02-02' }); // o campo é ignorado
     expect(u.status).toBe(200);
     expect((await Tarefa.findById(r.body.tarefa._id)).estado).toBe('cancelada');
     const nova = await Tarefa.findById(u.body.reserva.tarefa_gerada_id._id).lean();
@@ -278,12 +291,15 @@ describe('alterar tipo e datas de uma reserva gravada', () => {
     expect(new Date(nova.data).toISOString().slice(0, 10)).toBe('2043-02-05');
   });
 
-  it('mudar o check-out de uma intermédia sem mexer na data da limpeza não regenera; datas fora do intervalo -> 400', async () => {
-    const r = await reservar({ check_in: '2043-03-01', check_out: '2043-03-10', tipo_limpeza: 'intermedia', data_limpeza: '2043-03-05' });
-    const ok = await request(app).put(`/api/parceiro/reservas/${r.body.reserva._id}`).set(auth(parceiroToken)).send({ check_out: '2043-03-12' });
+  it('mudar o check-out de uma intermédia recalcula o dia a meio da nova estadia; notas não regeneram; datas trocadas -> 400', async () => {
+    const r = await reservar({ check_in: '2043-03-01', check_out: '2043-03-10', tipo_limpeza: 'intermedia' });
+    const notas = await request(app).put(`/api/parceiro/reservas/${r.body.reserva._id}`).set(auth(parceiroToken)).send({ observacoes: 'só notas' });
+    expect(notas.status).toBe(200);
+    expect(String(notas.body.reserva.tarefa_gerada_id._id)).toBe(String(r.body.tarefa._id));
+    const ok = await request(app).put(`/api/parceiro/reservas/${r.body.reserva._id}`).set(auth(parceiroToken)).send({ check_out: '2043-03-13' });
     expect(ok.status).toBe(200);
-    expect(String(ok.body.reserva.tarefa_gerada_id._id)).toBe(String(r.body.tarefa._id));
-    const mau = await request(app).put(`/api/parceiro/reservas/${r.body.reserva._id}`).set(auth(parceiroToken)).send({ check_out: '2043-03-04' });
+    expect(new Date(ok.body.reserva.tarefa_gerada_id.data).toISOString().slice(0, 10)).toBe('2043-03-07'); // 12 noites
+    const mau = await request(app).put(`/api/parceiro/reservas/${r.body.reserva._id}`).set(auth(parceiroToken)).send({ check_out: '2043-02-27' });
     expect(mau.status).toBe(400);
   });
 
@@ -322,50 +338,12 @@ describe('reservas e tarefas antigas (sem o campo) contam como normal', () => {
     const rs = lista.body.reservas.find((x) => String(x._id) === String(antiga.body.reserva._id));
     expect(rs.tipo_limpeza ?? 'normal').toBe('normal');
     // e uma intermédia nesse dia passa
-    const inter = await reservar({ check_in: '2044-01-01', check_out: '2044-01-10', tipo_limpeza: 'intermedia', data_limpeza: '2044-01-05' });
+    const inter = await reservar({ check_in: '2044-01-01', check_out: '2044-01-10', tipo_limpeza: 'intermedia' });
     expect(inter.status).toBe(201);
   });
 });
 
-describe('importação do gestor com coluna Tipo', () => {
-  it('vazio = normal; Profunda e Preparação com data; inválido = erro só nessa linha', async () => {
-    const r = await importar([
-      { Propriedade: 'Casa Tipos', 'Check-in': '01/02/2045', 'Check-out': '03/02/2045' },
-      { Propriedade: 'Casa Tipos', 'Check-in': '01/03/2045', 'Check-out': '03/03/2045', 'Tipo de limpeza': 'Profunda' },
-      { Propriedade: 'Casa Tipos', 'Check-in': '10/04/2045', 'Check-out': '12/04/2045', 'Tipo de limpeza': 'Preparação', 'Data limpeza': '09/04/2045' },
-      { Propriedade: 'Casa Tipos', 'Check-in': '01/05/2045', 'Check-out': '09/05/2045', 'Tipo de limpeza': 'Intermédia', 'Data limpeza': '05/05/2045' },
-      { Propriedade: 'Casa Tipos', 'Check-in': '01/06/2045', 'Check-out': '03/06/2045', 'Tipo de limpeza': 'Luxo' },
-      { Propriedade: 'Casa Tipos', 'Check-in': '01/07/2045', 'Check-out': '09/07/2045', 'Tipo de limpeza': 'Intermédia' },
-      { Propriedade: 'Casa Tipos', 'Check-in': '01/08/2045', 'Check-out': '09/08/2045', 'Tipo de limpeza': 'Intermédia', 'Data limpeza': '20/08/2045' },
-    ]);
-    expect(r.status).toBe(200);
-    expect(r.body.criadas).toBe(4);
-    expect(r.body.erros).toBe(3);
-    const por = async (mes) => Tarefa.findOne({ propriedade_id: casa._id, 'detalhes_reserva.checkout': { $regex: `^2045-${mes}` } }).lean();
-    expect((await por('02')).tipo_limpeza).toBe('normal');
-    const prof = await por('03');
-    expect([prof.tipo_limpeza, prof.tempo_limpeza_minutos]).toEqual(['profunda', 150]);
-    expect(prof.checklist).toEqual(['Frigorífico', 'Janelas']);
-    const prep = await por('04');
-    expect(prep.tipo_limpeza).toBe('preparacao');
-    expect(new Date(prep.data).toISOString().slice(0, 10)).toBe('2045-04-09');
-    const inter = await por('05');
-    expect([inter.tipo_limpeza, inter.tempo_limpeza_minutos]).toEqual(['intermedia', 30]);
-    expect(new Date(inter.data).toISOString().slice(0, 10)).toBe('2045-05-05');
-    expect(await por('06')).toBeNull();
-  });
-
-  it('a coluna Tipo antiga («limpeza») conta como vazia; reimportar não duplica; intermédia no dia da saída passa', async () => {
-    const linhas = [
-      { Propriedade: 'Casa Simples', 'Check-out': '10/09/2045', Tipo: 'limpeza' },
-      { Propriedade: 'Casa Simples', 'Check-in': '01/09/2045', 'Check-out': '20/09/2045', 'Tipo de limpeza': 'Intermédia', 'Data limpeza': '10/09/2045' },
-    ];
-    const a = await importar(linhas);
-    expect([a.body.criadas, a.body.erros]).toEqual([2, 0]);
-    const b = await importar(linhas);
-    expect([b.body.criadas, b.body.ignoradas]).toEqual([0, 2]);
-  });
-
+describe('exportação com coluna Tipo de limpeza', () => {
   it('a exportação tem a coluna «Tipo de limpeza»', async () => {
     const res = await request(app).get('/api/gestor/reservas/exportar-excel').set(auth(gestorToken))
       .buffer(true).parse((r, cb) => { const c = []; r.on('data', (x) => c.push(x)); r.on('end', () => cb(null, Buffer.concat(c))); });
@@ -424,38 +402,17 @@ describe('o tempo do tipo chega ao limite de 8h', () => {
   });
 });
 
-describe('S4/S5: formato de data_limpeza e limites', () => {
-  it('data_limpeza só aceita texto AAAA-MM-DD (0, true, lista, objeto = 400), em todos os tipos', async () => {
-    for (const dl of [0, true, ['2060-02-01'], { $gt: '' }]) {
-      for (const tipo of ['preparacao', 'normal']) {
-        const r = await reservar({ check_in: '2060-02-01', check_out: '2060-02-05', tipo_limpeza: tipo, data_limpeza: dl });
-        expect([tipo, JSON.stringify(dl), r.status]).toEqual([tipo, JSON.stringify(dl), 400]);
-      }
-    }
-    const r = await reservar({ check_in: '2060-02-01', check_out: '2060-02-05', tipo_limpeza: 'preparacao', data_limpeza: 'abc' });
-    expect(r.status).toBe(400);
-  });
-
-  it('preparação: no passado -> 400; mais de 30 dias antes -> 400; 30 dias e o dia do check-in -> ok', async () => {
-    const passado = await reservar({ check_in: '2060-03-10', check_out: '2060-03-12', tipo_limpeza: 'preparacao', data_limpeza: '1999-01-01' });
-    expect(passado.status).toBe(400);
-    const longe = await reservar({ check_in: '2060-04-10', check_out: '2060-04-12', tipo_limpeza: 'preparacao', data_limpeza: '2060-03-10' }); // 31 dias
-    expect(longe.status).toBe(400);
-    expect(longe.body.erro).toMatch(/30 dias/);
-    const limite = await reservar({ check_in: '2060-05-10', check_out: '2060-05-12', tipo_limpeza: 'preparacao', data_limpeza: '2060-04-10' }); // 30 dias
-    expect(limite.status).toBe(201);
-    const diaCheckIn = await reservar({ check_in: '2060-06-10', check_out: '2060-06-12', tipo_limpeza: 'preparacao', data_limpeza: '2060-06-10' });
-    expect(diaCheckIn.status).toBe(201);
-  });
-
-  it('preparação no passado: mensagem clara (a validação tem a data de hoje)', () => {
-    const r = resolverDiaLimpeza({ tipo: 'preparacao', check_in: '2020-02-10', check_out: '2020-02-12', data_limpeza: '2020-02-09', hoje: '2026-11-06' });
-    expect(r.erro).toMatch(/passado/);
-    expect(resolverDiaLimpeza({ tipo: 'preparacao', check_in: '2020-02-10', check_out: '2020-02-12', data_limpeza: '2020-02-09' }).dia).toBe('2020-02-09');
+describe('S4/S5: data automática e limites', () => {
+  it('preparação com o check-in no passado: mensagem clara (a validação tem a data de hoje)', () => {
+    const r = resolverDiaLimpeza({ tipo: 'preparacao', check_in: '2020-02-10', check_out: '2020-02-12', hoje: '2026-11-06' });
+    expect(r.erro).toMatch(/já passou/);
+    expect(resolverDiaLimpeza({ tipo: 'preparacao', check_in: '2020-02-10', check_out: '2020-02-12' }).dia).toBe('2020-02-10');
+    // data já gravada (reserva antiga) não é recusada
+    expect(resolverDiaLimpeza({ tipo: 'preparacao', check_in: '2020-02-10', check_out: '2020-02-12', data_gravada: new Date('2020-02-09T00:00:00Z'), hoje: '2026-11-06' }).dia).toBe('2020-02-09');
   });
 
   it('editar notas de uma preparação cuja data já passou não é bloqueado', async () => {
-    const r = await reservar({ check_in: '2060-07-10', check_out: '2060-07-12', tipo_limpeza: 'preparacao', data_limpeza: '2060-07-09' });
+    const r = await reservar({ check_in: '2060-07-10', check_out: '2060-07-12', tipo_limpeza: 'preparacao' });
     await ReservaManual.updateOne({ _id: r.body.reserva._id }, { $set: { check_in: new Date('2020-02-10T00:00:00Z'), check_out: new Date('2020-02-12T00:00:00Z'), data_limpeza: new Date('2020-02-09T00:00:00Z') } });
     const u = await request(app).put(`/api/parceiro/reservas/${r.body.reserva._id}`).set(auth(parceiroToken)).send({ observacoes: 'só notas' });
     expect(u.status).toBe(200);
@@ -475,21 +432,21 @@ describe('S4/S5: formato de data_limpeza e limites', () => {
   it('texto ISO com hora usa os 10 primeiros caracteres, sem converter para UTC', async () => {
     const r = await reservar({
       check_in: '2061-04-10T23:30:00-03:00', check_out: '2061-04-14T23:30:00-03:00',
-      tipo_limpeza: 'intermedia', data_limpeza: '2061-04-12T23:30:00-03:00',
+      tipo_limpeza: 'intermedia',
     });
     expect(r.status).toBe(201);
     expect(new Date(r.body.reserva.data_limpeza).toISOString().slice(0, 10)).toBe('2061-04-12');
     expect(new Date(r.body.tarefa.data).toISOString().slice(0, 10)).toBe('2061-04-12');
     const fim = await reservar({
       check_in: '2061-05-10T00:30:00+05:00', check_out: '2061-05-14T23:59:00-03:00',
-      tipo_limpeza: 'intermedia', data_limpeza: '2061-05-14T23:59:00-03:00',
+      tipo_limpeza: 'intermedia',
     });
     expect(fim.status).toBe(201);
     expect(resolverDiaLimpeza({ tipo: 'normal', check_in: '2061-01-01T23:00:00-03:00', check_out: '2061-01-03T23:00:00-03:00' }).dia).toBe('2061-01-03');
   });
 
   it('o tipo passa a Normal/Profunda: a data da limpeza é limpa no servidor', async () => {
-    const r = await reservar({ check_in: '2061-06-01', check_out: '2061-06-10', tipo_limpeza: 'intermedia', data_limpeza: '2061-06-05' });
+    const r = await reservar({ check_in: '2061-06-01', check_out: '2061-06-10', tipo_limpeza: 'intermedia' });
     const u = await request(app).put(`/api/parceiro/reservas/${r.body.reserva._id}`).set(auth(parceiroToken)).send({ tipo_limpeza: 'profunda' });
     expect(u.status).toBe(200);
     expect(u.body.reserva.data_limpeza).toBeNull();
@@ -509,8 +466,8 @@ describe('S4/S5: formato de data_limpeza e limites', () => {
 
 describe('S2: alterar o tipo no mesmo dia também verifica duplicados', () => {
   it('A preparação e B intermédia no mesmo dia: PUT B -> preparação = 409; nada muda', async () => {
-    const A = await reservar({ check_in: '2062-01-03', check_out: '2062-01-06', tipo_limpeza: 'preparacao', data_limpeza: '2062-01-03' });
-    const B = await reservar({ check_in: '2062-01-03', check_out: '2062-01-08', tipo_limpeza: 'intermedia', data_limpeza: '2062-01-03' });
+    const A = await reservar({ check_in: '2062-01-03', check_out: '2062-01-06', tipo_limpeza: 'preparacao' });
+    const B = await reservar({ check_in: '2062-01-03', check_out: '2062-01-08', tipo_limpeza: 'intermedia' });
     expect([A.status, B.status]).toEqual([201, 201]);
     const u = await request(app).put(`/api/parceiro/reservas/${B.body.reserva._id}`).set(auth(parceiroToken)).send({ tipo_limpeza: 'preparacao' });
     expect(u.status).toBe(409);
@@ -520,7 +477,7 @@ describe('S2: alterar o tipo no mesmo dia também verifica duplicados', () => {
 
   it('B normal (saída) e A intermédia no mesmo dia: PUT A -> normal = 409', async () => {
     const B = await reservar({ check_in: '2062-02-01', check_out: '2062-02-05' });
-    const A = await reservar({ check_in: '2062-02-03', check_out: '2062-02-05', tipo_limpeza: 'intermedia', data_limpeza: '2062-02-05' });
+    const A = await reservar({ check_in: '2062-02-03', check_out: '2062-02-05', tipo_limpeza: 'intermedia' });
     expect([B.status, A.status]).toEqual([201, 201]);
     const u = await request(app).put(`/api/parceiro/reservas/${A.body.reserva._id}`).set(auth(parceiroToken)).send({ tipo_limpeza: 'normal' });
     expect(u.status).toBe(409);

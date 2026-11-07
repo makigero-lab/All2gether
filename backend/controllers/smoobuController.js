@@ -2257,7 +2257,7 @@ async function sincronizarReservas(req, res) {
         // por atribuir para o gestor, como sempre foi).
         const tipoRM = tipoDeLimpeza(rm);
         const rdRM = resolverDiaLimpeza({
-          tipo: tipoRM, check_in: rm.check_in, check_out: rm.check_out, data_limpeza: rm.data_limpeza,
+          tipo: tipoRM, check_in: rm.check_in, check_out: rm.check_out, data_gravada: rm.data_limpeza,
         });
         const diaRM = rdRM.erro ? new Date(rm.check_out).toISOString().slice(0, 10) : rdRM.dia;
         const dataTarefaRM = new Date(`${diaRM}T10:00:00Z`);

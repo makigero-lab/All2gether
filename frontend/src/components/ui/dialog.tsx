@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -92,9 +93,11 @@ export function Dialog({ open, onOpenChange, children }: DialogProps) {
     }
   }, [open]);
 
-  if (!open) return null;
+  if (!open || typeof document === "undefined") return null;
 
-  return (
+  // Em portal no body: dentro de um pai com transform (ex.: cartão com active:scale) o
+  // "fixed" deixava de ser relativo ao ecrã e o diálogo saltava ao carregar nele.
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* Backdrop */}
       <div
@@ -115,7 +118,8 @@ export function Dialog({ open, onOpenChange, children }: DialogProps) {
           {children}
         </DialogTitleIdContext.Provider>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

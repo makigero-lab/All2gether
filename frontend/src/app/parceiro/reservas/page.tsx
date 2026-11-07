@@ -61,9 +61,7 @@ import {
   paraPayload,
   TIPOS_LIMPEZA,
   ROTULO_TIPO,
-  tipoPedeData,
   tipoOuNormal,
-  limitesDataLimpeza,
   reconciliar,
   validarReserva,
   valoresEfetivos,
@@ -87,8 +85,6 @@ interface ReservaDTO {
   horario_preferido?: string | null;
   /** Tipo de limpeza; sem o campo (reservas antigas) = normal. */
   tipo_limpeza?: string | null;
-  /** Dia da limpeza escolhido (só intermédia/preparação). */
-  data_limpeza?: string | null;
   tarefa_gerada_id: { estado: string; data: string; hora_conclusao?: string | null; concluida_em?: string | null } | null;
   createdAt: string;
 }
@@ -218,8 +214,6 @@ interface ColunaOrdem {
   valor: (l: Linha) => string | number | null | undefined;
 }
 
-const dataDaLimpeza = (l: Linha) => (tipoPedeData(l.valores.tipo_limpeza) ? l.valores.data_limpeza : l.valores.check_out);
-
 /** Colunas ordenáveis (desktop: cabeçalho; telemóvel: seletor). */
 const COLUNAS_ORDEM: ColunaOrdem[] = [
   { chave: "propriedade", rotulo: "Propriedade", tipo: "texto", valor: (l) => l.propNome },
@@ -231,7 +225,6 @@ const COLUNAS_ORDEM: ColunaOrdem[] = [
   { chave: "nome_hospede", rotulo: "Hóspede", tipo: "texto", valor: (l) => l.valores.nome_hospede },
   { chave: "plataforma", rotulo: "Plataforma", tipo: "texto", valor: (l) => l.valores.plataforma },
   { chave: "tipo_limpeza", rotulo: "Tipo de limpeza", tipo: "texto", valor: (l) => ROTULO_TIPO[tipoOuNormal(l.valores.tipo_limpeza)] },
-  { chave: "data_limpeza", rotulo: "Data da limpeza", tipo: "data", valor: dataDaLimpeza },
   { chave: "horario_preferido", rotulo: "Horário preferido", tipo: "texto", valor: (l) => l.valores.horario_preferido },
   { chave: "observacoes", rotulo: "Notas", tipo: "texto", valor: (l) => l.valores.observacoes },
   { chave: "estado", rotulo: "Estado da limpeza", tipo: "texto", valor: (l) => (l.estado ? estadoParaParceiro(l.estado) : "") },
@@ -282,7 +275,6 @@ function doServidor(r: ReservaDTO): Valores {
     horario_preferido: r.horario_preferido ?? "",
     observacoes: r.observacoes ?? "",
     tipo_limpeza: tipoOuNormal(r.tipo_limpeza),
-    data_limpeza: r.data_limpeza ? dia(r.data_limpeza) : "",
   };
 }
 
@@ -296,7 +288,6 @@ const ROTULO_CAMPO: Record<Campo, string> = {
   horario_preferido: "Horário preferido",
   observacoes: "Notas",
   tipo_limpeza: "Tipo de limpeza",
-  data_limpeza: "Data da limpeza",
 };
 
 /**
@@ -414,6 +405,117 @@ function Celula({
   );
 }
 
+/** Notas no cartão (telemóvel): caixa de várias linhas que cresce com o texto. */
+const CELULA_NOTAS_CARTAO =
+  "min-h-[5.5rem] w-full min-w-0 resize-none overflow-hidden rounded-md border border-input bg-background px-3 py-2 text-base outline-none focus:border-gold-text focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60";
+
+/** Faz a caixa de texto crescer com o conteúdo. */
+function cresce(e: React.FormEvent<HTMLTextAreaElement>) {
+  const el = e.currentTarget;
+  el.style.height = "auto";
+  el.style.height = `${el.scrollHeight + 2}px`;
+}
+
+/**
+ * Notas (texto longo). Tabela: mostra o início do texto numa célula larga (o texto completo
+ * aparece ao pousar o rato) e, ao clicar, abre uma caixa de 4 linhas na própria célula.
+ * Cartão: caixa de 3 linhas que cresce. Como as outras células: sair do campo guarda SÓ no
+ * rascunho, Esc anula (repõe o valor anterior) e o Gravar envia. Enter escreve uma nova linha.
+ */
+function CelulaNotas({
+  value, disabled, rotulo, cartao, pendente, onCommit,
+}: {
+  value: string;
+  disabled?: boolean;
+  rotulo: string;
+  cartao?: boolean;
+  pendente?: boolean;
+  onCommit: (novo: string) => void;
+}) {
+  const [v, setV] = useState(value);
+  const [aberto, setAberto] = useState(false);
+  const cancelar = useRef(false);
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    setV(value);
+  }, [value]);
+  useEffect(() => {
+    if (aberto) {
+      ref.current?.focus();
+      ref.current?.setSelectionRange(ref.current.value.length, ref.current.value.length);
+    }
+  }, [aberto]);
+  useEffect(() => {
+    if (cartao && ref.current) {
+      ref.current.style.height = "auto";
+      ref.current.style.height = `${ref.current.scrollHeight + 2}px`;
+    }
+  }, [cartao, v]);
+
+  const nomeAcessivel = pendente ? `${rotulo} (por gravar)` : rotulo;
+  const fechar = () => {
+    if (cancelar.current) {
+      cancelar.current = false;
+    } else if (v !== value) {
+      onCommit(v);
+    }
+    setAberto(false);
+  };
+  const teclas = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Enter é nova linha (não aciona atalhos da linha); Esc anula.
+    if (e.key === "Enter") e.stopPropagation();
+    if (e.key === "Escape") {
+      cancelar.current = true;
+      setV(value);
+      ref.current?.blur();
+    }
+  };
+
+  if (cartao) {
+    return (
+      <textarea
+        ref={ref}
+        value={v}
+        rows={3}
+        disabled={disabled}
+        aria-label={nomeAcessivel}
+        onChange={(e) => setV(e.target.value)}
+        onBlur={fechar}
+        onKeyDown={teclas}
+        className={`${CELULA_NOTAS_CARTAO} ${pendente ? PENDENTE_CARTAO : ""}`}
+      />
+    );
+  }
+  if (aberto) {
+    return (
+      <textarea
+        ref={ref}
+        value={v}
+        rows={4}
+        disabled={disabled}
+        aria-label={nomeAcessivel}
+        onChange={(e) => setV(e.target.value)}
+        onBlur={fechar}
+        onKeyDown={teclas}
+        className={`block w-full min-w-[20rem] resize-y bg-primary/5 px-2 py-1.5 text-sm outline-none ring-2 ring-inset ring-primary ${pendente ? PENDENTE_TABELA : ""}`}
+      />
+    );
+  }
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      aria-label={`${nomeAcessivel}: ${value || "vazio"}. Carregar para editar`}
+      title={value || undefined}
+      onClick={() => setAberto(true)}
+      className={`block h-9 w-full max-w-[28rem] truncate px-2 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-60 ${pendente ? PENDENTE_TABELA : ""}`}
+    >
+      {value ? value.replace(/\s*\n\s*/g, " ") : <span className="text-muted-foreground">—</span>}
+    </button>
+  );
+}
+
 /** Campo de cartão com etiqueta visível (o controlo tem o seu próprio aria-label). */
 function Campo({ texto, className, children }: { texto: string; className?: string; children: React.ReactNode }) {
   return (
@@ -437,7 +539,6 @@ const NOVA_VAZIA = {
   horario_preferido: "",
   observacoes: "",
   tipo_limpeza: "normal",
-  data_limpeza: "",
 };
 
 /** Linha (existente ou nova) pronta a desenhar, igual para a tabela e para os cartões. */
@@ -639,16 +740,7 @@ export default function ParceiroReservasPage() {
       const { [linha.key]: _x, ...resto } = e;
       return resto;
     });
-    // Mudar o tipo acerta a data da limpeza: limpa-a em Normal/Profunda e, em Intermédia/Preparação
-    // sem data, sugere o check-in.
     const extras: Array<[Campo, string]> = [];
-    if (c === "tipo_limpeza") {
-      if (!tipoPedeData(valor)) {
-        if (linha.valores.data_limpeza !== "") extras.push(["data_limpeza", ""]);
-      } else if (!linha.valores.data_limpeza && linha.valores.check_in) {
-        extras.push(["data_limpeza", linha.valores.check_in]);
-      }
-    }
     if (linha.nova) {
       setRascunho((r) => ({
         ...r,
@@ -678,7 +770,6 @@ export default function ParceiroReservasPage() {
       horario_preferido: nova.horario_preferido,
       observacoes: nova.observacoes,
       tipo_limpeza: nova.tipo_limpeza,
-      data_limpeza: tipoPedeData(nova.tipo_limpeza) ? nova.data_limpeza : "",
     };
     const msg = validarReserva(v, nova.propriedade_id);
     if (msg) {
@@ -971,9 +1062,7 @@ export default function ParceiroReservasPage() {
   }
 
   const setN = (k: keyof typeof NOVA_VAZIA) => (v: string) => setNova((n) => ({ ...n, [k]: v }));
-  /** Tipo da reserva nova: limpa a data em Normal/Profunda; em Intermédia/Preparação sugere o check-in. */
-  const mudarTipoNova = (v: string) =>
-    setNova((n) => ({ ...n, tipo_limpeza: v, data_limpeza: tipoPedeData(v) ? n.data_limpeza || n.check_in : "" }));
+  const mudarTipoNova = (v: string) => setNova((n) => ({ ...n, tipo_limpeza: v }));
   const enterAdiciona = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") acrescentarNova();
   };
@@ -1208,9 +1297,8 @@ export default function ParceiroReservasPage() {
                   <Cab chave="nome_hospede" rotulo="Hóspede" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[11rem]" />
                   <Cab chave="plataforma" rotulo="Plataforma" ordem={ordem} onOrdenar={ordenarPorColuna} />
                   <Cab chave="tipo_limpeza" rotulo="Tipo de limpeza" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[11rem]" />
-                  <Cab chave="data_limpeza" rotulo="Data da limpeza" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[11rem]" />
                   <Cab chave="horario_preferido" rotulo="Horário pref. limpeza" ordem={ordem} onOrdenar={ordenarPorColuna} />
-                  <Cab chave="observacoes" rotulo="Notas" ordem={ordem} onOrdenar={ordenarPorColuna} />
+                  <Cab chave="observacoes" rotulo="Notas" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[20rem]" />
                   <Cab chave="estado" rotulo="Limpeza" ordem={ordem} onOrdenar={ordenarPorColuna} className={`${FIXO_ESTADO} z-[2] bg-background bg-gradient-to-r from-muted/40 to-muted/40`} />
                   <th className={`${FIXO_ACOES} z-[2] bg-background bg-gradient-to-r from-muted/40 to-muted/40 px-2 py-2`}><span className="sr-only">Ações</span></th>
                 </tr>
@@ -1260,13 +1348,10 @@ export default function ParceiroReservasPage() {
                     </select>
                   </td>
                   <td className="p-0">
-                    <input type="date" {...limitesDataLimpeza(nova.tipo_limpeza, nova.check_in, nova.check_out)} value={tipoPedeData(nova.tipo_limpeza) ? nova.data_limpeza : ""} onChange={(e) => setN("data_limpeza")(e.target.value)} className={CELULA} disabled={gravando || !tipoPedeData(nova.tipo_limpeza)} aria-label="Nova reserva: data da limpeza (intermédia ou preparação)" />
-                  </td>
-                  <td className="p-0">
                     <input value={nova.horario_preferido} onChange={(e) => setN("horario_preferido")(e.target.value)} placeholder="11h - 14h" className={CELULA} disabled={gravando} aria-label="Nova reserva: horário preferido de limpeza" />
                   </td>
                   <td className="p-0">
-                    <input value={nova.observacoes} onChange={(e) => setN("observacoes")(e.target.value)} className={CELULA} disabled={gravando} aria-label="Nova reserva: notas" />
+                    <textarea value={nova.observacoes} onChange={(e) => setN("observacoes")(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") e.stopPropagation(); }} rows={2} className={`${CELULA} h-auto min-h-[3.25rem] resize-y py-1.5`} disabled={gravando} aria-label="Nova reserva: notas" />
                   </td>
                   <td className={`${FIXO_ESTADO} bg-background bg-gradient-to-r from-primary/5 to-primary/5 px-2 text-xs text-muted-foreground`}>nova</td>
                   <td className={`${FIXO_ACOES} bg-background bg-gradient-to-r from-primary/5 to-primary/5 px-1 text-right`}>
@@ -1317,17 +1402,10 @@ export default function ParceiroReservasPage() {
                           <Celula type="select" opcoes={OPCOES_TIPO} pendente={p("tipo_limpeza")} rotulo={`Tipo de limpeza, ${nome}`} value={tipoOuNormal(l.valores.tipo_limpeza)} disabled={l.semEdicao} onCommit={(v) => alterar(l, "tipo_limpeza", v)} />
                         </td>
                         <td className="p-0">
-                          {tipoPedeData(l.valores.tipo_limpeza) ? (
-                            <Celula type="date" {...limitesDataLimpeza(l.valores.tipo_limpeza, l.valores.check_in, l.valores.check_out)} pendente={p("data_limpeza")} rotulo={`Data da limpeza, ${nome}`} value={l.valores.data_limpeza} disabled={l.semEdicao} onCommit={(v) => alterar(l, "data_limpeza", v)} />
-                          ) : (
-                            <span className="px-2 text-xs text-muted-foreground" title="Normal e profunda ficam no check-out">No check-out</span>
-                          )}
-                        </td>
-                        <td className="p-0">
                           <Celula value={l.valores.horario_preferido} pendente={p("horario_preferido")} rotulo={`Horário preferido, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "horario_preferido", v)} />
                         </td>
                         <td className="p-0">
-                          <Celula value={l.valores.observacoes} pendente={p("observacoes")} rotulo={`Observações, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "observacoes", v)} />
+                          <CelulaNotas value={l.valores.observacoes} pendente={p("observacoes")} rotulo={`Observações, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "observacoes", v)} />
                         </td>
                         <td className={`${FIXO_ESTADO} whitespace-nowrap px-2 ${cor.fixo}`}>
                           {l.nova ? (
@@ -1435,16 +1513,11 @@ export default function ParceiroReservasPage() {
                   {OPCOES_TIPO.map((o) => <option key={o.valor} value={o.valor}>{o.rotulo}</option>)}
                 </select>
               </Campo>
-              {tipoPedeData(nova.tipo_limpeza) && (
-                <Campo texto="Data da limpeza">
-                  <input type="date" {...limitesDataLimpeza(nova.tipo_limpeza, nova.check_in, nova.check_out)} value={nova.data_limpeza} onChange={(e) => setN("data_limpeza")(e.target.value)} className={CELULA_CARTAO} disabled={gravando} aria-label="Nova reserva: data da limpeza" />
-                </Campo>
-              )}
               <Campo texto="Horário preferido de limpeza">
                 <input value={nova.horario_preferido} onChange={(e) => setN("horario_preferido")(e.target.value)} placeholder="11h - 14h" className={CELULA_CARTAO} disabled={gravando} aria-label="Nova reserva: horário preferido de limpeza" />
               </Campo>
               <Campo texto="Notas">
-                <input value={nova.observacoes} onChange={(e) => setN("observacoes")(e.target.value)} className={CELULA_CARTAO} disabled={gravando} aria-label="Nova reserva: notas" />
+                <textarea value={nova.observacoes} onChange={(e) => setN("observacoes")(e.target.value)} onInput={cresce} rows={3} className={CELULA_NOTAS_CARTAO} disabled={gravando} aria-label="Nova reserva: notas" />
               </Campo>
               {novaErro && <p role="alert" className="text-sm text-destructive">{novaErro}</p>}
               <Button size="touch" variant="outline" className="w-full" onClick={acrescentarNova} disabled={gravando} aria-label="Acrescentar reserva por gravar">
@@ -1570,16 +1643,11 @@ export default function ParceiroReservasPage() {
                   <Campo texto="Tipo de limpeza">
                     <Celula cartao type="select" opcoes={OPCOES_TIPO} value={tipoOuNormal(l.valores.tipo_limpeza)} pendente={p("tipo_limpeza")} rotulo={`Tipo de limpeza, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "tipo_limpeza", v)} />
                   </Campo>
-                  {tipoPedeData(l.valores.tipo_limpeza) && (
-                    <Campo texto="Data da limpeza">
-                      <Celula cartao type="date" {...limitesDataLimpeza(l.valores.tipo_limpeza, l.valores.check_in, l.valores.check_out)} value={l.valores.data_limpeza} pendente={p("data_limpeza")} rotulo={`Data da limpeza, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "data_limpeza", v)} />
-                    </Campo>
-                  )}
                   <Campo texto="Horário preferido de limpeza">
                     <Celula cartao value={l.valores.horario_preferido} pendente={p("horario_preferido")} rotulo={`Horário preferido, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "horario_preferido", v)} />
                   </Campo>
                   <Campo texto="Notas">
-                    <Celula cartao value={l.valores.observacoes} pendente={p("observacoes")} rotulo={`Observações, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "observacoes", v)} />
+                    <CelulaNotas cartao value={l.valores.observacoes} pendente={p("observacoes")} rotulo={`Observações, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "observacoes", v)} />
                   </Campo>
                 </CardContent>
               </Card>

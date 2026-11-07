@@ -1,6 +1,5 @@
 "use client";
 
-import { ResultadoImportacao, lerDetalheErros } from "@/components/resultado-importacao";
 import { TipoLimpezaBadge } from "@/components/tipo-limpeza-badge";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -18,7 +17,6 @@ import {
   Eye,
   Info,
   UserMinus,
-  Upload,
   Download,
   ChevronDown,
 } from "lucide-react";
@@ -55,6 +53,7 @@ import {
 import { PaginationBar } from "@/components/admin/pagination-bar";
 import { DetalheTarefaModal } from "@/components/gestor/detalhe-tarefa-modal";
 import { parsearDataSegura, extrairHoraISO, plural } from "@/lib/utils";
+import { SeletorDisponiveis, corpoAtribuicao, type InfoDisponiveis } from "@/components/gestor/seletor-disponiveis";
 
 interface TarefaAdmin {
   _id: string;
@@ -305,35 +304,8 @@ export default function AdminTarefasPage() {
   // Prompt 95 — Modal de detalhe da tarefa (card de detalhes_reserva).
   const [detalheTarefa, setDetalheTarefa] = useState<TarefaAdmin | null>(null);
 
-  // v1.59.0 (Prompt 81) — Staff indisponíveis (férias/doença) no dia da tarefa.
-  const [indisponiveis, setIndisponiveis] = useState<Array<{
-    utilizador_id: string;
-    tipo: string;
-    data_inicio: string;
-    data_fim: string;
-  }>>([]);
-
-  // Busca indisponíveis quando o modal de atribuição abre.
-  useEffect(() => {
-    if (!atribuindo) {
-      setIndisponiveis([]);
-      return;
-    }
-    let cancelado = false;
-    (async () => {
-      try {
-        const dia = atribuindo.data?.slice(0, 10);
-        if (!dia) return;
-        const res = await adminGet<{ indisponiveis: typeof indisponiveis }>(
-          `/api/gestor/tarefas/indisponiveis?data=${dia}`
-        );
-        if (!cancelado) setIndisponiveis(res.indisponiveis ?? []);
-      } catch {
-        if (!cancelado) setIndisponiveis([]);
-      }
-    })();
-    return () => { cancelado = true; };
-  }, [atribuindo]);
+  // Quem pode fazer a limpeza (o seletor pergunta ao servidor) e se é uma vaga de equipa.
+  const [infoDisp, setInfoDisp] = useState<InfoDisponiveis | null>(null);
 
   const carregar = useCallback(async () => {
     setLoading(true);
@@ -484,7 +456,7 @@ export default function AdminTarefasPage() {
       // Prompt 114 — Captura warning de distância.
       const res = await adminPatch<{ tarefa: TarefaAdmin; warning?: string; aviso_horario?: string }>(
         `/api/gestor/tarefas/${atribuindo._id}/atribuir`,
-        { utilizador_id: atribuirUserId }
+        corpoAtribuicao(atribuirUserId, infoDisp, atribuindo.utilizador_id, atribuindo.equipa_atribuida)
       );
       const avisoAtribuir = [res.warning, res.aviso_horario].filter(Boolean).join(" | ");
       if (avisoAtribuir) setWarningToast(avisoAtribuir);
@@ -518,13 +490,6 @@ export default function AdminTarefasPage() {
   // Origem: 'manual' (sem reserva Smoobu associada).
   // Reaproveita as listas `propriedades` e `staff` já carregadas na página.
   const [espontaneaOpen, setEspontaneaOpen] = useState(false);
-  // FIX (import/export excel) — Estado para o modal de importação de Excel.
-  const [importOpen, setImportOpen] = useState(false);
-  const [importFile, setImportFile] = useState<File | null>(null);
-  const [importLoading, setImportLoading] = useState(false);
-  const [importResult, setImportResult] = useState<string | null>(null);
-  const [importErros, setImportErros] = useState<string[]>([]);
-  const [importNaoAtribuidas, setImportNaoAtribuidas] = useState<string[]>([]);
   const [espontaneaForm, setEspontaneaForm] = useState({
     propriedade_id: "",
     data: "",
@@ -657,36 +622,6 @@ export default function AdminTarefasPage() {
     }
   }
 
-  // FIX (import/export excel) — Importa reservas de um ficheiro .xlsx.
-  async function handleImportarExcel() {
-    if (!importFile) return;
-    setImportLoading(true);
-    setImportResult(null);
-    setImportErros([]);
-    setImportNaoAtribuidas([]);
-    try {
-      // Lê o ficheiro como ArrayBuffer e envia como raw body.
-      const arrayBuffer = await importFile.arrayBuffer();
-      const res = await fetch("/api/gestor/reservas/importar-excel", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
-        body: arrayBuffer,
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.erro || `Erro ${res.status}`);
-      setImportErros(lerDetalheErros(data.detalheErros));
-      setImportNaoAtribuidas(lerDetalheErros(data.detalheNaoAtribuidas, 50));
-      setImportResult(data.message || `${data.criadas} criadas, ${data.ignoradas} ignoradas, ${data.erros} erros.`);
-      // Recarrega as tarefas para mostrar as importadas.
-      await carregar();
-    } catch (e) {
-      setImportResult(e instanceof Error ? e.message : "Erro ao importar Excel.");
-    } finally {
-      setImportLoading(false);
-    }
-  }
-
   /** Ações da limpeza (iguais na tabela e nos cartões; `tam` ajusta o alvo de toque). */
   function acoesTarefa(t: TarefaAdmin, tam: string) {
     return (
@@ -695,7 +630,7 @@ export default function AdminTarefasPage() {
           <Eye className="h-4 w-4" />
         </Button>
         {(t.estado === "por_atribuir" || t.estado === "atribuida" || t.estado === "nao_atribuida") && (
-          <Button variant="ghost" size="icon" className={tam} onClick={() => { setAtribuindo(t); setAtribuirUserId(""); }} aria-label="Atribuir" title="Atribuir / Reatribuir">
+          <Button variant="ghost" size="icon" className={tam} onClick={() => { setAtribuindo(t); setAtribuirUserId(""); setInfoDisp(null); }} aria-label="Atribuir" title="Atribuir / Reatribuir">
             <UserCheck className="h-4 w-4" />
           </Button>
         )}
@@ -853,16 +788,6 @@ export default function AdminTarefasPage() {
                   <Download className="h-4 w-4" aria-hidden="true" />
                   Exportar Excel
                 </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="flex min-h-11 w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent disabled:opacity-50"
-                  disabled={importLoading}
-                  onClick={() => { setMenuAcoes(false); setImportOpen(true); setImportFile(null); setImportResult(null); }}
-                >
-                  <Upload className="h-4 w-4" aria-hidden="true" />
-                  Importar Excel
-                </button>
               </div>
             )}
           </div>
@@ -888,7 +813,7 @@ export default function AdminTarefasPage() {
             <SprayCan className="h-4 w-4" />
             <span className="hidden sm:inline">Limpeza espontânea</span>
           </Button>
-          {/* FIX (import/export excel) — Botões de importar/exportar Excel. */}
+          {/* Exportar Excel. */}
           <Button
             variant="outline"
             onClick={handleExportarExcel}
@@ -898,20 +823,6 @@ export default function AdminTarefasPage() {
           >
             <Download className="h-4 w-4" />
             <span className="hidden sm:inline">Exportar Excel</span>
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => {
-              setImportOpen(true);
-              setImportFile(null);
-              setImportResult(null);
-            }}
-            disabled={importLoading}
-            title="Importa reservas em massa a partir de um ficheiro Excel (.xlsx)."
-            className="gap-2"
-          >
-            <Upload className="h-4 w-4" />
-            <span className="hidden sm:inline">Importar Excel</span>
           </Button>
           </div>
         </div>
@@ -1423,7 +1334,7 @@ export default function AdminTarefasPage() {
               {atribuindo?.propriedade_id?.nome} — {atribuindo ? formatarData(atribuindo.data) : ""}
               {atribuindo && nomesEquipa(atribuindo).length > 1 && (
                 <span className="mt-1 block text-xs">
-                  Equipa atual: {nomesEquipa(atribuindo).join(" + ")}. A pessoa escolhida passa a responsável e os outros membros mantêm-se.
+                  Equipa atual: {nomesEquipa(atribuindo).join(" + ")}. {infoDisp?.modo === "vaga" ? "A pessoa escolhida entra na equipa e preenche a vaga." : "A pessoa escolhida passa a responsável e os outros membros mantêm-se."}
                 </span>
               )}
             </DialogDescription>
@@ -1432,38 +1343,15 @@ export default function AdminTarefasPage() {
         </DialogHeader>
         <DialogContent className="space-y-4">
           <div className="space-y-1.5">
-            <label className="text-sm font-medium">Equipa</label>
-            <select
-              value={atribuirUserId}
-              onChange={(e) => setAtribuirUserId(e.target.value)}
-              className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <option value="">Selecionar…</option>
-              {staff.map((u) => {
-                // FIX (folgas/férias) — Em vez de OMITIR os staff
-                // indisponíveis (férias/doença/ausência nesse dia), mostramos
-                // TODOS no dropdown com a option disabled e a label
-                // " [Indisponível]" ao lado do nome. Assim o gestor vê quem
-                // existe mas não consegue selecionar quem está de folga/férias.
-                const indisponivel = indisponiveis.some(
-                  (i) => i.utilizador_id === u._id
-                );
-                return (
-                  <option
-                    key={u._id}
-                    value={indisponivel ? "" : u._id}
-                    disabled={indisponivel}
-                  >
-                    {u.nome}
-                    {indisponivel ? " — [Indisponível]" : ""}
-                  </option>
-                );
-              })}
-            </select>
-            {indisponiveis.length > 0 && (
-              <p className="text-xs text-amber-600 dark:text-amber-400">
-                ⚠️ {plural(indisponiveis.length, "membro")} da equipa está(ão) de folga/férias neste dia e apareceram como [Indisponível] na lista (não selecionáveis).
-              </p>
+            <label className="text-sm font-medium">{infoDisp?.modo === "vaga" ? "Quem entra na equipa" : "Equipa"}</label>
+            {atribuindo && (
+              <SeletorDisponiveis
+                tarefaId={atribuindo._id}
+                acao="atribuir"
+                value={atribuirUserId}
+                onChange={setAtribuirUserId}
+                onInfo={setInfoDisp}
+              />
             )}
           </div>
         </DialogContent>
@@ -1751,67 +1639,6 @@ export default function AdminTarefasPage() {
         </DialogFooter>
       </Dialog>
 
-      {/* FIX (import/export excel) — Modal de importação de Excel. */}
-      <Dialog open={importOpen} onOpenChange={(o) => !o && !importLoading && setImportOpen(o)}>
-        <DialogHeader>
-          <div>
-            <DialogTitle className="flex items-center gap-2">
-              <Upload className="h-5 w-5 text-gold-text" />
-              Importar Reservas (Excel)
-            </DialogTitle>
-            <DialogDescription>
-              Carrega um ficheiro .xlsx com as colunas: Propriedade, Data (ou Check-out),
-              Hóspedes (opcional), Check-in (opcional), Nome Hóspede (opcional).
-              O sistema faz match do nome da propriedade e cria as reservas/tarefas.
-            </DialogDescription>
-          </div>
-          <DialogClose onClick={() => !importLoading && setImportOpen(false)} />
-        </DialogHeader>
-        <DialogContent className="space-y-4">
-          <div className="space-y-2">
-            <label className="text-sm font-medium">Ficheiro Excel (.xlsx)</label>
-            <input
-              type="file"
-              accept=".xlsx,.xls"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                setImportFile(f ?? null);
-                setImportResult(null);
-              }}
-              className="flex w-full cursor-pointer items-center gap-2 rounded-md border border-dashed border-input bg-muted/30 px-3 py-2 text-sm text-muted-foreground hover:bg-muted/50"
-            />
-            {importFile && (
-              <p className="text-xs text-muted-foreground">
-                Ficheiro selecionado: {importFile.name} ({(importFile.size / 1024).toFixed(0)} KB)
-              </p>
-            )}
-          </div>
-          {importResult && (
-            <ResultadoImportacao resumo={importResult} detalheErros={importErros} naoAtribuidas={importNaoAtribuidas} />
-          )}
-        </DialogContent>
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setImportOpen(false)}
-            disabled={importLoading}
-          >
-            Cancelar
-          </Button>
-          <Button
-            type="button"
-            onClick={handleImportarExcel}
-            disabled={!importFile || importLoading}
-          >
-            {importLoading ? (
-              <><Loader2 className="mr-2 h-4 w-4 animate-spin" />A importar…</>
-            ) : (
-              <><Upload className="mr-2 h-4 w-4" />Importar</>
-            )}
-          </Button>
-        </DialogFooter>
-      </Dialog>
     </div>
   );
 }

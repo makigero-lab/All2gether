@@ -17,6 +17,7 @@ const {
 } = require('../utils/scheduler');
 const Horario = require('../utils/horario');
 const { avisarParceiro, aoConcluirTarefa } = require('../utils/cicloTarefa');
+const { listarDisponiveis } = require('../utils/disponiveisTarefa');
 
 /**
  * 'YYYY-MM-DD' (+ 'HH:MM' de Lisboa, com hora de verão) -> instante UTC.
@@ -563,6 +564,38 @@ exports.criarTarefa = async (req, res) => {
     return res.status(201).json(resposta);
   } catch (err) {
     console.error('❌ criarTarefa:', err.message);
+    return res.status(500).json({ erro: 'Erro interno do servidor.' });
+  }
+};
+
+/**
+ * GET /api/gestor/tarefas/:id/disponiveis[?acao=atribuir|reatribuir]
+ *
+ * Quem pode fazer a limpeza (para o seletor da atribuição manual), com a hora
+ * prevista de cada pessoa. Sem ninguém: lista vazia e o motivo real.
+ * Resposta 200: { modo: 'responsavel'|'vaga', disponiveis: [{ _id, nome, hora_prevista, tempo_viagem_minutos }], motivo }
+ */
+exports.listarDisponiveisTarefa = async (req, res) => {
+  try {
+    const { ok, empresaId } = obterEmpresaId(req, res);
+    if (!ok) return;
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ erro: 'ID de tarefa inválido.' });
+    }
+    const tarefa = await Tarefa.findOne({ _id: id, empresa_id: empresaId }).lean();
+    if (!tarefa) return res.status(404).json({ erro: 'Tarefa não encontrada.' });
+    if (tarefa.estado === 'concluida' || tarefa.estado === 'cancelada') {
+      return res.status(409).json({ erro: "Não é possível atribuir uma tarefa " + tarefa.estado + ".", codigo: 'ESTADO_INVALIDO' });
+    }
+    const propriedade = await Propriedade.findOne({ _id: tarefa.propriedade_id, empresa_id: empresaId })
+      .select('coordenadas nome staff_necessario').lean();
+    if (!propriedade) return res.status(404).json({ erro: 'Propriedade não encontrada.' });
+    const acao = req.query.acao === 'atribuir' ? 'atribuir' : 'reatribuir';
+    const r = await listarDisponiveis({ empresaId, tarefa, propriedade, acao });
+    return res.status(200).json(r);
+  } catch (err) {
+    console.error('❌ listarDisponiveisTarefa:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
   }
 };

@@ -313,17 +313,18 @@ export default function StaffPage() {
             </span>
           </div>
         ) : (
-          <div className="flex justify-end">
+          <div className="-my-2 flex justify-end">
+            {/* Discreto (texto pequeno) mas com a área de toque de 44 px (size touch). */}
             <Button
               variant="ghost"
               size="touch"
-              className="gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              className="gap-1.5 px-2 text-xs font-normal text-destructive hover:bg-destructive/10 hover:text-destructive"
               onClick={() => {
                 setMostrarDialogFalta(true);
                 setErroFalta(null);
               }}
             >
-              <AlertTriangle className="h-4 w-4" />
+              <AlertTriangle className="h-3.5 w-3.5" />
               Reportar falta hoje
             </Button>
           </div>
