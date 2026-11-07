@@ -160,7 +160,7 @@ export function DetalheTarefaClient({
     // Se já estiver concluída, pré-marca todos os itens (reflete o final).
     () => rascunhoInicial?.itens ?? checklist.map(() => jaConcluida)
   );
-  const [observacoes, setObservacoes] = useState(rascunhoInicial?.observacoes ?? "");
+  const [observacoes, setObservacoes] = useState(jaConcluida ? (tarefa.observacoes_staff ?? "") : (rascunhoInicial?.observacoes ?? ""));
   const [concluida, setConcluida] = useState(jaConcluida);
   const [concluindo, setConcluindo] = useState(false);
   const [erroConcluir, setErroConcluir] = useState<string | null>(null);
@@ -447,7 +447,7 @@ export function DetalheTarefaClient({
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-md flex-col bg-muted/20">
       {/* Cabeçalho com nome da propriedade no topo + voltar */}
-      <header className="sticky top-0 z-10 border-b bg-background/95 px-5 pb-4 pt-5 backdrop-blur">
+      <header className="sticky top-0 z-20 border-b bg-background/95 px-5 pb-4 pt-5 backdrop-blur">
         <Link
           href="/staff"
           prefetch

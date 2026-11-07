@@ -61,6 +61,10 @@ function formatarData(iso: string): string {
 
 const TIPO_LABEL: Record<string, string> = {
   tarefa: "Limpeza",
+  tarefa_atribuida: "Limpeza atribuída",
+  tarefa_reatribuida: "Limpeza reatribuída",
+  tarefa_cancelada: "Limpeza cancelada",
+  aviso: "Aviso",
   atraso: "Atraso",
   avaria: "Avaria",
   atribuicao: "Atribuição",

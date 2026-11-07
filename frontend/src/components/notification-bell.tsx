@@ -186,7 +186,7 @@ export function NotificationBell({ paraCima = false }: { paraCima?: boolean } = 
       </Button>
 
       {aberto && (
-        <div className={`absolute right-0 z-50 ${paraCima ? "bottom-full mb-2" : "top-full mt-2"} flex max-h-[70vh] w-[calc(100vw-2rem)] max-w-sm flex-col origin-top-right overflow-hidden rounded-lg border bg-card shadow-lg`}>
+        <div className={`absolute right-0 z-50 ${paraCima ? "bottom-full mb-2" : "top-full mt-2"} flex max-h-[70vh] w-[24rem] flex-col origin-top-right overflow-hidden rounded-lg border bg-card shadow-lg max-sm:fixed max-sm:inset-x-2 max-sm:right-2 max-sm:w-auto ${paraCima ? "max-sm:bottom-16 max-sm:mb-0" : "max-sm:top-14 max-sm:mt-0"}`}>
           <div className="flex shrink-0 items-center justify-between border-b px-4 py-3">
             <span className="text-sm font-semibold">Notificações</span>
             {naoLidas > 0 && (

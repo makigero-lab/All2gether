@@ -66,7 +66,7 @@ describe('fim de ausência preenche vagas na hora', () => {
     const r = await cancelar(a);
     expect(r.status).toBe(200);
     expect(r.body.preenchimento).toMatchObject({ atribuidas: 1, orfas: 0 });
-    expect(r.body.reatribuicaoAviso).toMatch(/1 tarefa\(s\) preenchida/);
+    expect(r.body.reatribuicaoAviso).toMatch(/1 tarefa preenchida/);
     const d = await Tarefa.findById(t._id);
     expect(d.estado).toBe('atribuida');
     expect(String(d.utilizador_id)).toBe(String(ana._id));

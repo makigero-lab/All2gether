@@ -253,7 +253,7 @@ export default function StaffPage() {
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-md flex-col bg-muted/20">
       {/* Cabeçalho */}
-      <header className="sticky top-0 z-10 border-b bg-background/95 px-5 pb-4 pt-6 backdrop-blur">
+      <header className="sticky top-0 z-20 border-b bg-background/95 px-5 pb-4 pt-6 backdrop-blur">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <Avatar>
@@ -436,8 +436,8 @@ export default function StaffPage() {
             Reportar falta hoje
           </DialogTitle>
           <DialogDescription>
-            Tem a certeza que não pode trabalhar hoje? O Administrador será
-            notificado para redistribuir as suas tarefas.
+            Tens a certeza de que não podes trabalhar hoje? O gestor será
+            notificado para redistribuir as tuas tarefas.
           </DialogDescription>
           <DialogClose onClick={() => setMostrarDialogFalta(false)} />
         </DialogHeader>

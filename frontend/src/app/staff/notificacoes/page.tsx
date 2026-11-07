@@ -84,6 +84,10 @@ function formatarData(iso: string): string {
 
 const TIPO_LABEL: Record<string, string> = {
   tarefa: "Limpeza",
+  tarefa_atribuida: "Limpeza atribuída",
+  tarefa_reatribuida: "Limpeza reatribuída",
+  tarefa_cancelada: "Limpeza cancelada",
+  aviso: "Aviso",
   atraso: "Atraso",
   avaria: "Avaria",
   atribuicao: "Atribuição",
@@ -140,7 +144,7 @@ export default function StaffNotificacoesPage() {
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-md flex-col bg-muted/20">
       {/* Cabeçalho */}
-      <header className="sticky top-0 z-10 border-b bg-background/95 px-5 pb-4 pt-6 backdrop-blur">
+      <header className="sticky top-0 z-20 border-b bg-background/95 px-5 pb-4 pt-6 backdrop-blur">
         <div className="flex items-start justify-between gap-3">
           <div className="flex-1">
             <Link

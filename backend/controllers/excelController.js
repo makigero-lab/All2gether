@@ -16,6 +16,7 @@
  */
 
 const ExcelJS = require('exceljs');
+const { pl } = require('../utils/plural');
 const Tarefa = require('../models/Tarefa');
 const Propriedade = require('../models/Propriedade');
 const ReservaManual = require('../models/ReservaManual');
@@ -274,7 +275,7 @@ async function atribuirLote(itens, empresaId) {
         await avisarGestores(
           empresaId,
           '⚠️ Limpezas por atribuir',
-          `A importação de Excel deixou ${naoAtribuidas} limpeza(s) por atribuir (sem equipa disponível). Vê o motivo em cada tarefa.`,
+          `A importação de Excel deixou ${pl(naoAtribuidas, 'limpeza', 'limpezas')} por atribuir (sem equipa disponível). Vê o motivo em cada tarefa.`,
           '/gestor/tarefas'
         );
       }
@@ -538,9 +539,9 @@ async function importarLinhas({
   const atrib = await atribuirLote(porAtribuirLista, empresaId);
   const porAtribuir = criadas - atrib.atribuidas;
 
-  let message = `${criadas} reserva(s) criada(s)`;
+  let message = pl(criadas, 'reserva criada', 'reservas criadas');
   if (criadas > 0) {
-    message += ` (${atrib.atribuidas} atribuída(s), ${porAtribuir} por atribuir`;
+    message += ` (${pl(atrib.atribuidas, 'atribuída', 'atribuídas')}, ${porAtribuir} por atribuir`;
     message += atrib.emSegundoPlano > 0 ? `, ${atrib.emSegundoPlano} a atribuir em segundo plano)` : ')';
   }
   if (ignoradas > 0) message += `, ${ignoradas} já existiam (ignoradas)`;

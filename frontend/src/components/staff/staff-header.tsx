@@ -29,7 +29,7 @@ interface StaffHeaderProps {
 
 export function StaffHeader({ title, showBack = false, userName }: StaffHeaderProps) {
   return (
-    <header className="sticky top-0 z-10 border-b bg-background/95 px-5 pb-4 pt-6 backdrop-blur">
+    <header className="sticky top-0 z-20 border-b bg-background/95 px-5 pb-4 pt-6 backdrop-blur">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           {showBack && (

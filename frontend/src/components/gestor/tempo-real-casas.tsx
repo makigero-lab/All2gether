@@ -88,7 +88,7 @@ export function TempoRealCasas({ inicio, fim }: { inicio: string; fim: string })
         {dados && (
           <>
             <p className="text-sm text-muted-foreground">
-              {plural(dados.limpezas_concluidas, "limpeza")} concluída(s) no período:{" "}
+              {plural(dados.limpezas_concluidas, "limpeza concluída", "limpezas concluídas")} no período:{" "}
               <strong>{dados.inicios.botao}</strong> começaram pelo botão, <strong>{dados.inicios.automatico}</strong> automaticamente
               {dados.inicios.sem_registo > 0 ? `, ${dados.inicios.sem_registo} sem registo de início` : ""}.{" "}
               {dados.excluidas_sem_inicio_fiavel > 0 &&

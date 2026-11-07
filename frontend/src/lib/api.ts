@@ -156,6 +156,7 @@ export interface TarefaMock {
   // Equipa da limpeza (2+ pessoas): nomes, responsável primeiro. `eu` = a própria pessoa.
   equipa_nomes?: Array<{ _id: string; nome: string; responsavel: boolean; eu?: boolean }> | null;
   // Início da limpeza (botão «Comecei» ou automático à hora marcada).
+  observacoes_staff?: string | null;
   iniciada_em?: string | null;
   inicio_origem?: "botao" | "automatico" | null;
   // «Não consegui começar»: último registo do staff.
