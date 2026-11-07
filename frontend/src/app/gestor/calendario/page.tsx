@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { rotuloTipoLimpeza } from "@/components/tipo-limpeza-badge";
 import {
@@ -21,6 +21,8 @@ import {
   Download,
   Plus,
   Trash2,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -34,7 +36,7 @@ import dayGridPlugin from "@fullcalendar/daygrid";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import interactionPlugin from "@fullcalendar/interaction";
 import ptLocale from "@fullcalendar/core/locales/pt";
-import type { DatesSetArg, EventClickArg, EventContentArg, EventInput } from "@fullcalendar/core";
+import type { DatesSetArg, DayCellContentArg, EventClickArg, EventContentArg, EventInput } from "@fullcalendar/core";
 import type { DateClickArg } from "@fullcalendar/interaction";
 
 import { Button } from "@/components/ui/button";
@@ -332,6 +334,21 @@ export default function CalendarioOperacionalPage() {
   const [mudarDiaAberto, setMudarDiaAberto] = useState(false);
   const [dataCal, setDataCal] = useState<Date | null>(null);
   const [filtrosAbertos, setFiltrosAbertos] = useState(false);
+
+  // Telemóvel (< 640 px): o Mês mostra pontos + contador por dia e a Semana é uma lista agrupada por dia.
+  const [estreito, setEstreito] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 639px)");
+    const atualizar = () => setEstreito(mq.matches);
+    atualizar();
+    mq.addEventListener("change", atualizar);
+    return () => mq.removeEventListener("change", atualizar);
+  }, []);
+  const calRef = useRef<FullCalendar | null>(null);
+  const calBoxRef = useRef<HTMLDivElement | null>(null);
+  const asideRef = useRef<HTMLElement | null>(null);
+  // Largura do calendário: na Semana, só cabem lado a lado as limpezas com >= 70 px; as outras vão para «+N mais».
+  const [larguraCal, setLarguraCal] = useState(0);
 
   // Período atual do calendário (definido via datesSet do FullCalendar).
   const [periodo, setPeriodo] = useState<PeriodoState | null>(null);
@@ -787,6 +804,85 @@ export default function CalendarioOperacionalPage() {
       .sort((a, b) => (parsearDataSegura(a.data)?.getTime() ?? 0) - (parsearDataSegura(b.data)?.getTime() ?? 0));
   }, [diaAberto, tarefas]);
 
+  /* --- Telemóvel: resumo por dia (Mês) e lista agrupada (Semana) --- */
+  const ESPECIAIS = ["ausencia", "ausencia_pendente", "folga_fixa", "viagem"];
+  const porDia = useMemo(() => {
+    const m = new Map<string, TarefaCalendario[]>();
+    for (const t of tarefas) {
+      if (t.tipo === "viagem") continue;
+      const d = parsearDataSegura(t.data);
+      if (!d) continue;
+      const k = format(d, "yyyy-MM-dd");
+      const l = m.get(k);
+      if (l) l.push(t);
+      else m.set(k, [t]);
+    }
+    for (const l of m.values()) l.sort((a, b) => (parsearDataSegura(a.data)?.getTime() ?? 0) - (parsearDataSegura(b.data)?.getTime() ?? 0));
+    return m;
+  }, [tarefas]);
+
+  const diasDaSemana = useMemo(() => {
+    if (!periodo) return [] as string[];
+    const base = new Date(`${periodo.inicio}T12:00:00`);
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(base);
+      d.setDate(base.getDate() + i);
+      return format(d, "yyyy-MM-dd");
+    });
+  }, [periodo]);
+
+  // Mede o calendário (para decidir quantas limpezas lado a lado cabem na Semana).
+  useEffect(() => {
+    const el = calBoxRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => setLarguraCal(el.clientWidth));
+    ro.observe(el);
+    setLarguraCal(el.clientWidth);
+    return () => ro.disconnect();
+  }, [vista, mounted, estreito]);
+
+  // Telemóvel: ao tocar num dia, a lista desse dia aparece por baixo e é trazida para o ecrã.
+  useEffect(() => {
+    if (!diaAberto || !estreito) return;
+    const id = requestAnimationFrame(() => asideRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    return () => cancelAnimationFrame(id);
+  }, [diaAberto, estreito]);
+
+  // Conteúdo da célula do Mês no telemóvel: nº do dia + pontos (forma = tipo, cor = estado) + contador.
+  const conteudoDia = useCallback(
+    (arg: DayCellContentArg) => {
+      if (!estreito || arg.view.type !== "dayGridMonth") return undefined;
+      const itens = (porDia.get(format(arg.date, "yyyy-MM-dd")) ?? []).filter((t) => !ESPECIAIS.includes(t.tipo));
+      if (itens.length === 0) return <>{arg.dayNumberText}</>;
+      const urgencia = (e: string) => (e === "nao_atribuida" ? 0 : e === "por_atribuir" ? 1 : e === "em_curso" ? 2 : e === "atribuida" ? 3 : 4);
+      const ordenados = itens.slice().sort((a, b) => urgencia(a.estado) - urgencia(b.estado));
+      const semPessoa = itens.filter((t) => t.estado === "por_atribuir" || t.estado === "nao_atribuida").length;
+      const emCurso = itens.filter((t) => t.estado === "em_curso").length;
+      return (
+        <span
+          className="dia-resumo"
+          role="img"
+          aria-label={`${arg.dayNumberText}: ${itens.length} ${itens.length === 1 ? "limpeza" : "limpezas"}${semPessoa ? `, ${semPessoa} por atribuir` : ""}${emCurso ? `, ${emCurso} em curso` : ""}`}
+        >
+          <span className="dia-resumo__num">{arg.dayNumberText}</span>
+          <span className="dia-resumo__pontos" aria-hidden="true">
+            {ordenados.slice(0, 4).map((t) => {
+              const tv = t.tipo_limpeza && COR_TIPO_VALIDOS.includes(t.tipo_limpeza) ? t.tipo_limpeza : "normal";
+              return <span key={t._id} className="dia-ponto" data-tipo={tv} data-estado={t.estado} style={{ ["--c" as string]: corPorEstado(t.estado) }} />;
+            })}
+          </span>
+          <span className="dia-resumo__total" aria-hidden="true">
+            {itens.length}
+            {semPessoa > 0 && <span className="dia-resumo__sinal dia-resumo__sinal--por">?{semPessoa}</span>}
+            {emCurso > 0 && <span className="dia-resumo__sinal dia-resumo__sinal--curso">▶{emCurso}</span>}
+          </span>
+        </span>
+      );
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [estreito, porDia]
+  );
+
   /* --- Callbacks do FullCalendar --- */
   const handleDateClick = useCallback((arg: DateClickArg) => {
     // Computador: abre a lista do dia ao lado; telemóvel: por baixo do calendário.
@@ -795,6 +891,10 @@ export default function CalendarioOperacionalPage() {
 
   const handleDatesSet = useCallback((arg: DatesSetArg) => {
     setDataCal(arg.view.currentStart);
+    // «Hoje» desativado também para tecnologias de apoio (o FullCalendar só põe o atributo disabled).
+    requestAnimationFrame(() => {
+      document.querySelectorAll<HTMLButtonElement>(".fc .fc-today-button").forEach((b) => b.setAttribute("aria-disabled", String(b.disabled)));
+    });
     setPeriodo({
       inicio: format(arg.start, "yyyy-MM-dd"),
       fim: format(arg.end, "yyyy-MM-dd"),
@@ -1140,6 +1240,41 @@ export default function CalendarioOperacionalPage() {
     }
   }, [periodo, filtros]);
 
+  // Linha de uma limpeza (painel do dia e lista da semana no telemóvel): o nome ocupa até 2 linhas.
+  const renderLinhaDia = (x: TarefaCalendario) => {
+    const ausencia = ESPECIAIS.includes(x.tipo);
+    const titulo = ausencia ? (x.title ?? "Ausência") : (x.propriedade_id?.nome ?? "—");
+    return (
+      <button
+        key={x._id}
+        type="button"
+        disabled={ausencia}
+        onClick={() => { setTarefaSelecionada(x); setReatribuindoPara(""); setInfoDisp(null); }}
+        className="flex min-h-11 w-full items-center justify-between gap-2 rounded-md border px-3 py-2 text-left text-sm disabled:cursor-default"
+      >
+        <span className="min-w-0 flex-1">
+          <span className="flex items-start gap-1.5 font-medium">
+            {!ausencia && x.tipo === "limpeza" && <span className="tipo-marca mt-1" data-tipo={x.tipo_limpeza && COR_TIPO_VALIDOS.includes(x.tipo_limpeza) ? x.tipo_limpeza : "normal"} aria-hidden="true" />}
+            <span className="line-clamp-2 break-words">{titulo}</span>
+          </span>
+          <span className="block truncate text-xs text-muted-foreground">
+            {ausencia ? "" : `${temHoraReal(x.data) ? horaTarefa(x.data) : "sem hora"} · ${x.utilizador_id?.nome ?? "Por atribuir"}`}
+          </span>
+        </span>
+        {!ausencia && <EstadoTarefaBadge estado={x.estado} className="shrink-0" />}
+      </button>
+    );
+  };
+
+  const tituloSemana = (() => {
+    if (diasDaSemana.length === 0) return "";
+    const a = new Date(`${diasDaSemana[0]}T12:00:00`);
+    const b = new Date(`${diasDaSemana[6]}T12:00:00`);
+    return `${format(a, "d MMM", { locale: pt })} – ${format(b, "d MMM yyyy", { locale: pt })}`;
+  })();
+  const hojeISO = format(new Date(), "yyyy-MM-dd");
+  const listaSemana = vista === "semana" && estreito;
+
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
       {/* Cabeçalho */}
@@ -1211,7 +1346,7 @@ export default function CalendarioOperacionalPage() {
 
       {/* Vistas numa só barra (Mês, Semana, Tabela, Equipa) + Filtros no telemóvel */}
       <div className="flex flex-wrap items-center gap-2">
-        <div role="group" aria-label="Vista do calendário" className="flex items-center gap-1 rounded-md border bg-muted/40 p-1">
+        <div role="group" aria-label="Vista do calendário" className="flex w-full max-w-full items-center gap-1 overflow-x-auto rounded-md border bg-muted/40 p-1 sm:w-auto">
           {([["mes", "Mês", CalendarRange], ["semana", "Semana", CalendarRange], ["tabela", "Tabela", Table], ["equipa", "Equipa", Users]] as const).map(([v, rotulo, Ic]) => (
             <button
               key={v}
@@ -1222,11 +1357,11 @@ export default function CalendarioOperacionalPage() {
               }}
               aria-pressed={vista === v}
               className={cn(
-                "flex min-h-9 items-center gap-1.5 rounded px-3 py-1.5 text-sm font-medium transition-colors",
+                "flex min-h-11 shrink-0 flex-1 items-center justify-center gap-1.5 rounded px-2.5 py-1.5 text-sm font-medium transition-colors sm:min-h-9 sm:flex-none sm:px-3",
                 vista === v ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
               )}
             >
-              <Ic className="h-3.5 w-3.5" aria-hidden="true" />
+              <Ic className="hidden h-3.5 w-3.5 min-[400px]:block" aria-hidden="true" />
               {rotulo}
             </button>
           ))}
@@ -1359,10 +1494,43 @@ export default function CalendarioOperacionalPage() {
 
       {/* Prompt 99 — Vista Calendário (FullCalendar) */}
       {(vista === "mes" || vista === "semana") && (
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
-        <div className="rounded-lg border bg-card p-2 sm:p-4">
+        <div className={cn("grid gap-4", diaAberto && "lg:grid-cols-[minmax(0,1fr)_24rem]")}>
+        {listaSemana && (
+          <section aria-label="Limpezas da semana" className="rounded-lg border bg-card p-2">
+            <div className="mb-2 flex items-center gap-2">
+              <Button variant="outline" size="icon" aria-label="Semana anterior" onClick={() => calRef.current?.getApi().prev()}>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Button variant="outline" size="icon" aria-label="Semana seguinte" onClick={() => calRef.current?.getApi().next()}>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+              <Button variant="outline" onClick={() => calRef.current?.getApi().today()}>Hoje</Button>
+              <h2 className="ml-1 min-w-0 flex-1 truncate text-sm font-semibold">{tituloSemana}</h2>
+            </div>
+            <div className="space-y-4">
+              {diasDaSemana.map((dia) => {
+                const itens = porDia.get(dia) ?? [];
+                return (
+                  <div key={dia}>
+                    <h3 className={cn("mb-1 flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-muted-foreground", dia === hojeISO && "text-primary")}>
+                      <span>{formatarDataSegura(`${dia}T12:00:00`, (d) => format(d, "EEE, d 'de' MMM", { locale: pt }), dia)}{dia === hojeISO ? " · hoje" : ""}</span>
+                      <span>{itens.filter((t) => !ESPECIAIS.includes(t.tipo)).length || ""}</span>
+                    </h3>
+                    {itens.length === 0 ? (
+                      <p className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">Sem limpezas.</p>
+                    ) : (
+                      <div className="space-y-1.5">{itens.map(renderLinhaDia)}</div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+        <div ref={calBoxRef} className={cn("min-w-0 rounded-lg border bg-card p-2 sm:p-4", listaSemana && "hidden")}>
           {mounted ? (
             <FullCalendar
+              ref={calRef}
               plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
               key={vista}
               initialView={vista === "semana" ? "timeGridWeek" : "dayGridMonth"}
@@ -1395,7 +1563,9 @@ export default function CalendarioOperacionalPage() {
               dayMaxEvents={2}
               // Semana: no máximo 2 colunas lado a lado; o resto fica em «+N mais» (popover que fecha ao clicar fora ou Esc).
               slotEventOverlap={false}
-              eventMaxStack={2}
+              eventMaxStack={vista === "semana" ? Math.max(1, Math.floor(((larguraCal - 70) / 7) / 70)) : 2}
+              dayCellContent={conteudoDia}
+              dayCellClassNames={(a) => (estreito && format(a.date, "yyyy-MM-dd") === diaAberto ? ["dia-selecionado"] : [])}
               moreLinkClick="popover"
               moreLinkContent={(a) => `+${a.num} mais`}
               eventDisplay="block"
@@ -1422,8 +1592,8 @@ export default function CalendarioOperacionalPage() {
             </div>
           )}
         </div>
-        {diaAberto && (
-          <aside aria-label="Limpezas do dia" className="rounded-lg border bg-card lg:sticky lg:top-4 lg:self-start">
+        {diaAberto && !listaSemana && (
+          <aside ref={asideRef} aria-label="Limpezas do dia" className="scroll-mt-20 rounded-lg border bg-card lg:sticky lg:top-4 lg:self-start">
             <div className="flex items-start justify-between gap-2 border-b p-3">
               <div>
                 <h2 className="text-sm font-semibold first-letter:uppercase">
@@ -1438,30 +1608,7 @@ export default function CalendarioOperacionalPage() {
               </Button>
             </div>
             <div className="space-y-2 p-3">
-              {itensDoDia.map((x) => {
-                const ausencia = x.tipo === "ausencia" || x.tipo === "ausencia_pendente" || x.tipo === "folga_fixa";
-                const titulo = ausencia ? (x.title ?? "Ausência") : (x.propriedade_id?.nome ?? "—");
-                return (
-                  <button
-                    key={x._id}
-                    type="button"
-                    disabled={ausencia}
-                    onClick={() => { setTarefaSelecionada(x); setReatribuindoPara(""); setInfoDisp(null); }}
-                    className="flex min-h-11 w-full items-center justify-between gap-2 rounded-md border px-3 py-2 text-left text-sm disabled:cursor-default"
-                  >
-                    <span className="min-w-0">
-                      <span className="flex items-center gap-1.5 truncate font-medium">
-                        {!ausencia && x.tipo === "limpeza" && <span className="tipo-marca" data-tipo={x.tipo_limpeza && COR_TIPO_VALIDOS.includes(x.tipo_limpeza) ? x.tipo_limpeza : "normal"} aria-hidden="true" />}
-                        <span className="truncate">{titulo}</span>
-                      </span>
-                      <span className="block truncate text-xs text-muted-foreground">
-                        {ausencia ? "" : `${temHoraReal(x.data) ? horaTarefa(x.data) : "sem hora"} · ${x.utilizador_id?.nome ?? "Por atribuir"}`}
-                      </span>
-                    </span>
-                    {!ausencia && <EstadoTarefaBadge estado={x.estado} className="shrink-0" />}
-                  </button>
-                );
-              })}
+              {itensDoDia.map(renderLinhaDia)}
             </div>
           </aside>
         )}

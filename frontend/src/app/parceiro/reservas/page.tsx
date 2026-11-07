@@ -105,7 +105,7 @@ const CELULA_CARTAO =
 /** Marca visual de "por gravar" (não depende só da cor: leva também um traço e o aviso da linha). */
 // Colunas «Limpeza» (estado) e apagar coladas à direita ao fazer scroll na tabela larga (desktop).
 const FIXO_ACOES = "sticky right-0 z-[1] w-12 min-w-[3rem]";
-const FIXO_ESTADO = "sticky right-12 z-[1] w-[15rem] min-w-[15rem] shadow-[-8px_0_8px_-8px_rgba(0,0,0,0.25)]";
+const FIXO_ESTADO = "sticky right-12 z-[1] w-[11rem] min-w-[11rem] shadow-[-8px_0_8px_-8px_rgba(0,0,0,0.25)]";
 const PENDENTE_TABELA = "bg-amber-100 dark:bg-amber-900/40 shadow-[inset_3px_0_0_0_rgb(217_119_6)]";
 const PENDENTE_CARTAO = "border-amber-600 bg-amber-50 dark:bg-amber-950/30";
 
@@ -498,7 +498,7 @@ function CelulaNotas({
         onChange={(e) => setV(e.target.value)}
         onBlur={fechar}
         onKeyDown={teclas}
-        className={`block w-full min-w-[20rem] resize-y bg-primary/5 px-2 py-1.5 text-sm outline-none ring-2 ring-inset ring-primary ${pendente ? PENDENTE_TABELA : ""}`}
+        className={`block w-full min-w-[26rem] resize-y bg-primary/5 px-2 py-1.5 text-sm outline-none ring-2 ring-inset ring-primary ${pendente ? PENDENTE_TABELA : ""}`}
       />
     );
   }
@@ -619,6 +619,26 @@ export default function ParceiroReservasPage() {
   const [eliminar, setEliminar] = useState<ReservaDTO | null>(null);
 
   const pendentes = contarPendentes(rascunho);
+  // P1: a linha «Nova reserva» com um rascunho válido também ativa o Gravar (acrescenta-a e grava tudo).
+  const novaPronta =
+    nova.check_in !== "" &&
+    nova.check_out !== "" &&
+    validarReserva(
+      {
+        check_in: nova.check_in,
+        check_out: nova.check_out,
+        hora_checkin: nova.hora_checkin,
+        hospedes: nova.hospedes,
+        nome_hospede: nova.nome_hospede,
+        plataforma: nova.plataforma,
+        horario_preferido: nova.horario_preferido,
+        observacoes: nova.observacoes,
+        tipo_limpeza: nova.tipo_limpeza,
+      },
+      nova.propriedade_id
+    ) === null;
+  const [gravarAposNova, setGravarAposNova] = useState(false);
+  const podeGravar = pendentes > 0 || novaPronta;
 
   const carregar = useCallback(async (silencioso = false) => {
     if (!silencioso) setLoading(true);
@@ -1166,20 +1186,37 @@ export default function ParceiroReservasPage() {
     );
   };
 
+  // Depois de acrescentar a linha «Nova reserva» ao rascunho, grava tudo no render seguinte.
+  useEffect(() => {
+    if (gravarAposNova && pendentes > 0) {
+      setGravarAposNova(false);
+      gravar();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gravarAposNova, pendentes]);
+
+  const aoGravar = () => {
+    if (novaPronta) {
+      acrescentarNova();
+      setGravarAposNova(true);
+    } else gravar();
+  };
+
+  const total = pendentes + (novaPronta ? 1 : 0);
   const botaoGravar = (extra = "") => (
     <Button
-      onClick={gravar}
-      disabled={gravando || pendentes === 0}
+      onClick={aoGravar}
+      disabled={gravando || !podeGravar}
       className={`gap-2 ${extra}`}
-      aria-label={pendentes === 0 ? "Gravar (sem alterações por gravar)" : `Gravar: ${textoPendentes(pendentes)}`}
+      aria-label={!podeGravar ? "Gravar (sem alterações por gravar)" : novaPronta ? `Gravar: ${textoPendentes(pendentes)} e a nova reserva` : `Gravar: ${textoPendentes(pendentes)}`}
     >
       {gravando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-      Gravar{pendentes > 0 ? ` (${pendentes})` : ""}
+      Gravar{total > 0 ? ` (${total})` : ""}
     </Button>
   );
 
   return (
-    <main className={`flex flex-col gap-6 p-4 sm:p-6 lg:p-8 ${pendentes > 0 ? "pb-28 md:pb-8" : ""}`}>
+    <main className={`flex flex-col gap-6 p-4 sm:p-6 lg:p-8 ${podeGravar ? "pb-28 md:pb-8" : ""}`}>
       {/* Anúncio para leitores de ecrã: pendentes e resultado da gravação. */}
       <div className="sr-only" aria-live="polite" role="status">
         {pendentes === 0 ? "Sem alterações por gravar." : `${textoPendentes(pendentes)}.`} {resumo}
@@ -1192,11 +1229,19 @@ export default function ParceiroReservasPage() {
             Minhas reservas
           </h1>
           <p className="text-sm text-muted-foreground">
-            Clica num campo para editar. Sair do campo guarda só neste aparelho (rascunho): nada é enviado nem
-            atribuído até carregares em <strong>Gravar</strong>. Para uma reserva nova, preenche a linha do topo
-            (ou o cartão &quot;Nova reserva&quot; no telemóvel) e carrega em Enter ou em +; ela fica por gravar.
-            Cada reserva gerada gera uma limpeza.
+            Edita os campos e carrega em <strong>Gravar</strong>: até lá nada é enviado.
           </p>
+          <details className="group mt-1 text-sm text-muted-foreground">
+            <summary className="inline-flex min-h-11 cursor-pointer items-center font-medium text-brand-text marker:content-none sm:min-h-9">
+              Como funciona?
+            </summary>
+            <p className="max-w-3xl pb-1">
+              Clica num campo para editar. Sair do campo guarda só neste aparelho (rascunho): nada é enviado nem
+              atribuído até carregares em <strong>Gravar</strong>. Para uma reserva nova, preenche a linha do topo
+              (ou o cartão &quot;Nova reserva&quot; no telemóvel) e carrega em Gravar, Enter ou +. Cada reserva
+              gera uma limpeza.
+            </p>
+          </details>
         </div>
         <div className="flex gap-2">
           <span className="hidden md:inline-flex">{botaoGravar()}</span>
@@ -1250,22 +1295,22 @@ export default function ParceiroReservasPage() {
       )}
 
       {/* Barra de alterações por gravar: fixa em baixo no telemóvel; no desktop fica visível ao rolar. */}
-      {pendentes > 0 && (
+      {podeGravar && (
         <>
           <div className="sticky top-2 z-20 hidden items-center justify-between gap-3 rounded-lg border border-amber-500/60 bg-background px-4 py-2 shadow md:flex">
             <p className="text-sm font-medium">
-              {textoPendentes(pendentes)}{" "}
-              <span className="font-normal text-muted-foreground">(guardadas neste aparelho)</span>
+              {pendentes > 0 ? textoPendentes(pendentes) : "Nova reserva pronta a gravar"}{" "}
+              <span className="font-normal text-muted-foreground">{pendentes > 0 ? "(guardadas neste aparelho)" : ""}</span>
             </p>
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={() => setDescartarAberto(true)} disabled={gravando}>
+              <Button variant="outline" size="sm" onClick={() => setDescartarAberto(true)} disabled={gravando || pendentes === 0}>
                 Descartar
               </Button>
               {botaoGravar()}
             </div>
           </div>
           <div className="fixed inset-x-0 bottom-0 z-30 flex items-center gap-2 border-t bg-background p-3 shadow-[0_-2px_8px_rgba(0,0,0,0.12)] md:hidden">
-            <Button variant="outline" size="touch" onClick={() => setDescartarAberto(true)} disabled={gravando}>
+            <Button variant="outline" size="touch" onClick={() => setDescartarAberto(true)} disabled={gravando || pendentes === 0}>
               Descartar
             </Button>
             {botaoGravar("min-h-[44px] flex-1")}
@@ -1290,7 +1335,7 @@ export default function ParceiroReservasPage() {
         {/* Desktop (md+): tabela editável tipo folha de cálculo. */}
         <Card className="hidden md:block" onFocus={aoFocar} onBlur={aoDesfocar}>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1450px] border-collapse text-sm">
+            <table className="w-full min-w-[1500px] border-collapse text-sm">
               <thead>
                 <tr className="border-b bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
                   <Cab chave="propriedade" rotulo="Propriedade" ordem={ordem} onOrdenar={ordenarPorColuna} />
@@ -1299,11 +1344,11 @@ export default function ParceiroReservasPage() {
                   <Cab chave="check_out" rotulo="Check-out" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[11rem]" />
                   <Cab chave="noites" rotulo="Noites" ordem={ordem} onOrdenar={ordenarPorColuna} direita />
                   <Cab chave="hospedes" rotulo="Hósp." ordem={ordem} onOrdenar={ordenarPorColuna} direita />
-                  <Cab chave="nome_hospede" rotulo="Hóspede" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[11rem]" />
+                  <Cab chave="nome_hospede" rotulo="Hóspede" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[9rem]" />
                   <Cab chave="plataforma" rotulo="Plataforma" ordem={ordem} onOrdenar={ordenarPorColuna} />
                   <Cab chave="tipo_limpeza" rotulo="Tipo de limpeza" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[11rem]" />
                   <Cab chave="horario_preferido" rotulo="Horário" ordem={ordem} onOrdenar={ordenarPorColuna} />
-                  <Cab chave="observacoes" rotulo="Notas" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[20rem]" />
+                  <Cab chave="observacoes" rotulo="Notas" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[28rem]" />
                   <Cab chave="estado" rotulo="Limpeza" ordem={ordem} onOrdenar={ordenarPorColuna} className={`${FIXO_ESTADO} z-[2] bg-background bg-gradient-to-r from-muted/40 to-muted/40`} />
                   <th className={`${FIXO_ACOES} z-[2] bg-background bg-gradient-to-r from-muted/40 to-muted/40 px-2 py-2`}><span className="sr-only">Ações</span></th>
                 </tr>
@@ -1311,7 +1356,7 @@ export default function ParceiroReservasPage() {
               <tbody>
                 {/* Linha de entrada: Enter ou + acrescentam-na às reservas por gravar */}
                 <tr className="border-b bg-primary/5" onKeyDown={enterAdiciona}>
-                  <td className="p-0">
+                  <td className="max-w-[16rem] p-0">
                     <select
                       value={nova.propriedade_id}
                       onChange={(e) => setN("propriedade_id")(e.target.value)}
@@ -1381,7 +1426,7 @@ export default function ParceiroReservasPage() {
                   return (
                     <FragmentoLinha key={l.key} avisos={avisos}>
                       <tr className={`border-b last:border-0 hover:bg-muted/30 ${cor.tr}`}>
-                        <td className={`whitespace-nowrap px-2 py-1 font-medium ${cor.faixa}`}>{nome}</td>
+                        <td title={nome} className={`max-w-[16rem] truncate px-2 py-1 font-medium ${cor.faixa}`}>{nome}</td>
                         <td className="p-0">
                           <Celula type="date" value={ci} pendente={p("check_in")} rotulo={`Check-in, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "check_in", v)} />
                         </td>

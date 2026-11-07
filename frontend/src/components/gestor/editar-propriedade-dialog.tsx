@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertCircle, Check, ChevronRight, Loader2, Lock, MapPin, Plus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -45,6 +45,28 @@ const DIAS = [
 
 const CAMPO = "flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 const AREA = "flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+/** Campo de texto de 1 linha que cresce até mostrar tudo (mín. 2 linhas): nomes e moradas compridos não ficam cortados. */
+function CampoAuto({ className, onChange, value, ...rest }: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { value: string }) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [value]);
+  return (
+    <textarea
+      ref={ref}
+      rows={2}
+      value={value}
+      className={cn(AREA, "resize-none overflow-hidden break-words", className)}
+      onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }}
+      onChange={(e) => { e.target.value = e.target.value.replace(/\s*\n+\s*/g, " "); onChange?.(e); }}
+      {...rest}
+    />
+  );
+}
+
 const SEPARADOR =
   "relative -mb-px rounded-none border-b-2 border-transparent bg-transparent px-3 py-2 text-sm font-medium text-muted-foreground shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-brand-text data-[state=active]:shadow-none";
 
@@ -110,17 +132,19 @@ export function EditarPropriedadeDialog({
   return (
     <Dialog open={aberto} onOpenChange={(o) => !o && onClose()} ecraInteiroNoTelemovel>
       <form onSubmit={onSubmit} className="flex max-h-full flex-1 flex-col">
-        <div className="flex items-center gap-2 px-5 pb-0 pt-4 pr-16">
-          <DialogTitle className="truncate">{form.nome || nomeAtual}</DialogTitle>
-          {form.smoobu_id && (
-            <span className="inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-xs text-muted-foreground" title="O ID do Smoobu não é editável">
-              <Lock className="h-3 w-3" aria-hidden="true" />
-              Smoobu {form.smoobu_id}
+        <div className="flex flex-col gap-1.5 px-5 pb-0 pt-4 pr-16">
+          <DialogTitle className="line-clamp-2 break-words">{form.nome || nomeAtual}</DialogTitle>
+          <div className="flex flex-wrap items-center gap-2">
+            {form.smoobu_id && (
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-xs text-muted-foreground" title="O ID do Smoobu não é editável">
+                <Lock className="h-3 w-3" aria-hidden="true" />
+                Smoobu {form.smoobu_id}
+              </span>
+            )}
+            <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold", ativa ? "bg-status-conc-bg text-status-conc" : "bg-status-canc-bg text-status-canc")}>
+              {ativa ? "Ativa" : "Inativa"}
             </span>
-          )}
-          <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold", ativa ? "bg-status-conc-bg text-status-conc" : "bg-status-canc-bg text-status-canc")}>
-            {ativa ? "Ativa" : "Inativa"}
-          </span>
+          </div>
           <DialogClose onClick={onClose} />
         </div>
 
@@ -136,7 +160,7 @@ export function EditarPropriedadeDialog({
             <TabsContent value="essencial" className="mt-0 space-y-4">
               <div className="space-y-1.5">
                 <label htmlFor="edit-nome" className="text-xs font-medium text-muted-foreground">Nome da propriedade</label>
-                <Input id="edit-nome" value={form.nome} onChange={(e) => upd({ nome: e.target.value })} required />
+                <CampoAuto id="edit-nome" value={form.nome} onChange={(e) => upd({ nome: e.target.value })} required />
               </div>
               <div className="space-y-1.5">
                 <div className="flex flex-wrap items-center gap-2">
@@ -150,7 +174,7 @@ export function EditarPropriedadeDialog({
                 </div>
                 <div className="relative">
                   <MapPin className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" aria-hidden="true" />
-                  <Input
+                  <CampoAuto
                     id="edit-morada"
                     className="pl-9"
                     value={form.morada}
@@ -290,7 +314,52 @@ export function EditarPropriedadeDialog({
 
               <div className="space-y-1.5">
                 <p className="text-xs font-medium text-muted-foreground">Tempo e checklist por tipo de limpeza</p>
-                <div className="overflow-hidden rounded-md border">
+                <div className="space-y-2 sm:hidden">
+                  {linhasTipo.map(({ id, rotulo }) => {
+                    const normal = id === "normal";
+                    const t = form.tipos[id];
+                    const n = itens(normal ? form.checklist : t?.checklist ?? "");
+                    const resumo = normal
+                      ? n > 0 ? `Checklist da casa · ${n} itens` : form.modelo_checklist_id ? "Modelo da casa" : "Sem checklist"
+                      : n > 0 ? `Personalizada · ${n} itens` : "Herda a da casa";
+                    return (
+                      <div key={id} className="rounded-md border p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="inline-flex items-center gap-2 font-medium">
+                            <span className="tipo-marca" data-tipo={id} aria-hidden="true" />
+                            {rotulo}
+                          </span>
+                          <button type="button" className="min-h-11 rounded-md border px-4 text-sm font-medium text-brand-text" aria-expanded={editarTipo === id} aria-label={`Editar a checklist ${rotulo.toLowerCase()}`} onClick={() => setEditarTipo((v) => (v === id ? null : id))}>
+                            Editar
+                          </button>
+                        </div>
+                        <p className="mt-1 text-xs text-muted-foreground">{resumo}</p>
+                        <div className="mt-2 flex items-center gap-2 text-sm">
+                          <span className="text-xs font-medium text-muted-foreground">Tempo</span>
+                          {normal ? (
+                            <span className="text-muted-foreground">{form.tempo_limpeza_minutos || "—"} min</span>
+                          ) : (
+                            <>
+                              <input
+                                type="number"
+                                inputMode="numeric"
+                                min={1}
+                                max={480}
+                                aria-label={`Tempo da limpeza ${rotulo.toLowerCase()} (minutos)`}
+                                value={t?.tempo ?? ""}
+                                placeholder={`= base ${form.tempo_limpeza_minutos}`}
+                                onChange={(e) => setForm((f) => ({ ...f, tipos: { ...f.tipos, [id]: { ...f.tipos[id], tempo: e.target.value } } }))}
+                                className="h-11 w-32 rounded-md border border-input bg-background px-2 text-sm placeholder:italic"
+                              />
+                              <span className="text-xs text-muted-foreground">min</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="hidden overflow-hidden rounded-md border sm:block">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b bg-muted/40 text-left text-[11.5px] uppercase tracking-wide text-muted-foreground">

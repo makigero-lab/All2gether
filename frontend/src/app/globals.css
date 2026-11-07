@@ -910,3 +910,190 @@
   border-color: hsl(var(--border));
   z-index: 40;
 }
+
+/* ==========================================================================
+   Calendário do gestor: usabilidade (telemóvel e «+N mais»)
+   ========================================================================== */
+
+/* Botão Hoje desativado: continua legível (>= 3:1), não só "apagado" */
+.fc .fc-button:disabled {
+  opacity: 1;
+}
+.fc .fc-today-button:disabled {
+  background-color: hsl(var(--muted));
+  border-color: hsl(var(--muted-foreground) / 0.6);
+  color: hsl(var(--muted-foreground));
+  cursor: default;
+}
+
+/* «+N mais»: botão claro de uma linha (Mês e Semana) */
+.fc .fc-daygrid-more-link,
+.fc .fc-timegrid-more-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.5rem;
+  max-width: 100%;
+  margin: 2px 0;
+  padding: 0 0.5rem;
+  border: 1px solid hsl(var(--primary) / 0.55);
+  border-radius: calc(var(--radius) - 2px);
+  background: hsl(var(--primary) / 0.1);
+  color: hsl(var(--primary));
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.dark .fc .fc-daygrid-more-link,
+.dark .fc .fc-timegrid-more-link {
+  color: hsl(var(--foreground));
+}
+.fc .fc-daygrid-more-link:hover,
+.fc .fc-timegrid-more-link:hover {
+  background: hsl(var(--primary) / 0.2);
+  text-decoration: none;
+}
+.fc .fc-timegrid-more-link {
+  display: block;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: center;
+}
+.fc .fc-timegrid-more-link-inner {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.5rem;
+  padding: 0 0.5rem;
+  border: 1px solid hsl(var(--primary) / 0.55);
+  border-radius: calc(var(--radius) - 2px);
+  background: hsl(var(--card));
+  box-shadow: 0 1px 2px hsl(var(--foreground) / 0.12);
+}
+
+/* Popover do «+N mais»: nunca passa a largura do ecrã e o X vê-se e toca-se bem */
+.fc .fc-popover {
+  max-width: calc(100vw - 1rem);
+}
+.fc .fc-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.25rem 0.25rem 0.25rem 0.625rem;
+}
+.fc .fc-popover-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: var(--radius);
+  background: hsl(var(--background));
+  font-size: 1.25rem;
+  line-height: 1;
+  opacity: 1;
+  cursor: pointer;
+}
+.fc .fc-popover-body {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+/* Ícone de estado maior no Mês (desktop) */
+.fc-evt-glifo {
+  font-size: 0.85rem;
+}
+
+/* Pontos do Mês no telemóvel: forma = tipo de limpeza, cor = estado */
+.dia-ponto {
+  display: inline-block;
+  flex: none;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background: var(--c);
+}
+.dia-ponto[data-tipo="intermedia"] {
+  background: transparent;
+  box-shadow: inset 0 0 0 0.15rem var(--c);
+}
+.dia-ponto[data-tipo="profunda"] {
+  border-radius: 0.1rem;
+}
+.dia-ponto[data-tipo="preparacao"] {
+  border-radius: 0.1rem;
+  transform: rotate(45deg) scale(0.85);
+}
+.dia-resumo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+}
+.dia-resumo__pontos {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2px;
+  min-height: 0.625rem;
+}
+.dia-resumo__total {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0 0.25rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  line-height: 1.1;
+  color: hsl(var(--foreground));
+}
+.dia-resumo__sinal {
+  font-size: 0.625rem;
+}
+.dia-resumo__sinal--por {
+  color: hsl(var(--status-porat));
+}
+.dia-resumo__sinal--curso {
+  color: hsl(var(--status-curso));
+}
+
+@media (max-width: 639px) {
+  /* Mês: sem barras de eventos; o resumo vai na célula */
+  .fc-dayGridMonth-view .fc-daygrid-event-harness,
+  .fc-dayGridMonth-view .fc-daygrid-day-bottom,
+  .fc-dayGridMonth-view .fc-daygrid-more-link {
+    display: none !important;
+  }
+  .fc-dayGridMonth-view .fc-daygrid-day-frame {
+    min-height: 4.25rem;
+    cursor: pointer;
+  }
+  .fc-dayGridMonth-view .fc-daygrid-day-top {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .fc-dayGridMonth-view .fc-daygrid-day-number {
+    width: 100%;
+    padding: 2px 0;
+    text-align: center;
+    font-size: 0.8125rem;
+  }
+  .fc .fc-daygrid-day.dia-selecionado {
+    background: hsl(var(--primary) / 0.14);
+    box-shadow: inset 0 0 0 2px hsl(var(--primary));
+  }
+  /* Alvos de toque de 44 px na barra do calendário */
+  .fc .fc-button {
+    min-height: 2.75rem;
+    min-width: 2.75rem;
+  }
+  .fc .fc-toolbar-title {
+    font-size: 1.125rem;
+  }
+}

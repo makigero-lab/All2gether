@@ -173,14 +173,14 @@ export default function AdminDashboardPage() {
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-bold tracking-tight">Dashboard</h1>
-        <span className="text-sm text-muted-foreground">
+        <span className="order-last w-full text-sm text-muted-foreground sm:order-none sm:w-auto">
           {formatarDataSegura(new Date().toISOString(), (d) => format(d, "EEEE, d 'de' MMMM", { locale: pt }), "")} · tempo real
         </span>
         <div className="ml-auto flex items-center gap-2">
           <Button variant="outline" size="icon" onClick={carregar} disabled={loading} aria-label="Atualizar">
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           </Button>
-          <Link href="/gestor/tarefas" className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90">
+          <Link href="/gestor/tarefas" className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 max-sm:h-11 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90">
             <Plus className="h-4 w-4" aria-hidden="true" />
             Nova limpeza
           </Link>

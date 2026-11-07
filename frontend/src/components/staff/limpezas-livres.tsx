@@ -107,8 +107,8 @@ export function LimpezasLivres({ onAceite }: { onAceite?: () => void }) {
         <Card key={v._id} className="border-primary/40">
           <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0 space-y-1">
-              <p className="flex items-center gap-2 font-semibold">
-                <HandHeart className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+              <p className="flex items-start gap-2 font-semibold">
+                <HandHeart className="mt-1 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
                 <span className="break-words">Limpeza livre em {v.casa}</span>
               </p>
               <p className="text-sm text-muted-foreground">
