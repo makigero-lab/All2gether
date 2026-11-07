@@ -761,10 +761,10 @@ exports.mudarDiaTarefa = async (req, res) => {
     const hFmt = Horario.temHoraReal(fim.data) ? ` às ${new Date(fim.data).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Lisbon' })}` : '';
     const opts = { tipo: 'tarefa_reatribuida', empresa_id: String(empresaId), criarInApp: true };
     for (const m of membrosAntes.filter((x) => !equipaFinal.includes(x))) {
-      notificarUtilizador(m, '📅 Limpeza mudou de dia', `A limpeza de ${prop.nome} foi mudada para ${dFmt}: já não estás nela.`, '/staff', opts);
+      await notificarUtilizador(m, '📅 Limpeza mudou de dia', `A limpeza de ${prop.nome} foi mudada para ${dFmt}: já não estás nela.`, '/staff', opts);
     }
     for (const m of equipaFinal) {
-      notificarUtilizador(m, '📅 Limpeza mudou de dia', `A limpeza de ${prop.nome} passou para ${dFmt}${hFmt}.`, '/staff', opts);
+      await notificarUtilizador(m, '📅 Limpeza mudou de dia', `A limpeza de ${prop.nome} passou para ${dFmt}${hFmt}.`, '/staff', opts);
     }
     let aviso = null;
     // Hora pedida fora do horário de trabalho: aceita-se, mas avisa-se.

@@ -630,6 +630,10 @@ exports.cancelarAusencia = async (req, res) => {
     const resp = await Ausencia.findById(ausencia._id)
       .populate({ path: 'utilizador_id', select: 'nome email role' })
       .lean();
+    // Um DELETE em simultâneo pode ter apagado a ausência entretanto.
+    if (!resp) {
+      return res.status(409).json({ erro: 'A ausência acabou de ser eliminada.', codigo: 'CONFLITO_CONCORRENCIA' });
+    }
     const u = resp.utilizador_id;
     return res.status(200).json({
       mensagem: 'Ausência cancelada com sucesso.',

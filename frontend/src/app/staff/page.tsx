@@ -110,8 +110,10 @@ export default function StaffPage() {
   const [submetendoFalta, setSubmetendoFalta] = useState(false);
   const [erroFalta, setErroFalta] = useState<string | null>(null);
 
-  const carregar = useCallback(async () => {
-    setLoading(true);
+  // `silencioso`: recarrega sem o ecrã de carregamento (não desmonta as Limpezas livres,
+  // que mostram a confirmação depois de Aceitar).
+  const carregar = useCallback(async (silencioso = false) => {
+    if (!silencioso) setLoading(true);
     try {
       // Prompt 113 — Usa lerUtilizador() (com cache temporal) em vez de
       // fetch direto a /api/auth/me. Isto evita:
@@ -385,7 +387,7 @@ export default function StaffPage() {
             )}
 
             {/* Limpezas livres oferecidas a toda a equipa (aceita quem chegar primeiro): depois do trabalho do dia */}
-            <LimpezasLivres onAceite={carregar} limite={3} />
+            <LimpezasLivres onAceite={() => carregar(true)} limite={3} />
 
             {/* Tarefas concluídas do dia selecionado */}
             {tarefasConcluidasDia.length > 0 && (

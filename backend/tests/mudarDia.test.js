@@ -96,7 +96,14 @@ describe('mudar o dia de uma limpeza', () => {
     expect(u.body.equipa_mudou).toBe(true);
     const t = await Tarefa.findById(tid).lean();
     expect(String(t.utilizador_id)).toBe(String(outro._id));
-    expect(await Notificacao.countDocuments({ utilizador_id: ausentes._id, mensagem: /mudada para/ })).toBe(1);
+    // A notificação é gravada em segundo plano: espera até 3 s em vez de ler logo.
+    const filtro = { utilizador_id: ausentes._id, mensagem: /mudada para/ };
+    let n = 0;
+    for (let i = 0; i < 30 && n === 0; i++) {
+      n = await Notificacao.countDocuments(filtro);
+      if (n === 0) await new Promise((ok) => setTimeout(ok, 100));
+    }
+    expect(n).toBe(1);
   });
 
   test('ninguém disponível: fica por atribuir com o motivo, e os gestores são avisados', async () => {
