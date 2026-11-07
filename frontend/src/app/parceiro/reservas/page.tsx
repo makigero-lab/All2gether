@@ -100,7 +100,7 @@ const CELULA =
 
 /** Campo do cartão (telemóvel): alvo de toque >= 44 px, 16 px (o iOS não faz zoom). */
 const CELULA_CARTAO =
-  "h-11 w-full min-w-0 rounded-md border border-input bg-background px-3 text-base outline-none focus:border-gold-text focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60";
+  "h-11 w-full min-w-0 rounded-md border border-input bg-background px-3 text-base outline-none focus:border-brand-text focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60";
 
 /** Marca visual de "por gravar" (não depende só da cor: leva também um traço e o aviso da linha). */
 // Colunas «Limpeza» (estado) e apagar coladas à direita ao fazer scroll na tabela larga (desktop).
@@ -407,7 +407,7 @@ function Celula({
 
 /** Notas no cartão (telemóvel): caixa de várias linhas que cresce com o texto. */
 const CELULA_NOTAS_CARTAO =
-  "min-h-[5.5rem] w-full min-w-0 resize-none overflow-hidden rounded-md border border-input bg-background px-3 py-2 text-base outline-none focus:border-gold-text focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60";
+  "min-h-[5.5rem] w-full min-w-0 resize-none overflow-hidden rounded-md border border-input bg-background px-3 py-2 text-base outline-none focus:border-brand-text focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60";
 
 /** Faz a caixa de texto crescer com o conteúdo. */
 function cresce(e: React.FormEvent<HTMLTextAreaElement>) {
@@ -1183,7 +1183,7 @@ export default function ParceiroReservasPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
-            <Table2 className="h-6 w-6 text-gold-text" />
+            <Table2 className="h-6 w-6 text-brand-text" />
             Minhas reservas
           </h1>
           <p className="text-sm text-muted-foreground">

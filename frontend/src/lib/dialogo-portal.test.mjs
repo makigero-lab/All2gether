@@ -13,7 +13,7 @@ const comecar = readFileSync(new URL("../components/staff/comecar-limpeza.tsx", 
 
 test("Dialog renderiza em portal no body (imune a transform dos pais)", () => {
   assert.match(dialog, /import \{ createPortal \} from "react-dom"/);
-  assert.match(dialog, /createPortal\(\s*<div className="fixed inset-0 z-50[\s\S]*?document\.body\s*\)/);
+  assert.match(dialog, /createPortal\(\s*<div className=\{?"?[^>]*fixed inset-0 z-50[\s\S]*?document\.body\s*\)/);
 });
 
 test("«Não consegui começar»: Avisar o gestor fecha o diálogo, limpa o formulário e avisa o pai", () => {

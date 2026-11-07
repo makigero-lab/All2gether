@@ -1,6 +1,6 @@
 "use client";
 
-import { TipoLimpezaBadge } from "@/components/tipo-limpeza-badge";
+import { TipoMarca, TipoLimpezaBadge } from "@/components/tipo-limpeza-badge";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Plus,
@@ -675,64 +675,12 @@ export default function AdminTarefasPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 max-sm:[&>button]:h-11 max-sm:[&>button]:min-w-[44px]">
-          <div className="contents max-sm:hidden">
-          <Button
-            variant={soAvarias ? "destructive" : "outline"}
-            size="sm"
-            onClick={() => {
-              setSoAvarias((v) => !v);
-              setPagina(1);
-            }}
-            title="Mostrar só tarefas com avarias reportadas"
-            aria-pressed={soAvarias}
-          >
-            <Wrench className="h-4 w-4" />
-            <span className="hidden sm:inline">
-              {soAvarias ? "A mostrar avarias" : "Só avarias"}
-            </span>
+          {/* Cabeçalho da opção A: Exportar, Mais (secundárias), Nova limpeza e a ação principal em petróleo. */}
+          <Button variant="outline" onClick={handleExportarExcel} disabled={loading} title="Exporta todas as limpezas para um ficheiro Excel (.xlsx)." className="gap-2 max-sm:hidden">
+            <Download className="h-4 w-4" aria-hidden="true" />
+            Exportar
           </Button>
-          </div>
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={carregar}
-            disabled={loading}
-            aria-label="Atualizar"
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-          </Button>
-          {/* HF24 — Botões "Sincronizar Reservas", "Limpar Futuras" e
-              "Importar do Smoobu" removidos da barra principal para não
-              confundir o gestor no dia a dia. Essas ações avançadas ficam
-              disponíveis em /gestor/configuracoes/integracoes. */}
-          <div className="contents max-sm:hidden">
-          {/* FIX — Botão "Auto-Atribuir Pendentes" reposto na página de Limpezas.
-              O gestor precisa de poder disparar o load balancer diretamente daqui. */}
-          <Button
-            onClick={() => setConfirmarAutoAtribuir(true)}
-            disabled={autoAtribuindo}
-            title="Atribui automaticamente todas as tarefas futuras sem funcionário."
-            className="bg-primary text-primary-foreground hover:bg-primary/90"
-          >
-            {autoAtribuindo ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Sparkles className="h-4 w-4" />
-            )}
-            <span className="hidden sm:inline">
-              {autoAtribuindo ? "A atribuir…" : "Auto-Atribuir Pendentes"}
-            </span>
-          </Button>
-          </div>
-          <Button onClick={() => {
-            setMostrarForm((v) => !v);
-            setConflitoForcar(false);
-          }}>
-            <Plus className="h-4 w-4" />
-            Nova limpeza
-          </Button>
-          {/* Telemóvel: as ações secundárias ficam num menu «Ações» com texto (em vez de 5 ícones soltos). */}
-          <div className="relative sm:hidden" ref={menuAcoesRef}>
+          <div className="relative" ref={menuAcoesRef}>
             <Button
               variant="outline"
               className="gap-1.5"
@@ -740,7 +688,7 @@ export default function AdminTarefasPage() {
               aria-expanded={menuAcoes}
               onClick={() => setMenuAcoes((v) => !v)}
             >
-              Ações
+              Mais
               <ChevronDown className="h-4 w-4" aria-hidden="true" />
             </Button>
             {menuAcoes && (
@@ -753,16 +701,6 @@ export default function AdminTarefasPage() {
                 >
                   <Wrench className="h-4 w-4" aria-hidden="true" />
                   {soAvarias ? "Mostrar todas as limpezas" : "Só limpezas com avarias"}
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="flex min-h-11 w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent disabled:opacity-50"
-                  disabled={autoAtribuindo}
-                  onClick={() => { setMenuAcoes(false); setConfirmarAutoAtribuir(true); }}
-                >
-                  <Sparkles className="h-4 w-4" aria-hidden="true" />
-                  Auto-atribuir pendentes
                 </button>
                 <button
                   type="button"
@@ -783,6 +721,26 @@ export default function AdminTarefasPage() {
                   role="menuitem"
                   className="flex min-h-11 w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent disabled:opacity-50"
                   disabled={loading}
+                  onClick={() => { setMenuAcoes(false); carregar(); }}
+                >
+                  <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                  Atualizar a lista
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="flex min-h-11 w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent disabled:opacity-50 sm:hidden"
+                  disabled={autoAtribuindo}
+                  onClick={() => { setMenuAcoes(false); setConfirmarAutoAtribuir(true); }}
+                >
+                  <Sparkles className="h-4 w-4" aria-hidden="true" />
+                  Auto-atribuir pendentes
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="flex min-h-11 w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm hover:bg-accent disabled:opacity-50 sm:hidden"
+                  disabled={loading}
                   onClick={() => { setMenuAcoes(false); handleExportarExcel(); }}
                 >
                   <Download className="h-4 w-4" aria-hidden="true" />
@@ -791,40 +749,19 @@ export default function AdminTarefasPage() {
               </div>
             )}
           </div>
-          <div className="contents max-sm:hidden">
-          {/* HF18 — Botão "Nova Limpeza Espontânea" — abre um Dialog simples
-              para criar uma tarefa manual (origem: 'manual') sem reserva
-              Smoobu associada. Endpoint: POST /api/gestor/tarefas/espontanea. */}
-          <Button
-            variant="secondary"
-            onClick={() => {
-              setEspontaneaOpen(true);
-              setEspontaneaErro(null);
-              setEspontaneaForm({
-                propriedade_id: "",
-                data: "",
-                hora: "",
-                observacoes: "",
-                utilizador_id: "",
-              });
-            }}
-            title="Cria uma limpeza avulsa (sem reserva Smoobu). Útil para limpezas extra solicitadas pelo proprietário ou parceiro."
-          >
-            <SprayCan className="h-4 w-4" />
-            <span className="hidden sm:inline">Limpeza espontânea</span>
+          <Button variant="outline" onClick={() => { setMostrarForm((v) => !v); setConflitoForcar(false); }}>
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            Nova limpeza
           </Button>
-          {/* Exportar Excel. */}
           <Button
-            variant="outline"
-            onClick={handleExportarExcel}
-            disabled={loading}
-            title="Exporta todas as reservas/tarefas para um ficheiro Excel (.xlsx)."
-            className="gap-2"
+            onClick={() => setConfirmarAutoAtribuir(true)}
+            disabled={autoAtribuindo}
+            title="Atribui automaticamente todas as tarefas futuras sem funcionário."
+            className="max-sm:hidden"
           >
-            <Download className="h-4 w-4" />
-            <span className="hidden sm:inline">Exportar Excel</span>
+            {autoAtribuindo ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" aria-hidden="true" />}
+            {autoAtribuindo ? "A atribuir…" : "Auto-atribuir pendentes"}
           </Button>
-          </div>
         </div>
       </div>
 
@@ -851,7 +788,7 @@ export default function AdminTarefasPage() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
-              <SprayCan className="h-5 w-5 text-gold-text" />
+              <SprayCan className="h-5 w-5 text-brand-text" />
               Nova limpeza manual
             </CardTitle>
           </CardHeader>
@@ -1105,9 +1042,9 @@ export default function AdminTarefasPage() {
             className="h-9 gap-1.5"
             onClick={() => { setSoParceiros((v) => !v); setPagina(1); }}
             aria-pressed={soParceiros}
-            title="Mostrar só tarefas geradas por reservas de parceiros"
+            title="Mostrar só limpezas geradas por reservas de proprietários"
           >
-            🤝 Apenas Parceiros
+            🤝 Apenas proprietários
           </Button>
           {(filtroDataInicio || filtroDataFim || filtroPropriedade || filtroStaff || soParceiros) && (
             <Button
@@ -1175,7 +1112,7 @@ export default function AdminTarefasPage() {
                     <div className="flex flex-wrap gap-1">
                       <TipoLimpezaBadge tipo={t.tipo_limpeza} />
                       {t.origem_parceiro && (
-                        <Badge variant="secondary" className="px-1.5 py-0 text-xs">🤝 Parceiro</Badge>
+                        <Badge variant="secondary" className="px-1.5 py-0 text-xs">🤝 Proprietário</Badge>
                       )}
                       {Array.isArray(t.avarias) && t.avarias.length > 0 && (
                         <Badge variant="destructive" className="gap-1 px-1.5 py-0 text-xs">
@@ -1193,11 +1130,12 @@ export default function AdminTarefasPage() {
               ))}
             </ul>
             <div className="hidden overflow-x-auto md:block">
-              <table className="w-full text-sm">
+              <table className="rt w-full text-sm">
                 <thead>
                   <tr className="border-b bg-muted/40 text-left">
                     <th className="px-4 py-3 font-medium">Data</th>
                     <th className="px-4 py-3 font-medium">Propriedade</th>
+                    <th className="px-4 py-3 font-medium">Tipo</th>
                     {/* Prompt 136 — Coluna Hóspede (nome_hospede da reserva). */}
                     <th className="px-4 py-3 font-medium">Hóspede</th>
                     {/* FIX (qtd hóspedes) — Coluna Qtd. Hóspedes com fallback à lotação. */}
@@ -1225,12 +1163,11 @@ export default function AdminTarefasPage() {
                             <Badge
                               variant="secondary"
                               className="shrink-0 gap-1 whitespace-nowrap text-xs px-1.5 py-0"
-                              title="Tarefa gerada por reserva de parceiro B2B"
+                              title="Limpeza gerada por reserva de proprietário"
                             >
                               🤝 Parceiro
                             </Badge>
                           )}
-                          <TipoLimpezaBadge tipo={t.tipo_limpeza} />
                           {temAvarias && (
                             <Badge
                               variant="destructive"
@@ -1243,6 +1180,7 @@ export default function AdminTarefasPage() {
                           )}
                         </div>
                       </td>
+                      <td className="px-4 py-3"><TipoMarca tipo={t.tipo_limpeza} /></td>
                       {/* Prompt 136 — Nome do hóspede (da reserva Smoobu ou manual). */}
                       <td className="px-4 py-3 text-muted-foreground">
                         {t.detalhes_reserva?.nome_hospede ?? "—"}
@@ -1367,7 +1305,7 @@ export default function AdminTarefasPage() {
       <Dialog open={confirmarAutoAtribuir} onOpenChange={setConfirmarAutoAtribuir}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Sparkles className="h-5 w-5 text-gold-text" />
+            <Sparkles className="h-5 w-5 text-brand-text" />
             Auto-Atribuir Pendentes
           </DialogTitle>
           <DialogDescription>
@@ -1423,7 +1361,7 @@ export default function AdminTarefasPage() {
         <DialogHeader>
           <div>
             <DialogTitle className="flex items-center gap-2">
-              <SprayCan className="h-5 w-5 text-gold-text" />
+              <SprayCan className="h-5 w-5 text-brand-text" />
               Nova limpeza espontânea
             </DialogTitle>
             <DialogDescription>
@@ -1598,6 +1536,7 @@ export default function AdminTarefasPage() {
       {/* Prompt 95 — Modal de detalhe da limpeza (card de detalhes_reserva) */}
       <DetalheTarefaModal
         onAvariaAlterada={carregar}
+        onDiaAlterado={(aviso) => { if (aviso) setWarningToast(aviso); carregar(); }}
         tarefa={detalheTarefa}
         open={detalheTarefa !== null}
         onOpenChange={(o) => !o && setDetalheTarefa(null)}

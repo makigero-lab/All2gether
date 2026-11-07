@@ -32,3 +32,17 @@ export function TipoLimpezaBadge({
     </Badge>
   );
 }
+
+/**
+ * Tipo de limpeza com FORMA e cor (nunca só a cor): círculo normal, anel intermédia,
+ * quadrado profunda, losango preparação (ver `.tipo-marca` em globals.css) + o nome.
+ */
+export function TipoMarca({ tipo, soMarca = false, className = "" }: { tipo?: string | null; soMarca?: boolean; className?: string }) {
+  const t = tipoOuNormal(tipo);
+  return (
+    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap text-sm ${className}`} title={`Tipo de limpeza: ${ROTULO_TIPO[t]}`}>
+      <span className="tipo-marca" data-tipo={t} aria-hidden="true" />
+      {soMarca ? <span className="sr-only">{ROTULO_TIPO[t]}</span> : ROTULO_TIPO[t]}
+    </span>
+  );
+}

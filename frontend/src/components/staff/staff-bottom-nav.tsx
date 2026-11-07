@@ -40,7 +40,7 @@ export function StaffBottomNav() {
                 className={cn(
                   "flex min-h-14 flex-col items-center justify-center gap-0.5 px-2 py-2 text-xs font-medium transition-colors",
                   ativo
-                    ? "text-gold-text"
+                    ? "text-brand-text"
                     : "text-muted-foreground hover:text-foreground"
                 )}
               >

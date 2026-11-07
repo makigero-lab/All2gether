@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  CalendarClock,
   Clock,
   Timer,
   MapPin,
@@ -46,6 +47,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { DetalhesReservaCard } from "@/components/detalhes-reserva-card";
+import { MudarDiaDialog, podeMudarDia } from "@/components/gestor/mudar-dia-dialog";
 
 /** Tarefa no formato devolvido pelo GET /api/gestor/tarefas (com populate). */
 export interface AvariaDTO {
@@ -191,13 +193,17 @@ export function DetalheTarefaModal({
   open,
   onOpenChange,
   onAvariaAlterada,
+  onDiaAlterado,
 }: {
   tarefa: TarefaDetalheGestor | null;
   open: boolean;
   onOpenChange: (o: boolean) => void;
   /** Chamado depois de marcar uma avaria como resolvida (para a lista recarregar). */
   onAvariaAlterada?: () => void;
+  /** Chamado depois de «Mudar dia» (a lista recarrega); `aviso` = ficou por atribuir, falta gente... */
+  onDiaAlterado?: (aviso: string | null) => void;
 }) {
+  const [mudarDiaAberto, setMudarDiaAberto] = useState(false);
   const Icon = tarefa ? (tipoIcon[tarefa.tipo] ?? SprayCan) : SprayCan;
 
   // Prova da limpeza: fotos, hora de conclusão e checklist, só ao abrir.
@@ -277,7 +283,7 @@ export function DetalheTarefaModal({
       <DialogHeader>
         <div>
           <DialogTitle className="flex items-center gap-2">
-            {tarefa && <Icon className="h-5 w-5 text-gold-text" />}
+            {tarefa && <Icon className="h-5 w-5 text-brand-text" />}
             Detalhe da Limpeza
           </DialogTitle>
           <DialogDescription>
@@ -296,6 +302,12 @@ export function DetalheTarefaModal({
               </h3>
               <Badge variant="outline">{tipoLabel[tarefa.tipo] ?? tarefa.tipo}</Badge>
               <EstadoTarefaBadge estado={tarefa.estado} />
+              {tarefa.tipo === "limpeza" && podeMudarDia(tarefa) && (
+                <Button type="button" variant="outline" size="sm" className="ml-auto h-9 gap-1.5" onClick={() => setMudarDiaAberto(true)}>
+                  <CalendarClock className="h-4 w-4" aria-hidden="true" />
+                  Mudar dia
+                </Button>
+              )}
             </div>
 
             {/* Metadados rápidos */}
@@ -386,7 +398,7 @@ export function DetalheTarefaModal({
             {/* Início da limpeza */}
             {tarefa.iniciada_em && (
               <p className="flex items-center gap-2 text-sm">
-                <Play className="h-4 w-4 text-gold-text" aria-hidden="true" />
+                <Play className="h-4 w-4 text-brand-text" aria-hidden="true" />
                 Começou às <strong>{horaCurta(tarefa.iniciada_em)}</strong>
                 <span className="text-muted-foreground">
                   ({tarefa.inicio_origem === "automatico" ? "início automático, à hora marcada" : "pelo botão «Comecei»"})
@@ -457,7 +469,7 @@ export function DetalheTarefaModal({
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="flex items-center gap-2 text-sm">
-                    <StickyNote className="h-4 w-4 text-gold-text" />
+                    <StickyNote className="h-4 w-4 text-brand-text" />
                     Observações
                   </CardTitle>
                 </CardHeader>
@@ -565,6 +577,15 @@ export function DetalheTarefaModal({
           </>
         )}
       </DialogContent>
+      <MudarDiaDialog
+        tarefa={tarefa}
+        open={mudarDiaAberto}
+        onOpenChange={setMudarDiaAberto}
+        onFeito={(aviso) => {
+          onOpenChange(false);
+          onDiaAlterado?.(aviso);
+        }}
+      />
     </Dialog>
   );
 }

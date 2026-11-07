@@ -1,6 +1,7 @@
 import { GestorSidebar } from "@/components/gestor/gestor-sidebar";
 import { RouteGuard } from "@/components/auth/route-guard";
 import { ImpersonationBanner } from "@/components/gestor/impersonation-banner";
+import { TabelasResponsivas } from "@/components/gestor/tabelas-responsivas";
 
 /**
  * Layout do Painel do Gestor de Operações.
@@ -41,8 +42,9 @@ export default function GestorLayout({
 }) {
   return (
     <RouteGuard role="gestor">
-      <div className="flex min-h-screen flex-col bg-muted/30 lg:flex-row">
+      <div className="flex min-h-screen flex-col bg-background lg:flex-row">
         <GestorSidebar />
+        <TabelasResponsivas />
         <main className="flex-1 lg:overflow-x-hidden">
           <ImpersonationBanner />
           {children}

@@ -776,7 +776,7 @@ function EquipaPage() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-base">
-                  <Users className="h-5 w-5 text-gold-text" />
+                  <Users className="h-5 w-5 text-brand-text" />
                   Novo funcionário
                 </CardTitle>
               </CardHeader>
@@ -871,7 +871,7 @@ function EquipaPage() {
                       </select>
                       {form.role === "parceiro" && (
                         <p className="text-xs text-muted-foreground">
-                          Parceiros são externos: não têm folgas semanais nem responsável hierárquico.
+                          Os proprietários são externos: não têm folgas semanais nem responsável hierárquico.
                           Acedem ao portal B2B para criar reservas manuais nas suas propriedades.
                         </p>
                       )}
@@ -959,7 +959,7 @@ function EquipaPage() {
                                 key={p._id}
                                 className={`flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm transition-colors ${
                                   checked
-                                    ? "border-primary bg-primary/10 text-gold-text"
+                                    ? "border-primary bg-primary/10 text-brand-text"
                                     : "border-input text-muted-foreground hover:bg-muted/50"
                                 }`}
                               >
@@ -1039,7 +1039,7 @@ function EquipaPage() {
                                 key={p._id}
                                 className={`flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm transition-colors ${
                                   checked
-                                    ? "border-primary bg-primary/10 text-gold-text"
+                                    ? "border-primary bg-primary/10 text-brand-text"
                                     : "border-input text-muted-foreground hover:bg-muted/50"
                                 }`}
                               >
@@ -1140,7 +1140,7 @@ function EquipaPage() {
                 </div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
+                  <table className="rt w-full text-sm">
                     <thead>
                       <tr className="border-b bg-muted/40 text-left">
                         <th className="px-4 py-3 font-medium">Nome</th>
@@ -1389,7 +1389,7 @@ function EquipaPage() {
                   </select>
                   {editForm.role === "parceiro" && (
                     <p className="text-xs text-muted-foreground">
-                      Parceiros são externos: não têm folgas semanais nem responsável hierárquico.
+                      Os proprietários são externos: não têm folgas semanais nem responsável hierárquico.
                       Acedem ao portal B2B para criar reservas manuais nas suas propriedades.
                     </p>
                   )}
@@ -1470,7 +1470,7 @@ function EquipaPage() {
                 {editForm.role !== "parceiro" && (
                 <div className="space-y-3 rounded-md border p-3">
                   <div className="flex items-center gap-2">
-                    <Calendar className="h-4 w-4 text-gold-text" />
+                    <Calendar className="h-4 w-4 text-brand-text" />
                     <h4 className="text-sm font-medium leading-none">
                       Folgas Específicas / Rotativas
                     </h4>
@@ -1629,7 +1629,7 @@ function EquipaPage() {
                               key={p._id}
                               className={`flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm transition-colors ${
                                 checked
-                                  ? "border-primary bg-primary/10 text-gold-text"
+                                  ? "border-primary bg-primary/10 text-brand-text"
                                   : "border-input text-muted-foreground hover:bg-muted/50"
                               }`}
                             >
@@ -1707,7 +1707,7 @@ function EquipaPage() {
                               key={p._id}
                               className={`flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm transition-colors ${
                                 checked
-                                  ? "border-primary bg-primary/10 text-gold-text"
+                                  ? "border-primary bg-primary/10 text-brand-text"
                                   : "border-input text-muted-foreground hover:bg-muted/50"
                               }`}
                             >

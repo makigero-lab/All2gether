@@ -736,12 +736,13 @@ async function atualizarReserva(req, res) {
     const rd = resolverDiaLimpeza({
       tipo: tipoNovo, check_in: novoCheckIn, check_out: novoCheckOut,
       data_gravada: estadiaIgual ? reserva.data_limpeza : null,
+      ajustada: estadiaIgual && !!reserva.data_limpeza_ajustada,
       hoje: reverPassado ? new Date().toISOString().slice(0, 10) : undefined,
     });
     if (rd.erro) return res.status(400).json({ erro: rd.erro });
     const tipoAntes = tipoDe(reserva);
     const rdAntes = resolverDiaLimpeza({
-      tipo: tipoAntes, check_in: reserva.check_in, check_out: reserva.check_out, data_gravada: reserva.data_limpeza,
+      tipo: tipoAntes, check_in: reserva.check_in, check_out: reserva.check_out, data_gravada: reserva.data_limpeza, ajustada: !!reserva.data_limpeza_ajustada,
     });
     const diaAntes = rdAntes.erro ? dia(reserva.check_out) : rdAntes.dia;
     const tipoMudou = tipoNovo !== tipoAntes;
@@ -788,7 +789,9 @@ async function atualizarReserva(req, res) {
     if (body.observacoes !== undefined) reserva.observacoes = String(body.observacoes ?? '').trim();
     Object.assign(reserva, extras);
     reserva.tipo_limpeza = tipoNovo;
+    const perdeuAjuste = !!reserva.data_limpeza_ajustada && !rd.ajustada;
     reserva.data_limpeza = rd.dataLimpeza;
+    reserva.data_limpeza_ajustada = !!rd.ajustada;
 
     const detalhesExtra = detalhesDaReserva(extras);
     if (tarefa && checkOutMudou) {
@@ -854,6 +857,13 @@ async function atualizarReserva(req, res) {
       await tarefa.save();
     }
     await reserva.save();
+    if (perdeuAjuste) {
+      try {
+        const pAj = await Propriedade.findById(reserva.propriedade_id).select('nome').lean();
+        await avisarGestores(reserva.empresa_id, 'Dia da limpeza recalculado',
+          `O proprietário mudou as datas ou o tipo da reserva de ${pAj ? pAj.nome : 'uma casa'}: o dia da limpeza que tinhas ajustado foi recalculado (${new Date(`${rd.dia}T00:00:00Z`).toISOString().slice(0, 10)}).`, '/gestor/tarefas');
+      } catch (e) { console.error('⚠️  aviso de dia recalculado:', e.message); }
+    }
 
     const atualizada = await ReservaManual.findById(reserva._id)
       .populate('propriedade_id', 'nome morada')
@@ -908,6 +918,8 @@ async function eliminarReserva(req, res) {
 }
 
 module.exports = {
+  limpezasDoDia,
+  textoDuplicada,
   validarDatas,
   criarPropriedade,
   listarPropriedades,

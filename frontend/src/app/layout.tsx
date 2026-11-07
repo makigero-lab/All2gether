@@ -31,7 +31,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#B8860B",
+  themeColor: "#0B5D6B",
   width: "device-width",
   initialScale: 1,
   // Zoom permitido (WCAG 1.4.4). O zoom automático do iOS nos inputs evita-se com text-base.

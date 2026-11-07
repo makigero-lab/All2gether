@@ -116,15 +116,18 @@ function diaAutomatico(tipo, ci, co) {
  * `data_gravada` é a data já guardada numa reserva antiga (ou ajustada): se ainda é
  * válida para o tipo e para a estadia, continua a valer; o que o parceiro enviar
  * como `data_limpeza` nunca chega aqui (é ignorado pelos controladores).
+ * `ajustada`: a data gravada foi escolhida pelo gestor («Mudar dia») e prevalece.
  * `hoje` (AAAA-MM-DD), se vier, recusa uma preparação cujo check-in já passou.
  * @returns {{ erro: string } | { dataLimpeza: Date|null, dia: string }}
  */
-function resolverDiaLimpeza({ tipo, check_in, check_out, data_gravada, hoje }) {
+function resolverDiaLimpeza({ tipo, check_in, check_out, data_gravada, ajustada = false, hoje }) {
   const ci = diaTexto(check_in);
   const co = diaTexto(check_out);
   if (!ci || !co) return { erro: 'Datas inválidas.' };
-  if (eSaida(tipo)) return { dataLimpeza: null, dia: co };
   const g = diaTexto(data_gravada);
+  // Dia ajustado pelo gestor: vale tal como está (qualquer tipo) enquanto o tipo e a estadia não mudarem.
+  if (ajustada && g) return { dataLimpeza: new Date(`${g}T00:00:00Z`), dia: g, ajustada: true };
+  if (eSaida(tipo)) return { dataLimpeza: null, dia: co };
   const gravadaValida = g && (tipo === 'intermedia' ? g >= ci && g <= co : g <= ci);
   const d = gravadaValida ? g : diaAutomatico(tipo, ci, co);
   if (tipo === 'preparacao' && !gravadaValida && hoje && d < hoje) {

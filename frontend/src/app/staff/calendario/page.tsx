@@ -182,7 +182,7 @@ export default function StaffCalendarioPage() {
               Voltar
             </Link>
             <div className="flex items-center gap-2">
-              <CalendarDays className="h-5 w-5 text-gold-text" />
+              <CalendarDays className="h-5 w-5 text-brand-text" />
               <h1 className="text-xl font-semibold tracking-tight">
                 A minha Agenda
               </h1>
@@ -227,7 +227,7 @@ export default function StaffCalendarioPage() {
             {diaHoje && (
               <section>
                 <div className="mb-2 flex items-center gap-2">
-                  <h2 className="text-sm font-semibold uppercase tracking-wide text-gold-text">
+                  <h2 className="text-sm font-semibold uppercase tracking-wide text-brand-text">
                     Hoje · {format(diaHoje.data, "d MMM", { locale: pt })}
                   </h2>
                   <span className="h-px flex-1 bg-primary/30" />
@@ -280,10 +280,10 @@ export default function StaffCalendarioPage() {
                             <CardContent className="flex items-center gap-3 p-3">
                               {/* Bloco de hora (destaque visual) */}
                               <div className="flex w-14 shrink-0 flex-col items-center justify-center rounded-md bg-primary/10 py-1.5">
-                                <span className="text-sm font-bold tabular-nums text-gold-text">
+                                <span className="text-sm font-bold tabular-nums text-brand-text">
                                   {hora}
                                 </span>
-                                <span className="text-xs uppercase text-gold-text">
+                                <span className="text-xs uppercase text-brand-text">
                                   início
                                 </span>
                               </div>
@@ -295,7 +295,7 @@ export default function StaffCalendarioPage() {
                                     ? "bg-status-conc-bg text-status-conc"
                                     : t.estado === "por_atribuir"
                                     ? "bg-status-porat-bg text-status-porat"
-                                    : "bg-primary/10 text-gold-text"
+                                    : "bg-primary/10 text-brand-text"
                                 )}
                               >
                                 <Icon className="h-4 w-4" />
@@ -399,7 +399,7 @@ export default function StaffCalendarioPage() {
                               <Link key={t._id} href={`/staff/tarefas/${t._id}`} prefetch>
                                 <Card className="cursor-pointer border-border/60 transition-all hover:border-primary/40 hover:shadow-sm active:scale-[0.99]">
                                   <CardContent className="flex items-center gap-3 p-3">
-                                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-gold-text">
+                                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-brand-text">
                                       <Icon className="h-4 w-4" />
                                     </div>
                                     <div className="min-w-0 flex-1">

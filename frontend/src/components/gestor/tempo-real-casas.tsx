@@ -66,7 +66,7 @@ export function TempoRealCasas({ inicio, fim }: { inicio: string; fim: string })
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <Timer className="h-5 w-5 text-gold-text" aria-hidden="true" />
+          <Timer className="h-5 w-5 text-brand-text" aria-hidden="true" />
           Tempo real vs estimado por casa
         </CardTitle>
         <CardDescription>
@@ -127,7 +127,7 @@ export function TempoRealCasas({ inicio, fim }: { inicio: string; fim: string })
                         <td className="px-3 py-2">
                           {c.sugestao_min !== null ? (
                             <span className="inline-flex flex-wrap items-center gap-2">
-                              <Lightbulb className="h-4 w-4 text-gold-text" aria-hidden="true" />
+                              <Lightbulb className="h-4 w-4 text-brand-text" aria-hidden="true" />
                               Ajustar para <strong>{c.sugestao_min} min</strong>
                               <Link href="/gestor/propriedades" className="text-xs underline">
                                 alterar na casa

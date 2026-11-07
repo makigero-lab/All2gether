@@ -5,6 +5,8 @@ import Link from "next/link";
 import { rotuloTipoLimpeza } from "@/components/tipo-limpeza-badge";
 import {
   CalendarRange,
+  CalendarClock,
+  Filter,
   Loader2,
   AlertCircle,
   AlertTriangle,
@@ -23,6 +25,7 @@ import {
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 // Prompt Extra — parsearDataSegura para compatibilidade Safari/iOS.
+import { MudarDiaDialog, podeMudarDia } from "@/components/gestor/mudar-dia-dialog";
 import { SeletorDisponiveis, corpoAtribuicao, type InfoDisponiveis } from "@/components/gestor/seletor-disponiveis";
 import { parsearDataSegura, formatarDataSegura, extrairHoraISO, calcularHoraFimISO, plural } from "@/lib/utils";
 
@@ -138,7 +141,7 @@ function paletaPorEstado(estado: string): PaletaEvento {
   const token = infoEstadoTarefa(estado).token;
   return {
     bg: `hsl(var(--status-${token}-bg))`,
-    border: `hsl(var(--status-${token}) / 0.45)`,
+    border: `hsl(var(--status-${token}))`,
     text: `hsl(var(--status-${token}))`,
     dot: `hsl(var(--status-${token}))`,
   };
@@ -170,6 +173,11 @@ const COR_PONTO_TIPO: Record<string, string> = {
 };
 
 /** Cor de fundo/borda do evento do FullCalendar por estado da tarefa. */
+const COR_TIPO_VALIDOS = ["normal", "intermedia", "profunda", "preparacao"];
+
+/** Glifo do estado (além da cor e do fundo): ✓ concluída, ▶ em curso, ? por atribuir, ! não atribuída. */
+const GLIFO_ESTADO: Record<string, string> = { concluida: "✓", em_curso: "▶", por_atribuir: "?", nao_atribuida: "!" };
+
 function corPorEstado(estado: string): string {
   return paletaPorEstado(estado).dot;
 }
@@ -320,13 +328,16 @@ export default function CalendarioOperacionalPage() {
   // SSR-safe mount: FullCalendar só pode ser renderizado no cliente.
   const [mounted, setMounted] = useState(false);
   // Telemóvel: abre na vista Dia (a semana não cabe). O utilizador pode mudar; desktop inalterado.
-  const [vistaInicialCal, setVistaInicialCal] = useState<"timeGridWeek" | "timeGridDay">("timeGridWeek");
+  // Vistas numa só barra: Mês, Semana, Tabela, Equipa (sem vista Dia). Por omissão, Mês.
+  const [mudarDiaAberto, setMudarDiaAberto] = useState(false);
+  const [dataCal, setDataCal] = useState<Date | null>(null);
+  const [filtrosAbertos, setFiltrosAbertos] = useState(false);
 
   // Período atual do calendário (definido via datesSet do FullCalendar).
   const [periodo, setPeriodo] = useState<PeriodoState | null>(null);
 
   // Prompt 99 — Toggle de vistas: "calendario" (FullCalendar) | "tabela" (Data Table).
-  const [vista, setVista] = useState<"calendario" | "tabela" | "equipa">("calendario");
+  const [vista, setVista] = useState<"mes" | "semana" | "tabela" | "equipa">("mes");
   const [exportando, setExportando] = useState(false);
 
   // Modal de detalhe.
@@ -339,9 +350,6 @@ export default function CalendarioOperacionalPage() {
 
   /* --- Marca montação no cliente (inibe o SSR do FullCalendar) --- */
   useEffect(() => {
-    if (typeof window !== "undefined" && window.matchMedia("(max-width: 639px)").matches) {
-      setVistaInicialCal("timeGridDay");
-    }
     setMounted(true);
   }, []);
 
@@ -415,9 +423,9 @@ export default function CalendarioOperacionalPage() {
           end: t.end,
           allDay: true,
           // Roxo pastel suave com opacidade — distinto de tarefas normais.
-          backgroundColor: "#ede9fe",
-          borderColor: "#c4b5fd",
-          textColor: "#5b21b6",
+          backgroundColor: "hsl(var(--status-curso-bg))",
+          borderColor: "hsl(var(--status-curso))",
+          textColor: "hsl(var(--status-curso))",
           extendedProps: t,
           // Flag custom para o eventContent aplicar a classe de banner.
           classNames: ["fc-evt-ausencia"],
@@ -437,9 +445,9 @@ export default function CalendarioOperacionalPage() {
           end: t.end,
           allDay: true,
           // Âmbar pastel com opacidade — sinal de atenção (precisa ação).
-          backgroundColor: "#fef3c7",
-          borderColor: "#f59e0b",
-          textColor: "#92400e",
+          backgroundColor: "hsl(var(--status-porat-bg))",
+          borderColor: "hsl(var(--status-porat))",
+          textColor: "hsl(var(--status-porat))",
           extendedProps: t,
           classNames: ["fc-evt-ausencia-pendente"],
         } as EventInput];
@@ -457,9 +465,9 @@ export default function CalendarioOperacionalPage() {
           title: `Folga - ${t.utilizador_id?.nome ?? "Elemento da equipa"}`,
           start: dataFolga,
           allDay: true,
-          backgroundColor: "#e2e8f0",
-          borderColor: "#cbd5e1",
-          textColor: "#475569",
+          backgroundColor: "hsl(var(--status-canc-bg))",
+          borderColor: "hsl(var(--status-canc))",
+          textColor: "hsl(var(--status-canc))",
           extendedProps: t,
         } as EventInput];
       }
@@ -476,7 +484,7 @@ export default function CalendarioOperacionalPage() {
       // e adiciona classe de alerta, override da paleta por estado.
       const isOrfao = !!t.alerta_orfao;
       const paletaFinal = isOrfao
-        ? { bg: "#fee2e2", border: "#ef4444", text: "#991b1b", dot: "#dc2626" }
+        ? { bg: "hsl(var(--status-naoat-bg))", border: "hsl(var(--status-naoat))", text: "hsl(var(--status-naoat))", dot: "hsl(var(--status-naoat))" }
         : paleta;
       const classNames = isOrfao
         ? ["fc-evt-orfao"]
@@ -527,9 +535,9 @@ export default function CalendarioOperacionalPage() {
         title: t.propriedade_id?.nome ?? "—",
         start: startLocal,
         end: endLocal,
-        backgroundColor: isOrfao ? paletaFinal.bg : (temConflito ? "#fef3c7" : paleta.bg),
-        borderColor: isOrfao ? paletaFinal.border : (temConflito ? "#f59e0b" : paleta.border),
-        textColor: isOrfao ? paletaFinal.text : (temConflito ? "#92400e" : paleta.text),
+        backgroundColor: isOrfao ? paletaFinal.bg : (temConflito ? "hsl(var(--status-porat-bg))" : paleta.bg),
+        borderColor: isOrfao ? paletaFinal.border : (temConflito ? "hsl(var(--status-porat))" : paleta.border),
+        textColor: isOrfao ? paletaFinal.text : (temConflito ? "hsl(var(--status-porat))" : paleta.text),
         extendedProps: t,
         classNames: isOrfao ? classNames : (temConflito ? [...classNames, "fc-evt-conflito"] : classNames),
       };
@@ -558,9 +566,9 @@ export default function CalendarioOperacionalPage() {
           start: startViagemLocal,
           end: startLocal,
           // Cinzento suave + borda tracejada (classe CSS fc-evt-viagem).
-          backgroundColor: "#f1f5f9",
-          borderColor: "#94a3b8",
-          textColor: "#475569",
+          backgroundColor: "hsl(var(--muted))",
+          borderColor: "hsl(var(--muted-foreground))",
+          textColor: "hsl(var(--status-canc))",
           extendedProps: { ...t, _isViagem: true },
           classNames: ["fc-evt-viagem"],
         };
@@ -583,17 +591,13 @@ export default function CalendarioOperacionalPage() {
     const tipoEspecial = t.tipo === "limpeza" && t.tipo_limpeza && t.tipo_limpeza !== "normal" ? rotuloTipoLimpeza(t.tipo_limpeza) : null;
     const titulo = `${tipoEspecial ? `${tipoEspecial} - ` : ""}${t.propriedade_id?.nome ?? "—"}`;
     // Vista Mês: o tipo vai num ponto colorido (com rótulo acessível) e o título fica só com a casa.
-    const corTipo = t.tipo === "limpeza" && t.tipo_limpeza ? COR_PONTO_TIPO[t.tipo_limpeza] : undefined;
     const tituloMes = t.propriedade_id?.nome ?? "—";
-    const pontoTipo = corTipo && tipoEspecial ? (
-      <span
-        role="img"
-        aria-label={`Limpeza ${tipoEspecial.toLowerCase()}`}
-        title={`Limpeza ${tipoEspecial.toLowerCase()}`}
-        className="fc-evt-month__dot fc-evt-month__dot--tipo"
-        style={{ backgroundColor: corTipo }}
-      />
+    const tipoVal = t.tipo === "limpeza" ? (t.tipo_limpeza && COR_TIPO_VALIDOS.includes(t.tipo_limpeza) ? t.tipo_limpeza : "normal") : null;
+    const pontoTipo = tipoVal ? (
+      <span role="img" aria-label={`Limpeza ${rotuloTipoLimpeza(tipoVal).toLowerCase()}`} title={`Limpeza ${rotuloTipoLimpeza(tipoVal).toLowerCase()}`} className="tipo-marca" data-tipo={tipoVal} />
     ) : null;
+    const glifo = GLIFO_ESTADO[t.estado] ?? "";
+    const riscada = t.estado === "cancelada" ? " fc-evt-cancelada" : "";
     const staff = t.utilizador_id?.nome ?? null;
     const isFolga = t.tipo === "folga_fixa";
     const isAusencia = t.tipo === "ausencia";
@@ -718,30 +722,14 @@ export default function CalendarioOperacionalPage() {
           </div>
         );
       }
-      // Prompt 80, ponto 1 — destaque forte para por_atribuir na vista mensal.
-      if (isPorAtribuir) {
-        return (
-          <div className="fc-evt-month fc-evt-month--alert" title={`⚠️ ${rotuloEstado} — ${titulo}`}>
-            <span className="fc-evt-month__alert-icon" aria-hidden>⚠️</span>
-            {pontoTipo}
-            <span className="fc-evt-month__title">
-              {emoji} {tituloMes}
-            </span>
-            <span className="fc-evt-month__alert-tag">{rotuloEstado}</span>
-          </div>
-        );
-      }
+      // Por atribuir / não atribuída: o fundo, a barra lateral e o glifo (? / !) já o dizem.
       return (
-        <div className="fc-evt-month">
-          <span
-            className="fc-evt-month__dot"
-            style={{ backgroundColor: isFolga ? "#94a3b8" : paleta.dot }}
-            aria-hidden
-          />
+        <div className={`fc-evt-month${riscada}`}>
           {pontoTipo}
           <span className="fc-evt-month__time">{arg.timeText}</span>
+          {glifo && <span className="fc-evt-glifo" aria-hidden="true">{glifo}</span>}
           <span className="fc-evt-month__title" title={textoFalta(t.pessoas_em_falta) ? `${titulo} · ${textoFalta(t.pessoas_em_falta)}` : titulo}>
-            {emoji} {tituloMes}{(t.pessoas_em_falta ?? 0) > 0 ? " ⚠" : ""}
+            {tituloMes}{(t.pessoas_em_falta ?? 0) > 0 ? " ⚠" : ""}
           </span>
         </div>
       );
@@ -756,16 +744,11 @@ export default function CalendarioOperacionalPage() {
         ? "fc-evt-block fc-evt-block--alert"
         : "fc-evt-block";
     return (
-      <div className={blockClass}>
+      <div className={`${blockClass}${riscada}`}>
         <div className="fc-evt-block__header">
-          <span
-            className="fc-evt-block__dot"
-            style={{ backgroundColor: t.alerta_orfao ? "#dc2626" : (isFolga ? "#94a3b8" : paleta.dot) }}
-            aria-hidden
-          />
-          <span className="fc-evt-block__emoji" aria-hidden>
-            {t.alerta_orfao ? "🚨" : emoji}
-          </span>
+          {pontoTipo}
+          {glifo && <span className="fc-evt-glifo" aria-hidden="true">{glifo}</span>}
+          {t.alerta_orfao && <span className="fc-evt-block__emoji" aria-hidden>🚨</span>}
           <span className="fc-evt-block__time">{arg.timeText}</span>
         </div>
         <div className="fc-evt-block__title" title={titulo}>
@@ -806,12 +789,12 @@ export default function CalendarioOperacionalPage() {
 
   /* --- Callbacks do FullCalendar --- */
   const handleDateClick = useCallback((arg: DateClickArg) => {
-    // Só no telemóvel: no desktop o clique na data não faz nada (evita mudar o comportamento).
-    if (typeof window === "undefined" || !window.matchMedia("(max-width: 639px)").matches) return;
+    // Computador: abre a lista do dia ao lado; telemóvel: por baixo do calendário.
     setDiaAberto(format(arg.date, "yyyy-MM-dd"));
   }, []);
 
   const handleDatesSet = useCallback((arg: DatesSetArg) => {
+    setDataCal(arg.view.currentStart);
     setPeriodo({
       inicio: format(arg.start, "yyyy-MM-dd"),
       fim: format(arg.end, "yyyy-MM-dd"),
@@ -1201,51 +1184,7 @@ export default function CalendarioOperacionalPage() {
             {autoAtribuindo ? "A atribuir…" : "Auto-Atribuir Pendentes"}
           </Button>
 
-          {/* Prompt 99 — Toggle de vistas (Calendário / Tabela) */}
-          <div className="ml-auto flex items-center gap-1 rounded-md border bg-muted/40 p-1">
-            <button
-              type="button"
-              onClick={() => setVista("calendario")}
-              className={cn(
-                "flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors",
-                vista === "calendario"
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-              aria-pressed={vista === "calendario"}
-            >
-              <CalendarRange className="h-3.5 w-3.5" />
-              Vista calendário
-            </button>
-            <button
-              type="button"
-              onClick={() => setVista("tabela")}
-              className={cn(
-                "flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors",
-                vista === "tabela"
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-              aria-pressed={vista === "tabela"}
-            >
-              <Table className="h-3.5 w-3.5" />
-              Vista tabela
-            </button>
-            <button
-              type="button"
-              onClick={() => setVista("equipa")}
-              className={cn(
-                "flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors",
-                vista === "equipa"
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-              aria-pressed={vista === "equipa"}
-            >
-              <Users className="h-3.5 w-3.5" />
-              Vista equipa
-            </button>
-          </div>
+          <div className="ml-auto" />
 
           {/* Prompt 99 — Exportar Excel (só relevante na Vista Tabela) */}
           <Button
@@ -1264,14 +1203,51 @@ export default function CalendarioOperacionalPage() {
           </Button>
         </div>
         <p className="text-sm text-muted-foreground">
-          Vista mensal, semanal e diária de todas as tarefas de limpeza. Filtra por
+          Vista mensal e semanal de todas as tarefas de limpeza. Filtra por
           propriedade, staff ou estado. Clica numa limpeza para ver o detalhe e reatribuir.
           Alterna para a Vista Tabela e exporta para Excel.
         </p>
       </div>
 
+      {/* Vistas numa só barra (Mês, Semana, Tabela, Equipa) + Filtros no telemóvel */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div role="group" aria-label="Vista do calendário" className="flex items-center gap-1 rounded-md border bg-muted/40 p-1">
+          {([["mes", "Mês", CalendarRange], ["semana", "Semana", CalendarRange], ["tabela", "Tabela", Table], ["equipa", "Equipa", Users]] as const).map(([v, rotulo, Ic]) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => {
+                if (v === "semana" && vista === "mes") setDataCal(diaAberto ? new Date(`${diaAberto}T12:00:00`) : new Date());
+                setVista(v);
+              }}
+              aria-pressed={vista === v}
+              className={cn(
+                "flex min-h-9 items-center gap-1.5 rounded px-3 py-1.5 text-sm font-medium transition-colors",
+                vista === v ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <Ic className="h-3.5 w-3.5" aria-hidden="true" />
+              {rotulo}
+            </button>
+          ))}
+        </div>
+        <Button
+          variant="outline"
+          className="gap-1.5 lg:hidden"
+          aria-expanded={filtrosAbertos}
+          onClick={() => setFiltrosAbertos((v) => !v)}
+        >
+          <Filter className="h-4 w-4" aria-hidden="true" />
+          Filtros
+          {(filtros.propriedadeId || filtros.utilizadorId || filtros.estado) && <span className="h-2 w-2 rounded-full bg-primary" aria-label="com filtros ativos" />}
+        </Button>
+        <Button variant="outline" size="icon" className="lg:hidden" onClick={carregarTarefas} disabled={loading || !periodo} aria-label="Atualizar">
+          <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
+        </Button>
+      </div>
+
       {/* Zona de Filtros */}
-      <div className="flex flex-col gap-4 rounded-lg border bg-card p-4 lg:flex-row lg:items-end lg:justify-between">
+      <div className={cn("flex-col gap-4 rounded-lg border bg-card p-4 lg:flex lg:flex-row lg:items-end lg:justify-between", filtrosAbertos ? "flex" : "hidden")}>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 lg:flex lg:gap-3">
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-medium text-muted-foreground">Propriedade</label>
@@ -1382,18 +1358,21 @@ export default function CalendarioOperacionalPage() {
       )}
 
       {/* Prompt 99 — Vista Calendário (FullCalendar) */}
-      {vista === "calendario" && (
+      {(vista === "mes" || vista === "semana") && (
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="rounded-lg border bg-card p-2 sm:p-4">
           {mounted ? (
             <FullCalendar
               plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
-              initialView={vistaInicialCal}
+              key={vista}
+              initialView={vista === "semana" ? "timeGridWeek" : "dayGridMonth"}
+              initialDate={dataCal ?? undefined}
               locale={ptLocale}
               timeZone="local"
               headerToolbar={{
                 left: "prev,next today",
                 center: "title",
-                right: "dayGridMonth,timeGridWeek,timeGridDay",
+                right: "",
               }}
               // Ponto 1 — Horário comercial (esconde madrugada/noite)
               slotMinTime="08:00:00"
@@ -1414,6 +1393,11 @@ export default function CalendarioOperacionalPage() {
               // FIX (calendário compacto) — Limita a 2 o nº de eventos allDay
               // visíveis por dia; o excesso fica escondido num botão "+X mais".
               dayMaxEvents={2}
+              // Semana: no máximo 2 colunas lado a lado; o resto fica em «+N mais» (popover que fecha ao clicar fora ou Esc).
+              slotEventOverlap={false}
+              eventMaxStack={2}
+              moreLinkClick="popover"
+              moreLinkContent={(a) => `+${a.num} mais`}
               eventDisplay="block"
               // Ponto 4 — Renderização customizada do bloco
               eventContent={renderEventContent}
@@ -1438,6 +1422,50 @@ export default function CalendarioOperacionalPage() {
             </div>
           )}
         </div>
+        {diaAberto && (
+          <aside aria-label="Limpezas do dia" className="rounded-lg border bg-card lg:sticky lg:top-4 lg:self-start">
+            <div className="flex items-start justify-between gap-2 border-b p-3">
+              <div>
+                <h2 className="text-sm font-semibold first-letter:uppercase">
+                  {formatarDataSegura(`${diaAberto}T12:00:00`, (d) => format(d, "EEEE, d 'de' MMMM", { locale: pt }), diaAberto)}
+                </h2>
+                <p className="text-xs text-muted-foreground">
+                  {itensDoDia.some((x) => x.tipo !== "ausencia" && x.tipo !== "ausencia_pendente" && x.tipo !== "folga_fixa") ? "Escolhe uma limpeza para ver o detalhe." : "Sem limpezas neste dia."}
+                </p>
+              </div>
+              <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => setDiaAberto(null)} aria-label="Fechar a lista do dia">
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="space-y-2 p-3">
+              {itensDoDia.map((x) => {
+                const ausencia = x.tipo === "ausencia" || x.tipo === "ausencia_pendente" || x.tipo === "folga_fixa";
+                const titulo = ausencia ? (x.title ?? "Ausência") : (x.propriedade_id?.nome ?? "—");
+                return (
+                  <button
+                    key={x._id}
+                    type="button"
+                    disabled={ausencia}
+                    onClick={() => { setTarefaSelecionada(x); setReatribuindoPara(""); setInfoDisp(null); }}
+                    className="flex min-h-11 w-full items-center justify-between gap-2 rounded-md border px-3 py-2 text-left text-sm disabled:cursor-default"
+                  >
+                    <span className="min-w-0">
+                      <span className="flex items-center gap-1.5 truncate font-medium">
+                        {!ausencia && x.tipo === "limpeza" && <span className="tipo-marca" data-tipo={x.tipo_limpeza && COR_TIPO_VALIDOS.includes(x.tipo_limpeza) ? x.tipo_limpeza : "normal"} aria-hidden="true" />}
+                        <span className="truncate">{titulo}</span>
+                      </span>
+                      <span className="block truncate text-xs text-muted-foreground">
+                        {ausencia ? "" : `${temHoraReal(x.data) ? horaTarefa(x.data) : "sem hora"} · ${x.utilizador_id?.nome ?? "Por atribuir"}`}
+                      </span>
+                    </span>
+                    {!ausencia && <EstadoTarefaBadge estado={x.estado} className="shrink-0" />}
+                  </button>
+                );
+              })}
+            </div>
+          </aside>
+        )}
+        </div>
       )}
 
       {/* Prompt 99 — Vista Tabela (Data Table) */}
@@ -1457,7 +1485,7 @@ export default function CalendarioOperacionalPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="rt w-full text-sm">
                 <thead>
                   <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
                     <th className="px-4 py-3 font-medium">Data</th>
@@ -1525,7 +1553,7 @@ export default function CalendarioOperacionalPage() {
       )}
 
       {/* Legenda */}
-      <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+      <div className="hidden flex-wrap items-center gap-3 text-xs text-muted-foreground lg:flex">
         <span className="font-medium">Legenda:</span>
         {Object.values(ESTADOS_TAREFA).map((info) => (
           <span key={info.token} className="flex items-center gap-1.5">
@@ -1543,62 +1571,31 @@ export default function CalendarioOperacionalPage() {
           <span className="h-3 w-3 rounded border border-slate-300 bg-slate-200 dark:border-slate-500 dark:bg-slate-700" />
           Folga fixa
         </span>
-        <span className="flex items-center gap-3">
-          <span className="font-medium">Ponto na vista Mês:</span>
-          {Object.entries(COR_PONTO_TIPO).map(([tipo, cor]) => (
-            <span key={tipo} className="flex items-center gap-1.5">
-              <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: cor }} aria-hidden />
-              {rotuloTipoLimpeza(tipo)}
+        <span className="flex flex-wrap items-center gap-3">
+          <span className="font-medium">Tipo:</span>
+          {COR_TIPO_VALIDOS.map((tp) => (
+            <span key={tp} className="flex items-center gap-1.5">
+              <span className="tipo-marca" data-tipo={tp} aria-hidden />
+              {rotuloTipoLimpeza(tp)}
             </span>
           ))}
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span aria-hidden>✓ ▶ ? !</span> concluída, em curso, por atribuir, não atribuída
         </span>
       </div>
 
 
-      {/* Telemóvel: lista do dia tocado no calendário */}
-      <Dialog open={diaAberto !== null} onOpenChange={(o) => !o && setDiaAberto(null)}>
-        <DialogHeader>
-          <div>
-            <DialogTitle>
-              {diaAberto
-                ? formatarDataSegura(`${diaAberto}T12:00:00`, (d) => format(d, "EEEE, d 'de' MMMM", { locale: pt }), diaAberto)
-                : ""}
-            </DialogTitle>
-            <DialogDescription>
-              {itensDoDia.some((t) => t.tipo !== "ausencia" && t.tipo !== "ausencia_pendente" && t.tipo !== "folga_fixa") ? "Toca numa limpeza para ver o detalhe." : "Sem limpezas neste dia."}
-            </DialogDescription>
-          </div>
-          <DialogClose onClick={() => setDiaAberto(null)} />
-        </DialogHeader>
-        <DialogContent className="space-y-2">
-          {itensDoDia.map((t) => {
-            const ausencia = t.tipo === "ausencia" || t.tipo === "ausencia_pendente" || t.tipo === "folga_fixa";
-            const titulo = ausencia ? (t.title ?? "Ausência") : (t.propriedade_id?.nome ?? "—");
-            return (
-              <button
-                key={t._id}
-                type="button"
-                disabled={ausencia}
-                onClick={() => {
-                  setDiaAberto(null);
-                  setTarefaSelecionada(t);
-                  setReatribuindoPara("");
-                  setInfoDisp(null);
-                }}
-                className="flex min-h-11 w-full items-center justify-between gap-2 rounded-md border px-3 py-2 text-left text-sm disabled:cursor-default"
-              >
-                <span className="min-w-0">
-                  <span className="block truncate font-medium">{titulo}</span>
-                  <span className="block truncate text-xs text-muted-foreground">
-                    {ausencia ? "" : `${temHoraReal(t.data) ? horaTarefa(t.data) : "sem hora"} · ${t.utilizador_id?.nome ?? "Por atribuir"}`}
-                  </span>
-                </span>
-                {!ausencia && <EstadoTarefaBadge estado={t.estado} className="shrink-0" />}
-              </button>
-            );
-          })}
-        </DialogContent>
-      </Dialog>
+      <MudarDiaDialog
+        tarefa={tarefaSelecionada}
+        open={mudarDiaAberto}
+        onOpenChange={setMudarDiaAberto}
+        onFeito={async (aviso) => {
+          if (aviso) setWarningToast(aviso);
+          setTarefaSelecionada(null);
+          await carregarTarefas();
+        }}
+      />
 
       {/* Prova da limpeza (modal partilhado com a página de limpezas) */}
       <DetalheTarefaModal
@@ -1633,6 +1630,12 @@ export default function CalendarioOperacionalPage() {
             {/* Estado + tipo + propriedade */}
             <div className="flex flex-wrap items-center gap-2">
               <EstadoTarefaBadge estado={tarefaSelecionada.estado} />
+              {tarefaSelecionada.tipo === "limpeza" && podeMudarDia(tarefaSelecionada) && (
+                <Button type="button" variant="outline" size="sm" className="ml-auto h-9 gap-1.5" onClick={() => setMudarDiaAberto(true)}>
+                  <CalendarClock className="h-4 w-4" aria-hidden="true" />
+                  Mudar dia
+                </Button>
+              )}
               {/* v1.58.0 (Prompt 80, ponto 4) — Badge de tipo para deixar claro
                   que manutenções também podem ser atribuídas/reatribuídas. */}
               {tarefaSelecionada.tipo && TIPO_LABEL[tarefaSelecionada.tipo] && (
@@ -1679,7 +1682,7 @@ export default function CalendarioOperacionalPage() {
                   {tarefaSelecionada.utilizador_id ? (
                     <Link
                       href={`/gestor/equipa?editar=${tarefaSelecionada.utilizador_id._id}`}
-                      className="text-gold-text underline-offset-2 hover:underline font-medium"
+                      className="text-brand-text underline-offset-2 hover:underline font-medium"
                       title="Editar funcionário"
                     >
                       {tarefaSelecionada.utilizador_id.nome}
@@ -1821,7 +1824,7 @@ export default function CalendarioOperacionalPage() {
       <Dialog open={confirmarAutoAtribuir} onOpenChange={setConfirmarAutoAtribuir}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Sparkles className="h-5 w-5 text-gold-text" />
+            <Sparkles className="h-5 w-5 text-brand-text" />
             Auto-Atribuir Pendentes
           </DialogTitle>
           <DialogDescription>
@@ -1871,7 +1874,7 @@ export default function CalendarioOperacionalPage() {
       <Dialog open={mostrarNovaTarefa} onOpenChange={setMostrarNovaTarefa}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Plus className="h-5 w-5 text-gold-text" />
+            <Plus className="h-5 w-5 text-brand-text" />
             Nova limpeza
           </DialogTitle>
           <DialogDescription>

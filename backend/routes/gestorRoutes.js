@@ -54,7 +54,7 @@ const {
   getFornecedores,
   getContactoHospede,
 } = require('../controllers/gestorController');
-const { reportarAtrasoTarefa, criarTarefa, atribuirTarefa, reatribuirTarefa, atualizarEstadoTarefa, apagarTarefasFuturas, listarIndisponiveisData, autoAtribuirTarefas, criarTarefaEspontanea, listarDisponiveisTarefa } = require('../controllers/tarefaController');
+const { reportarAtrasoTarefa, criarTarefa, atribuirTarefa, reatribuirTarefa, atualizarEstadoTarefa, apagarTarefasFuturas, listarIndisponiveisData, autoAtribuirTarefas, criarTarefaEspontanea, listarDisponiveisTarefa, mudarDiaTarefa } = require('../controllers/tarefaController');
 // CRUD de Modelos de Checklist (futuro: Modelos de Protocolo Clínico)
 const { getProvaLimpeza, resolverAvaria } = require('../controllers/provaController');
 const { listarModelos, criarModelo, obterModelo, atualizarModelo, apagarModelo } = require('../controllers/checklistController');
@@ -149,6 +149,7 @@ router.patch('/tarefas/:id/avarias/:avariaId/resolver', auth, isGestor, resolver
 router.post('/tarefas', auth, isGestor, criarTarefa);
 router.post('/tarefas/espontanea', auth, isGestor, criarTarefaEspontanea);
 router.get('/tarefas/:id/disponiveis', auth, isGestor, listarDisponiveisTarefa);
+router.patch('/tarefas/:id/data', auth, isGestor, mudarDiaTarefa);
 router.patch('/tarefas/:id/atribuir', auth, isGestor, atribuirTarefa);
 router.patch('/tarefas/:id/reatribuir', auth, isGestor, reatribuirTarefa);
 router.patch('/tarefas/:id/estado', auth, isGestor, atualizarEstadoTarefa);

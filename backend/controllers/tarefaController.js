@@ -18,6 +18,11 @@ const {
 const Horario = require('../utils/horario');
 const { avisarParceiro, aoConcluirTarefa } = require('../utils/cicloTarefa');
 const { listarDisponiveis } = require('../utils/disponiveisTarefa');
+const { calcularInicioEquipa, obterRangeDia: rangeDoDia } = require('../utils/scheduler');
+const { obterStaffDisponivel } = require('../utils/loadBalancer');
+const { cabeNaAgendaNaHora } = require('../utils/atribuicaoAutomatica');
+const { diaTexto, tipoDe: tipoDeTarefa } = require('../utils/tipoLimpeza');
+const { avisarGestores } = require('../utils/notificar');
 
 /**
  * 'YYYY-MM-DD' (+ 'HH:MM' de Lisboa, com hora de verão) -> instante UTC.
@@ -564,6 +569,170 @@ exports.criarTarefa = async (req, res) => {
     return res.status(201).json(resposta);
   } catch (err) {
     console.error('❌ criarTarefa:', err.message);
+    return res.status(500).json({ erro: 'Erro interno do servidor.' });
+  }
+};
+
+/**
+ * PATCH /api/gestor/tarefas/:id/data   body: { data: 'AAAA-MM-DD', hora?: 'HH:MM' (Lisboa) }
+ *
+ * O gestor muda o DIA (e, se quiser, a hora) de uma limpeza. Recalcula hora e pessoa com o motor
+ * de horário, como o Smoobu ao mudar a data: a equipa atual fica se couber nesse dia; senão procura
+ * outra; se ninguém couber fica por atribuir, com o motivo. Recusa em_curso/concluida/cancelada e
+ * um dia que já tenha outra limpeza do proprietário do mesmo tipo (409 RESERVA_DUPLICADA).
+ * A data fica marcada como ajustada pelo gestor (Tarefa.data_ajustada_gestor e
+ * ReservaManual.data_limpeza_ajustada) para o sistema não a recalcular quando o proprietário só mexe
+ * em notas. Avisa o proprietário (sino «alterada»), quem sai e quem entra/fica, e os gestores se ficar por atribuir.
+ * Resposta 200: { tarefa, aviso, equipa_mudou }
+ */
+exports.mudarDiaTarefa = async (req, res) => {
+  try {
+    const { ok, empresaId } = obterEmpresaId(req, res);
+    if (!ok) return;
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) return res.status(400).json({ erro: 'ID de tarefa inválido.' });
+    const dia = diaTexto(typeof (req.body || {}).data === 'string' ? req.body.data : null);
+    if (!dia) return res.status(400).json({ erro: 'Dia inválido (usa o formato AAAA-MM-DD).' });
+    const horaBruta = req.body.hora;
+    const temHoraPedida = horaBruta !== undefined && horaBruta !== null && horaBruta !== '';
+    if (temHoraPedida && !(typeof horaBruta === 'string' && /^([01]?\d|2[0-3]):[0-5]\d$/.test(horaBruta.trim()))) {
+      return res.status(400).json({ erro: 'Hora inválida (usa HH:MM).' });
+    }
+    const tarefa = await Tarefa.findOne({ _id: id, empresa_id: empresaId });
+    if (!tarefa) return res.status(404).json({ erro: 'Tarefa não encontrada.' });
+    if (['em_curso', 'concluida', 'cancelada'].includes(tarefa.estado)) {
+      return res.status(409).json({
+        erro: tarefa.estado === 'em_curso'
+          ? 'A limpeza já começou: não se pode mudar o dia.'
+          : `Não é possível mudar o dia de uma limpeza ${tarefa.estado}.`,
+        codigo: 'ESTADO_INVALIDO',
+      });
+    }
+    const diaAntes = Horario.diaUTC(tarefa.data);
+    if (dia === diaAntes && !temHoraPedida) return res.status(400).json({ erro: 'A limpeza já está nesse dia.' });
+    const prop = await Propriedade.findOne({ _id: tarefa.propriedade_id, empresa_id: empresaId })
+      .select('nome coordenadas staff_necessario tempo_limpeza_minutos').lean();
+    if (!prop) return res.status(404).json({ erro: 'Propriedade não encontrada.' });
+
+    // Duplicados: outra limpeza do proprietário do mesmo tipo nesse dia.
+    if (tarefa.tipo === 'limpeza' && dia !== diaAntes) {
+      const { limpezasDoDia, textoDuplicada } = require('./parceiroController');
+      const tipoT = tipoDeTarefa(tarefa);
+      const inicioDia = new Date(`${dia}T00:00:00Z`);
+      const r = await limpezasDoDia({ empresaId, propriedadeId: prop._id, inicioDia, tipoLimpeza: tipoT, excluirTarefaId: tarefa._id });
+      if (r.doParceiro) {
+        return res.status(409).json({
+          erro: `Já existe outra limpeza para "${prop.nome}" ${textoDuplicada(tipoT, inicioDia)}.`,
+          codigo: 'RESERVA_DUPLICADA',
+        });
+      }
+    }
+
+    const range = rangeDoDia(new Date(`${dia}T00:00:00Z`));
+    const tempo = Number(tarefa.tempo_limpeza_minutos) || 45;
+    const staffNec = Math.max(1, Number(prop.staff_necessario) || 1);
+    const membrosAntes = idsEquipa(tarefa).map(String);
+    const horaMin = temHoraPedida ? (() => { const [h, m] = horaBruta.trim().split(':').map(Number); return h * 60 + m; })() : null;
+    const dataPedida = horaMin !== null ? Horario.utcDeMinutosLocais(dia, horaMin) : null;
+
+    // Cabe esta equipa nesse dia? (hora pedida, se houver; senão a mais cedo)
+    const tentar = async (ids) => {
+      if (dataPedida) {
+        for (const m of ids) {
+          if (!(await cabeNaAgendaNaHora(m, dataPedida, tempo, tarefa._id, prop.coordenadas, prop._id))) return { ok: false };
+        }
+        return { ok: true, data: dataPedida, viagem: 0 };
+      }
+      const r = await calcularInicioEquipa(ids, range.start, prop.coordenadas, tempo, tarefa._id, prop._id);
+      return r.cabe ? { ok: true, data: r.data, viagem: Number(r.tempoViagem) || 0 } : { ok: false, motivo: r.motivo };
+    };
+
+    let equipaNova = [];
+    let dataNova = null;
+    let viagem = 0;
+    let motivo = null;
+    let estadoNovo = 'por_atribuir';
+    // 1) quem já estava e continua disponível nesse dia
+    if (membrosAntes.length > 0) {
+      const { disponiveis } = await obterStaffDisponivel(empresaId, range, prop._id, null);
+      const okSet = new Set(disponiveis.map((u) => String(u._id)));
+      const mantidos = membrosAntes.filter((m) => okSet.has(m));
+      if (mantidos.length > 0) {
+        const r = await tentar(mantidos);
+        if (r.ok) { equipaNova = mantidos; dataNova = r.data; viagem = r.viagem; estadoNovo = 'atribuida'; }
+      }
+    }
+    // 2) senão, o motor procura outra equipa para o dia
+    if (equipaNova.length === 0) {
+      const plano = await planearAtribuicao({ empresaId, propriedade: prop, dia: range.start, tempoLimpeza: tempo });
+      if (plano.estado === 'atribuida' && plano.equipa_atribuida.length > 0) {
+        const ids = plano.equipa_atribuida.map(String);
+        if (dataPedida) {
+          const r = await tentar(ids);
+          if (r.ok) { equipaNova = ids; dataNova = r.data; viagem = 0; estadoNovo = 'atribuida'; }
+          else { equipaNova = ids; dataNova = plano.data; viagem = plano.tempo_viagem_minutos || 0; estadoNovo = 'atribuida'; }
+        } else { equipaNova = ids; dataNova = plano.data; viagem = plano.tempo_viagem_minutos || 0; estadoNovo = 'atribuida'; }
+      } else {
+        estadoNovo = plano.estado === 'nao_atribuida' ? 'nao_atribuida' : 'por_atribuir';
+        motivo = plano.motivo_nao_atribuicao || 'Ninguém disponível nesse dia';
+        dataNova = dataPedida || plano.data;
+      }
+    }
+
+    const dataAntes = new Date(tarefa.data).getTime();
+    if (equipaNova.length > 0) {
+      const eq = normalizarEquipa(equipaNova[0], equipaNova);
+      tarefa.utilizador_id = eq.utilizador_id;
+      tarefa.equipa_atribuida = eq.equipa_atribuida.length > 1 ? eq.equipa_atribuida : [];
+      tarefa.estado = 'atribuida';
+      tarefa.motivo_nao_atribuicao = null;
+      tarefa.pessoas_em_falta = Math.max(0, staffNec - eq.equipa_atribuida.length);
+      tarefa.tempo_viagem_minutos = viagem;
+    } else {
+      tarefa.utilizador_id = null;
+      tarefa.equipa_atribuida = [];
+      tarefa.estado = estadoNovo;
+      tarefa.motivo_nao_atribuicao = motivo;
+      tarefa.pessoas_em_falta = 0;
+      tarefa.tempo_viagem_minutos = 0;
+    }
+    tarefa.data = dataNova;
+    tarefa.data_ajustada_gestor = true;
+    await tarefa.save();
+
+    // Falta gente: tenta preencher a vaga sem mexer na hora.
+    if (equipaNova.length > 0 && tarefa.pessoas_em_falta > 0) {
+      try { await preencherVagaTarefa({ empresaId, tarefa: tarefa.toObject(), propriedade: prop }); } catch (e) { /* mantém a vaga */ }
+    }
+    // A reserva do proprietário passa a ter o dia ajustado (o sistema não o recalcula por notas).
+    try {
+      const ReservaManual = require('../models/ReservaManual');
+      await ReservaManual.updateOne({ tarefa_gerada_id: tarefa._id }, { $set: { data_limpeza: new Date(`${dia}T00:00:00Z`), data_limpeza_ajustada: true } });
+    } catch (e) { console.error('⚠️  mudarDiaTarefa (reserva):', e.message); }
+
+    // Avisos.
+    if (new Date(tarefa.data).getTime() !== dataAntes) await avisarParceiro(tarefa, 'alterada');
+    const fim = await Tarefa.findById(tarefa._id).lean();
+    const equipaFinal = idsEquipa(fim).map(String);
+    const dFmt = new Date(`${dia}T00:00:00Z`).toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit', timeZone: 'UTC' });
+    const hFmt = Horario.temHoraReal(fim.data) ? ` às ${new Date(fim.data).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Lisbon' })}` : '';
+    const opts = { tipo: 'tarefa_reatribuida', empresa_id: String(empresaId), criarInApp: true };
+    for (const m of membrosAntes.filter((x) => !equipaFinal.includes(x))) {
+      notificarUtilizador(m, '📅 Limpeza mudou de dia', `A limpeza de ${prop.nome} foi mudada para ${dFmt}: já não estás nela.`, '/staff', opts);
+    }
+    for (const m of equipaFinal) {
+      notificarUtilizador(m, '📅 Limpeza mudou de dia', `A limpeza de ${prop.nome} passou para ${dFmt}${hFmt}.`, '/staff', opts);
+    }
+    let aviso = null;
+    if (!equipaFinal.length) {
+      aviso = `Ninguém disponível a ${dFmt}: a limpeza ficou por atribuir (${motivo}).`;
+      await avisarGestores(empresaId, 'Limpeza por atribuir', `${prop.nome} (${dFmt}): ${motivo}.`, '/gestor/tarefas');
+    } else if (fim.pessoas_em_falta > 0) {
+      aviso = `Falta ${fim.pessoas_em_falta} ${fim.pessoas_em_falta === 1 ? 'pessoa' : 'pessoas'} nessa limpeza.`;
+    }
+    return res.status(200).json({ tarefa: fim, aviso, equipa_mudou: membrosAntes.join() !== equipaFinal.join() });
+  } catch (err) {
+    console.error('❌ mudarDiaTarefa:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
   }
 };

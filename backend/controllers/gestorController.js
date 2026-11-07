@@ -194,6 +194,26 @@ exports.getDashboard = async (req, res) => {
       })),
     };
 
+    // Próximas 48 h (todas as ativas, não só as por atribuir): para a coluna do dashboard.
+    const proximasRaw = await Tarefa.find({
+      empresa_id: empresaId,
+      tipo: 'limpeza',
+      data: { $gte: agora, $lte: limiteRisco48h },
+      estado: { $in: ['por_atribuir', 'nao_atribuida', 'atribuida'] },
+    })
+      .populate({ path: 'propriedade_id', select: 'nome' })
+      .select('data estado propriedade_id tipo_limpeza')
+      .sort({ data: 1 })
+      .limit(12)
+      .lean();
+    const proximas48h = proximasRaw.map((t) => ({
+      _id: String(t._id),
+      data: t.data,
+      estado: t.estado,
+      tipo_limpeza: t.tipo_limpeza || 'normal',
+      propriedade_nome: t.propriedade_id?.nome ?? '—',
+    }));
+
     // «A decorrer agora»: limpezas em curso (início por botão ou automático).
     const emCursoDocs = await Tarefa.find({
       empresa_id: empresaId,
@@ -202,7 +222,7 @@ exports.getDashboard = async (req, res) => {
     })
       .populate({ path: 'propriedade_id', select: 'nome' })
       .populate({ path: 'utilizador_id', select: 'nome' })
-      .select('data propriedade_id utilizador_id iniciada_em inicio_origem tipo')
+      .select('data propriedade_id utilizador_id iniciada_em inicio_origem tipo tipo_limpeza')
       .sort({ iniciada_em: 1 })
       .lean();
     const aDecorrerAgora = {
@@ -214,6 +234,7 @@ exports.getDashboard = async (req, res) => {
         iniciada_em: t.iniciada_em || null,
         inicio_origem: t.inicio_origem || null,
         tipo: t.tipo,
+        tipo_limpeza: t.tipo_limpeza || 'normal',
       })),
     };
 
@@ -244,6 +265,7 @@ exports.getDashboard = async (req, res) => {
       tarefasConcluidasHoje,
       tarefasPorStaff,
       checkinsEmRisco,
+      proximas48h,
     });
   } catch (err) {
     console.error('❌ getDashboard:', err.message);
@@ -1246,6 +1268,7 @@ exports.atualizarPropriedade = async (req, res) => {
       req.body?.tempos_limpeza_por_tipo === undefined &&
       req.body?.checklists_por_tipo === undefined &&
       capacidade_hospedes === undefined &&
+      req.body?.dias_fixos_limpeza === undefined &&
       fornecedor_id === undefined
     ) {
       return res.status(400).json({
@@ -1487,6 +1510,15 @@ exports.atualizarPropriedade = async (req, res) => {
         });
       }
       propriedade.capacidade_hospedes = n;
+    }
+
+    // Dias fixos de limpeza (0 = domingo ... 6 = sábado): também ao editar.
+    if (req.body && req.body.dias_fixos_limpeza !== undefined) {
+      const d = req.body.dias_fixos_limpeza;
+      if (!Array.isArray(d) || d.some((x) => !Number.isInteger(x) || x < 0 || x > 6)) {
+        return res.status(400).json({ erro: 'dias_fixos_limpeza deve ser uma lista de dias (0 a 6).' });
+      }
+      propriedade.dias_fixos_limpeza = [...new Set(d)].sort();
     }
 
     // FIX (restrição lavandaria) — fornecedor_id (lavandaria atribuída).

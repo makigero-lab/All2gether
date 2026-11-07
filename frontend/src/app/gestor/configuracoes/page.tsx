@@ -312,7 +312,7 @@ export default function ConfiguracoesPage() {
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
       <div className="flex items-center gap-3">
-        <Settings className="h-6 w-6 text-gold-text" />
+        <Settings className="h-6 w-6 text-brand-text" />
         <h1 className="text-2xl font-bold tracking-tight">Configurações</h1>
       </div>
 
@@ -331,7 +331,7 @@ export default function ConfiguracoesPage() {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
-              <Building2 className="h-5 w-5 text-gold-text" />
+              <Building2 className="h-5 w-5 text-brand-text" />
               Dados da Empresa
             </CardTitle>
           </CardHeader>
@@ -405,7 +405,7 @@ export default function ConfiguracoesPage() {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
-              <Webhook className="h-5 w-5 text-gold-text" />
+              <Webhook className="h-5 w-5 text-brand-text" />
               Ações Smoobu
             </CardTitle>
           </CardHeader>
@@ -431,7 +431,7 @@ export default function ConfiguracoesPage() {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
-              <Clock className="h-5 w-5 text-gold-text" />
+              <Clock className="h-5 w-5 text-brand-text" />
               Testes Manuais (Cron Jobs)
             </CardTitle>
           </CardHeader>
@@ -612,7 +612,7 @@ export default function ConfiguracoesPage() {
         <DialogHeader>
           <div>
             <DialogTitle className="flex items-center gap-2">
-              <ScrollText className="h-5 w-5 text-gold-text" />
+              <ScrollText className="h-5 w-5 text-brand-text" />
               Logs de Sincronização Smoobu
             </DialogTitle>
             <DialogDescription>

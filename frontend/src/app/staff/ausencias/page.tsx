@@ -268,7 +268,7 @@ export default function StaffAusenciasPage() {
               Voltar
             </Link>
             <div className="flex items-center gap-2">
-              <CalendarOff className="h-5 w-5 text-gold-text" />
+              <CalendarOff className="h-5 w-5 text-brand-text" />
               <h1 className="text-xl font-semibold tracking-tight">
                 Pedidos de Ausência
               </h1>
@@ -526,7 +526,7 @@ export default function StaffAusenciasPage() {
       <Dialog open={mostrarConfirmacao} onOpenChange={setMostrarConfirmacao}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <CheckCircle2 className="h-5 w-5 text-gold-text" />
+            <CheckCircle2 className="h-5 w-5 text-brand-text" />
             Confirmar Pedido de Ausência
           </DialogTitle>
           <DialogDescription>

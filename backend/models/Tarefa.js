@@ -255,6 +255,8 @@ const tarefaSchema = new mongoose.Schema(
     // A checklist desta tarefa veio de uma checklist PRÓPRIA do tipo (e não da checklist base da casa).
     // O staff vê «segue a checklist própria desta casa» só quando é verdade.
     checklist_do_tipo: { type: Boolean, default: false },
+    // true quando o gestor mudou o dia («Mudar dia»): o sistema não o recalcula sozinho.
+    data_ajustada_gestor: { type: Boolean, default: false },
     tipo_limpeza: {
       type: String,
       enum: ['normal', 'intermedia', 'profunda', 'preparacao'],

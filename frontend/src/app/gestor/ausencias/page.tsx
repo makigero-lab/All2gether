@@ -484,7 +484,7 @@ export default function AusenciasPage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-col gap-1">
           <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-            <CalendarOff className="h-6 w-6 text-gold-text" />
+            <CalendarOff className="h-6 w-6 text-brand-text" />
             Ausências / Férias
           </h1>
           <p className="text-sm text-muted-foreground">
@@ -590,7 +590,7 @@ export default function AusenciasPage() {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base flex items-center gap-2">
-            <CalendarOff className="h-4 w-4 text-gold-text" />
+            <CalendarOff className="h-4 w-4 text-brand-text" />
             Ausências Registadas ({ausenciasFiltradas.length})
           </CardTitle>
         </CardHeader>
@@ -647,7 +647,7 @@ export default function AusenciasPage() {
               })}
             </ul>
             <div className="hidden overflow-x-auto md:block">
-              <table className="w-full text-sm">
+              <table className="rt w-full text-sm">
                 <thead>
                   <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
                     <th className="px-4 py-3 font-medium">Equipa</th>
@@ -725,7 +725,7 @@ export default function AusenciasPage() {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base">
-            <CalendarX className="h-5 w-5 text-gold-text" />
+            <CalendarX className="h-5 w-5 text-brand-text" />
             Folgas Fixas da Equipa
           </CardTitle>
         </CardHeader>
@@ -733,7 +733,7 @@ export default function AusenciasPage() {
           <p className="text-sm text-muted-foreground mb-4">
             Funcionários ativos (staff) e os respetivos dias de folga fixos
             semanais. Para editar, vai à página{" "}
-            <a href="/gestor/equipa" className="text-gold-text underline">
+            <a href="/gestor/equipa" className="text-brand-text underline">
               Equipa
             </a>
             .
@@ -753,7 +753,7 @@ export default function AusenciasPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="rt w-full text-sm">
                 <thead>
                   <tr className="border-b bg-muted/40 text-left">
                     <th className="px-4 py-3 font-medium">Nome</th>
@@ -770,7 +770,7 @@ export default function AusenciasPage() {
                         <td className="px-4 py-3 font-medium">
                           <Link
                             href={`/gestor/equipa?editar=${staff._id}`}
-                            className="text-gold-text underline-offset-2 hover:underline"
+                            className="text-brand-text underline-offset-2 hover:underline"
                             title={`Editar ${staff.nome}`}
                           >
                             {staff.nome}
@@ -960,7 +960,7 @@ export default function AusenciasPage() {
         <DialogHeader>
           <div>
             <DialogTitle className="flex items-center gap-2">
-              <Plus className="h-5 w-5 text-gold-text" />
+              <Plus className="h-5 w-5 text-brand-text" />
               Nova ausência
             </DialogTitle>
             <DialogDescription>
