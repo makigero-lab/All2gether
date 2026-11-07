@@ -340,7 +340,7 @@ describe('Prova da limpeza', () => {
     expect(itemCal.fotos_conclusao).toBeUndefined();
   });
 
-  test('gestor: concluída sem fotos = retenção de 7 dias já passou; outra empresa 404', async () => {
+  test('gestor: concluída sem fotos = retenção das fotos já passou; outra empresa 404', async () => {
     const c = await cenario();
     const t = await c.tarefa(hora(0, 10), { estado: 'concluida', hora_conclusao: new Date(), fotos_conclusao: [] });
     const r = await request(app).get(`/api/gestor/tarefas/${t._id}/prova`).set(auth(c.tokG));

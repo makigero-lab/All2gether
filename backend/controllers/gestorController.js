@@ -2972,7 +2972,7 @@ exports.reprocessarWebhook = async (req, res) => {
  * GET /api/gestor/tarefas/:id/contacto-hospede   (EXCLUSIVO do admin)
  *
  * Devolve o email e o telefone do hóspede (guardados à parte, em ContactoHospede,
- * e apagados 90 dias depois do check-out). Cada consulta fica em auditoria.
+ * e apagados 30 dias depois do check-out). Cada consulta fica em auditoria.
  *
  * Resposta 200: { email: string|null, telefone: string|null }
  */

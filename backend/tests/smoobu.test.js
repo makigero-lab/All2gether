@@ -228,9 +228,9 @@ describe('Email e telefone do hóspede — só admin', () => {
     expect((await request(app).get(url).set('Authorization', `Bearer ${tokens.staff}`)).status).toBe(403);
   });
 
-  it('o contacto expira 90 dias depois do check-out', async () => {
+  it('o contacto expira 30 dias depois do check-out', async () => {
     const c = await ContactoHospede.findOne({ tarefa_id: tarefaId }).lean();
-    const esperado = new Date('2031-03-14').getTime() + 90 * 24 * 3600 * 1000;
+    const esperado = new Date('2031-03-14').getTime() + 30 * 24 * 3600 * 1000;
     expect(Math.abs(new Date(c.expira_em).getTime() - esperado)).toBeLessThan(24 * 3600 * 1000);
   });
 
@@ -267,7 +267,7 @@ describe('Retenção RGPD dos logs de webhooks (90 dias após o check-out)', () 
     await webhook('newReservation', reserva(9401, { departure: '2032-06-20' }));
     await esperar(300);
     const log = await WebhookLog.findOne({ 'payload.data.id': 9401 }).lean();
-    const esperado = new Date('2032-06-20').getTime() + 90 * 24 * 3600 * 1000;
+    const esperado = new Date('2032-06-20').getTime() + 30 * 24 * 3600 * 1000;
     expect(Math.abs(new Date(log.expira_em).getTime() - esperado)).toBeLessThan(24 * 3600 * 1000);
   });
 
@@ -288,11 +288,11 @@ describe('Retenção RGPD dos logs de webhooks (90 dias após o check-out)', () 
 
     // reserva futura: expira 90 dias depois do departure (e não 90 dias após a receção)
     const futuro = await WebhookLog.findOne({ 'payload.data.id': 9501 }).lean();
-    const esperado = new Date('2032-09-01').getTime() + 90 * 24 * 3600 * 1000;
+    const esperado = new Date('2032-09-01').getTime() + 30 * 24 * 3600 * 1000;
     expect(Math.abs(new Date(futuro.expira_em).getTime() - esperado)).toBeLessThan(24 * 3600 * 1000);
     // sem departure: createdAt + 90 dias
     const semDep = await WebhookLog.findOne({ 'payload.x': 1 }).lean();
-    expect(Math.abs(new Date(semDep.expira_em).getTime() - (criado.getTime() + 90 * 24 * 3600 * 1000))).toBeLessThan(24 * 3600 * 1000);
+    expect(Math.abs(new Date(semDep.expira_em).getTime() - (criado.getTime() + 30 * 24 * 3600 * 1000))).toBeLessThan(24 * 3600 * 1000);
     // idempotente
     expect((await WebhookLog.migrarRetencao()).atualizados).toBe(0);
   });

@@ -2289,3 +2289,40 @@ Stage Summary:
 - Fica por fazer das correções do @UX: I1/I2/I3 (calendário no telemóvel e Semana), I4, I6, P1, P2, P3, P5.
 - **Achados do @Tester (tarefa 5)**: Mudar dia e ausências (DELETE/cancelar/aprovar) devolvem 409 `CONFLITO_CONCORRENCIA` em vez de 500 (cancelar é atómico; `utils/concorrencia.js` nos outros `save()` de tarefa); Mudar dia recusa dias passados (Lisboa) e > 2 anos e avisa se a hora pedida está fora do horário; «Dia da limpeza recalculado» só quando o dia mudou; intermédia no passado dá 400; `desatribuida_manual` impede `preencherVagasPeriodo` de preencher o que o gestor desatribuiu; notas da nova reserva crescem (mín. 4 linhas); «Parceiro» -> «Proprietário» no gestor; Hóspede com 2 linhas.
 - Totais finais: backend 532/532 testes (40 suites), frontend 42/42, tsc e lint limpos, build OK.
+
+
+---
+
+Task ID: RETENCAO-RGPD-PRAZOS-FINAIS
+Agent: Claude Code (@dev)
+Task: Prazos de retenção RGPD recomendados pelo @Legal.
+
+Work Log:
+- `ContactoHospede` e `WebhookLog`: 90 -> 30 dias após o check-out. Migrações idempotentes no arranque (`server.js`): WebhookLog encurta `expira_em` para max(departure, receção) + 30 d (só reduz); ContactoHospede usa o marcador `retencao_dias` (registos sem ele perdem 60 d, uma só vez). Reservas futuras e em curso mantêm os logs, por isso `reconciliar-cancelamentos` continua a funcionar (teste).
+- `jobs/retencao.js` reescrito: regras independentes, por empresa e em lotes de 500, só sobre registos antigos que ainda têm dados; devolve contagens por categoria e por empresa e regista-as no log.
+- `jobs/limpezaFotos.js`: as fotos sobrevivem em `TarefaArquivo` (o arquivista copia tudo, `strict: false`); a mesma limpeza aplica-se lá (prazos finais: ver abaixo).
+- Notas do hóspede separadas do nome; doença: texto limpo a 30 d e ausência apagada a 12 meses; ausências não aprovadas a 12 meses; aprovadas (não doença) mantêm 36 meses; arquivo anonimizado ao fim de 5 anos; auditoria 3 anos; notificações 90 d; contas eliminadas anonimizadas a 30 d (email `eliminado-<id>@invalido`, sem password, inativa; o nome fica). O registo de acesso ao contacto do hóspede não guarda email nem telefone (teste).
+
+Prazos finais (variável de ambiente = nome da constante; valor inválido volta ao por defeito):
+| Dado | Prazo | Variável |
+|---|---|---|
+| Email/telefone do hóspede (ContactoHospede) | check-out + 30 d | (fixo no modelo) |
+| Payload dos webhooks (WebhookLog) | check-out + 30 d | (fixo no modelo) |
+| Notas do hóspede (Tarefa, TarefaArquivo) | 30 d | RETENCAO_NOTAS_HOSPEDE_DIAS |
+| Nome do hóspede (Tarefa, TarefaArquivo, ReservaManual) | 90 d | RETENCAO_HOSPEDES_DIAS |
+| Justificação/notas de ausência por doença | 30 d após o fim | RETENCAO_JUSTIFICACAO_DOENCA_DIAS |
+| Ausência por doença | 12 meses após o fim | RETENCAO_AUSENCIAS_DOENCA_MESES |
+| Ausências pendente, pendente_emergencia, rejeitada, cancelada | 12 meses após o fim | RETENCAO_AUSENCIAS_NAO_APROVADAS_MESES |
+| Ausências aprovadas (não doença) | 36 meses após o fim | RETENCAO_AUSENCIAS_MESES |
+| TarefaArquivo (equipa e pessoas) | anterior a 1 jan (ano - 5) | RETENCAO_ARQUIVO_ANOS |
+| Auditoria | 3 anos | RETENCAO_AUDITORIA_ANOS |
+| Notificações | 90 d | RETENCAO_NOTIFICACOES_DIAS |
+| Contas eliminadas (email, telefone, nif, observações, password) | 30 d | RETENCAO_CONTAS_ELIMINADAS_DIAS |
+| Fotos de conclusão das limpezas (Tarefa e TarefaArquivo) | 30 d após a conclusão | RETENCAO_FOTOS_DIAS (mín. 7) |
+| Fotos das avarias (Tarefa e TarefaArquivo) | 90 d após o registo E só com a avaria resolvida (aberta mantém) | RETENCAO_FOTOS_AVARIAS_DIAS (mín. 7) |
+
+Fotos e proteção do espaço do Atlas (`jobs/limpezaFotos.js`): prazos separados (30 d conclusão, 90 d avarias resolvidas; a data da resolução não é guardada, usa-se `data_registo`, por isso uma avaria resolvida depois dos 90 d perde as fotos na corrida seguinte). No fim do job lê `db.stats()` (o maior de dataSize/storageSize) face a `ATLAS_LIMITE_MB` (512). >= 80%: aviso no sino aos utilizadores `admin` (chave `atlas_espaco:AAAA-MM-DD`, no máximo 1x por dia) e log; >= 90%: nesse dia as fotos de conclusão passam ao prazo de 7 d (avarias não mudam) e o aviso di-lo. Log sempre com o tamanho da BD e a estimativa das fotos (`$strLenBytes`, amostra de 2000 documentos por coleção se houver mais). Falha do `db.stats()` não impede a limpeza. Testes: `tests/retencaoRgpd.test.js` (bloco «limpezaFotos: prazos 30/90 e proteção de espaço»).
+
+Stage Summary:
+- Testes novos em `tests/retencaoRgpd.test.js`; `smoobu.test.js` ajustado de 90 para 30 dias.
+- Primeiro arranque em produção: as migrações encurtam TTL e o job das 03:30 trata o histórico acumulado (ver a resposta ao pedido para como estimar).

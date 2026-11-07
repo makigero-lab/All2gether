@@ -211,6 +211,14 @@ if (require.main === module) {
         console.error('⚠️  Falha na migração de retenção do WebhookLog (não bloqueia):', e.message);
       }
 
+      // Retenção RGPD do email/telefone dos hóspedes: 90 -> 30 dias após o check-out (idempotente).
+      try {
+        const r = await require('./models/ContactoHospede').migrarRetencao();
+        console.log(`🧹 Retenção de ContactoHospede: contactos atualizados=${r.atualizados}.`);
+      } catch (e) {
+        console.error('⚠️  Falha na migração de retenção do ContactoHospede (não bloqueia):', e.message);
+      }
+
       // Índice único parcial {utilizador_id, chave} das notificações (idempotência dos avisos).
       // O autoIndex do mongoose está ativo por omissão; isto garante-o de forma explícita e
       // nunca impede o arranque se falhar.
