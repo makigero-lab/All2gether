@@ -30,7 +30,8 @@ const horaLisboa = (iso: string) =>
  * oferecidas a toda a equipa. Fica com ela quem aceitar primeiro (o servidor decide).
  * Funciona em desktop e em 375 px (cartão em coluna, botão de largura total no telemóvel).
  */
-export function LimpezasLivres({ onAceite }: { onAceite?: () => void }) {
+export function LimpezasLivres({ onAceite, limite }: { onAceite?: () => void; limite?: number }) {
+  const [verTodas, setVerTodas] = useState(false);
   const [vagas, setVagas] = useState<VagaLivre[]>([]);
   const [aAceitar, setAAceitar] = useState<string | null>(null);
   const [mensagem, setMensagem] = useState<{ tipo: "ok" | "aviso" | "erro"; texto: string } | null>(null);
@@ -79,6 +80,7 @@ export function LimpezasLivres({ onAceite }: { onAceite?: () => void }) {
   }
 
   if (vagas.length === 0 && !mensagem) return null;
+  const visiveis = limite && !verTodas ? vagas.slice(0, limite) : vagas;
 
   return (
     <section aria-label="Limpezas livres" className="space-y-3">
@@ -103,7 +105,7 @@ export function LimpezasLivres({ onAceite }: { onAceite?: () => void }) {
           {mensagem.texto}
         </p>
       )}
-      {vagas.map((v) => (
+      {visiveis.map((v) => (
         <Card key={v._id} className="border-primary/40">
           <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0 space-y-1">
@@ -138,6 +140,11 @@ export function LimpezasLivres({ onAceite }: { onAceite?: () => void }) {
           </CardContent>
         </Card>
       ))}
+      {limite && vagas.length > limite && (
+        <Button type="button" variant="outline" size="touch" className="w-full" onClick={() => setVerTodas((v) => !v)} aria-expanded={verTodas}>
+          {verTodas ? "Ver menos" : `Ver todas (${vagas.length})`}
+        </Button>
+      )}
     </section>
   );
 }

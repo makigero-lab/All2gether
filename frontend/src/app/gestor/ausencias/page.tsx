@@ -553,7 +553,7 @@ export default function AusenciasPage() {
           <select
             value={filtroEstado}
             onChange={(e) => setFiltroEstado(e.target.value)}
-            className="h-9 rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
+            className="h-11 rounded-md border border-input bg-background px-3 text-sm md:h-9 ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
             aria-label="Filtrar por estado"
           >
             <option value="todos">Estado: Todos</option>
@@ -567,7 +567,7 @@ export default function AusenciasPage() {
             type="month"
             value={filtroMes}
             onChange={(e) => setFiltroMes(e.target.value)}
-            className="h-9 w-[180px]"
+            className="h-11 w-[180px] md:h-9"
             aria-label="Filtrar por mês"
           />
           {(filtroEstado !== "todos" || filtroMes) && (
@@ -981,7 +981,7 @@ export default function AusenciasPage() {
               onChange={(e) =>
                 setForm((f) => ({ ...f, utilizador_id: e.target.value }))
               }
-              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
+              className="flex h-11 md:h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
             >
               <option value="">Selecionar funcionário…</option>
               {equipa.map((u) => (
@@ -1027,7 +1027,7 @@ export default function AusenciasPage() {
                   tipo: e.target.value as TipoAusenciaAmp,
                 }))
               }
-              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
+              className="flex h-11 md:h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
             >
               <option value="ferias">Férias</option>
               <option value="doenca">Doença</option>

@@ -338,9 +338,6 @@ export default function StaffPage() {
           </div>
         ) : (
           <>
-            {/* Limpezas livres oferecidas a toda a equipa (aceita quem chegar primeiro) */}
-            <LimpezasLivres onAceite={carregar} />
-
             {/* Prompt 124 — Navegação de dias (1 dia de cada vez) */}
             <div className="flex items-center justify-between gap-2">
               <Button
@@ -386,6 +383,9 @@ export default function StaffPage() {
                 ))}
               </div>
             )}
+
+            {/* Limpezas livres oferecidas a toda a equipa (aceita quem chegar primeiro): depois do trabalho do dia */}
+            <LimpezasLivres onAceite={carregar} limite={3} />
 
             {/* Tarefas concluídas do dia selecionado */}
             {tarefasConcluidasDia.length > 0 && (

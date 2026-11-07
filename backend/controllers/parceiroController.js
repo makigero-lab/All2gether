@@ -706,6 +706,9 @@ async function criarReserva(req, res) {
     // Sem ninguém disponível (ou equipa incompleta): oferece a vaga à equipa.
     if (['por_atribuir', 'nao_atribuida'].includes(novaTarefa.estado) || (Number(novaTarefa.pessoas_em_falta) || 0) > 0) {
       await require('../utils/ofertaVaga').abrirOfertaMelhorEsforco(novaTarefa._id);
+      // A resposta traz o estado da oferta já atualizado (abre-se depois de a tarefa ser criada).
+      const campos = await Tarefa.findById(novaTarefa._id).select('oferta_estado oferta_aberta_em oferta_expira_em oferta_dia').lean().catch(() => null);
+      if (campos) Object.assign(novaTarefa, campos);
     }
     if (deOutraOrigem) await avisarGestorDuasLimpezas(empresaId, propriedade, inicioDiaSaida);
 

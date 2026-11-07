@@ -42,6 +42,7 @@ import type { DateClickArg } from "@fullcalendar/interaction";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { OfertaVagaBadge } from "@/components/gestor/oferta-vaga-badge";
 import { EstadoTarefaBadge } from "@/components/ui/estado-tarefa-badge";
 import { ESTADOS_TAREFA, infoEstadoTarefa } from "@/lib/estados";
 import { cn, temHoraReal } from "@/lib/utils";
@@ -68,6 +69,9 @@ interface TarefaCalendario {
   utilizador_id: { _id: string; nome: string } | null;
   equipa_atribuida?: { _id?: string; nome: string }[] | null;
   pessoas_em_falta?: number;
+  /** Vaga oferecida à equipa (ver OfertaVagaBadge). */
+  oferta_estado?: string | null;
+  oferta_expira_em?: string | null;
   data: string;
   tempo_limpeza_minutos: number;
   tipo: string;
@@ -1250,9 +1254,9 @@ export default function CalendarioOperacionalPage() {
         type="button"
         disabled={ausencia}
         onClick={() => { setTarefaSelecionada(x); setReatribuindoPara(""); setInfoDisp(null); }}
-        className="flex min-h-11 w-full items-center justify-between gap-2 rounded-md border px-3 py-2 text-left text-sm disabled:cursor-default"
+        className="flex min-h-11 w-full flex-wrap items-center justify-between gap-x-2 gap-y-1.5 rounded-md border px-3 py-2 text-left text-sm disabled:cursor-default"
       >
-        <span className="min-w-0 flex-1">
+        <span className="min-w-0 flex-1 basis-40">
           <span className="flex items-start gap-1.5 font-medium">
             {!ausencia && x.tipo === "limpeza" && <span className="tipo-marca mt-1" data-tipo={x.tipo_limpeza && COR_TIPO_VALIDOS.includes(x.tipo_limpeza) ? x.tipo_limpeza : "normal"} aria-hidden="true" />}
             <span className="line-clamp-2 break-words">{titulo}</span>
@@ -1262,6 +1266,7 @@ export default function CalendarioOperacionalPage() {
           </span>
         </span>
         {!ausencia && <EstadoTarefaBadge estado={x.estado} className="shrink-0" />}
+        {!ausencia && <OfertaVagaBadge tarefa={x} className="basis-full" />}
       </button>
     );
   };

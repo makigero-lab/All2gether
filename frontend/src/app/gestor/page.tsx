@@ -199,7 +199,7 @@ export default function AdminDashboardPage() {
             {data.checkinsEmRisco.tarefas.slice(0, 3).map((x) => `${x.propriedade_nome} (${formatarDataSegura(x.data, (d) => format(d, "EEE HH:mm", { locale: pt }), x.data)})`).join(", ")}
             {data.checkinsEmRisco.total > 3 ? ` e mais ${data.checkinsEmRisco.total - 3}` : ""}
           </p>
-          <Link href="/gestor/calendario" className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90">
+          <Link href="/gestor/calendario" className="inline-flex h-11 shrink-0 items-center gap-1.5 rounded-md bg-primary px-4 text-xs font-medium md:h-8 md:px-3 text-primary-foreground hover:bg-primary/90">
             Resolver
             <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
           </Link>
@@ -332,8 +332,8 @@ export default function AdminDashboardPage() {
               ) : (
                 <ul className="divide-y">
                   {data.aDecorrerAgora.tarefas.map((x) => (
-                    <li key={x._id} className="flex items-center justify-between gap-2 px-4 py-2.5 text-sm">
-                      <div className="min-w-0">
+                    <li key={x._id} className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 px-4 py-2.5 text-sm">
+                      <div className="min-w-0 flex-1 basis-40">
                         <p className="line-clamp-2 break-words font-medium" title={x.propriedade_nome}>{x.propriedade_nome}</p>
                         <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
                           <TipoMarca tipo={x.tipo_limpeza} className="text-xs" />
@@ -364,18 +364,16 @@ export default function AdminDashboardPage() {
               ) : (
                 <ul className="divide-y">
                   {data.proximas48h.map((x) => (
-                    <li key={x._id} className="flex items-center justify-between gap-2 px-4 py-2.5 text-sm">
-                      <div className="min-w-0">
+                    <li key={x._id} className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 px-4 py-2.5 text-sm">
+                      <div className="min-w-0 flex-1 basis-40">
                         <p className="line-clamp-2 break-words font-medium" title={x.propriedade_nome}>{x.propriedade_nome}</p>
                         <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
                           <TipoMarca tipo={x.tipo_limpeza} className="text-xs" />
                           · {formatarDataSegura(x.data, (d) => format(d, "EEE HH:mm", { locale: pt }), x.data)}
                         </p>
                       </div>
-                      <div className="flex shrink-0 flex-col items-end gap-1">
-                        <EstadoTarefaBadge estado={x.estado} />
-                        <OfertaVagaBadge tarefa={x} />
-                      </div>
+                      <EstadoTarefaBadge estado={x.estado} />
+                      <OfertaVagaBadge tarefa={x} className="basis-full" />
                     </li>
                   ))}
                 </ul>

@@ -43,7 +43,7 @@ const DIAS = [
   { dia: 0, label: "Dom" },
 ];
 
-const CAMPO = "flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+const CAMPO = "flex h-11 md:h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 const AREA = "flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 /** Campo de texto de 1 linha que cresce até mostrar tudo (mín. 2 linhas): nomes e moradas compridos não ficam cortados. */
 function CampoAuto({ className, onChange, value, ...rest }: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { value: string }) {

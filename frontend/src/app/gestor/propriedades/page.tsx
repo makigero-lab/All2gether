@@ -893,7 +893,7 @@ export default function PropriedadesPage() {
                         }));
                       }}
                       required
-                      className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      className="flex h-11 md:h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       <option value="">Seleciona um apartamento…</option>
                       {propriedadesSmoobu.map((p) => (
@@ -1376,7 +1376,7 @@ export default function PropriedadesPage() {
                 onChange={(e) =>
                   setManualForm((f) => ({ ...f, parceiro_id: e.target.value }))
                 }
-                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="flex h-11 md:h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <option value="">Nenhum (propriedade All2gether)</option>
                 {parceirosList.map((p) => (
@@ -1398,7 +1398,7 @@ export default function PropriedadesPage() {
                 onChange={(e) =>
                   setManualForm((f) => ({ ...f, fornecedor_id: e.target.value }))
                 }
-                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="flex h-11 md:h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <option value="">Nenhuma (sem lavandaria)</option>
                 {fornecedoresList.map((f) => (

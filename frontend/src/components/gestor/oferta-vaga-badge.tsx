@@ -32,7 +32,7 @@ export function OfertaVagaBadge({ tarefa, className }: { tarefa: CamposOferta; c
     <Badge
       variant="outline"
       title="Ninguém tinha disponibilidade: a vaga foi oferecida a toda a equipa que não está ausente. Podes atribuir à mão a qualquer momento."
-      className={cn("gap-1 whitespace-nowrap border-primary/50", className)}
+      className={cn("h-auto max-w-full gap-1 whitespace-normal border-primary/50 text-left leading-tight", className)}
     >
       <HandHeart className="h-3 w-3 shrink-0" aria-hidden="true" />
       Vaga oferecida à equipa até {ate}

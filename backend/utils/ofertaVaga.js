@@ -281,7 +281,7 @@ const MSG_JA_ACEITE = 'Esta limpeza já foi aceite por outra pessoa.';
  * (responsável e pessoas em falta), por isso só uma pessoa fica com cada vaga. Lança ErroOferta.
  * @returns {Promise<{ tarefa: object, aviso: string|null }>}
  */
-async function aceitarOferta({ tarefaId, utilizadorId, empresaId }) {
+async function aceitarOfertaUmaVez({ tarefaId, utilizadorId, empresaId }) {
   const agora = new Date();
   const uid = String(utilizadorId);
   const t = await Tarefa.findOne({ _id: tarefaId, empresa_id: empresaId, tipo: 'limpeza' }).lean();
@@ -361,6 +361,23 @@ async function aceitarOferta({ tarefaId, utilizadorId, empresaId }) {
     '/gestor/tarefas'
   );
   return { tarefa: final, aviso };
+}
+
+/**
+ * Aceitar com repetição: se o compare-and-set falhar porque outra pessoa aceitou ao mesmo tempo mas ainda há vaga
+ * (equipa de 2+), relê a limpeza e tenta outra vez (até 3 tentativas) antes de devolver 409.
+ */
+async function aceitarOferta(args) {
+  let ultimo;
+  for (let i = 0; i < 3; i++) {
+    try {
+      return await aceitarOfertaUmaVez(args);
+    } catch (e) {
+      if (!(e instanceof ErroOferta) || e.codigo !== 'JA_ACEITE') throw e;
+      ultimo = e;
+    }
+  }
+  throw ultimo;
 }
 
 module.exports = {

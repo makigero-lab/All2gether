@@ -643,6 +643,9 @@ export default function AdminTarefasPage() {
           </Button>
         )}
         {t.estado !== "cancelada" && t.estado !== "concluida" && (
+          <span className="ml-2 h-6 w-px shrink-0 bg-border md:hidden" aria-hidden="true" />
+        )}
+        {t.estado !== "cancelada" && t.estado !== "concluida" && (
           <Button variant="ghost" size="icon" className={`${tam} text-destructive hover:text-destructive`} onClick={() => handleCancelar(t)} aria-label="Cancelar tarefa" title="Cancelar">
             <AlertCircle className="h-4 w-4" />
           </Button>
@@ -658,7 +661,7 @@ export default function AdminTarefasPage() {
     return (
       <div className="flex flex-wrap items-center gap-1">
         <EstadoTarefaBadge estado={estadoExibido} />
-        <OfertaVagaBadge tarefa={t} />
+        <OfertaVagaBadge tarefa={t} className="basis-full" />
         {(t.estado === "por_atribuir" || t.estado === "nao_atribuida") && t.motivo_nao_atribuicao && (
           <span title={t.motivo_nao_atribuicao} className="cursor-help">
             <Info className="h-3.5 w-3.5 text-muted-foreground" />
@@ -998,7 +1001,7 @@ export default function AdminTarefasPage() {
               aria-label="Data de início"
               value={filtroDataInicio}
               onChange={(e) => { setFiltroDataInicio(e.target.value); setPagina(1); }}
-              className="h-9 w-full min-w-0 sm:w-[150px]"
+              className="h-11 w-full min-w-0 sm:h-9 sm:w-[150px]"
             />
           </div>
           <div className="flex min-w-0 flex-col gap-1.5 max-sm:w-full">
@@ -1008,7 +1011,7 @@ export default function AdminTarefasPage() {
               aria-label="Data de fim"
               value={filtroDataFim}
               onChange={(e) => { setFiltroDataFim(e.target.value); setPagina(1); }}
-              className="h-9 w-full min-w-0 sm:w-[150px]"
+              className="h-11 w-full min-w-0 sm:h-9 sm:w-[150px]"
             />
           </div>
           <div className="flex min-w-0 flex-col gap-1.5 max-sm:w-full">
@@ -1101,12 +1104,10 @@ export default function AdminTarefasPage() {
             <ul className="divide-y md:hidden" aria-label="Limpezas">
               {tarefasPagina.map((t) => (
                 <li key={t._id} className="space-y-2 p-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="break-words font-medium">{t.propriedade_id?.nome ?? "—"}</p>
-                      <p className="text-xs tabular-nums text-muted-foreground">{formatarDataHora(t.data)}</p>
-                    </div>
-                    <div className="shrink-0">{estadoTarefa(t)}</div>
+                  <div className="min-w-0">
+                    <p className="break-words font-medium">{t.propriedade_id?.nome ?? "—"}</p>
+                    <p className="text-xs tabular-nums text-muted-foreground">{formatarDataHora(t.data)}</p>
+                    <div className="mt-1.5">{estadoTarefa(t)}</div>
                   </div>
                   <p className="break-words text-sm text-muted-foreground">
                     <span className="text-xs uppercase tracking-wide">Equipa: </span>

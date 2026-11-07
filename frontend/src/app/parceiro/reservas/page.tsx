@@ -105,7 +105,7 @@ const CELULA_CARTAO =
 /** Marca visual de "por gravar" (não depende só da cor: leva também um traço e o aviso da linha). */
 // Colunas «Limpeza» (estado) e apagar coladas à direita ao fazer scroll na tabela larga (desktop).
 const FIXO_ACOES = "sticky right-0 z-[1] w-12 min-w-[3rem]";
-const FIXO_ESTADO = "sticky right-12 z-[1] w-[11rem] min-w-[11rem] shadow-[-8px_0_8px_-8px_rgba(0,0,0,0.25)]";
+const FIXO_ESTADO = "sticky right-12 z-[1] w-[9rem] min-w-[9rem] min-[1600px]:w-[11rem] min-[1600px]:min-w-[11rem] shadow-[-8px_0_8px_-8px_rgba(0,0,0,0.25)]";
 const PENDENTE_TABELA = "bg-amber-100 dark:bg-amber-900/40 shadow-[inset_3px_0_0_0_rgb(217_119_6)]";
 const PENDENTE_CARTAO = "border-amber-600 bg-amber-50 dark:bg-amber-950/30";
 
@@ -610,6 +610,15 @@ export default function ParceiroReservasPage() {
   const [sessaoTerminou, setSessaoTerminou] = useState(false);
   const [resumo, setResumo] = useState("");
   const [aviso, setAviso] = useState<string | null>(null);
+  /** Resultado visível junto à barra de baixo (o topo da página pode estar fora do ecrã). */
+  const [toast, setToast] = useState<{ texto: string; tipo: "ok" | "aviso" | "erro"; fixo: boolean } | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mostrarToast = useCallback((texto: string, tipo: "ok" | "aviso" | "erro", fixo = false) => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast({ texto, tipo, fixo });
+    if (!fixo) toastTimer.current = setTimeout(() => setToast(null), 4500);
+  }, []);
+  useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
   const [descartarAberto, setDescartarAberto] = useState(false);
   const reconciliarNoProximo = useRef(true);
   const rascunhoRef = useRef(rascunho);
@@ -802,6 +811,7 @@ export default function ParceiroReservasPage() {
     const item: NovaReserva = { ...v, propriedade_id: nova.propriedade_id, tmp: `nova-${Date.now()}-${contadorTmp.current}` };
     setRascunho((r) => ({ ...r, novas: [item, ...r.novas] }));
     setNova({ ...NOVA_VAZIA, propriedade_id: nova.propriedade_id });
+    mostrarToast("Reserva acrescentada. Fica por gravar: carrega em Gravar para a enviar.", "ok");
   }
 
   /** Conflito: mantém a minha alteração (aceita o valor atual do sistema como ponto de partida). */
@@ -1001,7 +1011,7 @@ export default function ParceiroReservasPage() {
     if (criadas) partes.push(`${plural(plural(criadas, "reserva"), "criada")}`);
     if (eliminadas) partes.push(`${plural(plural(eliminadas, "reserva"), "eliminada")}`);
     const resultado = partes.length ? partes.join(", ") : "Nada foi gravado";
-    setResumo(
+    const textoResumo =
       semRede || semSessao
         ? `${resultado}. O resto continua por gravar.`
         : comErro > 0
@@ -1009,8 +1019,17 @@ export default function ParceiroReservasPage() {
         : criadas > 0 || gravadas > 0
         ? `${resultado}. As limpezas foram criadas/reatribuídas.`
         : `${resultado}.`
-    );
+    ;
+    setResumo(textoResumo);
     if (avisosServidor.length > 0) setAviso(avisosServidor.join(" "));
+    // Resultado também junto à barra de baixo (no telemóvel o topo fica fora do ecrã). Avisos e erros ficam até fechar.
+    {
+      const falhou = semRede || semSessao || comErro > 0;
+      const textoToast = [semSessao ? "A tua sessão terminou. Inicia sessão outra vez, as alterações ficam guardadas." : semRede ? "Sem ligação. As alterações continuam aqui." : "", textoResumo, ...avisosServidor]
+        .filter(Boolean)
+        .join(" ");
+      mostrarToast(textoToast, falhou ? "erro" : avisosServidor.length > 0 ? "aviso" : "ok", falhou || avisosServidor.length > 0);
+    }
     if (semSessao) {
       setErro("A tua sessão terminou. Inicia sessão outra vez, as alterações ficam guardadas.");
       setSessaoTerminou(true);
@@ -1222,28 +1241,14 @@ export default function ParceiroReservasPage() {
         {pendentes === 0 ? "Sem alterações por gravar." : `${textoPendentes(pendentes)}.`} {resumo}
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
+      <div className="flex flex-col gap-1">
+        <div className="flex items-center justify-between gap-3">
           <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
             <Table2 className="h-6 w-6 text-brand-text" />
             Minhas reservas
           </h1>
-          <p className="text-sm text-muted-foreground">
-            Edita os campos e carrega em <strong>Gravar</strong>: até lá nada é enviado.
-          </p>
-          <details className="group mt-1 text-sm text-muted-foreground">
-            <summary className="inline-flex min-h-11 cursor-pointer items-center font-medium text-brand-text marker:content-none sm:min-h-9">
-              Como funciona?
-            </summary>
-            <p className="max-w-3xl pb-1">
-              Clica num campo para editar. Sair do campo guarda só neste aparelho (rascunho): nada é enviado nem
-              atribuído até carregares em <strong>Gravar</strong>. Para uma reserva nova, preenche a linha do topo
-              (ou o cartão &quot;Nova reserva&quot; no telemóvel) e carrega em Gravar, Enter ou +. Cada reserva
-              gera uma limpeza.
-            </p>
-          </details>
-        </div>
-        <div className="flex gap-2">
+
+          <div className="flex shrink-0 gap-2">
           <span className="hidden md:inline-flex">{botaoGravar()}</span>
           <Button
             variant="outline"
@@ -1258,9 +1263,24 @@ export default function ParceiroReservasPage() {
             aria-label="Exportar reservas gravadas para Excel"
           >
             <Download className="h-4 w-4" />
-            <span className="hidden sm:inline">Exportar</span>
+            <span>Exportar</span>
           </Button>
         </div>
+        </div>
+          <p className="text-sm text-muted-foreground">
+          Edita os campos e carrega em <strong>Gravar</strong>: até lá nada é enviado.
+        </p>
+        <details className="group mt-1 text-sm text-muted-foreground">
+          <summary className="inline-flex min-h-11 cursor-pointer items-center font-medium text-brand-text marker:content-none sm:min-h-9">
+            Como funciona?
+          </summary>
+          <p className="max-w-3xl pb-1">
+            Clica num campo para editar. Sair do campo guarda só neste aparelho (rascunho): nada é enviado nem
+            atribuído até carregares em <strong>Gravar</strong>. Para uma reserva nova, preenche a linha do topo
+            (ou o cartão &quot;Nova reserva&quot; no telemóvel) e carrega em Gravar, Enter ou +. Cada reserva
+            gera uma limpeza.
+          </p>
+        </details>
       </div>
 
       {erro && (
@@ -1292,6 +1312,21 @@ export default function ParceiroReservasPage() {
             </button>
           </CardContent>
         </Card>
+      )}
+
+      {toast && (
+        <div
+          role={toast.tipo === "ok" ? "status" : "alert"}
+          className={`fixed inset-x-3 ${podeGravar ? "bottom-[5.5rem]" : "bottom-4"} z-40 mx-auto flex max-w-xl items-start gap-2 rounded-lg border bg-background p-3 text-sm shadow-lg md:bottom-4 md:left-auto md:right-4 md:mx-0 md:w-[28rem] ${
+            toast.tipo === "erro" ? "border-destructive/60 text-destructive" : toast.tipo === "aviso" ? "border-amber-500/60" : "border-emerald-600/50"
+          }`}
+        >
+          <AlertCircle className={`mt-0.5 h-4 w-4 shrink-0 ${toast.tipo === "aviso" ? "text-amber-600" : ""}`} aria-hidden="true" />
+          <span className="min-w-0 flex-1 break-words">{toast.texto}</span>
+          <button type="button" onClick={() => setToast(null)} aria-label="Fechar mensagem" className="-m-2 min-h-[44px] min-w-[44px] shrink-0">
+            <X className="mx-auto h-4 w-4" />
+          </button>
+        </div>
       )}
 
       {/* Barra de alterações por gravar: fixa em baixo no telemóvel; no desktop fica visível ao rolar. */}
@@ -1335,20 +1370,20 @@ export default function ParceiroReservasPage() {
         {/* Desktop (md+): tabela editável tipo folha de cálculo. */}
         <Card className="hidden md:block" onFocus={aoFocar} onBlur={aoDesfocar}>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1500px] border-collapse text-sm">
+            <table className="w-full min-w-[1000px] border-collapse text-sm min-[1600px]:min-w-[1500px]">
               <thead>
                 <tr className="border-b bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
                   <Cab chave="propriedade" rotulo="Propriedade" ordem={ordem} onOrdenar={ordenarPorColuna} />
-                  <Cab chave="check_in" rotulo="Check-in" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[11rem]" />
-                  <Cab chave="hora_checkin" rotulo="Hora c/in" ordem={ordem} onOrdenar={ordenarPorColuna} />
-                  <Cab chave="check_out" rotulo="Check-out" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[11rem]" />
-                  <Cab chave="noites" rotulo="Noites" ordem={ordem} onOrdenar={ordenarPorColuna} direita />
+                  <Cab chave="check_in" rotulo="Check-in" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[9rem] min-[1600px]:min-w-[11rem]" />
+                  <Cab chave="hora_checkin" rotulo="Hora c/in" ordem={ordem} onOrdenar={ordenarPorColuna} className="hidden min-[1600px]:table-cell" />
+                  <Cab chave="check_out" rotulo="Check-out" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[9rem] min-[1600px]:min-w-[11rem]" />
+                  <Cab chave="noites" rotulo="Noites" ordem={ordem} onOrdenar={ordenarPorColuna} direita className="hidden min-[1600px]:table-cell" />
                   <Cab chave="hospedes" rotulo="Hósp." ordem={ordem} onOrdenar={ordenarPorColuna} direita />
-                  <Cab chave="nome_hospede" rotulo="Hóspede" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[9rem]" />
+                  <Cab chave="nome_hospede" rotulo="Hóspede" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[8rem] min-[1600px]:min-w-[9rem]" />
                   <Cab chave="plataforma" rotulo="Plataforma" ordem={ordem} onOrdenar={ordenarPorColuna} />
-                  <Cab chave="tipo_limpeza" rotulo="Tipo de limpeza" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[11rem]" />
-                  <Cab chave="horario_preferido" rotulo="Horário" ordem={ordem} onOrdenar={ordenarPorColuna} />
-                  <Cab chave="observacoes" rotulo="Notas" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[28rem]" />
+                  <Cab chave="tipo_limpeza" rotulo="Tipo de limpeza" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[9rem] min-[1600px]:min-w-[11rem]" />
+                  <Cab chave="horario_preferido" rotulo="Horário" ordem={ordem} onOrdenar={ordenarPorColuna} className="hidden min-[1600px]:table-cell" />
+                  <Cab chave="observacoes" rotulo="Notas" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[12rem] min-[1600px]:min-w-[28rem]" />
                   <Cab chave="estado" rotulo="Limpeza" ordem={ordem} onOrdenar={ordenarPorColuna} className={`${FIXO_ESTADO} z-[2] bg-background bg-gradient-to-r from-muted/40 to-muted/40`} />
                   <th className={`${FIXO_ACOES} z-[2] bg-background bg-gradient-to-r from-muted/40 to-muted/40 px-2 py-2`}><span className="sr-only">Ações</span></th>
                 </tr>
@@ -1356,7 +1391,7 @@ export default function ParceiroReservasPage() {
               <tbody>
                 {/* Linha de entrada: Enter ou + acrescentam-na às reservas por gravar */}
                 <tr className="border-b bg-primary/5" onKeyDown={enterAdiciona}>
-                  <td className="max-w-[16rem] p-0">
+                  <td className="max-w-[10rem] p-0 min-[1600px]:max-w-[16rem]">
                     <select
                       value={nova.propriedade_id}
                       onChange={(e) => setN("propriedade_id")(e.target.value)}
@@ -1373,13 +1408,13 @@ export default function ParceiroReservasPage() {
                     <input type="date" value={nova.check_in} className={CELULA} disabled={gravando} aria-label="Nova reserva: check-in"
                       onChange={(e) => setNova((n) => ({ ...n, check_in: e.target.value, check_out: n.check_out || e.target.value }))} />
                   </td>
-                  <td className="p-0">
+                  <td className="hidden p-0 min-[1600px]:table-cell">
                     <input value={nova.hora_checkin} onChange={(e) => setN("hora_checkin")(e.target.value)} placeholder="18:00" className={CELULA} disabled={gravando} aria-label="Nova reserva: hora de check-in" />
                   </td>
                   <td className="p-0">
                     <input type="date" value={nova.check_out} onChange={(e) => setN("check_out")(e.target.value)} className={CELULA} disabled={gravando} aria-label="Nova reserva: check-out" />
                   </td>
-                  <td className="px-2 text-right text-muted-foreground">{noites(nova.check_in, nova.check_out) || ""}</td>
+                  <td className="hidden px-2 text-right text-muted-foreground min-[1600px]:table-cell">{noites(nova.check_in, nova.check_out) || ""}</td>
                   <td className="p-0">
                     <input type="number" min={0} value={nova.hospedes} onChange={(e) => setN("hospedes")(e.target.value)} className={`${CELULA} text-right`} disabled={gravando} aria-label="Nova reserva: hóspedes" />
                   </td>
@@ -1397,7 +1432,7 @@ export default function ParceiroReservasPage() {
                       {OPCOES_TIPO.map((o) => <option key={o.valor} value={o.valor}>{o.rotulo}</option>)}
                     </select>
                   </td>
-                  <td className="p-0">
+                  <td className="hidden p-0 min-[1600px]:table-cell">
                     <input value={nova.horario_preferido} onChange={(e) => setN("horario_preferido")(e.target.value)} placeholder="11h - 14h" className={CELULA} disabled={gravando} aria-label="Nova reserva: horário preferido de limpeza" />
                   </td>
                   <td className="p-0">
@@ -1426,17 +1461,17 @@ export default function ParceiroReservasPage() {
                   return (
                     <FragmentoLinha key={l.key} avisos={avisos}>
                       <tr className={`border-b last:border-0 hover:bg-muted/30 ${cor.tr}`}>
-                        <td title={nome} className={`max-w-[16rem] truncate px-2 py-1 font-medium ${cor.faixa}`}>{nome}</td>
+                        <td title={nome} className={`max-w-[10rem] truncate px-2 min-[1600px]:max-w-[16rem] py-1 font-medium ${cor.faixa}`}>{nome}</td>
                         <td className="p-0">
                           <Celula type="date" value={ci} pendente={p("check_in")} rotulo={`Check-in, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "check_in", v)} />
                         </td>
-                        <td className="p-0">
+                        <td className="hidden p-0 min-[1600px]:table-cell">
                           <Celula value={l.valores.hora_checkin} pendente={p("hora_checkin")} rotulo={`Hora de check-in, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "hora_checkin", v)} />
                         </td>
                         <td className="p-0">
                           <Celula type="date" value={co} pendente={p("check_out")} rotulo={`Check-out, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "check_out", v)} />
                         </td>
-                        <td className="w-16 p-0">
+                        <td className="hidden w-16 p-0 min-[1600px]:table-cell">
                           <Celula type="number" align="right" pendente={p("check_out")} rotulo={`Noites, ${nome}`} value={String(noites(ci, co))} disabled={l.semEdicao} onCommit={(v) => alterar(l, "noites", v)} />
                         </td>
                         <td className="w-16 p-0">
@@ -1451,7 +1486,7 @@ export default function ParceiroReservasPage() {
                         <td className="p-0">
                           <Celula type="select" opcoes={OPCOES_TIPO} pendente={p("tipo_limpeza")} rotulo={`Tipo de limpeza, ${nome}`} value={tipoOuNormal(l.valores.tipo_limpeza)} disabled={l.semEdicao} onCommit={(v) => alterar(l, "tipo_limpeza", v)} />
                         </td>
-                        <td className="p-0">
+                        <td className="hidden p-0 min-[1600px]:table-cell">
                           <Celula value={l.valores.horario_preferido} pendente={p("horario_preferido")} rotulo={`Horário preferido, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "horario_preferido", v)} />
                         </td>
                         <td className="p-0">

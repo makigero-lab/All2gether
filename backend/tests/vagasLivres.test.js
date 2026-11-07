@@ -115,6 +115,24 @@ describe('oferta à equipa', () => {
     expect((await request(app).get('/api/staff/vagas-livres').set(auth(await login(c.cris)))).body.vagas).toHaveLength(0);
   });
 
+  test('equipa de 2 com 6 aceitações em simultâneo: acabam exatamente 2 aceites', async () => {
+    const c = await cenario({ sn: 2 });
+    const r = await reservar(c, { check_in: diaEm(7), check_out: diaEm(10) });
+    const id = r.body.tarefa._id;
+    const extra = [];
+    for (const nome of ['Dani', 'Eva', 'Fabio']) extra.push(await c.mk(nome, 'staff', { dias_folga: TODOS_OS_DIAS }));
+    const users = [c.ana, c.bia, c.cris, ...extra];
+    const tokens = [];
+    for (const u of users) tokens.push(await login(u));
+    const res = await Promise.all(tokens.map((tk) => aceitar(tk, id)));
+    expect(res.filter((x) => x.status === 200)).toHaveLength(2);
+    expect(res.filter((x) => x.status === 409).every((x) => x.body.codigo === 'JA_ACEITE')).toBe(true);
+    const t = await Tarefa.findById(id).lean();
+    expect(t.pessoas_em_falta).toBe(0);
+    expect((t.equipa_atribuida || []).length).toBe(2);
+    expect(t.oferta_estado).toBe('aceite');
+  });
+
   test('equipa de 2 pessoas: aceitam-se duas vagas e a terceira pessoa fica de fora', async () => {
     const c = await cenario({ sn: 2 });
     const r = await reservar(c, { check_in: diaEm(7), check_out: diaEm(10) });
