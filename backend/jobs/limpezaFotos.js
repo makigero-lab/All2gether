@@ -31,14 +31,17 @@ const MB = 1024 * 1024;
 /** Prazo em dias lido da env (no momento da chamada). Inválido -> defeito; abaixo do mínimo -> mínimo. */
 function lerDias(nome, defeito) {
   const n = Number(process.env[nome]);
-  if (!process.env[nome] || !Number.isFinite(n)) return defeito;
-  return Math.max(MINIMO_DIAS, Math.floor(n));
+  // Valor inválido ou abaixo do mínimo volta ao defeito (como em retencao.js): uma
+  // configuração errada nunca encurta o prazo.
+  if (!process.env[nome] || !Number.isFinite(n) || n < MINIMO_DIAS) return defeito;
+  return Math.floor(n);
 }
 const diasConclusao = () => lerDias('RETENCAO_FOTOS_DIAS', 30);
 const diasAvarias = () => lerDias('RETENCAO_FOTOS_AVARIAS_DIAS', 90);
 function limiteAtlasMb() {
   const n = Number(process.env.ATLAS_LIMITE_MB);
-  return Number.isFinite(n) && n > 0 ? n : 512;
+  // Abaixo de 50 MB é quase de certeza um erro de configuração: usa o limite do plano gratuito.
+  return Number.isFinite(n) && n >= 50 ? n : 512;
 }
 
 /**

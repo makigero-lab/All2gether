@@ -369,19 +369,19 @@ describe('limpezaFotos: prazos 30/90 e proteção de espaço', () => {
     expect(d.avarias.map((a) => a.fotos)).toEqual([['Y'], []]);
   });
 
-  test('variáveis de ambiente: prazo alterado e mínimo de 7 dias', async () => {
+  test('variáveis de ambiente: prazo alterado; abaixo do mínimo volta aos 30 dias', async () => {
     stats(10);
     const c = await empresa();
     process.env.RETENCAO_FOTOS_DIAS = '60';
     const meio = await tar(c, 40);
     await executarLimpezaFotos();
     expect((await ler(meio)).fotos_conclusao).toEqual(['F']);
-    process.env.RETENCAO_FOTOS_DIAS = '1'; // abaixo do mínimo -> 7
+    process.env.RETENCAO_FOTOS_DIAS = '1'; // abaixo do mínimo -> volta aos 30, não encurta
     const dez = await tar(c, 10);
-    const tres = await tar(c, 3);
+    const quarenta = await tar(c, 40);
     await executarLimpezaFotos();
-    expect((await ler(dez)).fotos_conclusao).toEqual([]);
-    expect((await ler(tres)).fotos_conclusao).toEqual(['F']);
+    expect((await ler(dez)).fotos_conclusao).toEqual(['F']);
+    expect((await ler(quarenta)).fotos_conclusao).toEqual([]);
   });
 
   test('aos 80%: avisa os admins uma só vez por dia e mantém o prazo de 30 d', async () => {

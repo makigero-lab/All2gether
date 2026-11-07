@@ -112,7 +112,7 @@ webhookLogSchema.statics.migrarRetencao = async function migrarRetencao() {
     ],
   };
   const r = await this.updateMany(
-    { $or: [{ expira_em: { $exists: false } }, { $expr: { $gt: ['$expira_em', novo] } }] },
+    { $or: [{ expira_em: { $exists: false } }, { expira_em: null }, { $expr: { $gt: ['$expira_em', novo] } }] },
     [{ $set: { expira_em: novo } }]
   );
   return { indiceAntigoRemovido: Boolean(antigo), atualizados: r.modifiedCount };

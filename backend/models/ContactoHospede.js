@@ -44,7 +44,7 @@ contactoHospedeSchema.statics.calcularExpiracao = function (checkout) {
  * (sem `retencao_dias`) passam a expirar 30 dias após o check-out, ou seja, menos 60 dias.
  */
 contactoHospedeSchema.statics.migrarRetencao = async function migrarRetencao() {
-  const r = await this.updateMany({ retencao_dias: { $exists: false } }, [
+  const r = await this.updateMany({ retencao_dias: { $exists: false }, expira_em: { $type: 'date' } }, [
     {
       $set: {
         expira_em: { $subtract: ['$expira_em', (RETENCAO_DIAS_ANTIGA - RETENCAO_DIAS) * MS_DIA] },
