@@ -333,6 +333,7 @@ async function guardarContactoHospede(tarefa, contacto) {
           empresa_id: tarefa.empresa_id,
           ...c,
           expira_em: ContactoHospede.calcularExpiracao(checkout),
+          retencao_dias: ContactoHospede.RETENCAO_DIAS,
         },
       },
       { upsert: true, setDefaultsOnInsert: true }

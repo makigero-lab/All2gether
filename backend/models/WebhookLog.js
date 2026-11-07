@@ -56,10 +56,10 @@ const webhookLogSchema = new mongoose.Schema(
 webhookLogSchema.index({ status: 1, createdAt: -1 });
 
 // RGPD (minimização/retenção): o payload bruto contém dados pessoais de hóspedes
-// (nome, email, telefone). Cada log expira 90 dias DEPOIS DO CHECK-OUT da reserva
+// (nome, email, telefone). Cada log expira 30 dias DEPOIS DO CHECK-OUT da reserva
 // (e não da receção), para que uma reserva feita com muita antecedência não perca
 // a cópia antes da estadia. O MongoDB apaga o documento quando `expira_em` passa.
-const RETENCAO_DIAS = 90;
+const RETENCAO_DIAS = 30;
 const MS_DIA = 24 * 60 * 60 * 1000;
 webhookLogSchema.index({ expira_em: 1 }, { expireAfterSeconds: 0 });
 
@@ -85,7 +85,9 @@ webhookLogSchema.pre('validate', function definirExpiracao(next) {
 /**
  * Migração (idempotente, corre no arranque):
  *  1. remove o antigo índice TTL sobre createdAt (apagava 90 dias após a receção);
- *  2. calcula `expira_em` nos logs antigos: o mais tardio entre departure e createdAt + 90 dias.
+ *  2. calcula `expira_em` nos logs sem ele e ENCURTA os que passam de
+ *     max(departure, createdAt) + 30 dias (retenção de 90 para 30 dias). Só reduz: repetir não muda nada.
+ *     As reservas futuras e em curso mantêm os logs (a reconciliação de cancelamentos precisa deles).
  */
 webhookLogSchema.statics.migrarRetencao = async function migrarRetencao() {
   const antigo = (await this.collection.indexes()).find(
@@ -93,28 +95,26 @@ webhookLogSchema.statics.migrarRetencao = async function migrarRetencao() {
   );
   if (antigo) await this.collection.dropIndex(antigo.name);
 
-  const r = await this.updateMany({ expira_em: { $exists: false } }, [
-    {
-      $set: {
-        expira_em: {
-          $add: [
-            {
-              $max: [
-                {
-                  $ifNull: [
-                    { $dateFromString: { dateString: { $ifNull: ['$payload.data.departure', ''] }, onError: null, onNull: null } },
-                    '$createdAt',
-                  ],
-                },
-                '$createdAt',
-              ],
-            },
-            RETENCAO_DIAS * MS_DIA,
-          ],
-        },
+  const novo = {
+    $add: [
+      {
+        $max: [
+          {
+            $ifNull: [
+              { $dateFromString: { dateString: { $ifNull: ['$payload.data.departure', ''] }, onError: null, onNull: null } },
+              '$createdAt',
+            ],
+          },
+          '$createdAt',
+        ],
       },
-    },
-  ]);
+      RETENCAO_DIAS * MS_DIA,
+    ],
+  };
+  const r = await this.updateMany(
+    { $or: [{ expira_em: { $exists: false } }, { $expr: { $gt: ['$expira_em', novo] } }] },
+    [{ $set: { expira_em: novo } }]
+  );
   return { indiceAntigoRemovido: Boolean(antigo), atualizados: r.modifiedCount };
 };
 

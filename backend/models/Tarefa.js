@@ -145,7 +145,7 @@ const tarefaSchema = new mongoose.Schema(
     // HF19 — Fotos obrigatórias na conclusão da tarefa.
     // O staff tem de anexar pelo menos 1 foto (máx. 5) para concluir.
     // Strings base64 ou URLs. O cron job limpezaFotos esvazia este array
-    // 7 dias após a conclusão para otimizar armazenamento.
+    // 30 dias após a conclusão (RETENCAO_FOTOS_DIAS) para otimizar armazenamento.
     fotos_conclusao: {
       type: [String],
       default: [],

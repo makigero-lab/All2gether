@@ -6,7 +6,7 @@
  *   GET   /api/parceiro/reservas/:id/limpeza                   — o que o parceiro pode ver
  *
  * As listas (calendário, tarefas) já NÃO trazem fotos: carregam-se aqui, só ao abrir.
- * A retenção de 7 dias mantém-se (jobs/limpezaFotos.js esvazia as fotos).
+ * A retenção de 30 dias (fotos de conclusão) mantém-se (jobs/limpezaFotos.js esvazia as fotos).
  * O parceiro NUNCA vê avarias, observações do staff nem a checklist.
  */
 const mongoose = require('mongoose');
@@ -51,7 +51,7 @@ exports.getProvaLimpeza = async (req, res) => {
       iniciada_em: t.iniciada_em || null,
       inicio_origem: t.inicio_origem || null,
       fotos,
-      // Concluída sem fotos = já passaram os 7 dias de retenção.
+      // Concluída sem fotos = já passou a retenção das fotos.
       fotos_expiradas: t.estado === 'concluida' && fotos.length === 0,
       checklist: contarChecklist(t),
       observacoes_staff: t.observacoes_staff || '',
