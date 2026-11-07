@@ -14,6 +14,7 @@
  */
 
 const mongoose = require('mongoose');
+const { pl } = require('../utils/plural');
 const Ausencia = require('../models/Ausencia');
 const Utilizador = require('../models/Utilizador');
 const Tarefa = require('../models/Tarefa');
@@ -49,7 +50,7 @@ function textoPreenchimento(p) {
   if (!p) return '';
   if (p.erro || p.em_segundo_plano) return 'O preenchimento automático das vagas não terminou: usa "Auto-Atribuir Pendentes" se ficarem tarefas por atribuir.';
   const partes = [];
-  if (p.atribuidas > 0) partes.push(`${p.atribuidas} tarefa(s) preenchida(s) automaticamente`);
+  if (p.atribuidas > 0) partes.push(`${pl(p.atribuidas, 'tarefa preenchida', 'tarefas preenchidas')} automaticamente`);
   if (p.orfas > 0) partes.push(`${p.orfas} continuam por preencher (ninguém disponível)`);
   return partes.length ? `${partes.join('; ')}.` : '';
 }
@@ -440,7 +441,7 @@ exports.aprovarRejeitarAusencia = async (req, res) => {
       recurso: 'ausencia',
       recurso_id: ausencia._id,
       descricao: `Ausência de "${utilizador?.nome ?? '?'}" ${novoEstado}${
-        redistribuicao ? `: ${redistribuicao.desatribuidas} tarefa(s) desatribuída(s)` : ''
+        redistribuicao ? `: ${pl(redistribuicao.desatribuidas, 'tarefa desatribuída', 'tarefas desatribuídas')}` : ''
       }`,
       detalhes: {
         utilizador_id: String(ausencia.utilizador_id),
@@ -478,7 +479,7 @@ exports.aprovarRejeitarAusencia = async (req, res) => {
     return res.status(200).json({
       mensagem:
         novoEstado === 'aprovada'
-          ? `Ausência aprovada. ${redistribuicao.desatribuidas} tarefa(s) desatribuída(s). ` +
+          ? `Ausência aprovada. ${pl(redistribuicao.desatribuidas, 'tarefa desatribuída', 'tarefas desatribuídas')}. ` +
             textoReatribuicao(redistribuicao.reatribuicao) +
             (redistribuicao.aviso ? ` ${redistribuicao.aviso}` : '')
           : 'Ausência rejeitada.' + (preenchimento ? ` ${textoPreenchimento(preenchimento)}` : ''),
@@ -994,7 +995,7 @@ async function reatribuirAutomaticamente(empresaId, utilizadorId, inicio, fim) {
     await avisarGestores(
       empresaId,
       '⚠️ Tarefas por atribuir',
-      `${resultado.orfas} tarefa(s) ficaram por atribuir ${periodo}: ninguém está disponível. Atribui-as manualmente.`
+      `${pl(resultado.orfas, 'tarefa ficou', 'tarefas ficaram')} por atribuir ${periodo}: ninguém está disponível. Atribui-as manualmente.`
     );
   }
   if (resultado.faltam && resultado.faltam.length > 0) {
@@ -1019,7 +1020,7 @@ function textoReatribuicao(re) {
   if (!re) return '';
   if (re.erro) return 'Não foi possível reatribuir automaticamente: ficam por atribuir.';
   const partes = [];
-  if (re.reatribuidas > 0) partes.push(`${re.reatribuidas} tarefa(s) reatribuída(s) automaticamente`);
+  if (re.reatribuidas > 0) partes.push(`${pl(re.reatribuidas, 'tarefa reatribuída', 'tarefas reatribuídas')} automaticamente`);
   if (re.orfas > 0) partes.push(`${re.orfas} por atribuir (ninguém disponível)`);
   if (re.parciais > 0) partes.push(`${re.parciais} com equipa incompleta (falta pessoa)`);
   return partes.length ? `${partes.join('; ')}.` : '';
@@ -1104,11 +1105,11 @@ exports.reaplicarAusencia = async (req, res) => {
     return res.status(200).json({
       mensagem: (
         redistribuicao.desatribuidas > 0
-          ? `Ausência reaplicada. ${redistribuicao.desatribuidas} tarefa(s) desatribuída(s)` +
+          ? `Ausência reaplicada. ${pl(redistribuicao.desatribuidas, 'tarefa desatribuída', 'tarefas desatribuídas')}` +
             (redistribuicao.reatribuicao
-              ? `; ${redistribuicao.reatribuicao.reatribuidas} reatribuída(s) automaticamente` +
+              ? `; ${pl(redistribuicao.reatribuicao.reatribuidas, 'reatribuída', 'reatribuídas')} automaticamente` +
                 (redistribuicao.reatribuicao.orfas > 0
-                  ? `; ${redistribuicao.reatribuicao.orfas} permanece(m) por atribuir.`
+                  ? `; ${pl(redistribuicao.reatribuicao.orfas, 'permanece', 'permanecem')} por atribuir.`
                   : '.')
               : '.')
           : 'Ausência reaplicada. Não havia tarefas atribuídas no período (já estavam corretas).' +

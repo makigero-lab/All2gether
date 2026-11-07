@@ -267,7 +267,7 @@ export default function PropriedadesPage() {
         const n = res.tarefasDesatribuidas;
         setFeedbackOk(
           n > 0
-            ? `Propriedade desativada. ${plural(plural(n, "tarefa"), "futura")} não concluída(s) foram desatribuída(s) (por atribuir).`
+            ? `Propriedade desativada. ${plural(n, "tarefa futura não concluída foi desatribuída", "tarefas futuras não concluídas foram desatribuídas")} (por atribuir).`
             : `Propriedade desativada. Não havia tarefas futuras por executar.`
         );
       }
@@ -511,7 +511,7 @@ export default function PropriedadesPage() {
     setEditando(p);
     setEditForm({
       nome: p.nome,
-      smoobu_id: p.smoobu_id,
+      smoobu_id: p.smoobu_id ?? "",
       morada: p.morada ?? "",
       tempo_limpeza_minutos: String(p.tempo_limpeza_minutos ?? 45),
       checklist: (p.checklist ?? []).join("\n"),

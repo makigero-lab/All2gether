@@ -109,6 +109,7 @@ export default function DetalheTarefaPage({
     // Prompt 138 (136 V2) — Tempo de viagem (para mostrar no detalhe).
     tempo_viagem_minutos: tarefa.tempo_viagem_minutos ?? null,
     equipa_nomes: tarefa.equipa_nomes ?? null,
+    observacoes_staff: tarefa.observacoes_staff ?? null,
     iniciada_em: tarefa.iniciada_em ?? null,
     inicio_origem: tarefa.inicio_origem ?? null,
     nao_consegui_comecar: tarefa.nao_consegui_comecar ?? null,

@@ -9,6 +9,7 @@
  */
 
 const mongoose = require('mongoose');
+const { pl } = require('../utils/plural');
 const bcrypt = require('bcryptjs');
 const Empresa = require('../models/Empresa');
 const Propriedade = require('../models/Propriedade');
@@ -1142,11 +1143,11 @@ exports.eliminarPropriedade = async (req, res) => {
 
       console.log(
         `🗑️ [eliminarPropriedade] HARD DELETE: "${propriedade.nome}" (${id}) ` +
-          `+ ${tarefasApagadas.deletedCount} tarefa(s) futura(s) apagada(s).`
+          `+ ${pl(tarefasApagadas.deletedCount, 'tarefa futura apagada', 'tarefas futuras apagadas')}.`
       );
 
       return res.status(200).json({
-        mensagem: `Propriedade "${propriedade.nome}" eliminada definitivamente. ${tarefasApagadas.deletedCount} tarefa(s) futura(s) apagada(s).`,
+        mensagem: `Propriedade "${propriedade.nome}" eliminada definitivamente. ${pl(tarefasApagadas.deletedCount, 'tarefa futura apagada', 'tarefas futuras apagadas')}.`,
         propriedade_id: id,
         hard_delete: true,
         tarefas_apagadas: tarefasApagadas.deletedCount,
@@ -1181,7 +1182,7 @@ exports.eliminarPropriedade = async (req, res) => {
     });
 
     return res.status(200).json({
-      mensagem: `Propriedade "${propriedade.nome}" desativada. ${resultadoTarefas.modifiedCount} tarefa(s) futura(s) desatribuída(s).`,
+      mensagem: `Propriedade "${propriedade.nome}" desativada. ${pl(resultadoTarefas.modifiedCount, 'tarefa futura desatribuída', 'tarefas futuras desatribuídas')}.`,
       propriedade_id: id,
       hard_delete: false,
       tarefas_desatribuidas: resultadoTarefas.modifiedCount,
@@ -2534,7 +2535,7 @@ exports.reportarFaltaSubita = async (req, res) => {
 
     return res.status(200).json({
       mensagem:
-        `Falta súbita processada: ${desatribuidas} tarefa(s) desatribuída(s). ${textoReatribuicao(reatribuicao)}` +
+        `Falta súbita processada: ${pl(desatribuidas, 'tarefa desatribuída', 'tarefas desatribuídas')}. ${textoReatribuicao(reatribuicao)}` +
         (avisoEmCurso ? ` ${avisoEmCurso}` : ''),
       desatribuidas,
       parciais,
@@ -2718,7 +2719,7 @@ exports.registarBaixaProlongada = async (req, res) => {
 
     return res.status(200).json({
       mensagem:
-        `Baixa processada: ${desatribuidas} tarefa(s) desatribuída(s). ${textoReatribuicao(reatribuicao)}` +
+        `Baixa processada: ${pl(desatribuidas, 'tarefa desatribuída', 'tarefas desatribuídas')}. ${textoReatribuicao(reatribuicao)}` +
         (avisoEmCurso ? ` ${avisoEmCurso}` : ''),
       desatribuidas,
       parciais,

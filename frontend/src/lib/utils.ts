@@ -299,7 +299,7 @@ export function textoRedistribuicao(
   const re = reatribuicaoFiavel(r);
   if (re) {
     const partes: string[] = [];
-    if (re.reatribuidas > 0) partes.push(`${re.reatribuidas} tarefa(s) reatribuída(s) automaticamente`);
+    if (re.reatribuidas > 0) partes.push(`${plural(re.reatribuidas, "tarefa reatribuída", "tarefas reatribuídas")} automaticamente`);
     if (re.orfas > 0) partes.push(`${re.orfas} por atribuir (ninguém disponível)`);
     if (re.vagasTarefas > 0) {
       partes.push(
@@ -317,7 +317,7 @@ export function textoRedistribuicao(
   }
   if (r?.reatribuicao?.erro) {
     return desatribuidas > 0
-      ? `${prefixo} Não foi possível reatribuir automaticamente: ${desatribuidas} tarefa(s) por atribuir.`
+      ? `${prefixo} Não foi possível reatribuir automaticamente: ${plural(desatribuidas, "tarefa", "tarefas")} por atribuir.`
       : `${prefixo} Não foi possível reatribuir automaticamente.`;
   }
   if (!(desatribuidas > 0)) return `${prefixo} ${semTarefas}`;

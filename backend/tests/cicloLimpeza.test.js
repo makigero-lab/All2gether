@@ -127,6 +127,36 @@ describe('Sino do parceiro (sem push, sem duplicar)', () => {
   });
 });
 
+describe('Nota do staff na conclusão e plurais', () => {
+  test('a nota de «Observações ou Problemas» fica gravada e volta no detalhe da tarefa concluída', async () => {
+    const c = await cenario();
+    const t = await c.tarefa(hora(0, 10));
+    const r = await request(app).patch(`/api/staff/tarefas/${t._id}/concluir`).set(auth(c.tokAna))
+      .send({ fotos_conclusao: [FOTO], observacoes_staff: 'Faltavam toalhas no WC' });
+    expect(r.status).toBe(200);
+    expect((await Tarefa.findById(t._id)).observacoes_staff).toBe('Faltavam toalhas no WC');
+    const det = await request(app).get(`/api/auth/me/tarefas/${t._id}`).set(auth(c.tokAna));
+    expect(det.body.tarefa.observacoes_staff).toBe('Faltavam toalhas no WC');
+  });
+
+  test('pl(): singular e plural reais', () => {
+    const { pl } = require('../utils/plural');
+    expect(pl(1, 'tarefa desatribuída', 'tarefas desatribuídas')).toBe('1 tarefa desatribuída');
+    expect(pl(2, 'tarefa desatribuída', 'tarefas desatribuídas')).toBe('2 tarefas desatribuídas');
+    expect(pl(0, 'tarefa', 'tarefas')).toBe('0 tarefas');
+  });
+
+  test('mensagem da ausência aprovada usa o plural certo (nunca «tarefa(s)»)', async () => {
+    const c = await cenario();
+    await c.tarefa(hora(3, 10));
+    const dia = hora(3, 10).toISOString().slice(0, 10);
+    const r = await request(app).post('/api/gestor/ausencias').set(auth(c.tokG))
+      .send({ utilizador_id: String(c.ana._id), data_inicio: dia, data_fim: dia, tipo: 'ferias' });
+    expect(r.status).toBe(201);
+    expect(JSON.stringify(r.body)).not.toMatch(/\(s\)|\(m\)/);
+  });
+});
+
 describe('Aviso «alterada»: o sino reflete sempre a hora atual', () => {
   test('A -> B -> A: fica um só aviso, com a hora atual; reenvio não repete', async () => {
     const { avisarParceiro } = require('../utils/cicloTarefa');
