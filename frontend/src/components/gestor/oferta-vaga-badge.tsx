@@ -21,7 +21,8 @@ export function ofertaViva(t: CamposOferta): boolean {
 }
 
 /** «Vaga oferecida à equipa até 18:00»: o gestor vê que a vaga está a ser oferecida e pode atribuir à mão. */
-export function OfertaVagaBadge({ tarefa, className }: { tarefa: CamposOferta; className?: string }) {
+/** `curto`: «Oferecida até 18:00» numa só linha (tabelas); o texto completo fica no title. */
+export function OfertaVagaBadge({ tarefa, className, curto }: { tarefa: CamposOferta; className?: string; curto?: boolean }) {
   if (!ofertaViva(tarefa)) return null;
   const ate = new Date(tarefa.oferta_expira_em as string).toLocaleTimeString("pt-PT", {
     hour: "2-digit",
@@ -31,11 +32,11 @@ export function OfertaVagaBadge({ tarefa, className }: { tarefa: CamposOferta; c
   return (
     <Badge
       variant="outline"
-      title="Ninguém tinha disponibilidade: a vaga foi oferecida a toda a equipa que não está ausente. Podes atribuir à mão a qualquer momento."
-      className={cn("h-auto max-w-full gap-1 whitespace-normal border-primary/50 text-left leading-tight", className)}
+      title={`Vaga oferecida à equipa até ${ate}. Ninguém tinha disponibilidade: a vaga foi oferecida a toda a equipa que não está ausente. Podes atribuir à mão a qualquer momento.`}
+      className={cn("h-auto max-w-full gap-1 border-primary/50 text-left leading-tight", curto ? "whitespace-nowrap" : "whitespace-normal", className)}
     >
       <HandHeart className="h-3 w-3 shrink-0" aria-hidden="true" />
-      Vaga oferecida à equipa até {ate}
+      {curto ? `Oferecida até ${ate}` : `Vaga oferecida à equipa até ${ate}`}
     </Badge>
   );
 }

@@ -661,7 +661,7 @@ export default function AdminTarefasPage() {
     return (
       <div className="flex flex-wrap items-center gap-1">
         <EstadoTarefaBadge estado={estadoExibido} />
-        <OfertaVagaBadge tarefa={t} className="basis-full" />
+        <OfertaVagaBadge tarefa={t} curto className="basis-full" />
         {(t.estado === "por_atribuir" || t.estado === "nao_atribuida") && t.motivo_nao_atribuicao && (
           <span title={t.motivo_nao_atribuicao} className="cursor-help">
             <Info className="h-3.5 w-3.5 text-muted-foreground" />
@@ -1142,13 +1142,13 @@ export default function AdminTarefasPage() {
                     <th className="min-w-[10rem] px-4 py-3 font-medium">Propriedade</th>
                     <th className="px-4 py-3 font-medium">Tipo</th>
                     {/* Prompt 136 — Coluna Hóspede (nome_hospede da reserva). */}
-                    <th className="hidden px-4 py-3 font-medium min-[1440px]:table-cell">Hóspede</th>
+                    <th className="hidden px-4 py-3 font-medium min-[1680px]:table-cell">Hóspede</th>
                     {/* FIX (qtd hóspedes) — Coluna Qtd. Hóspedes com fallback à lotação. */}
-                    <th className="hidden px-4 py-3 font-medium min-[1440px]:table-cell">Qtd. Hóspedes</th>
+                    <th className="hidden px-4 py-3 font-medium min-[1680px]:table-cell">Qtd. Hóspedes</th>
                     <th className="px-4 py-3 font-medium">Equipa</th>
                     <th className="px-4 py-3 font-medium">Estado</th>
                     {/* v1.68.0 (Prompt 91) — Coluna Observações / Avaria */}
-                    <th className="hidden px-4 py-3 font-medium min-[1440px]:table-cell">Observações / Avaria</th>
+                    <th className="hidden min-w-[10rem] px-4 py-3 font-medium min-[1440px]:table-cell">Observações / Avaria</th>
                     <th className="sticky right-0 z-10 bg-muted px-4 py-3 text-right font-medium shadow-[-6px_0_6px_-6px_rgba(0,0,0,0.25)]">Ações</th>
                   </tr>
                 </thead>
@@ -1187,14 +1187,14 @@ export default function AdminTarefasPage() {
                       </td>
                       <td className="px-4 py-3"><TipoMarca tipo={t.tipo_limpeza} /></td>
                       {/* Prompt 136 — Nome do hóspede (da reserva Smoobu ou manual). */}
-                      <td className="hidden min-w-[11rem] max-w-[14rem] px-4 py-3 text-muted-foreground min-[1440px]:table-cell">
+                      <td className="hidden min-w-[8rem] max-w-[12rem] px-4 py-3 text-muted-foreground min-[1680px]:table-cell">
                         <span className="line-clamp-2 break-words" title={t.detalhes_reserva?.nome_hospede ?? undefined}>{t.detalhes_reserva?.nome_hospede ?? "—"}</span>
                       </td>
                       {/* FIX (qtd hóspedes) — Quantidade de hóspedes com fallback.
                           Mostra t.hospedes (vindo do Smoobu). Se for null/0/inválido,
                           usa propriedade_id.capacidade_hospedes (lotação máxima) e
                           mostra visualmente que é o limite da casa "(Máx: N)". */}
-                      <td className="hidden px-4 py-3 min-[1440px]:table-cell">
+                      <td className="hidden px-4 py-3 min-[1680px]:table-cell">
                         {(() => {
                           const hospedesReal = t.hospedes ?? t.detalhes_reserva?.pax ?? null;
                           const capacidade = t.propriedade_id?.capacidade_hospedes ?? null;
@@ -1223,7 +1223,7 @@ export default function AdminTarefasPage() {
                       <td className="px-4 py-3 text-muted-foreground"><EquipaTarefa t={t} /></td>
                       <td className="px-4 py-3">{estadoTarefa(t)}</td>
                       {/* v1.68.0 (Prompt 91) — Excerto das observações (descrição da avaria) */}
-                      <td className="hidden max-w-xs px-4 py-3 min-[1440px]:table-cell">
+                      <td className="hidden min-w-[10rem] max-w-xs px-4 py-3 min-[1440px]:table-cell">
                         {t.observacoes ? (
                           <span
                             className={`line-clamp-2 text-xs ${

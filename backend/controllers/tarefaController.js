@@ -1428,6 +1428,8 @@ exports.autoAtribuirTarefas = async (req, res) => {
     const tarefasOrfas = await Tarefa.find({
       empresa_id: empresaId,
       data: { $gte: hojeInicio },
+      // Manutenções (avarias) não vão para a equipa de limpeza: o gestor atribui-as à mão.
+      tipo: { $ne: 'manutencao' },
       // 'nao_atribuida' também: antes ficavam presas para sempre mesmo havendo staff novo/disponível.
       // E as 'atribuida' com equipa incompleta (só se preenche a vaga).
       $or: [

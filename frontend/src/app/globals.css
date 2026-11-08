@@ -381,6 +381,15 @@
   white-space: nowrap;
 }
 
+/* Semana: o nome da casa passa a 2 linhas em vez de ser cortado numa. */
+.fc-timegrid-event .fc-evt-block__title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .fc-evt-block__subtitle {
   display: flex;
   align-items: center;

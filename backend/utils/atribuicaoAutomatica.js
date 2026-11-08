@@ -409,6 +409,8 @@ async function preencherVagasPeriodo(empresaId, inicio, fim) {
     const tarefas = await Tarefa.find({
       empresa_id: empresaId,
       data: { $gte: de, $lt: ate },
+      // Manutenções (avarias) não vão para a equipa de limpeza: o gestor atribui-as à mão.
+      tipo: { $ne: 'manutencao' },
       $or: [
         // Tarefas que o gestor desatribuiu à mão de propósito ficam de fora.
         { estado: { $in: ['por_atribuir', 'nao_atribuida'] }, utilizador_id: null, desatribuida_manual: { $ne: true } },

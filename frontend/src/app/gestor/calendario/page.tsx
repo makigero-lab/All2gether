@@ -357,6 +357,10 @@ export default function CalendarioOperacionalPage() {
   const asideRef = useRef<HTMLElement | null>(null);
   // Largura do calendário: na Semana, só cabem lado a lado as limpezas com >= 70 px; as outras vão para «+N mais».
   const [larguraCal, setLarguraCal] = useState(0);
+  // Semana: largura real de cada dia (calendário menos a margem interior e a coluna das horas). Com menos de
+  // 200 px só cabe 1 cartão por hora (hora completa + nome); a partir daí cabem 2, nunca mais.
+  const larguraDiaSemana = Math.max(0, (larguraCal - 32 - 62) / 7);
+  const cartoesPorHora = larguraDiaSemana >= 200 ? 2 : 1;
 
   // Período atual do calendário (definido via datesSet do FullCalendar).
   const [periodo, setPeriodo] = useState<PeriodoState | null>(null);
@@ -614,7 +618,9 @@ export default function CalendarioOperacionalPage() {
     const paleta = paletaPorEstado(t.estado);
     const emoji = emojiPorTipo(t.tipo);
     const tipoEspecial = t.tipo === "limpeza" && t.tipo_limpeza && t.tipo_limpeza !== "normal" ? rotuloTipoLimpeza(t.tipo_limpeza) : null;
-    const titulo = `${tipoEspecial ? `${tipoEspecial} - ` : ""}${t.propriedade_id?.nome ?? "—"}`;
+    // Semana com 2 cartões lado a lado: cartão estreito, só a hora de início e o nome da casa (o tipo vai no ponto).
+    const duo = !isMonthView && cartoesPorHora === 2;
+    const titulo = `${tipoEspecial && !duo ? `${tipoEspecial} - ` : ""}${t.propriedade_id?.nome ?? "—"}`;
     // Vista Mês: o tipo vai num ponto colorido (com rótulo acessível) e o título fica só com a casa.
     const tituloMes = t.propriedade_id?.nome ?? "—";
     const tipoVal = t.tipo === "limpeza" ? (t.tipo_limpeza && COR_TIPO_VALIDOS.includes(t.tipo_limpeza) ? t.tipo_limpeza : "normal") : null;
@@ -769,12 +775,12 @@ export default function CalendarioOperacionalPage() {
         ? "fc-evt-block fc-evt-block--alert"
         : "fc-evt-block";
     return (
-      <div className={`${blockClass}${riscada}`}>
+      <div className={`${blockClass}${riscada}${duo ? " fc-evt-block--duo" : ""}`}>
         <div className="fc-evt-block__header">
           {pontoTipo}
           {glifo && <span className="fc-evt-glifo" aria-hidden="true">{glifo}</span>}
           {t.alerta_orfao && <span className="fc-evt-block__emoji" aria-hidden>🚨</span>}
-          <span className="fc-evt-block__time">{arg.timeText}</span>
+          <span className="fc-evt-block__time" title={arg.timeText}>{duo ? arg.timeText.split(" - ")[0] : arg.timeText}</span>
         </div>
         <div className="fc-evt-block__title" title={titulo}>
           {titulo}
@@ -796,7 +802,7 @@ export default function CalendarioOperacionalPage() {
         </div>
       </div>
     );
-  }, []);
+  }, [cartoesPorHora]);
 
   /* --- Lista de um dia (telemóvel) --- */
   const itensDoDia = useMemo(() => {
@@ -1400,6 +1406,7 @@ export default function CalendarioOperacionalPage() {
               <span className="fc-evt-block__unassigned">{infoEstadoTarefa(x.estado).label}</span>
             )}
           </span>
+          <OfertaVagaBadge tarefa={x} curto className="mt-1 self-start whitespace-normal px-1.5 text-[11px]" />
         </button>
       </li>
     );
@@ -1760,7 +1767,7 @@ export default function CalendarioOperacionalPage() {
               dayMaxEvents={2}
               // Semana: no máximo 2 colunas lado a lado; o resto fica em «+N mais» (popover que fecha ao clicar fora ou Esc).
               slotEventOverlap={false}
-              eventMaxStack={vista === "semana" ? Math.max(1, Math.floor(((larguraCal - 70) / 7) / 70)) : 2}
+              eventMaxStack={vista === "semana" ? cartoesPorHora : 2}
               dayCellContent={conteudoDia}
               dayCellClassNames={(a) => (estreito && format(a.date, "yyyy-MM-dd") === diaAberto ? ["dia-selecionado"] : [])}
               dayHeaderContent={vista === "semana" ? conteudoCabecalhoSemana : undefined}

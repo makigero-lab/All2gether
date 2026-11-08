@@ -44,6 +44,19 @@ test('B6 substituto parcial livre à hora da tarefa é escalado, sem mudar a hor
   expect(d.data.toISOString()).toBe(`${dia}T10:00:00.000Z`);
 });
 
+test('Ausência aprovada: a vaga oferecida à equipa que fica preenchida fecha a oferta e avisa quem recebe', async () => {
+  const c = await cenario(app, { extra: 1 });
+  const dia = '2035-07-12';
+  const t = await c.tarefa(dia, { oferta_estado: 'aberta', oferta_dia: dia, oferta_expira_em: new Date(Date.now() + 3600000) });
+  const r = await request(app).post(`/api/gestor/equipa/${c.bia._id}/baixa`).set(auth(c.token)).send({ data_inicio: dia, data_fim: dia, tipo: 'doenca' });
+  expect(r.status).toBe(200);
+  const d = await Tarefa.findById(t._id).lean();
+  expect(d.pessoas_em_falta).toBe(0);
+  expect(d.oferta_estado).toBe('aceite');
+  const aviso = await Notificacao.find({ utilizador_id: c.subs[0]._id }).lean();
+  expect(aviso.some((n) => /escalado/.test(n.mensagem))).toBe(true);
+});
+
 test('B5 auto-atribuir preenche só a vaga de uma equipa incompleta', async () => {
   const c = await cenario(app, { extra: 1 });
   const dia = amanha();
