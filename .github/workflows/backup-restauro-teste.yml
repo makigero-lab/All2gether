@@ -1,0 +1,127 @@
+# Teste semanal de restauro do backup: descarrega o artifact mais recente do workflow
+# "Backup MongoDB", decifra e restaura num MongoDB TEMPORARIO (service container no runner,
+# nunca no Atlas), e confirma que as coleções principais têm documentos.
+#
+# Secret necessário: BACKUP_PASSPHRASE (o mesmo do backup.yml). Não precisa de MONGODB_URI.
+# Nada é impresso além de nomes de coleções e contagens (resumo do job). Ficheiros em claro
+# ficam em ${RUNNER_TEMP} com modo 600 e são apagados no fim, mesmo se o job falhar.
+# O agendamento só corre depois deste ficheiro chegar à branch principal (main).
+# Ver docs/OPERACOES.md (secção «Teste de restauro»).
+
+name: Teste de restauro do backup
+
+on:
+  schedule:
+    - cron: '17 4 * * 0' # domingo 04:17 UTC, uma hora depois do backup diário (03:17)
+  workflow_dispatch:
+
+permissions:
+  actions: read # só para listar execuções e descarregar o artifact deste repositório
+
+concurrency:
+  group: backup-restauro-teste
+  cancel-in-progress: false
+
+jobs:
+  restauro:
+    name: descarregar, decifrar e restaurar
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    services:
+      mongo:
+        image: mongo:7.0.14
+        ports:
+          - 27017:27017
+    env:
+      BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+      GH_TOKEN: ${{ github.token }}
+      TOOLS_VERSION: '100.10.0'
+      COLECOES_OBRIGATORIAS: 'tarefas utilizadors propriedades empresas'
+    steps:
+      - name: Verificar secret
+        run: |
+          set -euo pipefail
+          if [ -z "${BACKUP_PASSPHRASE}" ]; then
+            echo "::error::Falta o secret BACKUP_PASSPHRASE."
+            exit 1
+          fi
+
+      - name: Instalar MongoDB Database Tools
+        run: |
+          set -euo pipefail
+          curl -fsSL -o tools.tgz "https://fastdl.mongodb.org/tools/db/mongodb-database-tools-ubuntu2204-x86_64-${TOOLS_VERSION}.tgz"
+          tar -xzf tools.tgz
+          echo "$PWD/mongodb-database-tools-ubuntu2204-x86_64-${TOOLS_VERSION}/bin" >> "$GITHUB_PATH"
+
+      - name: Descarregar o artifact mais recente do backup
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "${RUNNER_TEMP}/backup"
+          # Execução mais recente do backup que terminou com sucesso (e cujo artifact não expirou).
+          RUN_ID="$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow backup.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+          if [ -z "${RUN_ID}" ]; then
+            echo "::error::Não há nenhuma execução bem-sucedida do workflow de backup."
+            exit 1
+          fi
+          gh run download "${RUN_ID}" --repo "${GITHUB_REPOSITORY}" --name mongodb-backup --dir "${RUNNER_TEMP}/backup"
+          ls "${RUNNER_TEMP}"/backup/*.archive.gz.gpg >/dev/null
+          echo "Backup descarregado (execução ${RUN_ID})."
+
+      - name: Decifrar e restaurar no MongoDB temporário
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s' "${BACKUP_PASSPHRASE}" > "${RUNNER_TEMP}/pass.txt"
+          FICHEIRO="$(ls "${RUNNER_TEMP}"/backup/*.archive.gz.gpg | sort | tail -n 1)"
+          gpg --batch --yes --pinentry-mode loopback \
+            --passphrase-file "${RUNNER_TEMP}/pass.txt" \
+            --output "${RUNNER_TEMP}/dump.archive.gz" --decrypt "${FICHEIRO}"
+          test -s "${RUNNER_TEMP}/dump.archive.gz"
+          # Só o MongoDB local do service container (nunca o Atlas).
+          mongorestore --uri "mongodb://127.0.0.1:27017" --archive="${RUNNER_TEMP}/dump.archive.gz" --gzip --quiet
+
+      - name: Verificar coleções e contagens
+        run: |
+          set -euo pipefail
+          umask 077
+          CONTAINER="$(docker ps -q --filter "ancestor=mongo:7.0.14" | head -n 1)"
+          if [ -z "${CONTAINER}" ]; then
+            echo "::error::Não encontrei o contentor do MongoDB temporário."
+            exit 1
+          fi
+          # Imprime só «base.colecao<TAB>contagem» (sem documentos), ignorando bases de sistema.
+          docker exec "${CONTAINER}" mongosh --quiet --eval '
+            db.getMongo().getDBNames().filter(n => !["admin","local","config"].includes(n)).forEach(n => {
+              const d = db.getSiblingDB(n);
+              d.getCollectionNames().filter(c => !c.startsWith("system.")).forEach(c => print(n + "." + c + "\t" + d.getCollection(c).countDocuments({})));
+            });' > "${RUNNER_TEMP}/contagens.tsv"
+
+          {
+            echo "## Teste de restauro do backup"
+            echo
+            echo "| Coleção | Documentos |"
+            echo "|---|---|"
+            awk -F'\t' '{ printf "| %s | %s |\n", $1, $2 }' "${RUNNER_TEMP}/contagens.tsv"
+            echo
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          FALHA=0
+          for c in ${COLECOES_OBRIGATORIAS}; do
+            N="$(awk -F'\t' -v c="${c}" '{ n = split($1, p, "."); if (p[n] == c) t += $2 } END { print t + 0 }' "${RUNNER_TEMP}/contagens.tsv")"
+            if [ "${N}" -le 0 ]; then
+              echo "::error::A coleção '${c}' não existe ou está vazia depois do restauro."
+              echo "- FALHA: coleção \`${c}\` ausente ou vazia" >> "${GITHUB_STEP_SUMMARY}"
+              FALHA=1
+            fi
+          done
+          if [ "${FALHA}" -ne 0 ]; then exit 1; fi
+          echo "Restauro verificado: todas as coleções principais têm documentos." >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Apagar ficheiros decifrados
+        if: always()
+        run: |
+          set +e
+          shred -u "${RUNNER_TEMP}/dump.archive.gz" "${RUNNER_TEMP}/pass.txt" "${RUNNER_TEMP}/contagens.tsv" 2>/dev/null
+          rm -rf -- "${RUNNER_TEMP}/dump.archive.gz" "${RUNNER_TEMP}/pass.txt" "${RUNNER_TEMP}/contagens.tsv" "${RUNNER_TEMP}/backup"
+          exit 0

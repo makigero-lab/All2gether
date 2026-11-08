@@ -2319,10 +2319,24 @@ Prazos finais (variável de ambiente = nome da constante; valor inválido volta 
 | Notificações | 90 d | RETENCAO_NOTIFICACOES_DIAS |
 | Contas eliminadas (email, telefone, nif, observações, password) | 30 d | RETENCAO_CONTAS_ELIMINADAS_DIAS |
 | Fotos de conclusão das limpezas (Tarefa e TarefaArquivo) | 30 d após a conclusão | RETENCAO_FOTOS_DIAS (mín. 7) |
-| Fotos das avarias (Tarefa e TarefaArquivo) | 90 d após o registo E só com a avaria resolvida (aberta mantém) | RETENCAO_FOTOS_AVARIAS_DIAS (mín. 7) |
+| Fotos das avarias (Tarefa e TarefaArquivo) | 90 d após a resolução (`data_resolucao`; nas antigas sem data, o registo) E só com a avaria resolvida (aberta mantém) | RETENCAO_FOTOS_AVARIAS_DIAS (mín. 7) |
 
-Fotos e proteção do espaço do Atlas (`jobs/limpezaFotos.js`): prazos separados (30 d conclusão, 90 d avarias resolvidas; a data da resolução não é guardada, usa-se `data_registo`, por isso uma avaria resolvida depois dos 90 d perde as fotos na corrida seguinte). No fim do job lê `db.stats()` (o maior de dataSize/storageSize) face a `ATLAS_LIMITE_MB` (512). >= 80%: aviso no sino aos utilizadores `admin` (chave `atlas_espaco:AAAA-MM-DD`, no máximo 1x por dia) e log; >= 90%: nesse dia as fotos de conclusão passam ao prazo de 7 d (avarias não mudam) e o aviso di-lo. Log sempre com o tamanho da BD e a estimativa das fotos (`$strLenBytes`, amostra de 2000 documentos por coleção se houver mais). Falha do `db.stats()` não impede a limpeza. Testes: `tests/retencaoRgpd.test.js` (bloco «limpezaFotos: prazos 30/90 e proteção de espaço»).
+Fotos e proteção do espaço do Atlas (`jobs/limpezaFotos.js`): prazos separados (30 d conclusão, 90 d avarias resolvidas; a data da resolução é guardada em `data_resolucao` (ver entrada de 2026-11-08); nas avarias antigas sem ela usa-se `data_registo`). No fim do job lê `db.stats()` (o maior de dataSize/storageSize) face a `ATLAS_LIMITE_MB` (512). >= 80%: aviso no sino aos utilizadores `admin` (chave `atlas_espaco:AAAA-MM-DD`, no máximo 1x por dia) e log; >= 90%: nesse dia as fotos de conclusão passam ao prazo de 7 d (avarias não mudam) e o aviso di-lo. Log sempre com o tamanho da BD e a estimativa das fotos (`$strLenBytes`, amostra de 2000 documentos por coleção se houver mais). Falha do `db.stats()` não impede a limpeza. Testes: `tests/retencaoRgpd.test.js` (bloco «limpezaFotos: prazos 30/90 e proteção de espaço»).
 
 Stage Summary:
 - Testes novos em `tests/retencaoRgpd.test.js`; `smoobu.test.js` ajustado de 90 para 30 dias.
 - Primeiro arranque em produção: as migrações encurtam TTL e o job das 03:30 trata o histórico acumulado (ver a resposta ao pedido para como estimar).
+
+---
+Task ID: avarias-data-resolucao-e-teste-restauro
+Agent: Dev
+Task: guardar a data de resolução das avarias; provar o restauro do backup de forma automática.
+
+Work Log:
+- `models/Tarefa.js`: novo `avarias[].data_resolucao` (Date, default null). `utils/avarias.js` (manutenção concluída) e `controllers/provaController.js` (resolução manual) gravam a data ao resolver; reabrir põe-na a null; repetir «resolver» numa avaria já resolvida não a renova. As respostas do gestor devolvem o campo. O arquivista copia o subdocumento inteiro (`Mixed`), por isso não perde o campo.
+- `jobs/limpezaFotos.js`: os 90 dias contam desde `data_resolucao`; sem ela (avarias antigas) usa `data_registo`, e sem esta a data da tarefa (comportamento anterior). Igual em `Tarefa` e `TarefaArquivo`. Antes, uma avaria resolvida tarde perdia as fotos logo.
+- Novo `.github/workflows/backup-restauro-teste.yml` (domingo 04:17 UTC + manual): descarrega o artifact do último backup bem-sucedido (`gh run download`, `permissions: actions: read`), decifra, `mongorestore` num `mongo:7.0.14` service container, verifica tarefas, utilizadors, propriedades e empresas com contagem > 0, resumo só com nomes e contagens, limpeza dos ficheiros em claro com `if: always()`. `docs/OPERACOES.md`: secção «Teste de restauro».
+
+Stage Summary:
+- Testes novos em `tests/retencaoRgpd.test.js` e `tests/cicloLimpeza.test.js`.
+- Por confirmar na 1.ª corrida do workflow (não testável fora do GitHub): ver resposta ao pedido.

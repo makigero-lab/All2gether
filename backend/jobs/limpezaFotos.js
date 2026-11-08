@@ -3,8 +3,8 @@
  *
  * Corre todos os dias às 03:00 e esvazia as fotos em base64 (pesadas no MongoDB Atlas):
  *  - `fotos_conclusao` das limpezas concluídas há mais de RETENCAO_FOTOS_DIAS (30);
- *  - `avarias[*].fotos` ao fim de RETENCAO_FOTOS_AVARIAS_DIAS (90) após o registo da avaria E só se a
- *    avaria estiver resolvida (avaria aberta mantém as fotos, por muito antiga que seja).
+ *  - `avarias[*].fotos` ao fim de RETENCAO_FOTOS_AVARIAS_DIAS (90) após a resolução da avaria
+ *    (`data_resolucao`; nas antigas sem data, o registo) E só se a avaria estiver resolvida (avaria aberta mantém as fotos, por muito antiga que seja).
  * Os dois prazos podem ser alterados por variável de ambiente, com mínimo de 7 dias (valor inválido
  * volta ao por defeito; abaixo de 7 sobe para 7). Aplica-se a `Tarefa` e a `TarefaArquivo`
  * (o arquivista copia tudo, `strict: false`). Descrições e restantes dados mantêm-se.
@@ -55,10 +55,11 @@ async function limparColecao(col, { campoData, soConcluidas, limConclusao, limAv
   const condConclusao = {
     $and: [eData(dataDoc), { $lt: [dataDoc, limConclusao] }, ...(soConcluidas ? [{ $eq: ['$estado', 'concluida'] }] : [])],
   };
-  // Avaria: só resolvida e registada antes do limite (sem data_registo usa a data da tarefa).
+  // Avaria: só resolvida e com a resolução antes do limite. Sem data_resolucao (avarias antigas) usa
+  // data_registo e, sem esta, a data da tarefa.
   const condAvaria = (a) => ({
     $let: {
-      vars: { d: { $ifNull: [`${a}.data_registo`, dataDoc] } },
+      vars: { d: { $ifNull: [`${a}.data_resolucao`, { $ifNull: [`${a}.data_registo`, dataDoc] }] } },
       in: { $and: [{ $eq: [{ $type: a }, 'object'] }, { $eq: [`${a}.resolvido`, true] }, eData('$$d'), { $lt: ['$$d', limAvarias] }] },
     },
   });

@@ -62,6 +62,7 @@ exports.getProvaLimpeza = async (req, res) => {
         fotos: a.fotos || [],
         resolvido: !!a.resolvido,
         data_registo: a.data_registo || null,
+        data_resolucao: a.data_resolucao || null,
       })),
     });
   } catch (err) {
@@ -80,14 +81,16 @@ exports.resolverAvaria = async (req, res) => {
       return res.status(400).json({ erro: 'ID inválido.' });
     }
     const valor = req.body && typeof req.body.resolvido === 'boolean' ? req.body.resolvido : true;
+    // Resolver grava a data (só se ainda estava aberta: repetir não a renova); reabrir limpa-a.
+    const filtroItem = { 'a._id': new mongoose.Types.ObjectId(avariaId), ...(valor ? { 'a.resolvido': { $ne: true } } : {}) };
     const r = await Tarefa.findOneAndUpdate(
       { _id: id, empresa_id: empresaId, 'avarias._id': avariaId },
-      { $set: { 'avarias.$[a].resolvido': valor } },
-      { arrayFilters: [{ 'a._id': new mongoose.Types.ObjectId(avariaId) }], new: true }
+      { $set: { 'avarias.$[a].resolvido': valor, 'avarias.$[a].data_resolucao': valor ? new Date() : null } },
+      { arrayFilters: [filtroItem], new: true }
     ).select('avarias').lean();
     if (!r) return res.status(404).json({ erro: 'Avaria não encontrada.' });
     return res.status(200).json({
-      avarias: (r.avarias || []).map((a) => ({ _id: String(a._id), descricao: a.descricao, resolvido: !!a.resolvido, data_registo: a.data_registo || null })),
+      avarias: (r.avarias || []).map((a) => ({ _id: String(a._id), descricao: a.descricao, resolvido: !!a.resolvido, data_registo: a.data_registo || null, data_resolucao: a.data_resolucao || null })),
     });
   } catch (err) {
     console.error('❌ resolverAvaria:', err.message);

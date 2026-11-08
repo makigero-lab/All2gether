@@ -20,6 +20,7 @@ const WebhookLog = require('../models/WebhookLog');
 const ContactoHospede = require('../models/ContactoHospede');
 const { executarRetencao } = require('../jobs/retencao');
 const { executarLimpezaFotos } = require('../jobs/limpezaFotos');
+const { resolverAvariaDaManutencao } = require('../utils/avarias');
 
 const DIA = 86400000;
 const antes = (dias) => new Date(Date.now() - dias * DIA);
@@ -357,6 +358,39 @@ describe('limpezaFotos: prazos 30/90 e proteção de espaço', () => {
     // idempotente
     await executarLimpezaFotos();
     expect((await ler(r)).avarias.map((a) => a.fotos)).toEqual([['A'], [], ['C']]);
+  });
+
+  test('avarias: os 90 d contam desde data_resolucao (resolvida hoje mantém, há 91 d apaga, sem data usa o registo)', async () => {
+    stats(10);
+    const c = await empresa();
+    const r = await tar(c, 120, { avarias: [
+      { descricao: 'resolvida hoje', fotos: ['A'], resolvido: true, data_registo: antes(100), data_resolucao: new Date() },
+      { descricao: 'resolvida ha 91 d', fotos: ['B'], resolvido: true, data_registo: antes(200), data_resolucao: antes(91) },
+      { descricao: 'antiga sem data', fotos: ['C'], resolvido: true, data_registo: antes(100) },
+      { descricao: 'aberta', fotos: ['D'], resolvido: false, data_registo: antes(300), data_resolucao: null },
+    ] });
+    const ar = await arq(c, antes(120), { avarias: [
+      { descricao: 'hoje', fotos: ['E'], resolvido: true, data_registo: antes(100), data_resolucao: new Date() },
+      { descricao: 'velha', fotos: ['F'], resolvido: true, data_registo: antes(100), data_resolucao: antes(91) },
+    ] });
+    await executarLimpezaFotos();
+    expect((await ler(r)).avarias.map((a) => a.fotos)).toEqual([['A'], [], [], ['D']]);
+    const d = await TarefaArquivo.collection.findOne({ _id: ar.insertedId });
+    expect(d.avarias.map((a) => a.fotos)).toEqual([['E'], []]);
+    expect(d.avarias[0].data_resolucao).toBeInstanceOf(Date);
+  });
+
+  test('concluir a manutenção grava data_resolucao', async () => {
+    const c = await empresa();
+    const r = await tar(c, 5, { avarias: [{ _id: new mongoose.Types.ObjectId(), descricao: 'x', fotos: ['A'], resolvido: false, data_registo: antes(100) }] });
+    const t = await Tarefa.findById(r.insertedId);
+    const item = t.avarias[0];
+    expect(item.data_resolucao).toBeNull();
+    const m = { tipo: 'manutencao', avaria_origem_id: t._id, avaria_origem_item_id: item._id };
+    expect(await resolverAvariaDaManutencao(m)).toBe(true);
+    const aposRes = (await Tarefa.findById(t._id)).avarias[0];
+    expect(aposRes.resolvido).toBe(true);
+    expect(Date.now() - aposRes.data_resolucao.getTime()).toBeLessThan(60000);
   });
 
   test('arquivo: mesmos prazos (avaria aberta mantém, resolvida a 100 d e conclusão a 40 d apagam)', async () => {
