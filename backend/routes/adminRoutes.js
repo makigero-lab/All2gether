@@ -7,6 +7,9 @@
  *   GET    /empresas                                          — lista todas as empresas + gestor principal
  *   POST   /empresas                                          — cria nova empresa
  *   POST   /empresas/:id/impersonar                           — gera token JWT do gestor (impersonation)
+ *   GET    /empresas/:id/exportar                             — RGPD: export completo da empresa (JSON)
+ *   POST   /empresas/:id/agendar-eliminacao                   — RGPD: agenda a eliminação definitiva (nome exato)
+ *   POST   /empresas/:id/cancelar-eliminacao                  — RGPD: cancela a eliminação agendada
  *   GET    /empresas/:empresaId/utilizadores                  — lista utilizadores de uma empresa
  *   POST   /empresas/:empresaId/utilizadores                  — cria gestor/staff numa empresa
  *   PATCH  /empresas/:empresaId/utilizadores/:utilizadorId/estado — alterna ativo/inativo
@@ -39,6 +42,7 @@ const {
   criarUtilizadorEmpresa,
   alternarEstadoUtilizadorEmpresa,
 } = require('../controllers/superAdminController');
+const rgpd = require('../controllers/rgpdController');
 
 // Todas as rotas exigem auth + isAdmin (só Super Admin).
 router.use(auth, isAdmin);
@@ -48,6 +52,11 @@ router.get('/empresas', listarEmpresas);
 
 // Impersonar gestor de uma empresa (gera token JWT do gestor).
 router.post('/empresas/:id/impersonar', impersonarGestor);
+
+// RGPD (fim de contrato): exportação completa, eliminação agendada (com período de segurança) e cancelamento.
+router.get('/empresas/:id/exportar', rgpd.exportarEmpresa);
+router.post('/empresas/:id/agendar-eliminacao', rgpd.agendarEliminacaoEmpresa);
+router.post('/empresas/:id/cancelar-eliminacao', rgpd.cancelarEliminacaoEmpresa);
 
 // Gestão de utilizadores de empresas terceiras.
 router.get('/empresas/:empresaId/utilizadores', listarUtilizadoresEmpresa);
@@ -333,6 +342,9 @@ router.patch('/empresas/:id/toggle-status', async (req, res) => {
       return res.status(404).json({ erro: 'Empresa não encontrada.' });
     }
     const novoEstado = typeof req.body?.ativa === 'boolean' ? req.body.ativa : !empresa.ativa;
+    if (novoEstado && empresa.eliminacao_agendada_para) {
+      return res.status(409).json({ erro: 'Esta empresa tem uma eliminação agendada. Cancela-a primeiro para a reativar.' });
+    }
     empresa.ativa = novoEstado;
     await empresa.save();
     return res.status(200).json({

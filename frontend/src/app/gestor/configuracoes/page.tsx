@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/dialog";
 import { adminGet, adminDelete, adminPost } from "@/lib/api";
 import { lerUtilizador, type Role } from "@/lib/auth";
+import { EmpresasRgpd } from "@/components/admin/empresas-rgpd";
 
 import { plural } from "@/lib/utils";
 type Toast = { tipo: "sucesso" | "erro"; msg: string } | null;
@@ -84,6 +85,7 @@ export default function ConfiguracoesPage() {
   // FIX (ações de massa no admin) — A secção "Ações de Manutenção" só é
   // visível para role === 'admin'.
   const [userRole, setUserRole] = useState<Role | null>(null);
+  const [empresaPropriaId, setEmpresaPropriaId] = useState<string | undefined>(undefined);
 
   function showToast(tipo: "sucesso" | "erro", msg: string) {
     setToast({ tipo, msg });
@@ -117,7 +119,10 @@ export default function ConfiguracoesPage() {
     let cancelado = false;
     (async () => {
       const user = await lerUtilizador();
-      if (!cancelado) setUserRole(user?.role ?? null);
+      if (!cancelado) {
+        setUserRole(user?.role ?? null);
+        setEmpresaPropriaId(user?.empresa_id);
+      }
     })();
     return () => { cancelado = true; };
   }, []);
@@ -452,6 +457,8 @@ export default function ConfiguracoesPage() {
             movida para a página principal de Configurações (visível para admin).
             Contém ações destrutivas em massa (Eliminar Limpezas Futuras) e
             sincronização do Smoobu. */}
+        {userRole === "admin" && <EmpresasRgpd empresaPropriaId={empresaPropriaId} />}
+
         {userRole === "admin" && (
         <Card className="border-destructive/30 md:col-span-2">
           <CardHeader className="pb-3">

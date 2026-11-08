@@ -19,6 +19,7 @@ import {
   ListChecks,
   Settings,
   Handshake,
+  UserRound,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -72,6 +73,8 @@ const gestorNavItems: NavItem[] = [
   // FIX (acesso direto admin) — Configurações da empresa (integracoes,
   // gerais) voltam a estar acessíveis na sidebar para admin E gestor.
   { label: "Configurações", href: "/gestor/configuracoes", icon: Settings },
+  // RGPD: perfil com «Descarregar os meus dados».
+  { label: "O meu perfil", href: "/gestor/perfil", icon: UserRound },
   // HF13 — Item "Integrações" removido (sistema agora usa webhooks exclusivamente;
   // a página /gestor/configuracoes/integracoes mantém-se acessível via URL direta
   // para gestão da API key, mas não é exposta na navegação principal).

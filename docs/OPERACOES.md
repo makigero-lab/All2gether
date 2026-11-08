@@ -66,3 +66,16 @@ MONGODB_URI="<uri de produção>" node scripts/reagendar-horarios.js --aplicar -
 ## 6. Verificação em produção dos índices novos (só leitura)
 Os índices novos são parciais e só abrangem documentos que tenham o campo novo, por isso não falham com dados antigos. Para confirmar depois do arranque:
 `db.reservamanuals.getIndexes()` deve listar `parceiro_id_1_chave_idempotencia_1` (unique, partialFilterExpression `chave_idempotencia: {$type: "string"}`). A coleção `lockempresas` é criada na primeira importação de Excel (lock com expiração de 2 min).
+
+## 7. Fim de contrato: exportar e apagar uma empresa (RGPD)
+
+Só o Super Admin (*Configurações > Empresas: fim de contrato (RGPD)*; API em `/api/admin/empresas/:id/...`).
+
+1. **Exportar empresa** (`GET /exportar`): descarrega um JSON com todas as coleções filtradas por `empresa_id` (e as notificações/auditoria antigas ligadas pelos utilizadores), sem `password_hash`, `pushSubscription` nem chaves/tokens (a chave do Smoobu é removida). É a devolução dos dados (art. 28.º, n.º 3, al. g). Vai em streaming: se o pedido pela Vercel expirar, pede-se diretamente ao backend com o token do Super Admin.
+2. **Agendar eliminação** (`POST /agendar-eliminacao`, corpo `{ "confirmar": "<nome exato>", "dias": 30 }`): `dias` por omissão 30 (variável `ELIMINACAO_EMPRESA_DIAS`), mínimo 7, máximo 365. A empresa fica **desativada** já (ninguém entra, nem com sessões antigas) e `eliminacao_agendada_para` mostra a data. Não se reativa enquanto houver agendamento.
+3. **Cancelar eliminação** (`POST /cancelar-eliminacao`): repõe o estado `ativa` anterior.
+4. **Apagamento**: o job `jobs/eliminacaoEmpresas.js` corre todos os dias às 04:10 (Europe/Lisbon) e só apaga empresas cuja data já passou. Remove os documentos de todas as coleções com `empresa_id` (descobertas pelos esquemas: um teste falha se aparecer uma coleção nova sem cobertura) e os registos ligados só por `utilizador_id`; apaga a empresa no fim e repete a varredura para apanhar o que um job ou webhook tenha criado a meio. Mantém um único registo na auditoria da plataforma (`empresa_apagada`, `empresa_id` nulo, só nome da empresa e data). Se a empresa contiver uma conta de Super Admin (empresa-sistema) nunca é apagada.
+5. **Concorrência**: o job usa o lock `eliminar-empresa:<id>` (duas instâncias não apagam a mesma empresa) e espera até 10 s pelo lock `vagas:<id>` (preenchimento de vagas). Se não conseguir, adia para o dia seguinte. Falhas avisam os Super Admins no sino.
+6. **Backups**: os backups cifrados (secção 1) expiram em **14 dias**. O apagamento chega aos backups nesse prazo, e uma restauração feita antes disso traria os dados de volta: não restaurar um backup anterior ao apagamento sem voltar a correr a eliminação.
+
+Por pessoa (a cargo do gestor da empresa): *Equipa > Exportar dados / Apagar dados pessoais*, e *O meu perfil > Descarregar os meus dados* para o próprio. O apagamento anonimiza a conta (mesma regra das contas eliminadas), apaga notificações e ausências, retira a pessoa das tarefas futuras (voltam a `por_atribuir` pelo fluxo normal) e mantém as tarefas passadas sem identificação.

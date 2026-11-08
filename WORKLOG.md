@@ -2340,3 +2340,19 @@ Work Log:
 Stage Summary:
 - Testes novos em `tests/retencaoRgpd.test.js` e `tests/cicloLimpeza.test.js`.
 - Por confirmar na 1.ª corrida do workflow (não testável fora do GitHub): ver resposta ao pedido.
+
+---
+Task ID: rgpd-exportar-apagar-pessoa-e-empresa
+Agent: Dev
+Task: funções RGPD prometidas no acordo de subcontratação (art. 28.º, n.º 3, al. e) e g)): exportar/apagar por pessoa e apagamento completo de uma empresa.
+
+Work Log:
+- Backend, por pessoa (`utils/rgpdPessoa.js`, `controllers/rgpdController.js`): `GET /api/auth/me/exportar-dados` (o próprio), `GET /api/gestor/equipa/:id/exportar-dados` e `POST /api/gestor/equipa/:id/apagar-dados-pessoais` (`{ confirmar: "APAGAR" }`; gestor/admin da empresa, 404 se for de outra). O export traz conta, tarefas (e arquivo) sem hóspedes nem colegas e sem fotos (só a contagem), avarias, ausências, notificações, reservas manuais sem hóspede, propriedades do proprietário/lavandaria e auditoria (ações da pessoa sem texto livre; registos sobre ela). Nunca `password_hash`, tokens nem `pushSubscription`. O apagamento anonimiza (mesma regra de `jobs/retencao.js`: "Pessoa removida", email `eliminado-<id>@invalido`, telefone/NIF/observações vazios, sem password nem push, inativa, `eliminado_em`), apaga notificações e ausências, tira-a das propriedades, retira-a das tarefas futuras (`desatribuirTarefasPeriodo` + `reatribuirAutomaticamente`) e troca o nome na auditoria e em textos livres. Recusas: o próprio (403), admin (403), gestor por um gestor (403, só o admin), único gestor/admin da empresa (409), sem confirmação (400). Idempotente. Auditoria regista quem pediu, sem copiar dados.
+- Backend, por empresa (`utils/rgpdEmpresa.js`, `jobs/eliminacaoEmpresas.js`, campos novos em `models/Empresa.js`): `GET /api/admin/empresas/:id/exportar` (JSON em streaming), `POST .../agendar-eliminacao` (`{ confirmar: <nome exato>, dias? }`, por omissão 30, mínimo 7, máximo 365; desativa a empresa) e `POST .../cancelar-eliminacao` (repõe `ativa`). Job diário às 04:10 apaga depois da data: todas as coleções com `empresa_id` (descobertas pelos esquemas) e as ligadas por `utilizador_id`, apaga a empresa no fim e repete a varredura; deixa um registo `empresa_apagada` na auditoria da plataforma. Usa os locks `eliminar-empresa:<id>` e `vagas:<id>`. Recusa empresas com contas de Super Admin (409).
+- `middleware/auth.js`: empresa desativada deixa de aceitar sessões antigas (401), exceto Super Admin e sessões de suporte; `toggle-status` não reativa uma empresa com eliminação agendada.
+- Frontend: botão «Descarregar os meus dados» no perfil (novas páginas `/staff/perfil` e `/gestor/perfil`; `perfil-content` do proprietário e da lavandaria), ações «Exportar dados» e «Apagar dados pessoais» na Equipa (separadas, diálogo destrutivo com palavra APAGAR) e, em Configurações (Super Admin), «Exportar empresa», «Agendar eliminação» (escrever o nome) e «Cancelar eliminação» com a data prevista. Proxies: anexos passam em streaming (`proxy-utils`, proxy `/api/admin`), nova rota `/api/auth/me/exportar-dados`.
+- `docs/OPERACOES.md` (secção 7): backups cifrados expiram em 14 dias, por isso o apagamento chega aos backups nesse prazo. `trabalho-local/legal/` atualizado (acordo, cláusulas 6.ª e 10.ª, e `LEIA-ME.md`).
+
+Stage Summary:
+- Testes novos: `backend/tests/rgpdExportApagar.test.js` (16) e `frontend/src/lib/rgpd.test.mjs`.
+- Por confirmar: ver a resposta ao pedido (export grande pela Vercel, `observacoes_staff`, retenção do registo mínimo de apagamento, verificação visual a 375/1366 px).

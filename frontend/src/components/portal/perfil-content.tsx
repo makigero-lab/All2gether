@@ -22,6 +22,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { lerUtilizador, fazerLogout, type Role } from "@/lib/auth";
+import { MeusDadosCard } from "@/components/rgpd/meus-dados-card";
 import { adminPatch } from "@/lib/api";
 
 /**
@@ -205,6 +206,9 @@ export function PerfilContent({ portalLabel }: { portalLabel: string }) {
           </div>
         </CardContent>
       </Card>
+
+      {/* RGPD: descarregar os próprios dados */}
+      <MeusDadosCard />
     </div>
   );
 }

@@ -62,6 +62,7 @@ const { listarModelos, criarModelo, obterModelo, atualizarModelo, apagarModelo }
 const { getPropriedadesSmoobu, importarPropriedades, sincronizarReservas, reconciliarCancelamentos } = require('../controllers/smoobuController');
 // FIX (import/export excel) — Controller de importação/exportação de Excel.
 const { exportarExcel } = require('../controllers/excelController');
+const rgpd = require('../controllers/rgpdController');
 
 // SEGURANÇA: a rota pública GET /setup foi removida (criava admin com password fixa).
 // O admin inicial é criado por `seed-admin.js` (npm start / npm run seed:admin).
@@ -175,6 +176,9 @@ router.get('/fornecedores', auth, isGestor, getFornecedores);
 router.put('/equipa/:id', auth, isGestor, atualizarMembroEquipa);
 router.patch('/equipa/:id/estado', auth, isGestor, alternarEstadoMembro);
 router.delete('/equipa/:id', auth, isGestor, eliminarMembroEquipa);
+// RGPD: exportar e apagar os dados pessoais de uma pessoa da equipa (art. 28.º, n.º 3, al. e).
+router.get('/equipa/:id/exportar-dados', auth, isGestor, rgpd.exportarDadosMembro);
+router.post('/equipa/:id/apagar-dados-pessoais', auth, isGestor, rgpd.apagarDadosMembro);
 
 // Falta súbita — reatribuição de emergência.
 router.post('/equipa/:id/falta-subita', auth, isGestor, reportarFaltaSubita);

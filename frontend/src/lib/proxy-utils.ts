@@ -39,6 +39,18 @@ export async function responderBackend(
   const ct = res.headers.get("content-type") || "";
   let response: NextResponse;
 
+  const anexo = (res.headers.get("content-disposition") || "").toLowerCase().startsWith("attachment");
+
+  if (anexo && res.ok && res.body) {
+    // Ficheiro para descarregar (ex.: exportação RGPD, que pode ser grande): passa em streaming,
+    // sem o ler para memória nem o reescrever.
+    const headers = new Headers();
+    if (ct) headers.set("Content-Type", ct);
+    headers.set("Content-Disposition", res.headers.get("content-disposition") as string);
+    headers.set("Cache-Control", "no-store");
+    return new NextResponse(res.body, { status: res.status, headers });
+  }
+
   if (ct.toLowerCase().includes("application/json")) {
     const data = await res.json();
     response = NextResponse.json(data, { status: res.status });
