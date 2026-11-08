@@ -32,6 +32,12 @@ jobs:
         image: mongo:7.0.14
         ports:
           - 27017:27017
+        # Espera que o Mongo responda antes dos passos (o GitHub só espera se houver health check).
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ping:1})'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     env:
       BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
       GH_TOKEN: ${{ github.token }}
