@@ -71,6 +71,28 @@ describe('PATCH /api/auth/me — guardar telefone', () => {
     }
   });
 
+  test('só aceita números, espaços e + - ( )', async () => {
+    const { token } = await criar('parceiro', '');
+    for (const t of ['abc', 'javascript:1', '9\n1', '900"1', '900\u00001']) {
+      const r = await request(app).patch('/api/auth/me').set(auth(token)).send({ telefone: t });
+      expect(r.status).toBe(400);
+    }
+    const ok = await request(app).patch('/api/auth/me').set(auth(token)).send({ telefone: '+351 (21) 900-000' });
+    expect(ok.status).toBe(200);
+    const vazio = await request(app).patch('/api/auth/me').set(auth(token)).send({ telefone: '' });
+    expect(vazio.status).toBe(200);
+  });
+
+  test('sessão de suporte (impersonação) não altera o telefone', async () => {
+    const jwt = require('jsonwebtoken');
+    const { JWT_SECRET } = require('../middleware/auth');
+    const { u, e } = await criar('gestor', '900 000 020');
+    const token = jwt.sign({ id: String(u._id), role: 'gestor', empresa_id: String(e._id), imp: String(new mongoose.Types.ObjectId()) }, JWT_SECRET, { expiresIn: '1h' });
+    const r = await request(app).patch('/api/auth/me').set(auth(token)).send({ telefone: '999' });
+    expect(r.status).toBe(403);
+    expect((await Utilizador.findById(u._id)).telefone).toBe('900 000 020');
+  });
+
   test('sem sessão é recusado', async () => {
     const r = await request(app).patch('/api/auth/me').send({ telefone: '900' });
     expect(r.status).toBe(401);

@@ -183,13 +183,21 @@ exports.atualizarMe = async (req, res) => {
     if (!req.user || !req.user.id) {
       return res.status(401).json({ erro: 'Não autenticado.' });
     }
+    // Sessão de suporte (impersonação) não altera dados da conta de outra pessoa.
+    if (req.user.impersonado_por) {
+      return res.status(403).json({ erro: 'Numa sessão de suporte não é possível alterar o perfil.' });
+    }
     const { telefone } = req.body || {};
     if (typeof telefone !== 'string') {
       return res.status(400).json({ erro: 'Telemóvel inválido.' });
     }
     const limpo = telefone.trim();
-    if (limpo.length > 30 || /[<>]/.test(limpo)) {
+    if (limpo.length > 30) {
       return res.status(400).json({ erro: 'Telemóvel inválido (máximo 30 caracteres).' });
+    }
+    // Só dígitos, espaços e + - ( ). Vazio apaga.
+    if (limpo && !/^[0-9 +()-]+$/.test(limpo)) {
+      return res.status(400).json({ erro: 'Telemóvel inválido: usa só números, espaços e + - ( ).' });
     }
     const utilizador = await Utilizador.findByIdAndUpdate(
       req.user.id,
