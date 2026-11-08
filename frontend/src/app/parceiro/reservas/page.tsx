@@ -1373,15 +1373,15 @@ export default function ParceiroReservasPage() {
               <thead>
                 <tr className="border-b bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
                   <Cab chave="propriedade" rotulo="Propriedade" ordem={ordem} onOrdenar={ordenarPorColuna} className="w-[8rem]" />
-                  <Cab chave="check_in" rotulo="Check-in" ordem={ordem} onOrdenar={ordenarPorColuna} className="w-[8.5rem]" />
+                  <Cab chave="check_in" rotulo="Check-in" ordem={ordem} onOrdenar={ordenarPorColuna} className="w-[7.25rem]" />
                   <Cab chave="hora_checkin" rotulo="Hora c/in" ordem={ordem} onOrdenar={ordenarPorColuna} className="hidden w-[6rem] min-[1600px]:table-cell" />
-                  <Cab chave="check_out" rotulo="Check-out" ordem={ordem} onOrdenar={ordenarPorColuna} className="w-[8.5rem]" />
+                  <Cab chave="check_out" rotulo="Check-out" ordem={ordem} onOrdenar={ordenarPorColuna} className="w-[7.25rem]" />
                   <Cab chave="noites" rotulo="Noites" ordem={ordem} onOrdenar={ordenarPorColuna} direita className="hidden w-[5rem] min-[1600px]:table-cell" />
-                  <Cab chave="hospedes" rotulo="Hósp." ordem={ordem} onOrdenar={ordenarPorColuna} direita className="w-[4.5rem]" />
+                  <Cab chave="hospedes" rotulo="Hósp." ordem={ordem} onOrdenar={ordenarPorColuna} direita className="w-[4rem]" />
                   <Cab chave="nome_hospede" rotulo="Hóspede" ordem={ordem} onOrdenar={ordenarPorColuna} className="w-[7.5rem]" />
-                  <Cab chave="plataforma" rotulo="Plataforma" ordem={ordem} onOrdenar={ordenarPorColuna} className="hidden w-[7rem] min-[1600px]:table-cell" />
+                  <Cab chave="plataforma" rotulo="Plataforma" ordem={ordem} onOrdenar={ordenarPorColuna} className="w-[6rem]" />
                   <Cab chave="tipo_limpeza" rotulo="Tipo de limpeza" ordem={ordem} onOrdenar={ordenarPorColuna} className="w-[8rem]" />
-                  <Cab chave="horario_preferido" rotulo="Horário" ordem={ordem} onOrdenar={ordenarPorColuna} className="hidden w-[7rem] min-[1366px]:table-cell" />
+                  <Cab chave="horario_preferido" rotulo="Horário" ordem={ordem} onOrdenar={ordenarPorColuna} className="hidden w-[6rem] min-[1366px]:table-cell" />
                   <Cab chave="observacoes" rotulo="Notas" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[14rem]" />
                   <Cab chave="estado" rotulo="Limpeza" ordem={ordem} onOrdenar={ordenarPorColuna} className={`${FIXO_ESTADO} z-[2] bg-background bg-gradient-to-r from-muted/40 to-muted/40`} />
                   <th className={`${FIXO_ACOES} z-[2] bg-background bg-gradient-to-r from-muted/40 to-muted/40 px-2 py-2`}><span className="sr-only">Ações</span></th>
@@ -1420,7 +1420,7 @@ export default function ParceiroReservasPage() {
                   <td className="p-0">
                     <input value={nova.nome_hospede} onChange={(e) => setN("nome_hospede")(e.target.value)} className={CELULA} disabled={gravando} aria-label="Nova reserva: nome do hóspede" />
                   </td>
-                  <td className="hidden p-0 min-[1600px]:table-cell">
+                  <td className="p-0">
                     <select value={nova.plataforma} onChange={(e) => setN("plataforma")(e.target.value)} className={CELULA} disabled={gravando} aria-label="Nova reserva: plataforma">
                       <option value="">—</option>
                       {PLATAFORMAS.map((o) => <option key={o} value={o}>{o}</option>)}
@@ -1446,7 +1446,7 @@ export default function ParceiroReservasPage() {
                 </tr>
                 {novaErro && (
                   <tr>
-                    {/* colSpan igual às colunas visíveis (9/10/13), senão a tabela fixa ganha colunas fantasma. */}<><td colSpan={9} className="px-3 py-1 text-xs text-destructive min-[1366px]:hidden" role="alert">{novaErro}</td><td colSpan={10} className="px-3 py-1 text-xs text-destructive hidden min-[1366px]:table-cell min-[1600px]:hidden" role="alert">{novaErro}</td><td colSpan={13} className="px-3 py-1 text-xs text-destructive hidden min-[1600px]:table-cell" role="alert">{novaErro}</td></>
+                    {/* colSpan igual às colunas visíveis (10/11/13), senão a tabela fixa ganha colunas fantasma. */}<><td colSpan={10} className="px-3 py-1 text-xs text-destructive min-[1366px]:hidden" role="alert">{novaErro}</td><td colSpan={11} className="px-3 py-1 text-xs text-destructive hidden min-[1366px]:table-cell min-[1600px]:hidden" role="alert">{novaErro}</td><td colSpan={13} className="px-3 py-1 text-xs text-destructive hidden min-[1600px]:table-cell" role="alert">{novaErro}</td></>
                   </tr>
                 )}
 
@@ -1479,7 +1479,7 @@ export default function ParceiroReservasPage() {
                         <td className="p-0">
                           <Celula value={l.valores.nome_hospede} pendente={p("nome_hospede")} rotulo={`Nome do hóspede, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "nome_hospede", v)} />
                         </td>
-                        <td className="hidden p-0 min-[1600px]:table-cell">
+                        <td className="p-0">
                           <Celula type="select" options={PLATAFORMAS} pendente={p("plataforma")} rotulo={`Plataforma, ${nome}`} value={l.valores.plataforma} disabled={l.semEdicao} onCommit={(v) => alterar(l, "plataforma", v)} />
                         </td>
                         <td className="p-0">
@@ -1796,7 +1796,7 @@ function FragmentoLinha({ avisos, children }: { avisos: React.ReactNode; childre
       {children}
       {avisos && (
         <tr className="border-b">
-          <><td colSpan={9} className="px-3 py-2 min-[1366px]:hidden">{avisos}</td><td colSpan={10} className="px-3 py-2 hidden min-[1366px]:table-cell min-[1600px]:hidden">{avisos}</td><td colSpan={13} className="px-3 py-2 hidden min-[1600px]:table-cell">{avisos}</td></>
+          <><td colSpan={10} className="px-3 py-2 min-[1366px]:hidden">{avisos}</td><td colSpan={11} className="px-3 py-2 hidden min-[1366px]:table-cell min-[1600px]:hidden">{avisos}</td><td colSpan={13} className="px-3 py-2 hidden min-[1600px]:table-cell">{avisos}</td></>
         </tr>
       )}
     </>
