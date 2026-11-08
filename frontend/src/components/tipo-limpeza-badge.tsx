@@ -1,3 +1,4 @@
+import { Wrench } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { ROTULO_TIPO, tipoOuNormal } from "@/lib/rascunho-reservas";
 
@@ -44,5 +45,15 @@ export function TipoMarca({ tipo, soMarca = false, className = "" }: { tipo?: st
       <span className="tipo-marca" data-tipo={t} aria-hidden="true" />
       {soMarca ? <span className="sr-only">{ROTULO_TIPO[t]}</span> : ROTULO_TIPO[t]}
     </span>
+  );
+}
+
+/** Etiqueta das tarefas de manutenção (ícone de ferramenta + texto, nunca só a cor). */
+export function EtiquetaManutencao({ className = "" }: { className?: string }) {
+  return (
+    <Badge variant="outline" className={`shrink-0 gap-1 whitespace-nowrap px-1.5 py-0 text-xs ${className}`} title="Tarefa de manutenção">
+      <Wrench className="h-3 w-3" aria-hidden="true" />
+      Manutenção
+    </Badge>
   );
 }

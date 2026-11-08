@@ -616,9 +616,18 @@ export default function ParceiroReservasPage() {
   const mostrarToast = useCallback((texto: string, tipo: "ok" | "aviso" | "erro", fixo = false) => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
     setToast({ texto, tipo, fixo });
-    if (!fixo) toastTimer.current = setTimeout(() => setToast(null), 4500);
+    if (!fixo) toastTimer.current = setTimeout(() => setToast(null), 6000);
   }, []);
   useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
+  // Altura do toast: no telemóvel acrescenta-se esse espaço no fim da página para ele não tapar a última linha.
+  const [toastAltura, setToastAltura] = useState(0);
+  const toastRef = useCallback((el: HTMLDivElement | null) => {
+    if (!el) { setToastAltura(0); return; }
+    setToastAltura(el.offsetHeight);
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => setToastAltura(el.offsetHeight));
+    ro.observe(el);
+  }, []);
   const [descartarAberto, setDescartarAberto] = useState(false);
   const reconciliarNoProximo = useRef(true);
   const rascunhoRef = useRef(rascunho);
@@ -1315,6 +1324,7 @@ export default function ParceiroReservasPage() {
 
       {toast && (
         <div
+          ref={toastRef}
           role={toast.tipo === "ok" ? "status" : "alert"}
           className={`fixed inset-x-3 ${podeGravar ? "bottom-[5.5rem]" : "bottom-4"} z-40 mx-auto flex max-w-xl items-start gap-2 rounded-lg border bg-background p-3 text-sm shadow-lg md:bottom-4 md:left-auto md:right-4 md:mx-0 md:w-[28rem] ${
             toast.tipo === "erro" ? "border-destructive/60 text-destructive" : toast.tipo === "aviso" ? "border-amber-500/60" : "border-emerald-600/50"
@@ -1785,6 +1795,8 @@ export default function ParceiroReservasPage() {
         </DialogFooter>
       </Dialog>
 
+      {/* Espaço no fim (telemóvel): o toast fixo não tapa a última linha nem os seus botões. */}
+      {toast && <div aria-hidden="true" className="md:hidden" style={{ height: toastAltura + (podeGravar ? 0 : 32) }} />}
     </main>
   );
 }

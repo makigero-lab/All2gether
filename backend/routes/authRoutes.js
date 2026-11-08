@@ -19,7 +19,7 @@ const router = express.Router();
 
 const { auth } = require('../middleware/auth');
 const rgpd = require('../controllers/rgpdController');
-const { login, ssoLogin, me, meuCalendario, minhasTarefas, minhaTarefaDetalhe, concluirMinhaTarefa } = require('../controllers/authController');
+const { login, ssoLogin, me, atualizarMe, meuCalendario, minhasTarefas, minhaTarefaDetalhe, concluirMinhaTarefa } = require('../controllers/authController');
 const {
   listarNotificacoes,
   contagemNotificacoes,
@@ -97,6 +97,8 @@ router.get('/sso', ssoLogin);
 
 // Dados do utilizador autenticado — requer JWT.
 router.get('/me', auth, me);
+// O utilizador atualiza o seu próprio telemóvel.
+router.patch('/me', auth, atualizarMe);
 
 // RGPD: o próprio descarrega os seus dados pessoais (JSON).
 router.get('/me/exportar-dados', auth, rgpd.exportarMeusDados);

@@ -21,7 +21,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { lerUtilizador, fazerLogout, type Role } from "@/lib/auth";
+import { lerUtilizador, fazerLogout, limparCacheAuth, type Role } from "@/lib/auth";
 import { MeusDadosCard } from "@/components/rgpd/meus-dados-card";
 import { adminPatch } from "@/lib/api";
 
@@ -70,7 +70,8 @@ export function PerfilContent({ portalLabel }: { portalLabel: string }) {
     setSaving(true);
     setToast(null);
     try {
-      await adminPatch(`/api/gestor/equipa/${user.id}`, { telefone });
+      await adminPatch("/api/auth/me", { telefone });
+      limparCacheAuth();
       setUser((prev) => (prev ? { ...prev, telefone } : prev));
       setToast({ tipo: "sucesso", msg: "Telemóvel atualizado com sucesso." });
     } catch (e) {
@@ -181,7 +182,7 @@ export function PerfilContent({ portalLabel }: { portalLabel: string }) {
                   type="tel"
                   value={telefone}
                   onChange={(e) => setTelefone(e.target.value)}
-                  placeholder="+351 912 345 678"
+                  placeholder="900 000 000"
                   className="pl-8"
                 />
               </div>

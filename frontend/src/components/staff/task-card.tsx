@@ -124,7 +124,7 @@ export function TaskCard({ tarefa, onAtualizar }: { tarefa: TarefaMock; onAtuali
                   className="after:absolute after:inset-0 after:content-[''] focus-visible:outline-none focus-visible:after:rounded-lg focus-visible:after:ring-2 focus-visible:after:ring-ring"
                 >
                   {tarefa.propriedade_nome}
-                  <span className="sr-only"> — {tipoLabel[tarefa.tipo]}, abrir tarefa</span>
+                  <span className="sr-only"> — {tipoLabel[tarefa.tipo]}{porAtribuir ? ", aguarda atribuição" : ""}, ver detalhes</span>
                 </Link>
               </CardTitle>
               <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">

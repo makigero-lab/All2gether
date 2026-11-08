@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { rotuloTipoLimpeza } from "@/components/tipo-limpeza-badge";
+import { rotuloTipoLimpeza, EtiquetaManutencao } from "@/components/tipo-limpeza-badge";
 import {
   CalendarRange,
   CalendarClock,
@@ -24,6 +24,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ArrowLeft,
+  Wrench,
 } from "lucide-react";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -626,6 +627,8 @@ export default function CalendarioOperacionalPage() {
     const tipoVal = t.tipo === "limpeza" ? (t.tipo_limpeza && COR_TIPO_VALIDOS.includes(t.tipo_limpeza) ? t.tipo_limpeza : "normal") : null;
     const pontoTipo = tipoVal ? (
       <span role="img" aria-label={`Limpeza ${rotuloTipoLimpeza(tipoVal).toLowerCase()}`} title={`Limpeza ${rotuloTipoLimpeza(tipoVal).toLowerCase()}`} className="tipo-marca" data-tipo={tipoVal} />
+    ) : t.tipo === "manutencao" ? (
+      <span role="img" aria-label="Manutenção" title="Manutenção" className="inline-flex shrink-0 items-center"><Wrench className="h-3 w-3" aria-hidden="true" /></span>
     ) : null;
     const glifo = GLIFO_ESTADO[t.estado] ?? "";
     const riscada = t.estado === "cancelada" ? " fc-evt-cancelada" : "";
@@ -1360,6 +1363,7 @@ export default function CalendarioOperacionalPage() {
           <span className="flex items-start gap-1.5 font-medium">
             {!ausencia && x.tipo === "limpeza" && <span className="tipo-marca mt-1" data-tipo={x.tipo_limpeza && COR_TIPO_VALIDOS.includes(x.tipo_limpeza) ? x.tipo_limpeza : "normal"} aria-hidden="true" />}
             <span className="line-clamp-2 break-words">{titulo}</span>
+            {!ausencia && x.tipo === "manutencao" && <EtiquetaManutencao className="mt-0.5" />}
           </span>
           <span className="block truncate text-xs text-muted-foreground">
             {ausencia ? "" : `${temHoraReal(x.data) ? horaTarefa(x.data) : "sem hora"} · ${x.utilizador_id?.nome ?? "Por atribuir"}`}
@@ -1392,6 +1396,7 @@ export default function CalendarioOperacionalPage() {
         >
           <span className="fc-evt-block__header">
             {x.tipo === "limpeza" && <span className="tipo-marca" data-tipo={tipoVal} aria-hidden="true" />}
+            {x.tipo === "manutencao" && <EtiquetaManutencao />}
             {glifo && <span className="fc-evt-glifo" aria-hidden="true">{glifo}</span>}
             <span className="fc-evt-block__time">{hora}</span>
           </span>

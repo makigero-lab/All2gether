@@ -44,6 +44,8 @@ export interface UtilizadorAuth {
   email: string;
   role: Role;
   empresa_id: string;
+  /** Telemóvel do próprio (vem do /api/auth/me). */
+  telefone?: string;
 }
 
 /* ------------------------------------------------------------------ */

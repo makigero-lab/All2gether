@@ -31,7 +31,7 @@ export default function StaffLayout({
   return (
     <RouteGuard role="staff">
       <PushNotificationSetup />
-      <div className={mostrarNav ? "pb-20" : undefined}>{children}</div>
+      <div className={mostrarNav ? "pb-[calc(5rem+env(safe-area-inset-bottom))]" : undefined}>{children}</div>
       {mostrarNav && <StaffBottomNav />}
     </RouteGuard>
   );

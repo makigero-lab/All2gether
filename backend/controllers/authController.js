@@ -163,10 +163,45 @@ exports.me = async (req, res) => {
         email: utilizador.email,
         role: utilizador.role,
         empresa_id: String(utilizador.empresa_id),
+        // Só o do próprio (a rota usa o id do token).
+        telefone: utilizador.telefone || '',
       },
     });
   } catch (err) {
     console.error('❌ me:', err.message);
+    return res.status(500).json({ erro: 'Erro interno do servidor.' });
+  }
+};
+
+/**
+ * PATCH /api/auth/me  (requer JWT)
+ * O utilizador atualiza o seu próprio telemóvel (qualquer perfil).
+ * Body: { telefone: string }  (vazio apaga; máx. 30 caracteres)
+ */
+exports.atualizarMe = async (req, res) => {
+  try {
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({ erro: 'Não autenticado.' });
+    }
+    const { telefone } = req.body || {};
+    if (typeof telefone !== 'string') {
+      return res.status(400).json({ erro: 'Telemóvel inválido.' });
+    }
+    const limpo = telefone.trim();
+    if (limpo.length > 30 || /[<>]/.test(limpo)) {
+      return res.status(400).json({ erro: 'Telemóvel inválido (máximo 30 caracteres).' });
+    }
+    const utilizador = await Utilizador.findByIdAndUpdate(
+      req.user.id,
+      { $set: { telefone: limpo } },
+      { new: true }
+    ).select('telefone');
+    if (!utilizador) {
+      return res.status(404).json({ erro: 'Utilizador não encontrado.' });
+    }
+    return res.status(200).json({ telefone: utilizador.telefone || '' });
+  } catch (err) {
+    console.error('❌ atualizarMe:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
   }
 };
