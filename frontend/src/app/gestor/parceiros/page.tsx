@@ -382,7 +382,7 @@ export default function ParceirosPage() {
                   type="tel"
                   value={criarForm.telefone}
                   onChange={(e) => setCriarForm((f) => ({ ...f, telefone: e.target.value }))}
-                  placeholder="+351 912 345 678"
+                  placeholder="900 000 000"
                 />
               </div>
               <div className="space-y-1.5">

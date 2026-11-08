@@ -1,6 +1,6 @@
 "use client";
 
-import { TipoMarca, TipoLimpezaBadge } from "@/components/tipo-limpeza-badge";
+import { TipoMarca, TipoLimpezaBadge, EtiquetaManutencao } from "@/components/tipo-limpeza-badge";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Plus,
@@ -1113,9 +1113,9 @@ export default function AdminTarefasPage() {
                     <span className="text-xs uppercase tracking-wide">Equipa: </span>
                     <EquipaTarefa t={t} />
                   </p>
-                  {(t.origem_parceiro || (t.tipo_limpeza && t.tipo_limpeza !== "normal") || (Array.isArray(t.avarias) && t.avarias.length > 0)) && (
+                  {(t.tipo === "manutencao" || t.origem_parceiro || (t.tipo_limpeza && t.tipo_limpeza !== "normal") || (Array.isArray(t.avarias) && t.avarias.length > 0)) && (
                     <div className="flex flex-wrap gap-1">
-                      <TipoLimpezaBadge tipo={t.tipo_limpeza} />
+                      {t.tipo === "manutencao" ? <EtiquetaManutencao /> : <TipoLimpezaBadge tipo={t.tipo_limpeza} />}
                       {t.origem_parceiro && (
                         <Badge variant="secondary" className="px-1.5 py-0 text-xs">🤝 Proprietário</Badge>
                       )}
@@ -1185,7 +1185,7 @@ export default function AdminTarefasPage() {
                           )}
                         </div>
                       </td>
-                      <td className="px-4 py-3"><TipoMarca tipo={t.tipo_limpeza} /></td>
+                      <td className="px-4 py-3">{t.tipo === "manutencao" ? <EtiquetaManutencao /> : <TipoMarca tipo={t.tipo_limpeza} />}</td>
                       {/* Prompt 136 — Nome do hóspede (da reserva Smoobu ou manual). */}
                       <td className="hidden min-w-[8rem] max-w-[12rem] px-4 py-3 text-muted-foreground min-[1680px]:table-cell">
                         <span className="line-clamp-2 break-words" title={t.detalhes_reserva?.nome_hospede ?? undefined}>{t.detalhes_reserva?.nome_hospede ?? "—"}</span>
