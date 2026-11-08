@@ -1446,7 +1446,7 @@ export default function ParceiroReservasPage() {
                 </tr>
                 {novaErro && (
                   <tr>
-                    <td colSpan={12} className="px-3 py-1 text-xs text-destructive" role="alert">{novaErro}</td>
+                    {/* colSpan igual às colunas visíveis (9/10/13), senão a tabela fixa ganha colunas fantasma. */}<><td colSpan={9} className="px-3 py-1 text-xs text-destructive min-[1366px]:hidden" role="alert">{novaErro}</td><td colSpan={10} className="px-3 py-1 text-xs text-destructive hidden min-[1366px]:table-cell min-[1600px]:hidden" role="alert">{novaErro}</td><td colSpan={13} className="px-3 py-1 text-xs text-destructive hidden min-[1600px]:table-cell" role="alert">{novaErro}</td></>
                   </tr>
                 )}
 
@@ -1796,7 +1796,7 @@ function FragmentoLinha({ avisos, children }: { avisos: React.ReactNode; childre
       {children}
       {avisos && (
         <tr className="border-b">
-          <td colSpan={12} className="px-3 py-2">{avisos}</td>
+          <><td colSpan={9} className="px-3 py-2 min-[1366px]:hidden">{avisos}</td><td colSpan={10} className="px-3 py-2 hidden min-[1366px]:table-cell min-[1600px]:hidden">{avisos}</td><td colSpan={13} className="px-3 py-2 hidden min-[1600px]:table-cell">{avisos}</td></>
         </tr>
       )}
     </>

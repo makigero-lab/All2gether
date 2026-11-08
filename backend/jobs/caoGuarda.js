@@ -58,6 +58,7 @@ async function autoAtribuicaoEmergencia() {
   //    Popula propriedade_id (coordenadas + nome + staff_necessario).
   const tarefasOrfas = await Tarefa.find({
     data: { $gte: amanhaInicio, $lt: amanhaFim },
+    tipo: { $ne: 'manutencao' }, // manutenções ficam para o gestor
     $or: [
       { estado: 'por_atribuir', utilizador_id: null },
       { estado: 'atribuida', pessoas_em_falta: { $gt: 0 } },
@@ -142,6 +143,7 @@ async function retomarAtribuicoesPresas(minutos = 45) {
   const limite = new Date(Date.now() - minutos * 60000);
   const presas = await Tarefa.find({
     estado: 'por_atribuir',
+    tipo: { $ne: 'manutencao' }, // manutenções ficam para o gestor
     utilizador_id: null,
     motivo_nao_atribuicao: 'Atribuição automática em curso',
     updatedAt: { $lt: limite },
