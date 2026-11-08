@@ -906,6 +906,11 @@ async function reatribuirTarefasPeriodo(empresaId, utilizadorId, inicio, fim) {
           set.tempo_viagem_minutos = horaEquipa ? Number(horaEquipa.tempoViagem) || 0 : 0;
         }
         await Tarefa.updateOne({ _id: tarefa._id }, { $set: set });
+        // Se a limpeza era uma vaga oferecida à equipa e ficou completa, fecha a oferta já (senão ficava
+        // «aberta» até ao próximo ciclo de 5 min do job; o resultado é o mesmo que o expirarOfertas dá).
+        if (tarefa.oferta_estado === 'aberta' && set.pessoas_em_falta === 0) {
+          await Tarefa.updateOne({ _id: tarefa._id, oferta_estado: 'aberta' }, { $set: { oferta_estado: 'aceite' } });
+        }
 
         reatribuidas++;
         if (parcial) avisarColegasDoSubstituto(membrosAtuais, novos, nomeProp);

@@ -168,6 +168,8 @@ export function DetalheTarefaClient({
   // HF19 — Modal de conclusão com fotos obrigatórias
   const [mostrarConcluir, setMostrarConcluir] = useState(false);
   const [concluirFotos, setConcluirFotos] = useState<string[]>([]);
+  // O erro «falta foto» só aparece depois de a pessoa tentar concluir sem foto.
+  const [tentouSemFoto, setTentouSemFoto] = useState(false);
   const [concluirResultado, setConcluirResultado] = useState<string | null>(null);
   // FIX (portal lavandaria) — Sacos de roupa suja recolhidos pelo staff.
   // Enviado no PATCH /concluir para o backend guardar em tarefa.sacos_roupa_suja.
@@ -295,6 +297,7 @@ export function DetalheTarefaClient({
   const handleConcluir = () => {
     if (!todasMarcadas || concluida || concluindo) return;
     setConcluirFotos([]);
+    setTentouSemFoto(false);
     setConcluirResultado(null);
     setMostrarConcluir(true);
   };
@@ -326,7 +329,10 @@ export function DetalheTarefaClient({
 
   // HF19 — Confirma a conclusão: envia PATCH com fotos_conclusao obrigatórias.
   async function handleConfirmarConclusao() {
-    if (concluirFotos.length === 0) return;
+    if (concluirFotos.length === 0) {
+      setTentouSemFoto(true);
+      return;
+    }
     setConcluindo(true);
     setErroConcluir(null);
     try {
@@ -1192,9 +1198,13 @@ export function DetalheTarefaClient({
 
           {/* Aviso se não há fotos */}
           {concluirFotos.length === 0 && (
-            <p className="text-sm text-destructive">
-              ⚠️ É obrigatório anexar pelo menos 1 foto para concluir.
-            </p>
+            tentouSemFoto ? (
+              <p role="alert" className="text-sm text-destructive">
+                ⚠️ É obrigatório anexar pelo menos 1 foto para concluir.
+              </p>
+            ) : (
+              <p className="text-sm text-muted-foreground">Anexa pelo menos 1 foto.</p>
+            )
           )}
 
           <p className="text-xs text-muted-foreground">
@@ -1239,7 +1249,7 @@ export function DetalheTarefaClient({
           </Button>
           <Button size="touch"
             type="button"
-            disabled={concluirFotos.length === 0 || concluindo}
+            disabled={concluindo}
             onClick={handleConfirmarConclusao}
             className="bg-status-conc text-status-foreground hover:bg-status-conc/90"
           >

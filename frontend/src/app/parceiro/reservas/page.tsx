@@ -104,8 +104,8 @@ const CELULA_CARTAO =
 
 /** Marca visual de "por gravar" (não depende só da cor: leva também um traço e o aviso da linha). */
 // Colunas «Limpeza» (estado) e apagar coladas à direita ao fazer scroll na tabela larga (desktop).
-const FIXO_ACOES = "sticky right-0 z-[1] w-12 min-w-[3rem]";
-const FIXO_ESTADO = "sticky right-12 z-[1] w-[9rem] min-w-[9rem] min-[1600px]:w-[11rem] min-[1600px]:min-w-[11rem] shadow-[-8px_0_8px_-8px_rgba(0,0,0,0.25)]";
+const FIXO_ACOES = "max-[1365px]:sticky right-0 z-[1] w-12 min-w-[3rem]";
+const FIXO_ESTADO = "max-[1365px]:sticky right-12 z-[1] w-[9rem] min-w-[9rem] max-[1365px]:shadow-[-8px_0_8px_-8px_rgba(0,0,0,0.25)]";
 const PENDENTE_TABELA = "bg-amber-100 dark:bg-amber-900/40 shadow-[inset_3px_0_0_0_rgb(217_119_6)]";
 const PENDENTE_CARTAO = "border-amber-600 bg-amber-50 dark:bg-amber-950/30";
 
@@ -492,13 +492,13 @@ function CelulaNotas({
       <textarea
         ref={ref}
         value={v}
-        rows={4}
+        rows={3}
         disabled={disabled}
         aria-label={nomeAcessivel}
         onChange={(e) => setV(e.target.value)}
         onBlur={fechar}
         onKeyDown={teclas}
-        className={`block w-full min-w-[26rem] resize-y bg-primary/5 px-2 py-1.5 text-sm outline-none ring-2 ring-inset ring-primary ${pendente ? PENDENTE_TABELA : ""}`}
+        className={`block w-full resize-y bg-primary/5 px-2 py-1.5 text-sm outline-none ring-2 ring-inset ring-primary ${pendente ? PENDENTE_TABELA : ""}`}
       />
     );
   }
@@ -509,9 +509,9 @@ function CelulaNotas({
       aria-label={`${nomeAcessivel}: ${value || "vazio"}. Carregar para editar`}
       title={value || undefined}
       onClick={() => setAberto(true)}
-      className={`block h-9 w-full max-w-[28rem] truncate px-2 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-60 ${pendente ? PENDENTE_TABELA : ""}`}
+      className={`group block min-h-9 w-full px-2 py-1.5 text-left text-sm leading-snug outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-60 ${pendente ? PENDENTE_TABELA : ""}`}
     >
-      {value ? value.replace(/\s*\n\s*/g, " ") : <span className="text-muted-foreground">—</span>}
+      {value ? <span className="line-clamp-2 break-words group-focus-visible:line-clamp-none">{value.replace(/\s*\n\s*/g, " ")}</span> : <span className="text-muted-foreground">—</span>}
     </button>
   );
 }
@@ -1021,7 +1021,6 @@ export default function ParceiroReservasPage() {
         : `${resultado}.`
     ;
     setResumo(textoResumo);
-    if (avisosServidor.length > 0) setAviso(avisosServidor.join(" "));
     // Resultado também junto à barra de baixo (no telemóvel o topo fica fora do ecrã). Avisos e erros ficam até fechar.
     {
       const falhou = semRede || semSessao || comErro > 0;
@@ -1370,20 +1369,20 @@ export default function ParceiroReservasPage() {
         {/* Desktop (md+): tabela editável tipo folha de cálculo. */}
         <Card className="hidden md:block" onFocus={aoFocar} onBlur={aoDesfocar}>
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1000px] border-collapse text-sm min-[1600px]:min-w-[1500px]">
+            <table className="w-full min-w-[1100px] table-fixed border-collapse text-sm">
               <thead>
                 <tr className="border-b bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
-                  <Cab chave="propriedade" rotulo="Propriedade" ordem={ordem} onOrdenar={ordenarPorColuna} />
-                  <Cab chave="check_in" rotulo="Check-in" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[9rem] min-[1600px]:min-w-[11rem]" />
-                  <Cab chave="hora_checkin" rotulo="Hora c/in" ordem={ordem} onOrdenar={ordenarPorColuna} className="hidden min-[1600px]:table-cell" />
-                  <Cab chave="check_out" rotulo="Check-out" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[9rem] min-[1600px]:min-w-[11rem]" />
-                  <Cab chave="noites" rotulo="Noites" ordem={ordem} onOrdenar={ordenarPorColuna} direita className="hidden min-[1600px]:table-cell" />
-                  <Cab chave="hospedes" rotulo="Hósp." ordem={ordem} onOrdenar={ordenarPorColuna} direita />
-                  <Cab chave="nome_hospede" rotulo="Hóspede" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[8rem] min-[1600px]:min-w-[9rem]" />
-                  <Cab chave="plataforma" rotulo="Plataforma" ordem={ordem} onOrdenar={ordenarPorColuna} />
-                  <Cab chave="tipo_limpeza" rotulo="Tipo de limpeza" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[9rem] min-[1600px]:min-w-[11rem]" />
-                  <Cab chave="horario_preferido" rotulo="Horário" ordem={ordem} onOrdenar={ordenarPorColuna} className="hidden min-[1600px]:table-cell" />
-                  <Cab chave="observacoes" rotulo="Notas" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[12rem] min-[1600px]:min-w-[28rem]" />
+                  <Cab chave="propriedade" rotulo="Propriedade" ordem={ordem} onOrdenar={ordenarPorColuna} className="w-[8rem]" />
+                  <Cab chave="check_in" rotulo="Check-in" ordem={ordem} onOrdenar={ordenarPorColuna} className="w-[8.5rem]" />
+                  <Cab chave="hora_checkin" rotulo="Hora c/in" ordem={ordem} onOrdenar={ordenarPorColuna} className="hidden w-[6rem] min-[1600px]:table-cell" />
+                  <Cab chave="check_out" rotulo="Check-out" ordem={ordem} onOrdenar={ordenarPorColuna} className="w-[8.5rem]" />
+                  <Cab chave="noites" rotulo="Noites" ordem={ordem} onOrdenar={ordenarPorColuna} direita className="hidden w-[5rem] min-[1600px]:table-cell" />
+                  <Cab chave="hospedes" rotulo="Hósp." ordem={ordem} onOrdenar={ordenarPorColuna} direita className="w-[4.5rem]" />
+                  <Cab chave="nome_hospede" rotulo="Hóspede" ordem={ordem} onOrdenar={ordenarPorColuna} className="w-[7.5rem]" />
+                  <Cab chave="plataforma" rotulo="Plataforma" ordem={ordem} onOrdenar={ordenarPorColuna} className="hidden w-[7rem] min-[1600px]:table-cell" />
+                  <Cab chave="tipo_limpeza" rotulo="Tipo de limpeza" ordem={ordem} onOrdenar={ordenarPorColuna} className="w-[8rem]" />
+                  <Cab chave="horario_preferido" rotulo="Horário" ordem={ordem} onOrdenar={ordenarPorColuna} className="hidden w-[7rem] min-[1366px]:table-cell" />
+                  <Cab chave="observacoes" rotulo="Notas" ordem={ordem} onOrdenar={ordenarPorColuna} className="min-w-[14rem]" />
                   <Cab chave="estado" rotulo="Limpeza" ordem={ordem} onOrdenar={ordenarPorColuna} className={`${FIXO_ESTADO} z-[2] bg-background bg-gradient-to-r from-muted/40 to-muted/40`} />
                   <th className={`${FIXO_ACOES} z-[2] bg-background bg-gradient-to-r from-muted/40 to-muted/40 px-2 py-2`}><span className="sr-only">Ações</span></th>
                 </tr>
@@ -1391,7 +1390,7 @@ export default function ParceiroReservasPage() {
               <tbody>
                 {/* Linha de entrada: Enter ou + acrescentam-na às reservas por gravar */}
                 <tr className="border-b bg-primary/5" onKeyDown={enterAdiciona}>
-                  <td className="max-w-[10rem] p-0 min-[1600px]:max-w-[16rem]">
+                  <td className="p-0">
                     <select
                       value={nova.propriedade_id}
                       onChange={(e) => setN("propriedade_id")(e.target.value)}
@@ -1421,7 +1420,7 @@ export default function ParceiroReservasPage() {
                   <td className="p-0">
                     <input value={nova.nome_hospede} onChange={(e) => setN("nome_hospede")(e.target.value)} className={CELULA} disabled={gravando} aria-label="Nova reserva: nome do hóspede" />
                   </td>
-                  <td className="p-0">
+                  <td className="hidden p-0 min-[1600px]:table-cell">
                     <select value={nova.plataforma} onChange={(e) => setN("plataforma")(e.target.value)} className={CELULA} disabled={gravando} aria-label="Nova reserva: plataforma">
                       <option value="">—</option>
                       {PLATAFORMAS.map((o) => <option key={o} value={o}>{o}</option>)}
@@ -1432,11 +1431,11 @@ export default function ParceiroReservasPage() {
                       {OPCOES_TIPO.map((o) => <option key={o.valor} value={o.valor}>{o.rotulo}</option>)}
                     </select>
                   </td>
-                  <td className="hidden p-0 min-[1600px]:table-cell">
+                  <td className="hidden p-0 min-[1366px]:table-cell">
                     <input value={nova.horario_preferido} onChange={(e) => setN("horario_preferido")(e.target.value)} placeholder="11h - 14h" className={CELULA} disabled={gravando} aria-label="Nova reserva: horário preferido de limpeza" />
                   </td>
                   <td className="p-0">
-                    <textarea value={nova.observacoes} onChange={(e) => { setN("observacoes")(e.target.value); e.currentTarget.style.height = "auto"; e.currentTarget.style.height = `${e.currentTarget.scrollHeight + 2}px`; }} onKeyDown={(e) => { if (e.key === "Enter") e.stopPropagation(); }} rows={4} className={`${CELULA} h-auto min-h-[6.5rem] resize-y py-1.5`} disabled={gravando} aria-label="Nova reserva: notas" />
+                    <textarea value={nova.observacoes} onChange={(e) => { setN("observacoes")(e.target.value); e.currentTarget.style.height = "auto"; e.currentTarget.style.height = `${e.currentTarget.scrollHeight + 2}px`; }} onKeyDown={(e) => { if (e.key === "Enter") e.stopPropagation(); }} rows={3} className={`${CELULA} h-auto min-h-[4.75rem] resize-y py-1.5`} disabled={gravando} aria-label="Nova reserva: notas" />
                   </td>
                   <td className={`${FIXO_ESTADO} bg-background bg-gradient-to-r from-primary/5 to-primary/5 px-2 text-xs text-muted-foreground`}>nova</td>
                   <td className={`${FIXO_ACOES} bg-background bg-gradient-to-r from-primary/5 to-primary/5 px-1 text-right`}>
@@ -1447,7 +1446,7 @@ export default function ParceiroReservasPage() {
                 </tr>
                 {novaErro && (
                   <tr>
-                    <td colSpan={12} className="px-3 py-1 text-xs text-destructive" role="alert">{novaErro}</td>
+                    {/* colSpan igual às colunas visíveis (9/10/13), senão a tabela fixa ganha colunas fantasma. */}<><td colSpan={9} className="px-3 py-1 text-xs text-destructive min-[1366px]:hidden" role="alert">{novaErro}</td><td colSpan={10} className="px-3 py-1 text-xs text-destructive hidden min-[1366px]:table-cell min-[1600px]:hidden" role="alert">{novaErro}</td><td colSpan={13} className="px-3 py-1 text-xs text-destructive hidden min-[1600px]:table-cell" role="alert">{novaErro}</td></>
                   </tr>
                 )}
 
@@ -1461,7 +1460,7 @@ export default function ParceiroReservasPage() {
                   return (
                     <FragmentoLinha key={l.key} avisos={avisos}>
                       <tr className={`border-b last:border-0 hover:bg-muted/30 ${cor.tr}`}>
-                        <td title={nome} className={`max-w-[10rem] truncate px-2 min-[1600px]:max-w-[16rem] py-1 font-medium ${cor.faixa}`}>{nome}</td>
+                        <td title={nome} className={`truncate px-2 py-1 font-medium ${cor.faixa}`}>{nome}</td>
                         <td className="p-0">
                           <Celula type="date" value={ci} pendente={p("check_in")} rotulo={`Check-in, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "check_in", v)} />
                         </td>
@@ -1471,22 +1470,22 @@ export default function ParceiroReservasPage() {
                         <td className="p-0">
                           <Celula type="date" value={co} pendente={p("check_out")} rotulo={`Check-out, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "check_out", v)} />
                         </td>
-                        <td className="hidden w-16 p-0 min-[1600px]:table-cell">
+                        <td className="hidden p-0 min-[1600px]:table-cell">
                           <Celula type="number" align="right" pendente={p("check_out")} rotulo={`Noites, ${nome}`} value={String(noites(ci, co))} disabled={l.semEdicao} onCommit={(v) => alterar(l, "noites", v)} />
                         </td>
-                        <td className="w-16 p-0">
+                        <td className="p-0">
                           <Celula type="number" align="right" value={l.valores.hospedes} pendente={p("hospedes")} rotulo={`Hóspedes, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "hospedes", v)} />
                         </td>
                         <td className="p-0">
                           <Celula value={l.valores.nome_hospede} pendente={p("nome_hospede")} rotulo={`Nome do hóspede, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "nome_hospede", v)} />
                         </td>
-                        <td className="p-0">
+                        <td className="hidden p-0 min-[1600px]:table-cell">
                           <Celula type="select" options={PLATAFORMAS} pendente={p("plataforma")} rotulo={`Plataforma, ${nome}`} value={l.valores.plataforma} disabled={l.semEdicao} onCommit={(v) => alterar(l, "plataforma", v)} />
                         </td>
                         <td className="p-0">
                           <Celula type="select" opcoes={OPCOES_TIPO} pendente={p("tipo_limpeza")} rotulo={`Tipo de limpeza, ${nome}`} value={tipoOuNormal(l.valores.tipo_limpeza)} disabled={l.semEdicao} onCommit={(v) => alterar(l, "tipo_limpeza", v)} />
                         </td>
-                        <td className="hidden p-0 min-[1600px]:table-cell">
+                        <td className="hidden p-0 min-[1366px]:table-cell">
                           <Celula value={l.valores.horario_preferido} pendente={p("horario_preferido")} rotulo={`Horário preferido, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "horario_preferido", v)} />
                         </td>
                         <td className="p-0">
@@ -1797,7 +1796,7 @@ function FragmentoLinha({ avisos, children }: { avisos: React.ReactNode; childre
       {children}
       {avisos && (
         <tr className="border-b">
-          <td colSpan={12} className="px-3 py-2">{avisos}</td>
+          <><td colSpan={9} className="px-3 py-2 min-[1366px]:hidden">{avisos}</td><td colSpan={10} className="px-3 py-2 hidden min-[1366px]:table-cell min-[1600px]:hidden">{avisos}</td><td colSpan={13} className="px-3 py-2 hidden min-[1600px]:table-cell">{avisos}</td></>
         </tr>
       )}
     </>
