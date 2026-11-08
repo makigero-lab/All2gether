@@ -152,7 +152,11 @@ const escapar = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 async function limparNomeEmTextos(empresaId, nome) {
   const n = String(nome || '').trim();
   if (n.length < 3 || n === NOME_ANONIMO) return 0;
-  const re = new RegExp(`(?<![\\p{L}\\p{N}])${escapar(n)}(?![\\p{L}\\p{N}])`, 'giu');
+  // Nome de uma só palavra: não substitui quando vem seguido de outra palavra com maiúscula,
+  // para não partir o nome de outra pessoa ("Ana" em "Ana Maria concluiu").
+  const umaPalavra = !/\s/.test(n);
+  const seguinte = umaPalavra ? '(?!\\s+\\p{Lu})' : '';
+  const re = new RegExp(`(?<![\\p{L}\\p{N}])${escapar(n)}(?![\\p{L}\\p{N}])${seguinte}`, 'gu');
   let total = 0;
   for (const [Modelo, campo] of [[Auditoria, 'descricao'], [Notificacao, 'mensagem']]) {
     const docs = await Modelo.find({ empresa_id: empresaId, [campo]: { $regex: escapar(n), $options: 'i' } })

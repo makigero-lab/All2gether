@@ -55,6 +55,7 @@ exports.listarTarefas = async (req, res) => {
       propriedade_id: { $in: propriedadeIds },
       data: { $gte: inicio, $lt: fim },
       estado: { $ne: 'cancelada' },
+      tipo: { $ne: 'manutencao' }, // manutenções (avarias) não levam roupa
     })
       .populate({
         path: 'propriedade_id',
@@ -103,6 +104,7 @@ exports.marcarRoupaEntregue = async (req, res) => {
     const tarefa = await Tarefa.findOne({
       _id: id,
       empresa_id: empresaId,
+      tipo: { $ne: 'manutencao' },
       propriedade_id: { $in: propsPermitidas.map((p) => p._id) },
     });
 

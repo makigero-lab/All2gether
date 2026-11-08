@@ -164,8 +164,12 @@ async function apagarEmpresaDefinitivo(empresaId, { agora = new Date() } = {}) {
   try {
     if (!donoVagas) return { apagada: false, motivo: 'ocupada' };
     // Impede novos acessos e novas ligações enquanto apaga.
-    await Empresa.updateOne({ _id: id }, { $set: { ativa: false } });
-    const idsUsers = await Utilizador.distinct('_id', { empresa_id: id });
+    // Guarda os ids dos utilizadores ANTES de apagar: se o job falhar depois de apagar os
+    // utilizadores, a retoma ainda sabe que notificações/auditoria (ligadas só por utilizador_id) apagar.
+    const atuais = await Utilizador.distinct('_id', { empresa_id: id });
+    const guardados = Array.isArray(empresa.eliminacao_ids_utilizadores) ? empresa.eliminacao_ids_utilizadores : [];
+    const idsUsers = [...new Map([...guardados, ...atuais].map((x) => [String(x), x])).values()];
+    await Empresa.collection.updateOne({ _id: id }, { $set: { ativa: false, eliminacao_ids_utilizadores: idsUsers } });
 
     const contagens = await varrer(id, idsUsers);
     await Empresa.deleteOne({ _id: id });
