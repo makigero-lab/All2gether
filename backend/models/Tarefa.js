@@ -169,6 +169,9 @@ const tarefaSchema = new mongoose.Schema(
           fotos: { type: [String], default: [] },
           resolvido: { type: Boolean, default: false },
           data_registo: { type: Date, default: Date.now },
+          // Quando a avaria foi resolvida (null se aberta ou resolvida antes deste campo existir).
+          // A retenção das fotos conta os 90 dias a partir daqui.
+          data_resolucao: { type: Date, default: null },
         },
       ],
       default: [],

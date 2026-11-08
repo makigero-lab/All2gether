@@ -49,6 +49,8 @@ const Empresa = require('../models/Empresa');
 const { extrairDadosReserva } = require('../controllers/smoobuController');
 
 const router = express.Router();
+// Aviso de webhook sem autenticação: uma vez por arranque.
+let avisoAuthDesativada = false;
 
 // Comparação de chaves em tempo constante (evita timing attacks).
 function chavesIguais(a, b) {
@@ -274,9 +276,13 @@ router.post('/webhook', async (req, res) => {
   }
 
   if (auth.origem === 'auth_desativada') {
-    console.warn(
-      '⚠️  [Smoobu Webhook] auth DESATIVADA via SMOOBU_WEBHOOK_AUTH_DISABLED=true — a aceitar sem autenticação (garante allowlist de IP no reverse proxy).'
-    );
+    // Avisa só uma vez por arranque (antes repetia em cada webhook e enchia os logs).
+    if (!avisoAuthDesativada) {
+      avisoAuthDesativada = true;
+      console.warn(
+        '⚠️  [Smoobu Webhook] auth DESATIVADA via SMOOBU_WEBHOOK_AUTH_DISABLED=true — a aceitar sem autenticação (garante allowlist de IP no reverse proxy).'
+      );
+    }
   } else if (auth.origem === 'dev') {
     console.warn(
       '⚠️  [Smoobu Webhook] sem auth configurada (nem empresas com chave nem SMOOBU_API_KEY) — modo dev, a aceitar sem autenticação.'

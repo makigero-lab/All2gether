@@ -270,6 +270,7 @@ describe('Avarias com ciclo fechado', () => {
     expect(conc.status).toBe(200);
     const depois = await Tarefa.findById(t._id);
     expect(depois.avarias[0].resolvido).toBe(true);
+    expect(depois.avarias[0].data_resolucao).toBeInstanceOf(Date);
     expect((await dash(c)).avariasAbertas).toBe(0);
     const det2 = await request(app).get(`/api/auth/me/tarefas/${seguinte._id}`).set(auth(c.tokAna));
     expect(det2.body.tarefa.avarias_abertas_casa).toHaveLength(0);
@@ -289,9 +290,17 @@ describe('Avarias com ciclo fechado', () => {
     const r = await request(app).patch(`/api/gestor/tarefas/${t._id}/avarias/${av._id}/resolver`).set(auth(c.tokG)).send({});
     expect(r.status).toBe(200);
     expect(r.body.avarias[0].resolvido).toBe(true);
+    expect(r.body.avarias[0].data_resolucao).toBeTruthy();
+    const data1 = (await Tarefa.findById(t._id)).avarias[0].data_resolucao;
+    expect(Date.now() - data1.getTime()).toBeLessThan(60000);
+    // repetir «resolver» não renova a data
+    await request(app).patch(`/api/gestor/tarefas/${t._id}/avarias/${av._id}/resolver`).set(auth(c.tokG)).send({});
+    expect((await Tarefa.findById(t._id)).avarias[0].data_resolucao.getTime()).toBe(data1.getTime());
     expect((await dash(c)).avariasAbertas).toBe(0);
     const re = await request(app).patch(`/api/gestor/tarefas/${t._id}/avarias/${av._id}/resolver`).set(auth(c.tokG)).send({ resolvido: false });
     expect(re.body.avarias[0].resolvido).toBe(false);
+    expect(re.body.avarias[0].data_resolucao).toBeNull();
+    expect((await Tarefa.findById(t._id)).avarias[0].data_resolucao).toBeNull();
     const outra = await cenario();
     expect((await request(app).patch(`/api/gestor/tarefas/${t._id}/avarias/${av._id}/resolver`).set(auth(outra.tokG)).send({})).status).toBe(404);
     expect((await request(app).patch(`/api/gestor/tarefas/${t._id}/avarias/xx/resolver`).set(auth(c.tokG)).send({})).status).toBe(400);

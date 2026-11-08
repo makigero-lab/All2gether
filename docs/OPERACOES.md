@@ -24,6 +24,9 @@ Pré-requisitos locais: `gpg` e as [MongoDB Database Tools](https://www.mongodb.
    (acrescenta `--drop` só se quiseres substituir coleções existentes; usa `--nsInclude "base.colecao"` para restaurar apenas uma coleção.)
 4. Verifica contagens/dados e só depois, se necessário, restaura em produção. Apaga o `dump.archive.gz` em claro quando terminares (contém dados pessoais).
 
+### Teste de restauro (semanal, automático)
+Um backup que nunca foi restaurado não está provado. O workflow `.github/workflows/backup-restauro-teste.yml` (*Actions > Teste de restauro do backup*; domingo às 04:17 UTC, uma hora depois do backup, e manual) descarrega o artifact mais recente do backup, decifra-o com `BACKUP_PASSPHRASE`, restaura-o com `mongorestore` num MongoDB temporário que corre no próprio runner (service container; nunca toca no Atlas) e confirma que `tarefas`, `utilizadors`, `propriedades` e `empresas` existem com mais de 0 documentos. O resumo do job mostra só nomes de coleções e contagens, nunca dados. Se algo falhar o job fica vermelho (o GitHub avisa por email). Os ficheiros decifrados são apagados no fim, mesmo em caso de falha. Não precisa de secrets novos (usa `BACKUP_PASSPHRASE`) e só aparece em *Actions* depois de estar na `main`. Se um backup falhar ou estiver expirado (14 dias), corre primeiro o workflow de backup.
+
 ## 2. Ping para o Render não adormecer
 
 O Render grátis adormece após inatividade. Usa um serviço externo, **não** o GitHub Actions (gastaria minutos).

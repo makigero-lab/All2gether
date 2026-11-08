@@ -31,11 +31,11 @@ const { notificarUtilizador } = require('../utils/notificar');
  * @param {string} telefone - número em formato internacional (ex.: +351912345678)
  * @param {string} mensagem - texto a enviar
  */
-function enviarWhatsApp(telefone, mensagem) {
-  console.log(`\n📱 WHATSAPP → ${telefone}`);
-  console.log('─────────────────────────────────────');
-  console.log(mensagem);
-  console.log('─────────────────────────────────────\n');
+function enviarWhatsApp(telefone, mensagem, utilizadorId) {
+  // RGPD: o log não leva o telefone, o nome nem a lista de casas (dados pessoais).
+  // Enquanto não houver integração real, nada é enviado.
+  void telefone; void mensagem;
+  console.log(`📱 [Daily Briefing] WhatsApp simulado (não enviado) para o utilizador ${utilizadorId}.`);
 }
 
 /**
@@ -135,10 +135,10 @@ async function executarBriefing() {
 
       if (!telefone) {
         semTelefone++;
-        console.log(`⚠️  [Daily Briefing] ${utilizador.nome} não tem telefone — skipping WhatsApp.`);
+        console.log(`⚠️  [Daily Briefing] utilizador ${utilizador._id} sem telefone — sem WhatsApp.`);
       } else {
         const mensagem = gerarMensagem(utilizador, tarefasUser);
-        enviarWhatsApp(telefone, mensagem);
+        enviarWhatsApp(telefone, mensagem, String(utilizador._id));
         enviados++;
       }
 
@@ -159,7 +159,7 @@ async function executarBriefing() {
     }
 
     console.log(
-      `✅ [Daily Briefing] Concluído: ${enviados} mensagem(s) WhatsApp enviada(s), ` +
+      `✅ [Daily Briefing] Concluído: ${enviados} WhatsApp simulado(s) (não enviados), ` +
         `${semTelefone} utilizador(es) sem telefone, ${pushesEnviados} push(es) enviados(s).`
     );
   } catch (err) {
@@ -174,7 +174,7 @@ async function executarBriefing() {
  * se necessário — ex.: TZ=Europe/Lisbon no Render).
  */
 function iniciarDailyBriefing() {
-  console.log('⏰ [Daily Briefing] Cron agendado para 08:00 diariamente (0 8 * * *).');
+  console.log('⏰ [Daily Briefing] Cron agendado para 08:00 (Europe/Lisbon) diariamente (0 8 * * *).');
 
   // 08:00 de Lisboa (hora de verão incluída), não do servidor (UTC no Render).
   cron.schedule('0 8 * * *', async () => {

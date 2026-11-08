@@ -167,7 +167,12 @@ app.use('/api/fornecedor', fornecedorRoutes);
 // padrão sem vazar a stack trace para o cliente (segurança).
 // Deve ser o ÚLTIMO middleware registado (depois de todas as rotas).
 app.use((err, req, res, next) => {
-  console.error('❌ Erro não tratado:', err.message);
+  // Corpo grande e JSON inválido são erros do cliente: aviso curto, não «erro não tratado».
+  if (err.status === 413 || err.type === 'entity.too.large' || err.type === 'entity.parse.failed') {
+    console.warn(`⚠️  Pedido recusado (${err.type || err.status}) em ${req.method} ${req.path}`);
+  } else {
+    console.error('❌ Erro não tratado:', err.message);
+  }
   // Log completo no servidor (para debug), mas NÃO enviar ao cliente.
   if (process.env.NODE_ENV !== 'production') {
     console.error(err.stack);

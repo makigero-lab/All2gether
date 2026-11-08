@@ -14,7 +14,7 @@ async function resolverAvariaDaManutencao(tarefa) {
     if (!tarefa || tarefa.tipo !== 'manutencao' || !tarefa.avaria_origem_id || !tarefa.avaria_origem_item_id) return false;
     const r = await Tarefa.updateOne(
       { _id: tarefa.avaria_origem_id, avarias: { $elemMatch: { _id: tarefa.avaria_origem_item_id, resolvido: false } } },
-      { $set: { 'avarias.$[a].resolvido': true } },
+      { $set: { 'avarias.$[a].resolvido': true, 'avarias.$[a].data_resolucao': new Date() } },
       { arrayFilters: [{ 'a._id': tarefa.avaria_origem_item_id }] }
     );
     return r.modifiedCount > 0;
