@@ -16,6 +16,7 @@ import {
   buildBackendUrl,
   ERRO_BACKEND_NAO_CONFIGURADO,
 } from "@/lib/backend";
+import { responderBackend } from "@/lib/proxy-utils";
 
 const COOKIE_NAME = "all2gether_token";
 
@@ -70,14 +71,8 @@ async function proxyHandler(
       cache: "no-store",
     });
 
-    const data = await res.json();
-
-    // Se 401, o token pode estar expirado — limpa o cookie.
-    const response = NextResponse.json(data, { status: res.status });
-    if (res.status === 401) {
-      response.cookies.delete(COOKIE_NAME);
-    }
-    return response;
+    // JSON normal ou ficheiro para descarregar (exportação RGPD de uma empresa); limpa o cookie se 401.
+    return await responderBackend(res, COOKIE_NAME);
   } catch {
     return NextResponse.json(
       { erro: "Erro ao comunicar com o backend." },

@@ -26,6 +26,8 @@ import {
   EyeOff,
   Lock,
   AlertTriangle,
+  Download,
+  ShieldX,
 } from "lucide-react";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -66,6 +68,9 @@ import {
   type Role,
 } from "@/lib/api";
 import { PaginationBar } from "@/components/admin/pagination-bar";
+import { ApagarDadosDialog } from "@/components/rgpd/apagar-dados-dialog";
+import { descarregarFicheiro } from "@/lib/descarregar";
+import { lerUtilizador } from "@/lib/auth";
 import { Switch } from "@/components/ui/switch";
 import { parsearDataSegura, tarefasPorAtribuir, textoRedistribuicao, type RedistribuicaoDTO, plural } from "@/lib/utils";
 
@@ -279,6 +284,21 @@ function EquipaPage() {
 
   // Modal de confirmação de eliminação
   const [eliminando, setEliminando] = useState<UtilizadorDTO | null>(null);
+  // RGPD: exportar / apagar os dados pessoais de uma pessoa (ações separadas das restantes).
+  const [apagarDados, setApagarDados] = useState<UtilizadorDTO | null>(null);
+  const [exportandoId, setExportandoId] = useState<string | null>(null);
+  const [rgpdMsg, setRgpdMsg] = useState<{ tipo: "ok" | "erro"; texto: string } | null>(null);
+  const [eu, setEu] = useState<{ id: string; role: string } | null>(null);
+  useEffect(() => {
+    let cancelado = false;
+    (async () => {
+      const u = await lerUtilizador();
+      if (!cancelado && u) setEu({ id: u.id, role: u.role });
+    })();
+    return () => {
+      cancelado = true;
+    };
+  }, []);
   const [elimSubmitting, setElimSubmitting] = useState(false);
 
   // Modal de falta súbita
@@ -676,6 +696,20 @@ function EquipaPage() {
       setEditErro(e instanceof Error ? e.message : "Erro ao eliminar.");
     } finally {
       setElimSubmitting(false);
+    }
+  }
+
+  /** RGPD: descarrega o JSON com os dados pessoais de uma pessoa da equipa. */
+  async function handleExportarDados(u: UtilizadorDTO) {
+    setExportandoId(u._id);
+    setRgpdMsg(null);
+    try {
+      await descarregarFicheiro(`/api/gestor/equipa/${u._id}/exportar-dados`, `dados-pessoais-${u._id}.json`);
+      setRgpdMsg({ tipo: "ok", texto: `Dados de ${u.nome} descarregados.` });
+    } catch (e) {
+      setRgpdMsg({ tipo: "erro", texto: e instanceof Error ? e.message : "Não foi possível exportar os dados." });
+    } finally {
+      setExportandoId(null);
     }
   }
 
@@ -1122,6 +1156,20 @@ function EquipaPage() {
             </Card>
           )}
 
+          {rgpdMsg && (
+            <Card className={rgpdMsg.tipo === "ok" ? "border-emerald-500/50" : "border-destructive/50"}>
+              <CardContent
+                role="status"
+                className={`flex items-center justify-between gap-3 p-3 text-sm ${rgpdMsg.tipo === "ok" ? "text-emerald-600 dark:text-emerald-400" : "text-destructive"}`}
+              >
+                <span className="min-w-0 break-words">{rgpdMsg.texto}</span>
+                <Button variant="ghost" size="sm" onClick={() => setRgpdMsg(null)}>
+                  Fechar
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Tabela de utilizadores */}
           <Card>
             <CardContent className="p-0">
@@ -1286,6 +1334,32 @@ function EquipaPage() {
                                 >
                                   <CalendarOff className="h-4 w-4" />
                                 </Button>
+                                {/* RGPD — separado das outras ações */}
+                                <span className="ml-3 h-6 w-px shrink-0 bg-border" aria-hidden="true" />
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-11 w-11 md:h-8 md:w-8"
+                                  onClick={() => handleExportarDados(u)}
+                                  disabled={exportandoId === u._id}
+                                  aria-label={`Exportar dados de ${u.nome}`}
+                                  title="Exportar dados"
+                                >
+                                  {exportandoId === u._id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                                </Button>
+                                {/* Só quem pode: nunca a própria conta; gestores só pelo administrador */}
+                                {eu && eu.id !== u._id && (u.role !== "gestor" || eu.role === "admin") && (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-11 w-11 text-destructive hover:text-destructive md:h-8 md:w-8"
+                                    onClick={() => setApagarDados(u)}
+                                    aria-label={`Apagar dados pessoais de ${u.nome}`}
+                                    title="Apagar dados pessoais"
+                                  >
+                                    <ShieldX className="h-4 w-4" />
+                                  </Button>
+                                )}
                               </div>
                             )}
                           </td>
@@ -1771,6 +1845,16 @@ function EquipaPage() {
           </Dialog>
 
           {/* Modal de Confirmação de Eliminação */}
+          <ApagarDadosDialog
+            pessoa={apagarDados}
+            onFechar={() => setApagarDados(null)}
+            onConcluido={(texto) => {
+              setApagarDados(null);
+              setRgpdMsg({ tipo: "ok", texto });
+              void carregar();
+            }}
+          />
+
           <Dialog
             open={eliminando !== null}
             onOpenChange={(o) => !o && setEliminando(null)}

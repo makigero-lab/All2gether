@@ -54,6 +54,13 @@ const empresaSchema = new mongoose.Schema(
       index: true,
     },
     // Dados da empresa.
+    // RGPD (art. 28.º, n.º 3, al. g): eliminação definitiva no fim do contrato, com período de
+    // segurança. Enquanto `eliminacao_agendada_para` estiver preenchido a empresa fica desativada
+    // (ver utils/rgpdEmpresa.js); o job diário apaga tudo depois dessa data.
+    eliminacao_agendada_para: { type: Date, default: null, index: true },
+    eliminacao_pedida_em: { type: Date, default: null },
+    eliminacao_pedida_por: { type: mongoose.Schema.Types.ObjectId, ref: 'Utilizador', default: null },
+    eliminacao_ativa_antes: { type: Boolean, default: null },
     morada: {
       type: String,
       default: '',

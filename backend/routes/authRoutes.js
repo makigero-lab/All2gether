@@ -18,6 +18,7 @@ const rateLimit = require('express-rate-limit');
 const router = express.Router();
 
 const { auth } = require('../middleware/auth');
+const rgpd = require('../controllers/rgpdController');
 const { login, ssoLogin, me, meuCalendario, minhasTarefas, minhaTarefaDetalhe, concluirMinhaTarefa } = require('../controllers/authController');
 const {
   listarNotificacoes,
@@ -96,6 +97,9 @@ router.get('/sso', ssoLogin);
 
 // Dados do utilizador autenticado — requer JWT.
 router.get('/me', auth, me);
+
+// RGPD: o próprio descarrega os seus dados pessoais (JSON).
+router.get('/me/exportar-dados', auth, rgpd.exportarMeusDados);
 
 // Calendário pessoal do utilizador — requer JWT.
 router.get('/me/calendario', auth, meuCalendario);

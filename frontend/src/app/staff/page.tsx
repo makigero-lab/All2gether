@@ -1,10 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
   Clock,
   ClipboardList,
   LogOut,
+  UserRound,
   Loader2,
   AlertTriangle,
   Send,
@@ -272,6 +274,14 @@ export default function StaffPage() {
           {/* Prompt 114 — Sino de Notificações + Botão logout */}
           <div className="flex items-center gap-1">
             <NotificationBell />
+            <Link
+              href="/staff/perfil"
+              aria-label="O meu perfil"
+              title="O meu perfil"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground sm:h-9 sm:w-9"
+            >
+              <UserRound className="h-5 w-5" />
+            </Link>
             <Button
               variant="ghost"
               size="icon"

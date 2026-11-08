@@ -42,6 +42,7 @@ const { iniciarAgendaAmanha } = require('./jobs/agendaAmanha');
 const { iniciarCaoGuarda } = require('./jobs/caoGuarda');
 const { iniciarArquivista } = require('./jobs/arquivista');
 const { iniciarRetencao } = require('./jobs/retencao');
+const { iniciarEliminacaoEmpresas } = require('./jobs/eliminacaoEmpresas');
 const { iniciarOfertasVagas } = require('./jobs/ofertaVagas');
 const { iniciarSincronizacaoSmoobu } = require('./jobs/sincronizacaoSmoobu');
 const { iniciarLimpezaFotos } = require('./jobs/limpezaFotos');
@@ -299,6 +300,9 @@ if (require.main === module) {
 
       // Retenção RGPD: anonimiza nomes/notas de hóspedes após 90 dias e apaga ausências antigas.
       iniciarRetencao();
+
+      // RGPD: apaga as empresas cujo período de segurança de eliminação já passou (04:10).
+      iniciarEliminacaoEmpresas();
 
       // Vagas livres: oferece à equipa as limpezas sem ninguém disponível (aceita quem chegar primeiro)
       // e expira as ofertas que chegaram ao prazo.

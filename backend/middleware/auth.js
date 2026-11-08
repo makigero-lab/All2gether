@@ -16,6 +16,7 @@
 const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
 const Utilizador = require('../models/Utilizador');
+const Empresa = require('../models/Empresa');
 
 // SEGURANÇA (fail-closed): em produção o segredo é OBRIGATÓRIO (>= 32 chars).
 // O fallback só existe para desenvolvimento/testes locais.
@@ -57,17 +58,24 @@ function verificarJwt(token) {
 const CACHE_TTL_MS = process.env.NODE_ENV === 'test' ? 0 : 30 * 1000;
 const cacheUtilizadores = new Map(); // id -> { ok, ate }
 
-async function utilizadorContinuaAtivo(id) {
+async function utilizadorContinuaAtivo(id, { suporte = false } = {}) {
   if (!mongoose.isValidObjectId(id)) return false;
   const agora = Date.now();
-  const emCache = cacheUtilizadores.get(String(id));
+  const chaveCache = `${String(id)}:${suporte ? 's' : 'n'}`;
+  const emCache = cacheUtilizadores.get(chaveCache);
   if (emCache && emCache.ate > agora) return emCache.ok;
 
-  const u = await Utilizador.findById(id).select('ativo eliminado_em').lean();
-  const ok = Boolean(u && u.ativo !== false && !u.eliminado_em);
+  const u = await Utilizador.findById(id).select('ativo eliminado_em role empresa_id').lean();
+  let ok = Boolean(u && u.ativo !== false && !u.eliminado_em);
+  // Empresa desativada (ex.: eliminação agendada): os utilizadores não entram, nem com um JWT antigo.
+  // O Super Admin e as sessões de suporte (impersonação) ficam de fora.
+  if (ok && !suporte && u.role !== 'admin' && u.empresa_id) {
+    const e = await Empresa.findById(u.empresa_id).select('ativa').lean();
+    if (e && e.ativa === false) ok = false;
+  }
   if (CACHE_TTL_MS > 0) {
     if (cacheUtilizadores.size > 5000) cacheUtilizadores.clear();
-    cacheUtilizadores.set(String(id), { ok, ate: agora + CACHE_TTL_MS });
+    cacheUtilizadores.set(chaveCache, { ok, ate: agora + CACHE_TTL_MS });
   }
   return ok;
 }
@@ -87,7 +95,7 @@ async function auth(req, res, next) {
   }
 
   try {
-    if (!(await utilizadorContinuaAtivo(payload.id))) {
+    if (!(await utilizadorContinuaAtivo(payload.id, { suporte: Boolean(payload.imp) }))) {
       return res.status(401).json({ erro: 'Sessão inválida. Inicie sessão novamente.' });
     }
   } catch (err) {
