@@ -41,6 +41,7 @@ const Propriedade = require('../models/Propriedade');
 const Tarefa = require('../models/Tarefa');
 const ContactoHospede = require('../models/ContactoHospede');
 const { registarAuditoria } = require('../utils/auditoria');
+const { decidirPessoas } = require('../utils/pessoasCasa');
 const WebhookLog = require('../models/WebhookLog');
 const Ausencia = require('../models/Ausencia');
 const TarefaArquivo = require('../models/TarefaArquivo');
@@ -1667,6 +1668,26 @@ function extrairMoradaSmoobu(apt) {
  * @returns {Promise<Array>} array de apartamentos.
  * @throws {Error} com `.status` (400/502) para o handler devolver.
  */
+/**
+ * Nº de quartos de um apartamento (GET /api/apartments/{id} -> rooms.bedrooms), para a tipologia.
+ * A listagem do Smoobu não o traz. Best-effort: null se falhar.
+ */
+async function buscarQuartosSmoobu(apiKey, smoobuId) {
+  try {
+    const r = await fetch(`https://login.smoobu.com/api/apartments/${encodeURIComponent(smoobuId)}`, {
+      method: 'GET',
+      headers: { 'Api-Key': apiKey, Accept: 'application/json' },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!r.ok) return null;
+    const b = await r.json();
+    const n = Number(b?.rooms?.bedrooms ?? b?.bedrooms);
+    return Number.isInteger(n) && n >= 0 && n <= 20 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
 async function buscarApartamentosSmoobu(apiKey) {
   let respostaSmoobu;
   try {
@@ -1801,6 +1822,7 @@ async function importarPropriedades(req, res) {
     let atualizadas = 0;
     let erros = 0;
     const detalheErros = [];
+    const casasComPessoasNovas = []; // pessoas mudaram pela tipologia: limpezas por começar seguem
 
     for (const apt of apartments) {
       const smoobuId = apt?.id != null ? String(apt.id) : null;
@@ -1837,6 +1859,25 @@ async function importarPropriedades(req, res) {
         if (existente) {
           // Atualização: morada só se vazia/'A definir'; capacidade sempre.
           let mudou = false;
+
+          // Tipologia (nº de quartos) só enquanto estiver vazia: o gestor pode corrigi-la.
+          // As pessoas seguem a regra (particular ou T2+ = 2), salvo valor posto à mão.
+          if (existente.tipologia == null) {
+            const quartos = await buscarQuartosSmoobu(apiKey, smoobuId);
+            if (quartos !== null) {
+              const antes = {
+                tempo_limpeza_minutos: existente.tempo_limpeza_minutos,
+                tempos_limpeza_por_tipo: { ...(existente.toObject().tempos_limpeza_por_tipo || {}) },
+                staff_necessario: existente.staff_necessario,
+              };
+              existente.tipologia = quartos;
+              const pessoas = decidirPessoas(existente.toObject(), undefined);
+              existente.staff_necessario = pessoas.staff_necessario;
+              existente.staff_necessario_manual = pessoas.staff_necessario_manual;
+              if (antes.staff_necessario !== pessoas.staff_necessario) casasComPessoasNovas.push({ antes, doc: existente });
+              mudou = true;
+            }
+          }
 
           if (
             moradaTexto !== 'A definir' &&
@@ -1883,6 +1924,7 @@ async function importarPropriedades(req, res) {
           }
         }
 
+        const quartos = await buscarQuartosSmoobu(apiKey, smoobuId);
         await Propriedade.create({
           smoobu_id: smoobuId,
           nome: apt.name || `Propriedade ${smoobuId}`,
@@ -1891,6 +1933,8 @@ async function importarPropriedades(req, res) {
           empresa_id: empresaId,
           tempo_limpeza_minutos: 45,
           capacidade_hospedes: capacidade,
+          tipologia: quartos,
+          ...decidirPessoas({ tipologia: quartos, staff_necessario_manual: false }, undefined),
         });
         criadas++;
       } catch (err) {
@@ -1909,6 +1953,17 @@ async function importarPropriedades(req, res) {
         `${criadas} criadas, ${atualizadas} atualizadas, ` +
         `${existentes} já existiam, ${erros} com erro.`
     );
+
+    // Casas que passaram a precisar de outro nº de pessoas: as limpezas por começar seguem
+    // (em segundo plano, nunca bloqueia a resposta).
+    if (casasComPessoasNovas.length > 0) {
+      const { aplicarConfigCasaNasLimpezas } = require('../utils/configCasaNasLimpezas');
+      (async () => {
+        for (const c of casasComPessoasNovas) {
+          await aplicarConfigCasaNasLimpezas({ empresaId, antes: c.antes, propriedade: c.doc.toObject() });
+        }
+      })().catch((e) => console.error('⚠️  [importarPropriedades] limpezas por começar:', e.message));
+    }
 
     // message legível para toasts (configuracoes/page.tsx executarAcao);
     // contadores estruturados para o painel de propriedades.

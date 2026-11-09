@@ -232,6 +232,12 @@ export interface PropriedadeDTO {
   modelo_checklist_id?: string | null;
   // HF21 — Nº de staff necessário para limpar esta propriedade.
   staff_necessario?: number;
+  /** true = nº de pessoas posto à mão (a regra por defeito não lhe mexe). */
+  staff_necessario_manual?: boolean;
+  /** Tipologia (nº de quartos): 0 = T0, 2 = T2... null = desconhecida. */
+  tipologia?: number | null;
+  /** Casa de um cliente particular: com T2+ leva 2 pessoas por defeito. */
+  cliente_particular?: boolean;
   // HF22 — Dias fixos de limpeza (0=Dom, 1=Seg, ..., 6=Sáb).
   dias_fixos_limpeza?: number[];
   // HF23 — Campos de gestão da propriedade.

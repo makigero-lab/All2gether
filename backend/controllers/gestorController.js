@@ -24,6 +24,7 @@ const { comMembro, filtroMembro, retirarMembroDoc, membrosPopulados, EXPR_MEMBRO
 const { FILTRO_SEM_PESSOA } = require('../utils/atribuicaoAutomatica');
 const { contarAvariasAbertas } = require('../utils/avarias');
 const { lerConfigTipos } = require('../utils/tipoLimpeza');
+const { lerCamposCasa, decidirPessoas } = require('../utils/pessoasCasa');
 
 /* ------------------------------------------------------------------ */
 /* Helper — obter empresa_id do JWT (req.user)                        */
@@ -322,6 +323,14 @@ exports.criarPropriedade = async (req, res) => {
     const cfgTipos = lerConfigTipos(req.body);
     if (cfgTipos.erro) return res.status(400).json({ erro: cfgTipos.erro });
 
+    // Tipologia e cliente particular: definem as pessoas por defeito (particular ou T2+ = 2).
+    const camposCasa = lerCamposCasa(req.body);
+    if (camposCasa.erro) return res.status(400).json({ erro: camposCasa.erro });
+    const staffEnviado = staff_necessario === undefined || staff_necessario === null || staff_necessario === ''
+      ? undefined
+      : Math.max(1, Math.min(10, Number(staff_necessario) || 1));
+    const pessoas = decidirPessoas({ ...camposCasa.set, staff_necessario_manual: false }, staffEnviado);
+
     // Validações de presença.
     // FIX (morada estruturada) — Aceita morada OU morada_estruturada (pelo menos
     // o campo rua). Retrocompatível com as 46 propriedades legadas que usam `morada`.
@@ -428,7 +437,8 @@ exports.criarPropriedade = async (req, res) => {
       ...(parceiro_id && mongoose.isValidObjectId(parceiro_id)
         ? { parceiro_id: String(parceiro_id).trim() }
         : {}),
-      staff_necessario: Math.max(1, Math.min(10, Number(staff_necessario) || 1)), // HF21
+      ...camposCasa.set,
+      ...pessoas, // HF21 + regra por defeito (particular ou T2+ = 2 pessoas)
       ...(Array.isArray(dias_fixos_limpeza)
         ? { dias_fixos_limpeza: dias_fixos_limpeza.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6) }
         : {}), // HF22
@@ -1267,6 +1277,8 @@ exports.atualizarPropriedade = async (req, res) => {
       morada === undefined &&
       tempo_limpeza_minutos === undefined &&
       staff_necessario === undefined &&
+      req.body?.tipologia === undefined &&
+      req.body?.cliente_particular === undefined &&
       equipa_preferencial === undefined &&
       parceiro_id === undefined &&
       funcionario_preferencial_id === undefined &&
@@ -1332,10 +1344,22 @@ exports.atualizarPropriedade = async (req, res) => {
       propriedade.tempo_limpeza_minutos = Number(tempo_limpeza_minutos);
     }
 
-    // Pessoas necessárias (já validado acima).
-    if (staff_necessario !== undefined && staff_necessario !== null) {
-      propriedade.staff_necessario = Number(staff_necessario);
-    }
+    // Tipologia / cliente particular e pessoas necessárias (regra: particular ou T2+ = 2,
+    // salvo valor posto à mão; staff_necessario já validado acima).
+    const camposCasa = lerCamposCasa(req.body);
+    if (camposCasa.erro) return res.status(400).json({ erro: camposCasa.erro });
+    for (const [k, v] of Object.entries(camposCasa.set)) propriedade[k] = v;
+    const pessoas = decidirPessoas(
+      {
+        tipologia: propriedade.tipologia,
+        cliente_particular: propriedade.cliente_particular,
+        staff_necessario: propriedade.staff_necessario,
+        staff_necessario_manual: propriedade.staff_necessario_manual,
+      },
+      staff_necessario === undefined || staff_necessario === null ? undefined : Number(staff_necessario)
+    );
+    propriedade.staff_necessario = pessoas.staff_necessario;
+    propriedade.staff_necessario_manual = pessoas.staff_necessario_manual;
 
     // Morada — se mudou, re-faz geocoding (best-effort).
     // Prompt 114 — Se geocoding falhar/devolver vazio, mantém coordenadas
