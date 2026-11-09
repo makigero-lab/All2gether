@@ -1,6 +1,6 @@
 "use client";
 
-import { EditarPropriedadeDialog, type EditarPropriedadeForm } from "@/components/gestor/editar-propriedade-dialog";
+import { EditarPropriedadeDialog, TIPOLOGIAS, comRegraPessoas, type EditarPropriedadeForm } from "@/components/gestor/editar-propriedade-dialog";
 import { useCallback, useEffect, useState } from "react";
 import { Plus, Building2, Loader2, AlertCircle, RefreshCw, Power, Pencil, Trash2, CheckCircle2, ListChecks, Navigation } from "lucide-react";
 
@@ -312,6 +312,8 @@ export default function PropriedadesPage() {
     morada: "",
     tempo_limpeza_minutos: "45",
     staff_necessario: "1",
+    tipologia: "",
+    cliente_particular: false,
     dias_fixos_limpeza: [] as number[],
     // FIX (parceiro associado + morada estruturada) — novos campos.
     observacoes: "",
@@ -366,6 +368,8 @@ export default function PropriedadesPage() {
             : { morada: manualForm.morada.trim() }),
           tempo_limpeza_minutos: tempo,
           staff_necessario: Math.max(1, Math.min(10, Number(manualForm.staff_necessario) || 1)),
+          tipologia: manualForm.tipologia === "" ? null : Number(manualForm.tipologia),
+          cliente_particular: manualForm.cliente_particular,
           dias_fixos_limpeza: manualForm.dias_fixos_limpeza.length > 0 ? manualForm.dias_fixos_limpeza : undefined,
           // FIX (parceiro associado) — observacoes (notas internas).
           observacoes: manualForm.observacoes.trim() || undefined,
@@ -384,7 +388,7 @@ export default function PropriedadesPage() {
         }
       );
       // Limpa o formulário e fecha o modal.
-      setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1", dias_fixos_limpeza: [], observacoes: "", morada_rua: "", morada_codigo_postal: "", morada_cidade: "", parceiro_id: "", fornecedor_id: "", capacidade_hospedes: "" });
+      setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1", tipologia: "", cliente_particular: false, dias_fixos_limpeza: [], observacoes: "", morada_rua: "", morada_codigo_postal: "", morada_cidade: "", parceiro_id: "", fornecedor_id: "", capacidade_hospedes: "" });
       setManualOpen(false);
       await carregar();
     } catch (e) {
@@ -420,6 +424,8 @@ export default function PropriedadesPage() {
     // propriedade (tornado editável no modal de edição; antes só existia no
     // formulário de criação manual).
     staff_necessario: "1",
+    tipologia: "",
+    cliente_particular: false,
     // FIX (lotação máxima) — Capacidade máxima de hóspedes (lotação da casa).
     // Usada como fallback quando o Smoobu não envia o número de hóspedes.
     capacidade_hospedes: "",
@@ -526,6 +532,8 @@ export default function PropriedadesPage() {
         : [],
       // FIX (equipas preferenciais) — Nº de staff necessário.
       staff_necessario: String(p.staff_necessario ?? 1),
+      tipologia: p.tipologia != null ? String(p.tipologia) : "",
+      cliente_particular: p.cliente_particular === true,
       // Prompt 134 — Modelo de Checklist associado (string vazia = Nenhum).
       modelo_checklist_id: p.modelo_checklist_id ?? "",
       // FIX (parceiro associado + morada estruturada) — novos campos.
@@ -686,6 +694,8 @@ export default function PropriedadesPage() {
             1,
             Math.min(10, Number(editForm.staff_necessario) || 1)
           ),
+          tipologia: editForm.tipologia === "" ? null : Number(editForm.tipologia),
+          cliente_particular: editForm.cliente_particular,
           // FIX (parceiro associado) — observacoes (notas internas).
           observacoes: editForm.observacoes.trim(),
           // FIX (parceiro associado relacional) — ID do parceiro B2B.
@@ -823,7 +833,7 @@ export default function PropriedadesPage() {
             onClick={() => {
               setManualOpen(true);
               setManualErro(null);
-              setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1", dias_fixos_limpeza: [], observacoes: "", morada_rua: "", morada_codigo_postal: "", morada_cidade: "", parceiro_id: "", fornecedor_id: "", capacidade_hospedes: "" });
+              setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1", tipologia: "", cliente_particular: false, dias_fixos_limpeza: [], observacoes: "", morada_rua: "", morada_codigo_postal: "", morada_cidade: "", parceiro_id: "", fornecedor_id: "", capacidade_hospedes: "" });
             }}
           >
             <Plus className="h-4 w-4" />
@@ -1442,6 +1452,30 @@ export default function PropriedadesPage() {
               />
             </div>
 
+            {/* Tipologia e cliente particular: definem as pessoas por defeito (particular ou T2+ = 2). */}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <label htmlFor="manual-tipologia" className="text-sm font-medium">Tipologia</label>
+                <select
+                  id="manual-tipologia"
+                  value={manualForm.tipologia}
+                  onChange={(e) => setManualForm((f) => comRegraPessoas(f, { tipologia: e.target.value }))}
+                  className="flex h-11 md:h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  {TIPOLOGIAS.map((t) => <option key={t.v} value={t.v}>{t.label}</option>)}
+                </select>
+              </div>
+              <label className="flex min-h-11 cursor-pointer items-center gap-2 self-end text-sm md:min-h-9">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 accent-[hsl(var(--primary))]"
+                  checked={manualForm.cliente_particular}
+                  onChange={(e) => setManualForm((f) => comRegraPessoas(f, { cliente_particular: e.target.checked }))}
+                />
+                Cliente particular
+              </label>
+            </div>
+
             {/* HF21 — Staff Necessário */}
             <div className="space-y-1.5">
               <label
@@ -1465,7 +1499,7 @@ export default function PropriedadesPage() {
                 placeholder="1"
               />
               <p className="text-xs text-muted-foreground">
-                Se &gt; 1, o sistema atribui uma equipa de N funcionários a esta propriedade.
+                Cliente particular ou T2 ou maior: 2 por defeito. Se &gt; 1, o sistema atribui uma equipa a esta propriedade.
               </p>
             </div>
 

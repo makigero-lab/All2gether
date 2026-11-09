@@ -180,6 +180,13 @@ const propriedadeSchema = new mongoose.Schema(
       default: 1,
       min: 1,
     },
+    // true = nº de pessoas posto à mão pelo gestor (a regra por defeito não lhe mexe).
+    // Sem valor (casas antigas): conta como manual se staff_necessario for diferente de 1.
+    staff_necessario_manual: { type: Boolean, default: undefined },
+    // Tipologia: nº de quartos (0 = T0, 2 = T2...). null = desconhecida. Nas casas do Smoobu vem do nº de quartos.
+    tipologia: { type: Number, default: null, min: 0, max: 20 },
+    // Casa de um cliente particular (não alojamento local). Particular ou T2+ = 2 pessoas por defeito.
+    cliente_particular: { type: Boolean, default: false },
     // HF22 — Dias fixos de limpeza semanal (rotinas automáticas).
     // Array de números (0=Dom, 1=Seg, ..., 6=Sáb — standard JS getDay()).
     // O cron job geradorRotinas corre diariamente e, para cada propriedade

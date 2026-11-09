@@ -26,6 +26,9 @@ export interface EditarPropriedadeForm {
   fornecedor_id: string;
   equipa_preferencial: string[];
   staff_necessario: string;
+  /** Tipologia: "" = desconhecida, "0" = T0, "2" = T2... */
+  tipologia: string;
+  cliente_particular: boolean;
   capacidade_hospedes: string;
   /** Dias fixos de limpeza (0 = domingo ... 6 = sábado). */
   dias_fixos_limpeza: number[];
@@ -69,6 +72,34 @@ function CampoAuto({ className, onChange, value, ...rest }: React.TextareaHTMLAt
 
 const SEPARADOR =
   "relative -mb-px rounded-none border-b-2 border-transparent bg-transparent px-3 py-2 text-sm font-medium text-muted-foreground shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-brand-text data-[state=active]:shadow-none";
+
+/** Opções de tipologia (valor = nº de quartos). */
+export const TIPOLOGIAS = [
+  { v: "", label: "—" },
+  ...[0, 1, 2, 3, 4, 5].map((n) => ({ v: String(n), label: `T${n}` })),
+  { v: "6", label: "T6 ou mais" },
+];
+
+/** Pessoas por defeito: cliente particular ou T2 ou maior = 2; senão 1. */
+export function pessoasPorDefeito(tipologia: string, particular: boolean): number {
+  return particular || (tipologia !== "" && Number(tipologia) >= 2) ? 2 : 1;
+}
+
+/**
+ * Muda tipologia/particular e, se as pessoas estavam no valor da regra antiga
+ * (não foram postas à mão), acompanha a regra nova.
+ */
+export function comRegraPessoas<F extends { tipologia: string; cliente_particular: boolean; staff_necessario: string }>(
+  f: F,
+  patch: Partial<Pick<F, "tipologia" | "cliente_particular">>
+): F {
+  const novo = { ...f, ...patch };
+  const antes = pessoasPorDefeito(f.tipologia, f.cliente_particular);
+  if ((Number(f.staff_necessario) || 1) === antes) {
+    novo.staff_necessario = String(pessoasPorDefeito(novo.tipologia, novo.cliente_particular));
+  }
+  return novo;
+}
 
 const itens = (s: string) => s.split("\n").map((x) => x.trim()).filter(Boolean).length;
 
@@ -237,6 +268,24 @@ export function EditarPropriedadeDialog({
             <TabsContent value="operacao" className="mt-0 space-y-4">
               <div className="grid gap-4 sm:grid-cols-3">
                 <div className="space-y-1.5">
+                  <label htmlFor="edit-tipologia" className="text-xs font-medium text-muted-foreground">Tipologia</label>
+                  <select id="edit-tipologia" value={form.tipologia} onChange={(e) => setForm((f) => comRegraPessoas(f, { tipologia: e.target.value }))} className={CAMPO}>
+                    {TIPOLOGIAS.map((t) => <option key={t.v} value={t.v}>{t.label}</option>)}
+                  </select>
+                </div>
+                <label className="flex min-h-11 cursor-pointer items-center gap-2 self-end text-sm sm:col-span-2 md:min-h-9">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 accent-[hsl(var(--primary))]"
+                    checked={form.cliente_particular}
+                    onChange={(e) => setForm((f) => comRegraPessoas(f, { cliente_particular: e.target.checked }))}
+                  />
+                  Cliente particular
+                  <span className="hidden text-xs text-muted-foreground sm:inline">· não é alojamento local</span>
+                </label>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-3">
+                <div className="space-y-1.5">
                   <label htmlFor="edit-tempo" className="text-xs font-medium text-muted-foreground">Tempo base (min)</label>
                   <Input id="edit-tempo" type="number" min={0} value={form.tempo_limpeza_minutos} onChange={(e) => upd({ tempo_limpeza_minutos: e.target.value })} required />
                 </div>
@@ -249,7 +298,7 @@ export function EditarPropriedadeDialog({
                   <Input id="edit-capacidade" type="number" min={0} value={form.capacidade_hospedes} onChange={(e) => upd({ capacidade_hospedes: e.target.value })} placeholder="Ex.: 4" />
                 </div>
               </div>
-              <p className="-mt-2 text-xs text-muted-foreground">Com mais de 1 pessoa, o sistema atribui uma equipa. A capacidade serve de recurso quando o Smoobu não envia o nº de hóspedes.</p>
+              <p className="-mt-2 text-xs text-muted-foreground">Cliente particular ou T2 ou maior: 2 pessoas por defeito (podes mudar). Com mais de 1 pessoa, o sistema atribui uma equipa. A capacidade serve de recurso quando o Smoobu não envia o nº de hóspedes.</p>
 
               <fieldset className="space-y-2">
                 <legend className="text-xs font-medium text-muted-foreground">Equipa preferencial</legend>

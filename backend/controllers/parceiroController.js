@@ -102,6 +102,12 @@ async function criarPropriedade(req, res) {
       smoobu_id: null,
       parceiro_id: parceiroId,
       ativo: true,
+      // Pessoas por defeito: particular ou T2+ = 2 (tipologia/cliente_particular opcionais).
+      ...(() => {
+        const { lerCamposCasa, decidirPessoas } = require('../utils/pessoasCasa');
+        const c = lerCamposCasa(req.body).set;
+        return { ...c, ...decidirPessoas({ ...c, staff_necessario_manual: false }, undefined) };
+      })(),
     });
 
     console.log(
