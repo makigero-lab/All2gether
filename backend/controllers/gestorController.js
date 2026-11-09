@@ -1259,13 +1259,16 @@ exports.atualizarPropriedade = async (req, res) => {
       });
     }
 
-    const { nome, morada, tempo_limpeza_minutos, funcionario_preferencial_id, modelo_checklist_id, observacoes, morada_estruturada, parceiro_id, fornecedor_id, equipa_preferencial, capacidade_hospedes } = req.body || {};
+    const { nome, morada, tempo_limpeza_minutos, funcionario_preferencial_id, modelo_checklist_id, observacoes, morada_estruturada, parceiro_id, fornecedor_id, equipa_preferencial, capacidade_hospedes, staff_necessario } = req.body || {};
 
     // Tem de haver pelo menos um campo para atualizar.
     if (
       nome === undefined &&
       morada === undefined &&
       tempo_limpeza_minutos === undefined &&
+      staff_necessario === undefined &&
+      equipa_preferencial === undefined &&
+      parceiro_id === undefined &&
       funcionario_preferencial_id === undefined &&
       modelo_checklist_id === undefined &&
       observacoes === undefined &&
@@ -1302,8 +1305,22 @@ exports.atualizarPropriedade = async (req, res) => {
         });
       }
     }
+    // Pessoas necessárias: número inteiro de 1 a 10 (antes era ignorado ao editar).
+    if (staff_necessario !== undefined && staff_necessario !== null) {
+      const n = Number(staff_necessario);
+      if (!Number.isInteger(n) || n < 1 || n > 10) {
+        return res.status(400).json({ erro: 'staff_necessario deve ser um número inteiro de 1 a 10.' });
+      }
+    }
 
     // F0 — Validação de unicidade do smoobu_id removida.
+
+    // Valores antes de gravar: as limpezas por começar seguem a mudança (ver configCasaNasLimpezas).
+    const configAntes = {
+      tempo_limpeza_minutos: propriedade.tempo_limpeza_minutos,
+      tempos_limpeza_por_tipo: { ...(propriedade.toObject().tempos_limpeza_por_tipo || {}) },
+      staff_necessario: propriedade.staff_necessario,
+    };
 
     // Nome.
     if (nome !== undefined) {
@@ -1313,6 +1330,11 @@ exports.atualizarPropriedade = async (req, res) => {
     // Tempo de limpeza.
     if (tempo_limpeza_minutos !== undefined && tempo_limpeza_minutos !== null) {
       propriedade.tempo_limpeza_minutos = Number(tempo_limpeza_minutos);
+    }
+
+    // Pessoas necessárias (já validado acima).
+    if (staff_necessario !== undefined && staff_necessario !== null) {
+      propriedade.staff_necessario = Number(staff_necessario);
     }
 
     // Morada — se mudou, re-faz geocoding (best-effort).
@@ -1556,6 +1578,12 @@ exports.atualizarPropriedade = async (req, res) => {
 
     await propriedade.save();
 
+    // Tempo base / por tipo / pessoas mudaram: as limpezas por começar desta casa seguem a mudança.
+    const { aplicarConfigCasaComPrazo, mudouConfig } = require('../utils/configCasaNasLimpezas');
+    const limpezas = mudouConfig(configAntes, propriedade).algo
+      ? await aplicarConfigCasaComPrazo({ empresaId, antes: configAntes, propriedade: propriedade.toObject() })
+      : null;
+
     // Auditoria.
     registarAuditoria({
       utilizador_id: req.user.id,
@@ -1570,6 +1598,7 @@ exports.atualizarPropriedade = async (req, res) => {
 
     return res.status(200).json({
       propriedade,
+      ...(limpezas ? { limpezas } : {}),
       ...(geocodingFalhou
         ? { warning: 'Não foi possível georreferenciar a nova morada. Coordenadas antigas mantidas. Tenta simplificar a morada.' }
         : {}),

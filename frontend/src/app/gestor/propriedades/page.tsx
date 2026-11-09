@@ -640,7 +640,7 @@ export default function PropriedadesPage() {
       // Prompt 114 — Captura warning de geocoding (nova morada não georreferenciada).
       // Prompt 126 — Envia flag forcar_morada para o backend saber que o
       // utilizador confirmou a morada inválida.
-      const res = await adminPut<{ propriedade: PropriedadeDTO; warning?: string }>(
+      const res = await adminPut<{ propriedade: PropriedadeDTO; warning?: string; limpezas?: { atualizadas: number; sem_equipa: number; em_segundo_plano?: boolean } }>(
         `/api/gestor/propriedades/${editando._id}`,
         {
           nome: editForm.nome.trim(),
@@ -725,6 +725,16 @@ export default function PropriedadesPage() {
         prev.map((x) => (x._id === editando._id ? res.propriedade : x))
       );
       setEditando(null);
+      // Limpezas por começar que seguiram o novo tempo / nº de pessoas.
+      const l = res.limpezas;
+      if (l?.em_segundo_plano) {
+        setFeedbackOk("Propriedade guardada. As limpezas por começar estão a ser atualizadas.");
+      } else if (l && l.atualizadas > 0) {
+        setFeedbackOk(
+          `Propriedade guardada. ${l.atualizadas} ${l.atualizadas === 1 ? "limpeza por começar foi atualizada" : "limpezas por começar foram atualizadas"}` +
+            (l.sem_equipa > 0 ? `; ${l.sem_equipa} ${l.sem_equipa === 1 ? "ficou" : "ficaram"} sem equipa (vê o calendário).` : ".")
+        );
+      }
     } catch (e) {
       setEditErro(e instanceof Error ? e.message : "Erro ao editar propriedade.");
     } finally {
