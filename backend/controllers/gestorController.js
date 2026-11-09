@@ -1315,6 +1315,13 @@ exports.atualizarPropriedade = async (req, res) => {
 
     // F0 — Validação de unicidade do smoobu_id removida.
 
+    // Valores antes de gravar: as limpezas por começar seguem a mudança (ver configCasaNasLimpezas).
+    const configAntes = {
+      tempo_limpeza_minutos: propriedade.tempo_limpeza_minutos,
+      tempos_limpeza_por_tipo: { ...(propriedade.toObject().tempos_limpeza_por_tipo || {}) },
+      staff_necessario: propriedade.staff_necessario,
+    };
+
     // Nome.
     if (nome !== undefined) {
       propriedade.nome = String(nome).trim();
@@ -1571,6 +1578,12 @@ exports.atualizarPropriedade = async (req, res) => {
 
     await propriedade.save();
 
+    // Tempo base / por tipo / pessoas mudaram: as limpezas por começar desta casa seguem a mudança.
+    const { aplicarConfigCasaComPrazo, mudouConfig } = require('../utils/configCasaNasLimpezas');
+    const limpezas = mudouConfig(configAntes, propriedade).algo
+      ? await aplicarConfigCasaComPrazo({ empresaId, antes: configAntes, propriedade: propriedade.toObject() })
+      : null;
+
     // Auditoria.
     registarAuditoria({
       utilizador_id: req.user.id,
@@ -1585,6 +1598,7 @@ exports.atualizarPropriedade = async (req, res) => {
 
     return res.status(200).json({
       propriedade,
+      ...(limpezas ? { limpezas } : {}),
       ...(geocodingFalhou
         ? { warning: 'Não foi possível georreferenciar a nova morada. Coordenadas antigas mantidas. Tenta simplificar a morada.' }
         : {}),
