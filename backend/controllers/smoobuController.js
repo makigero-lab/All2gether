@@ -2039,9 +2039,32 @@ async function importarPropriedades(req, res) {
  *   6. Devolve contadores: totalRecebidas, importadas, criadas, existentes,
  *      erros, detalheErros + message legível.
  *
- * Resposta 200: { totalRecebidas, importadas, criadas, existentes, erros,
- *                 detalheErros, message }
+ * Resposta 202 (sincronização manual): { message } — o processamento pesado
+ *                 corre em background (FIX timeout 502); os contadores finais
+ *                 ficam no log do servidor.
+ * Resposta 200 (modo reconciliação, chamado pelo job): contadores completos.
  */
+
+/**
+ * FIX (timeout 502) — Empresas com sincronização manual em curso.
+ * Evita disparar jobs em background em paralelo para a mesma empresa.
+ */
+const syncEmCurso = new Set();
+
+/**
+ * Mapeia um erro do motor de sincronização para a resposta HTTP.
+ */
+function responderErroSincronizacao(res, err) {
+  if (err.status) {
+    return res.status(err.status).json({
+      erro: err.message,
+      ...(err.detalhe ? { detalhe: err.detalhe } : {}),
+    });
+  }
+  console.error('❌ [Smoobu] sincronizarReservas: erro interno:', err.message);
+  return res.status(500).json({ erro: 'Erro interno.' });
+}
+
 async function sincronizarReservas(req, res) {
   try {
     const empresaId = req.user && req.user.empresa_id;
@@ -2049,12 +2072,12 @@ async function sincronizarReservas(req, res) {
       return res.status(400).json({ erro: 'empresa_id em falta no token.' });
     }
 
-    // Modo reconciliação periódica (job): não reativa canceladas, não toca em concluídas/em curso,
-    // espaça os pedidos e não recria tarefas de reservas manuais. A sincronização manual (sem
-    // `req.reconciliacao`) mantém o comportamento original.
+    // Modo reconciliação periódica (job): não reativa canceladas, não toca em
+    // concluídas/em curso, espaça os pedidos e não recria tarefas de reservas
+    // manuais. Corre SÍNCRONO porque o job (jobs/sincronizacaoSmoobu.js)
+    // precisa dos contadores na resposta.
     const reconciliacao = Boolean(req.reconciliacao);
     const pausaMs = reconciliacao ? Number(req.pausaMs ?? 400) : 0;
-    const pausar = (ms) => (ms > 0 ? new Promise((r) => setTimeout(r, ms)) : null);
 
     const { chave: apiKey } = await obterApiKeySmoobu(empresaId);
     if (!apiKey) {
@@ -2064,6 +2087,85 @@ async function sincronizarReservas(req, res) {
       });
     }
 
+    if (reconciliacao) {
+      // Job periódico: executa o motor de forma síncrona e devolve os contadores.
+      try {
+        const resultado = await executarSincronizacaoCore(empresaId, apiKey, {
+          reconciliacao: true,
+          pausaMs,
+        });
+        return res.status(resultado.status).json(resultado.body);
+      } catch (err) {
+        return responderErroSincronizacao(res, err);
+      }
+    }
+
+    // FIX (timeout 502) — Sincronização MANUAL (botão no painel): responde
+    // IMEDIATAMENTE 202 e processa tudo em segundo plano. Antes, o endpoint
+    // corria a lógica pesada (fetch ao Smoobu + loops + sync de parceiros) de
+    // forma síncrona, o que causava 502 Timeout/Bad Gateway com volume elevado.
+    if (syncEmCurso.has(String(empresaId))) {
+      return res.status(409).json({
+        erro: 'Já existe uma sincronização em curso para esta empresa. Aguarda a conclusão.',
+      });
+    }
+
+    // FIX (timeout 502) — Marca ANTES de responder: evita a corrida entre
+    // dois pedidos manuais simultâneos e permite aos testes aguardar a
+    // conclusão do background (aguardarSincronizacoes).
+    syncEmCurso.add(String(empresaId));
+
+    res.status(202).json({
+      message:
+        'Sincronização iniciada em segundo plano. As tarefas serão atualizadas nos próximos minutos. Recarrega a página de Limpezas daqui a 1-2 minutos.',
+    });
+
+    // Dispara o motor pesado SEM await — corre em background.
+    setImmediate(async () => {
+      const inicioJob = Date.now();
+      try {
+        console.log('🔄 [Smoobu] sincronizarReservas (background): iniciada para empresa ' + String(empresaId) + '.');
+        const resultado = await executarSincronizacaoCore(empresaId, apiKey, {});
+        const b = resultado.body || {};
+        const duracaoSeg = ((Date.now() - inicioJob) / 1000).toFixed(1);
+        console.log(
+          `🏁 [Smoobu] sincronizarReservas (background): CONCLUÍDA em ${duracaoSeg}s — ` +
+            `${b.criadas ?? 0} Smoobu criadas, ${b.existentes ?? 0} já existiam, ` +
+            `${b.parceirosCriadas ?? 0} de parceiros recriadas, ${b.erros ?? 0} erros.`
+        );
+      } catch (err) {
+        // FIX (timeout 502) — Log detalhado para não morrer silenciosamente.
+        console.error('❌ [Smoobu] sincronizarReservas (background): FALHOU a meio:', {
+          empresaId: String(empresaId),
+          erro: err.message,
+          stack: err.stack ? err.stack.split('\n').slice(0, 5).join('\n') : undefined,
+          timestamp: new Date().toISOString(),
+        });
+      } finally {
+        syncEmCurso.delete(String(empresaId));
+      }
+    });
+  } catch (err) {
+    console.error('❌ [Smoobu] sincronizarReservas: erro interno:', err.message);
+    return res.status(500).json({ erro: 'Erro interno.' });
+  }
+}
+
+/**
+ * FIX (timeout 502) — Motor pesado da sincronização, extraído de
+ * `sincronizarReservas` para poder correr em background (sincronização
+ * manual) ou de forma síncrona (job de reconciliação). NÃO escreve na
+ * resposta HTTP: devolve `{ status, body }` ou lança um Error com `.status`.
+ */
+async function executarSincronizacaoCore(empresaId, apiKey, opcoes = {}) {
+  // Modo reconciliação periódica (job): não reativa canceladas, não toca em concluídas/em curso,
+  // espaça os pedidos e não recria tarefas de reservas manuais. A sincronização manual (sem
+  // reconciliação) mantém o comportamento original.
+  const reconciliacao = Boolean(opcoes.reconciliacao);
+  const pausaMs = reconciliacao ? Number(opcoes.pausaMs ?? 400) : 0;
+  const pausar = (ms) => (ms > 0 ? new Promise((r) => setTimeout(r, ms)) : null);
+
+  try {
     // Data de hoje em YYYY-MM-DD (UTC) — não importamos o passado.
     const agora = new Date();
     const from = new Date(
@@ -2119,25 +2221,22 @@ async function sincronizarReservas(req, res) {
         if (currentPage <= totalPages) await pausar(pausaMs);
       }
     } catch (err) {
-      if (err.status) {
-        return res.status(err.status).json({
-          erro: err.message,
-          ...(err.detalhe ? { detalhe: err.detalhe } : {}),
-        });
+      if (!err.status) {
+        console.error('❌ [Smoobu] sincronizarReservas: fetch falhou:', err.message);
+        const e = new Error('Não foi possível ligar ao Smoobu.');
+        e.status = 502;
+        throw e;
       }
-      console.error('❌ [Smoobu] sincronizarReservas: fetch falhou:', err.message);
-      return res.status(502).json({
-        erro: 'Não foi possível ligar ao Smoobu.',
-      });
+      throw err;
     }
 
     const reservas = todasReservas;
     console.log(`📥 [Smoobu] sincronizarReservas: ${reservas.length} reservas recebidas (departureFrom=${from}).`);
 
     if (!Array.isArray(reservas)) {
-      return res.status(502).json({
-        erro: 'Resposta do Smoobu não contém array "bookings" ou "reservations".',
-      });
+      const e = new Error('Resposta do Smoobu não contém array "bookings" ou "reservations".');
+      e.status = 502;
+      throw e;
     }
 
     const porAtribuir = []; // limpezas que ficaram por atribuir: UM aviso agregado no fim
@@ -2390,27 +2489,46 @@ async function sincronizarReservas(req, res) {
       );
     }
 
-    // message legível para toasts (executarAcao do configuracoes/page.tsx).
+    // message legível para toasts (executarAcao do configuracoes/page.tsx)
+    // e para o log da sincronização em background.
     let message = `${criadas} tarefa(s) Smoobu criada(s)`;
     if (existentes > 0) message += `, ${existentes} já existiam`;
     if (erros > 0) message += `, ${erros} com erro`;
     if (parceirosCriadas > 0) message += ` · ${parceirosCriadas} de reservas de proprietários recriada(s)`;
     message += ` (de ${reservas.length} reservas).`;
 
-    return res.status(200).json({
-      totalRecebidas: reservas.length,
-      importadas: criadas + existentes,
-      criadas,
-      existentes,
-      erros,
-      detalheErros,
-      parceirosCriadas,
-      parceirosSkipped,
-      message,
-    });
+    return {
+      status: 200,
+      body: {
+        totalRecebidas: reservas.length,
+        importadas: criadas + existentes,
+        criadas,
+        existentes,
+        erros,
+        detalheErros,
+        parceirosCriadas,
+        parceirosSkipped,
+        message,
+      },
+    };
   } catch (err) {
     console.error('❌ [Smoobu] sincronizarReservas: erro interno:', err.message);
-    return res.status(500).json({ erro: 'Erro interno.' });
+    throw err;
+  }
+}
+
+/**
+ * FIX (timeout 502) — Utilitário para os TESTES: aguarda a conclusão de
+ * todas as sincronizações manuais em background (polling do `syncEmCurso`,
+ * com timeout de segurança). Não é usado em produção.
+ */
+async function aguardarSincronizacoes({ timeoutMs = 15000 } = {}) {
+  const inicio = Date.now();
+  while (syncEmCurso.size > 0) {
+    if (Date.now() - inicio > timeoutMs) {
+      throw new Error('Timeout a aguardar sincronizações em background.');
+    }
+    await new Promise((r) => setTimeout(r, 10));
   }
 }
 
@@ -2539,6 +2657,7 @@ module.exports = {
   importarPropriedades, // POST /api/gestor/smoobu/propriedades (upsert em massa)
   sincronizarReservas, // POST /api/gestor/smoobu/sincronizar (backfill em massa)
   reconciliarCancelamentos, // POST /api/gestor/smoobu/reconciliar-cancelamentos (admin)
+  aguardarSincronizacoes, // FIX (timeout 502) — exportado para testes
   extrairMoradaSmoobu, // exportado para testes
   obterApiKeySmoobu, // exportado para reutilização
 };

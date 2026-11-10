@@ -610,11 +610,15 @@ describe('S1: a recriação do Smoobu respeita o tipo da reserva', () => {
       ok: true, status: 200, statusText: '200',
       json: async () => ({ bookings: [], page_count: 1 }), text: async () => '{}',
     });
-    const { sincronizarReservas } = require('../controllers/smoobuController');
+    const { sincronizarReservas, aguardarSincronizacoes } = require('../controllers/smoobuController');
     const out = {};
     await sincronizarReservas({ user: { empresa_id: e._id } }, { status: (c2) => ({ json: (b) => { out.status = c2; out.body = b; } }) });
+    // FIX (timeout 502) — A sincronização manual responde 202 e corre em
+    // background: aguarda a conclusão (recriação das tarefas de parceiros)
+    // antes de restaurar o fetch e verificar o resultado.
+    await aguardarSincronizacoes();
     global.fetch = fetchOriginal;
-    expect(out.status).toBe(200);
+    expect(out.status).toBe(202);
 
     const tarefaDe = async (r) => Tarefa.findById((await ReservaManual.findById(r._id)).tarefa_gerada_id).lean();
     const ti = await tarefaDe(inter);

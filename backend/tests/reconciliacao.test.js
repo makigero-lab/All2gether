@@ -17,6 +17,7 @@ const WebhookLog = require('../models/WebhookLog');
 const {
   processarReservaSmoobu,
   sincronizarReservas,
+  aguardarSincronizacoes,
 } = require('../controllers/smoobuController');
 const { retomarWebhooksPresos, executarSincronizacaoSmoobu } = require('../jobs/sincronizacaoSmoobu');
 
@@ -153,6 +154,10 @@ describe('Reconciliação periódica', () => {
     global.fetch = listaSmoobu(reservas);
     const man = resCapturada();
     await sincronizarReservas({ user: { empresa_id: empresa._id } }, man.res);
+    // FIX (timeout 502) — A sincronização manual responde 202 e corre em
+    // background: aguarda a conclusão antes de verificar o resultado.
+    expect(man.out.status).toBe(202);
+    await aguardarSincronizacoes();
     expect((await tarefaDe(6001)).estado).not.toBe('cancelada'); // manual reativa, como antes
   });
 

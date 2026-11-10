@@ -135,19 +135,28 @@ export default function IntegracoesPage() {
     revisao_manual: CancelamentoPendente[];
   } | null>(null);
 
-  /** HF24 — Sincroniza reservas futuras do Smoobu (pull via REST API). */
+  /** HF24 — Sincroniza reservas futuras do Smoobu (pull via REST API).
+   *  FIX (timeout 502) — O backend agora responde 202 imediatamente e
+   *  processa em background. O toast informa o utilizador que deve
+   *  recarregar a página de Limpezas daqui a 1-2 minutos. */
   async function handleSincronizar() {
     setSincronizando(true);
     setResultadoEmergencia(null);
     try {
-      const res = await adminPost<{
-        totalRecebidas: number; criadas: number; existentes: number; erros: number;
-      }>("/api/gestor/smoobu/sincronizar", {});
-      let msg = `${plural(plural(res.criadas, "tarefa"), "criada")}`;
-      if (res.existentes > 0) msg += `, ${res.existentes} já existiam`;
-      if (res.erros > 0) msg += `, ${res.erros} com erro`;
-      setResultadoEmergencia(msg + ".");
-      showToast("sucesso", msg);
+      const res = await adminPost<{ message?: string }>(
+        "/api/gestor/smoobu/sincronizar",
+        {}
+      );
+      // FIX (timeout 502) — O backend devolve 202 com uma mensagem de
+      // "background job iniciado". Mostra essa mensagem ao utilizador.
+      const msg =
+        res.message ??
+        "Sincronização iniciada em segundo plano. As tarefas serão atualizadas nos próximos minutos. Recarrega a página de Limpezas daqui a 1-2 minutos.";
+      setResultadoEmergencia(msg);
+      showToast(
+        "sucesso",
+        "🔄 Sincronização em curso em segundo plano. Recarrega a página de Limpezas daqui a 1-2 minutos para ver as tarefas atualizadas."
+      );
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Erro ao sincronizar.";
       setResultadoEmergencia(msg);

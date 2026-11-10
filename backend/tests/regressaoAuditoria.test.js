@@ -350,7 +350,12 @@ describe('Associações e jobs', () => {
     process.env.SMOOBU_API_KEY = 'fake';
     try {
       const r = await request(app).post('/api/gestor/smoobu/sincronizar').set('Authorization', 'Bearer ' + (await login(ad))).send({});
-      expect(r.status).toBe(200);
+      // FIX (timeout 502) — A sincronização manual responde 202 e corre em
+      // background: aguarda a conclusão (com o fetch ainda simulado) antes
+      // de verificar o URL chamado e a tarefa criada.
+      expect(r.status).toBe(202);
+      const { aguardarSincronizacoes } = require('../controllers/smoobuController');
+      await aguardarSincronizacoes();
     } finally {
       global.fetch = antigo;
     }
