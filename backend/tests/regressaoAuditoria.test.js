@@ -335,7 +335,7 @@ describe('Associações e jobs', () => {
     expect(await Tarefa.countDocuments({})).toBe(2);
   });
 
-  test('sincronização usa departureFrom e atualiza reservas já existentes', async () => {
+  test('sincronização usa from/to (o Smoobu ignora departureFrom) e atualiza reservas já existentes', async () => {
     const { e, mk, mkP, login } = await cenario();
     const ad = await mk('ad', 'admin');
     const p = await mkP();
@@ -359,7 +359,9 @@ describe('Associações e jobs', () => {
     } finally {
       global.fetch = antigo;
     }
-    expect(urls[0]).toContain('departureFrom=');
+    expect(urls[0]).toMatch(/[?&]from=[0-9]{4}-[0-9]{2}-[0-9]{2}/);
+    expect(urls[0]).toMatch(/[?&]to=[0-9]{4}-[0-9]{2}-[0-9]{2}/);
+    expect(urls[0]).not.toContain('departureFrom=');
     expect((await Tarefa.findOne({ smoobu_reserva_id: id })).data.toISOString().slice(0, 10)).toBe('2031-10-09');
     expect(e).toBeTruthy();
   });

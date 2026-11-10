@@ -1364,6 +1364,22 @@ exports.apagarTarefasFuturas = async (req, res) => {
     const { ok, empresaId } = obterEmpresaId(req, res);
     if (!ok) return;
 
+    // As limpezas apagadas só voltam com a sincronização do Smoobu. Se a integração está
+    // ligada mas o Smoobu recusa a ligação, não apaga nada (em 10/11/2026 apagou-se tudo
+    // com a chave recusada e as limpezas não voltaram).
+    const Empresa = require('../models/Empresa');
+    const emp = await Empresa.findById(empresaId).select('integracoes.smoobu.api_key integracoes.smoobu.ativo').lean();
+    const smoobuLigado = Boolean(emp?.integracoes?.smoobu?.ativo && emp?.integracoes?.smoobu?.api_key);
+    if (smoobuLigado) {
+      const { testarLigacaoSmoobu } = require('./smoobuController');
+      const teste = await testarLigacaoSmoobu(empresaId);
+      if (!teste.ok) {
+        return res.status(409).json({
+          erro: `Nada foi apagado: a ligação ao Smoobu não está a funcionar, por isso as limpezas não voltariam com a sincronização. ${teste.mensagem}`,
+        });
+      }
+    }
+
     const agora = new Date();
     const hojeInicio = new Date(
       Date.UTC(agora.getUTCFullYear(), agora.getUTCMonth(), agora.getUTCDate())
@@ -1379,6 +1395,14 @@ exports.apagarTarefasFuturas = async (req, res) => {
       `🧹 apagarTarefasFuturas: ${resultado.deletedCount} tarefa(s) apagada(s) ` +
         `(empresa ${empresaId}, desde ${hojeInicio.toISOString()}).`
     );
+    registarAuditoria({
+      utilizador_id: req.user.id,
+      utilizador_nome: req.user.nome || 'Admin',
+      empresa_id: empresaId,
+      acao: 'apagar_tarefas_futuras',
+      recurso: 'tarefa',
+      descricao: `Apagadas ${resultado.deletedCount} limpeza(s) futuras não concluídas (desde ${hojeInicio.toISOString().slice(0, 10)}).`,
+    });
 
     return res.status(200).json({
       mensagem: `${resultado.deletedCount} tarefa(s) futura(s) apagada(s) com sucesso.`,

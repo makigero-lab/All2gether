@@ -76,6 +76,11 @@ export default function ConfiguracoesPage() {
   const [editApiKey, setEditApiKey] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [showApiKey, setShowApiKey] = useState(false);
+  // Segredo HMAC da chave (o Smoobu exige pedidos assinados desde 31/10/2026).
+  const [apiSecretInput, setApiSecretInput] = useState("");
+  const [temSegredo, setTemSegredo] = useState(false);
+  const [ultimoResultado, setUltimoResultado] = useState<{ em: string; ok: boolean; mensagem: string } | null>(null);
+  const [testando, setTestando] = useState(false);
 
   // FIX (status smoobu configs principais) — Estado real da integração Smoobu
   // (env var SMOOBU_API_KEY OU chave da BD). Se for true mas temApiKey for
@@ -105,6 +110,8 @@ export default function ConfiguracoesPage() {
         setNome(data.nome || "");
         setApiKeyMascarada(data.smoobu_api_key_mascarada || "");
         setTemApiKey(data.tem_api_key || false);
+        setTemSegredo(data.tem_segredo || false);
+        setUltimoResultado(data.ultimo_resultado || null);
         setSmoobuAtivo(data.smoobu_ativo || false);
       }
     } catch {
@@ -138,7 +145,8 @@ export default function ConfiguracoesPage() {
     try {
       const body: Record<string, string> = {};
       if (nome) body.nome = nome;
-      if (editApiKey && apiKeyInput) body.smoobu_api_key = apiKeyInput;
+      if (editApiKey && apiKeyInput.trim()) body.smoobu_api_key = apiKeyInput.trim();
+      if (editApiKey && apiSecretInput.trim()) body.smoobu_api_secret = apiSecretInput.trim();
 
       const res = await fetch("/api/gestor/configuracoes", {
         method: "PUT",
@@ -150,14 +158,29 @@ export default function ConfiguracoesPage() {
       if (!res.ok) throw new Error(data?.erro || `Erro ${res.status}`);
       setApiKeyMascarada(data.smoobu_api_key_mascarada || "");
       setTemApiKey(data.tem_api_key || false);
+      setTemSegredo(data.tem_segredo || false);
       setSmoobuAtivo(data.smoobu_ativo || false);
       setEditApiKey(false);
       setApiKeyInput("");
+      setApiSecretInput("");
       showToast("sucesso", data.message || "Configuração guardada.");
     } catch (e) {
       showToast("erro", e instanceof Error ? e.message : "Erro ao guardar.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  /** Testa a ligação ao Smoobu com a chave e o segredo guardados (só leitura). */
+  async function handleTestarSmoobu() {
+    setTestando(true);
+    try {
+      const r = await adminPost<{ ok: boolean; mensagem: string }>("/api/gestor/configuracoes/integracoes/testar", {});
+      showToast(r.ok ? "sucesso" : "erro", r.mensagem);
+    } catch (e) {
+      showToast("erro", e instanceof Error ? e.message : "Erro ao testar a ligação.");
+    } finally {
+      setTestando(false);
     }
   }
 
@@ -374,7 +397,12 @@ export default function ConfiguracoesPage() {
                         {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                       </button>
                     </div>
-                    <Button type="button" variant="ghost" size="sm" onClick={() => { setEditApiKey(false); setApiKeyInput(""); }}>Cancelar</Button>
+                    <label className="text-sm font-medium" htmlFor="cfg-smoobu-segredo">Segredo (Secret)</label>
+                    <Input id="cfg-smoobu-segredo" type="password" value={apiSecretInput} onChange={(e) => setApiSecretInput(e.target.value)} placeholder={temSegredo ? "Guardado — deixa vazio para manter" : "Cola aqui o segredo da chave"} autoComplete="off" />
+                    <p className="text-xs text-muted-foreground">
+                      No Smoobu: Advanced → API Keys → Create New. Copia a chave e o segredo (o segredo só aparece uma vez) e marca o acesso aos dados dos hóspedes.
+                    </p>
+                    <Button type="button" variant="ghost" size="sm" onClick={() => { setEditApiKey(false); setApiKeyInput(""); setApiSecretInput(""); }}>Cancelar</Button>
                   </div>
                 ) : (
                   <div className="flex items-center gap-2">
@@ -391,6 +419,22 @@ export default function ConfiguracoesPage() {
                       {temApiKey ? "Alterar" : "Definir"}
                     </Button>
                   </div>
+                )}
+                <div className="flex flex-wrap items-center gap-2">
+                  {temSegredo ? (
+                    <Badge variant="success" className="gap-1"><CheckCircle2 className="h-3 w-3" /> Segredo guardado</Badge>
+                  ) : (
+                    <Badge variant="outline" className="border-destructive/40 text-destructive">Falta o segredo</Badge>
+                  )}
+                  <Button type="button" variant="outline" size="sm" onClick={handleTestarSmoobu} disabled={testando || (!temApiKey && !smoobuAtivo)} className="gap-1">
+                    {testando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Webhook className="h-4 w-4" />}
+                    Testar ligação
+                  </Button>
+                </div>
+                {ultimoResultado && (
+                  <p className={`text-xs ${ultimoResultado.ok ? "text-emerald-700 dark:text-emerald-400" : "text-destructive"}`}>
+                    Última sincronização ({new Date(ultimoResultado.em).toLocaleString("pt-PT", { dateStyle: "short", timeStyle: "short" })}): {ultimoResultado.mensagem}
+                  </p>
                 )}
                 <p className="text-xs text-muted-foreground">
                   {keyConfiguradaGlobal
