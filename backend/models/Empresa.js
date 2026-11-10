@@ -96,6 +96,22 @@ const empresaSchema = new mongoose.Schema(
           default: '',
           trim: true,
         },
+        // Segredo HMAC da chave (Smoobu → Advanced → API Keys; só é mostrado uma vez).
+        // Obrigatório desde 31/10/2026 para assinar os pedidos. Nunca sai nas leituras
+        // (select: false); só utils/smoobuApi o usa, via obterApiKeySmoobu.
+        api_secret: {
+          type: String,
+          default: '',
+          trim: true,
+          select: false,
+        },
+        // Resultado da última sincronização manual (corre em segundo plano, por isso
+        // o gestor só o vê aqui): { em, ok, mensagem }.
+        ultimo_resultado: {
+          em: { type: Date, default: null },
+          ok: { type: Boolean, default: null },
+          mensagem: { type: String, default: '' },
+        },
         // Toggle on/off da integração (sem apagar a chave).
         ativo: {
           type: Boolean,

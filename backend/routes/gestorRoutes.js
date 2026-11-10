@@ -216,7 +216,7 @@ router.get('/configuracoes', auth, isGestor, async (req, res) => {
     // select para a página principal de configurações poder mostrar o estado
     // real da integração (env var OU chave BD).
     const empresa = await Empresa.findById(empresaId)
-      .select('nome nif morada telefone email integracoes.smoobu')
+      .select('nome nif morada telefone email integracoes.smoobu.api_key integracoes.smoobu.ativo integracoes.smoobu.ultima_sincronizacao integracoes.smoobu.ultimo_resultado +integracoes.smoobu.api_secret')
       .lean();
     if (!empresa) {
       return res.status(404).json({ erro: 'Empresa não encontrada.' });
@@ -236,6 +236,9 @@ router.get('/configuracoes', auth, isGestor, async (req, res) => {
       // na página principal de configurações apesar de a API estar a funcionar.
       smoobu_api_key_mascarada: mascararApiKey(smoobu.api_key),
       tem_api_key: temChaveBD,
+      // O segredo nunca sai: só se existe (obrigatório no Smoobu desde 31/10/2026).
+      tem_segredo: Boolean(smoobu.api_secret && smoobu.api_secret.trim()),
+      ultimo_resultado: smoobu.ultimo_resultado && smoobu.ultimo_resultado.em ? smoobu.ultimo_resultado : null,
       smoobu_ativo: Boolean(process.env.SMOOBU_API_KEY || temChaveBD),
     });
   } catch (err) {
@@ -251,8 +254,16 @@ router.put('/configuracoes', auth, isGestor, async (req, res) => {
     if (!empresaId) {
       return res.status(400).json({ erro: 'empresa_id em falta no token.' });
     }
-    const { nome, nif, morada, telefone, email } = req.body || {};
+    const { nome, nif, morada, telefone, email, smoobu_api_key, smoobu_api_secret } = req.body || {};
     const update = {};
+    // Chave e segredo do Smoobu (antes a página enviava a chave e ela era ignorada).
+    if (typeof smoobu_api_key === 'string' && smoobu_api_key.trim()) {
+      update['integracoes.smoobu.api_key'] = smoobu_api_key.trim();
+      update['integracoes.smoobu.ativo'] = true;
+    }
+    if (typeof smoobu_api_secret === 'string' && smoobu_api_secret.trim()) {
+      update['integracoes.smoobu.api_secret'] = smoobu_api_secret.trim();
+    }
     if (nome !== undefined) update.nome = String(nome).trim();
     if (nif !== undefined) update.nif = String(nif).trim();
     if (morada !== undefined) update.morada = String(morada).trim();
@@ -263,7 +274,7 @@ router.put('/configuracoes', auth, isGestor, async (req, res) => {
       return res.status(400).json({ erro: 'Nenhum campo para atualizar.' });
     }
 
-    const empresa = await Empresa.findByIdAndUpdate(empresaId, { $set: update }, { new: true }).select('nome nif morada telefone email integracoes.smoobu').lean();
+    const empresa = await Empresa.findByIdAndUpdate(empresaId, { $set: update }, { new: true }).select('nome nif morada telefone email integracoes.smoobu.api_key integracoes.smoobu.ativo integracoes.smoobu.ultima_sincronizacao integracoes.smoobu.ultimo_resultado +integracoes.smoobu.api_secret').lean();
     if (!empresa) {
       return res.status(404).json({ erro: 'Empresa não encontrada.' });
     }
@@ -280,6 +291,9 @@ router.put('/configuracoes', auth, isGestor, async (req, res) => {
       email: empresa.email || '',
       smoobu_api_key_mascarada: mascararApiKey(smoobu.api_key),
       tem_api_key: temChaveBD,
+      // O segredo nunca sai: só se existe (obrigatório no Smoobu desde 31/10/2026).
+      tem_segredo: Boolean(smoobu.api_secret && smoobu.api_secret.trim()),
+      ultimo_resultado: smoobu.ultimo_resultado && smoobu.ultimo_resultado.em ? smoobu.ultimo_resultado : null,
       smoobu_ativo: Boolean(process.env.SMOOBU_API_KEY || temChaveBD),
     });
   } catch (err) {
@@ -336,7 +350,7 @@ router.get('/configuracoes/integracoes', auth, isGestor, async (req, res) => {
       return res.status(400).json({ erro: 'empresa_id em falta no token.' });
     }
     const empresa = await Empresa.findById(empresaId)
-      .select('integracoes rotinas')
+      .select('rotinas integracoes.smoobu.api_key integracoes.smoobu.ativo integracoes.smoobu.ultima_sincronizacao integracoes.smoobu.ultimo_resultado +integracoes.smoobu.api_secret')
       .lean();
     if (!empresa) {
       return res.status(404).json({ erro: 'Empresa não encontrada.' });
@@ -348,8 +362,11 @@ router.get('/configuracoes/integracoes', auth, isGestor, async (req, res) => {
         // NUNCA devolver a chave em claro — só mascarada + booleano `configurado`.
         api_key_mascarada: mascararApiKey(smoobu.api_key),
         configurado: Boolean(smoobu.api_key && smoobu.api_key.trim()),
+        // O segredo nunca sai: só se existe.
+        tem_segredo: Boolean(smoobu.api_secret && smoobu.api_secret.trim()),
         ativo: Boolean(smoobu.ativo),
         ultima_sincronizacao: smoobu.ultima_sincronizacao || null,
+        ultimo_resultado: smoobu.ultimo_resultado && smoobu.ultimo_resultado.em ? smoobu.ultimo_resultado : null,
       },
       rotinas: {
         sincronizacao_automatica: Boolean(rotinas.sincronizacao_automatica),
@@ -404,6 +421,10 @@ router.put('/configuracoes/integracoes', auth, isGestor, async (req, res) => {
       if (typeof smoobu.api_key === 'string') {
         update['integracoes.smoobu.api_key'] = smoobu.api_key.trim();
       }
+      // Segredo HMAC: undefined mantém, '' apaga.
+      if (typeof smoobu.api_secret === 'string') {
+        update['integracoes.smoobu.api_secret'] = smoobu.api_secret.trim();
+      }
       if (typeof smoobu.ativo === 'boolean') {
         update['integracoes.smoobu.ativo'] = smoobu.ativo;
       }
@@ -430,7 +451,7 @@ router.put('/configuracoes/integracoes', auth, isGestor, async (req, res) => {
       { $set: update },
       { new: true }
     )
-      .select('integracoes rotinas')
+      .select('rotinas integracoes.smoobu.api_key integracoes.smoobu.ativo integracoes.smoobu.ultima_sincronizacao integracoes.smoobu.ultimo_resultado +integracoes.smoobu.api_secret')
       .lean();
 
     if (!empresa) {
@@ -444,6 +465,7 @@ router.put('/configuracoes/integracoes', auth, isGestor, async (req, res) => {
       smoobu: {
         api_key_mascarada: mascararApiKey(smoobuAtualizado.api_key),
         configurado: Boolean(smoobuAtualizado.api_key && smoobuAtualizado.api_key.trim()),
+        tem_segredo: Boolean(smoobuAtualizado.api_secret && smoobuAtualizado.api_secret.trim()),
         ativo: Boolean(smoobuAtualizado.ativo),
         ultima_sincronizacao: smoobuAtualizado.ultima_sincronizacao || null,
       },
@@ -452,6 +474,18 @@ router.put('/configuracoes/integracoes', auth, isGestor, async (req, res) => {
         frequencia_horas: Number(rotinasAtualizadas.frequencia_horas) || 24,
       },
     });
+  } catch (err) {
+    return res.status(500).json({ erro: 'Erro interno.' });
+  }
+});
+
+// POST /api/gestor/configuracoes/integracoes/testar — testa a ligação ao Smoobu (só leitura).
+router.post('/configuracoes/integracoes/testar', auth, isGestor, async (req, res) => {
+  try {
+    const empresaId = req.user && req.user.empresa_id;
+    if (!empresaId) return res.status(400).json({ erro: 'empresa_id em falta no token.' });
+    const { testarLigacaoSmoobu } = require('../controllers/smoobuController');
+    return res.status(200).json(await testarLigacaoSmoobu(empresaId));
   } catch (err) {
     return res.status(500).json({ erro: 'Erro interno.' });
   }

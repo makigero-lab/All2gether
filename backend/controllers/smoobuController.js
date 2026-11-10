@@ -41,6 +41,9 @@ const Propriedade = require('../models/Propriedade');
 const Tarefa = require('../models/Tarefa');
 const ContactoHospede = require('../models/ContactoHospede');
 const { registarAuditoria } = require('../utils/auditoria');
+const { smoobuFetch } = require('../utils/smoobuApi');
+const MSG_SMOOBU_401 =
+  'O Smoobu recusou a ligação (401). Confirma a chave e o segredo em Configurações → Integrações (Smoobu → Advanced → API Keys).';
 const { decidirPessoas } = require('../utils/pessoasCasa');
 const WebhookLog = require('../models/WebhookLog');
 const Ausencia = require('../models/Ausencia');
@@ -357,7 +360,8 @@ async function guardarContactoHospede(tarefa, contacto) {
  * @returns {Promise<object|null>} { departure, arrival, pax, nome_hospede } ou null.
  */
 async function enriquecerReservaSmoobu(reservaId, empresaId) {
-  const { chave: apiKey } = await obterApiKeySmoobu(empresaId);
+  const cred = await obterApiKeySmoobu(empresaId);
+  const apiKey = cred.chave;
   if (!apiKey || !reservaId) {
     console.warn(
       '⚠️  [Smoobu] enriquecerReservaSmoobu: API key em falta ou reservaId vazio — fallback para dados do webhook.'
@@ -366,14 +370,7 @@ async function enriquecerReservaSmoobu(reservaId, empresaId) {
   }
 
   try {
-    const res = await fetch(
-      `https://login.smoobu.com/api/reservations/${encodeURIComponent(reservaId)}`,
-      {
-        method: 'GET',
-        headers: { 'Api-Key': apiKey.trim(), Accept: 'application/json' },
-        signal: AbortSignal.timeout(15000), // 15s timeout
-      }
-    );
+    const res = await smoobuFetch(cred, `/api/reservations/${encodeURIComponent(reservaId)}`, { timeoutMs: 15000 });
 
     if (!res.ok) {
       console.warn(
@@ -1598,11 +1595,12 @@ async function obterApiKeySmoobu(empresaId) {
     try {
       const Empresa = require('../models/Empresa');
       const empresa = await Empresa.findById(empresaId)
-        .select('integracoes.smoobu')
+        .select('integracoes.smoobu.api_key integracoes.smoobu.ativo integracoes.smoobu.ultima_sincronizacao integracoes.smoobu.ultimo_resultado +integracoes.smoobu.api_secret')
         .lean();
       const smoobu = empresa?.integracoes?.smoobu;
       if (smoobu?.ativo && smoobu.api_key && smoobu.api_key.trim()) {
-        return { chave: smoobu.api_key.trim(), origem: 'empresa' };
+        // Segredo HMAC (obrigatório no Smoobu desde 31/10/2026).
+        return { chave: smoobu.api_key.trim(), segredo: String(smoobu.api_secret || '').trim(), origem: 'empresa' };
       }
     } catch {
       // Se falhar a leitura da empresa, continua para o fallback.
@@ -1611,9 +1609,9 @@ async function obterApiKeySmoobu(empresaId) {
   // 2. Fallback: env var global (retrocompatibilidade / dev).
   const envKey = process.env.SMOOBU_API_KEY;
   if (envKey && envKey.trim()) {
-    return { chave: envKey.trim(), origem: 'env' };
+    return { chave: envKey.trim(), segredo: String(process.env.SMOOBU_API_SECRET || '').trim(), origem: 'env' };
   }
-  return { chave: null, origem: null };
+  return { chave: null, segredo: '', origem: null };
 }
 
 /**
@@ -1672,13 +1670,9 @@ function extrairMoradaSmoobu(apt) {
  * Nº de quartos de um apartamento (GET /api/apartments/{id} -> rooms.bedrooms), para a tipologia.
  * A listagem do Smoobu não o traz. Best-effort: null se falhar.
  */
-async function buscarQuartosSmoobu(apiKey, smoobuId) {
+async function buscarQuartosSmoobu(credSmoobu, smoobuId) {
   try {
-    const r = await fetch(`https://login.smoobu.com/api/apartments/${encodeURIComponent(smoobuId)}`, {
-      method: 'GET',
-      headers: { 'Api-Key': apiKey, Accept: 'application/json' },
-      signal: AbortSignal.timeout(10000),
-    });
+    const r = await smoobuFetch(credSmoobu, `/api/apartments/${encodeURIComponent(smoobuId)}`, { timeoutMs: 10000 });
     if (!r.ok) return null;
     const b = await r.json();
     const n = Number(b?.rooms?.bedrooms ?? b?.bedrooms);
@@ -1688,17 +1682,10 @@ async function buscarQuartosSmoobu(apiKey, smoobuId) {
   }
 }
 
-async function buscarApartamentosSmoobu(apiKey) {
+async function buscarApartamentosSmoobu(credSmoobu) {
   let respostaSmoobu;
   try {
-    respostaSmoobu = await fetch('https://login.smoobu.com/api/apartments', {
-      method: 'GET',
-      headers: {
-        'Api-Key': apiKey,
-        Accept: 'application/json',
-      },
-      signal: AbortSignal.timeout(15000),
-    });
+    respostaSmoobu = await smoobuFetch(credSmoobu, '/api/apartments', { timeoutMs: 15000 });
   } catch (err) {
     const e = new Error('Não foi possível ligar ao Smoobu.');
     e.status = 502;
@@ -1708,7 +1695,7 @@ async function buscarApartamentosSmoobu(apiKey) {
 
   if (!respostaSmoobu.ok) {
     const texto = await respostaSmoobu.text().catch(() => '');
-    const e = new Error(`Smoobu devolveu erro ${respostaSmoobu.status}.`);
+    const e = new Error(respostaSmoobu.status === 401 ? MSG_SMOOBU_401 : `Smoobu devolveu erro ${respostaSmoobu.status}.`);
     e.status = 502;
     e.detalhe = texto.slice(0, 500) || respostaSmoobu.statusText;
     throw e;
@@ -1752,7 +1739,8 @@ async function buscarApartamentosSmoobu(apiKey) {
 async function getPropriedadesSmoobu(req, res) {
   try {
     const empresaId = req.user && req.user.empresa_id;
-    const { chave: apiKey } = await obterApiKeySmoobu(empresaId);
+    const credSmoobu = await obterApiKeySmoobu(empresaId);
+    const apiKey = credSmoobu.chave;
     if (!apiKey) {
       return res.status(400).json({
         erro:
@@ -1760,7 +1748,7 @@ async function getPropriedadesSmoobu(req, res) {
       });
     }
 
-    const apartments = await buscarApartamentosSmoobu(apiKey);
+    const apartments = await buscarApartamentosSmoobu(credSmoobu);
 
     const propriedadesSmoobu = apartments.map((a) => ({
       id: a.id,
@@ -1807,7 +1795,8 @@ async function importarPropriedades(req, res) {
       return res.status(400).json({ erro: 'empresa_id em falta no token.' });
     }
 
-    const { chave: apiKey } = await obterApiKeySmoobu(empresaId);
+    const credSmoobu = await obterApiKeySmoobu(empresaId);
+    const apiKey = credSmoobu.chave;
     if (!apiKey) {
       return res.status(400).json({
         erro:
@@ -1815,7 +1804,7 @@ async function importarPropriedades(req, res) {
       });
     }
 
-    const apartments = await buscarApartamentosSmoobu(apiKey);
+    const apartments = await buscarApartamentosSmoobu(credSmoobu);
 
     let criadas = 0;
     let existentes = 0;
@@ -1863,7 +1852,7 @@ async function importarPropriedades(req, res) {
           // Tipologia (nº de quartos) só enquanto estiver vazia: o gestor pode corrigi-la.
           // As pessoas seguem a regra (particular ou T2+ = 2), salvo valor posto à mão.
           if (existente.tipologia == null) {
-            const quartos = await buscarQuartosSmoobu(apiKey, smoobuId);
+            const quartos = await buscarQuartosSmoobu(credSmoobu, smoobuId);
             if (quartos !== null) {
               const antes = {
                 tempo_limpeza_minutos: existente.tempo_limpeza_minutos,
@@ -1924,7 +1913,7 @@ async function importarPropriedades(req, res) {
           }
         }
 
-        const quartos = await buscarQuartosSmoobu(apiKey, smoobuId);
+        const quartos = await buscarQuartosSmoobu(credSmoobu, smoobuId);
         await Propriedade.create({
           smoobu_id: smoobuId,
           nome: apt.name || `Propriedade ${smoobuId}`,
@@ -2079,7 +2068,8 @@ async function sincronizarReservas(req, res) {
     const reconciliacao = Boolean(req.reconciliacao);
     const pausaMs = reconciliacao ? Number(req.pausaMs ?? 400) : 0;
 
-    const { chave: apiKey } = await obterApiKeySmoobu(empresaId);
+    const credSmoobu = await obterApiKeySmoobu(empresaId);
+    const apiKey = credSmoobu.chave;
     if (!apiKey) {
       return res.status(400).json({
         erro:
@@ -2090,7 +2080,7 @@ async function sincronizarReservas(req, res) {
     if (reconciliacao) {
       // Job periódico: executa o motor de forma síncrona e devolve os contadores.
       try {
-        const resultado = await executarSincronizacaoCore(empresaId, apiKey, {
+        const resultado = await executarSincronizacaoCore(empresaId, credSmoobu, {
           reconciliacao: true,
           pausaMs,
         });
@@ -2125,7 +2115,7 @@ async function sincronizarReservas(req, res) {
       const inicioJob = Date.now();
       try {
         console.log('🔄 [Smoobu] sincronizarReservas (background): iniciada para empresa ' + String(empresaId) + '.');
-        const resultado = await executarSincronizacaoCore(empresaId, apiKey, {});
+        const resultado = await executarSincronizacaoCore(empresaId, credSmoobu, {});
         const b = resultado.body || {};
         const duracaoSeg = ((Date.now() - inicioJob) / 1000).toFixed(1);
         console.log(
@@ -2133,6 +2123,7 @@ async function sincronizarReservas(req, res) {
             `${b.criadas ?? 0} Smoobu criadas, ${b.existentes ?? 0} já existiam, ` +
             `${b.parceirosCriadas ?? 0} de parceiros recriadas, ${b.erros ?? 0} erros.`
         );
+        await guardarResultadoSincronizacao(empresaId, true, b.message || 'Sincronização concluída.');
       } catch (err) {
         // FIX (timeout 502) — Log detalhado para não morrer silenciosamente.
         console.error('❌ [Smoobu] sincronizarReservas (background): FALHOU a meio:', {
@@ -2141,6 +2132,7 @@ async function sincronizarReservas(req, res) {
           stack: err.stack ? err.stack.split('\n').slice(0, 5).join('\n') : undefined,
           timestamp: new Date().toISOString(),
         });
+        await guardarResultadoSincronizacao(empresaId, false, err.status ? err.message : 'Erro interno na sincronização.');
       } finally {
         syncEmCurso.delete(String(empresaId));
       }
@@ -2152,12 +2144,53 @@ async function sincronizarReservas(req, res) {
 }
 
 /**
+ * Testa a ligação ao Smoobu com as credenciais da empresa (GET /api/apartments, só leitura).
+ * @returns {Promise<{ ok: boolean, status: number|null, mensagem: string, assinado: boolean }>}
+ */
+async function testarLigacaoSmoobu(empresaId) {
+  const cred = await obterApiKeySmoobu(empresaId);
+  if (!cred.chave) {
+    return { ok: false, status: null, assinado: false, mensagem: 'Falta a chave do Smoobu em Configurações → Integrações.' };
+  }
+  const assinado = Boolean(cred.segredo);
+  try {
+    const r = await smoobuFetch(cred, '/api/apartments', { timeoutMs: 15000 });
+    if (r.ok) return { ok: true, status: r.status, assinado, mensagem: 'Ligação ao Smoobu a funcionar.' };
+    if (r.status === 401) {
+      return {
+        ok: false, status: 401, assinado,
+        mensagem: assinado ? MSG_SMOOBU_401 : 'Falta o segredo da chave: desde 31/10/2026 o Smoobu exige pedidos assinados.',
+      };
+    }
+    return { ok: false, status: r.status, assinado, mensagem: `O Smoobu respondeu com erro ${r.status}.` };
+  } catch (e) {
+    return { ok: false, status: null, assinado, mensagem: 'Não foi possível ligar ao Smoobu.' };
+  }
+}
+
+/**
+ * Guarda o resultado da sincronização manual (corre em segundo plano) para o gestor o ver
+ * em Configurações. Best-effort: nunca lança.
+ */
+async function guardarResultadoSincronizacao(empresaId, ok, mensagem) {
+  try {
+    const Empresa = require('../models/Empresa');
+    await Empresa.updateOne(
+      { _id: empresaId },
+      { $set: { 'integracoes.smoobu.ultimo_resultado': { em: new Date(), ok, mensagem: String(mensagem || '').slice(0, 500) } } }
+    );
+  } catch (e) {
+    console.warn('⚠️  [Smoobu] não foi possível guardar o resultado da sincronização:', e.message);
+  }
+}
+
+/**
  * FIX (timeout 502) — Motor pesado da sincronização, extraído de
  * `sincronizarReservas` para poder correr em background (sincronização
  * manual) ou de forma síncrona (job de reconciliação). NÃO escreve na
  * resposta HTTP: devolve `{ status, body }` ou lança um Error com `.status`.
  */
-async function executarSincronizacaoCore(empresaId, apiKey, opcoes = {}) {
+async function executarSincronizacaoCore(empresaId, credSmoobu, opcoes = {}) {
   // Modo reconciliação periódica (job): não reativa canceladas, não toca em concluídas/em curso,
   // espaça os pedidos e não recria tarefas de reservas manuais. A sincronização manual (sem
   // reconciliação) mantém o comportamento original.
@@ -2173,6 +2206,8 @@ async function executarSincronizacaoCore(empresaId, apiKey, opcoes = {}) {
     )
       .toISOString()
       .slice(0, 10);
+    // Até 2 anos à frente (o Smoobu aceita reservas com mais de um ano de antecedência).
+    const to = new Date(Date.parse(from) + 730 * 86400000).toISOString().slice(0, 10);
 
     // Fetch ao Smoobu com paginação.
     // O parâmetro oficial é arrivalFrom (case-sensitive, 'F' maiúsculo).
@@ -2183,22 +2218,19 @@ async function executarSincronizacaoCore(empresaId, apiKey, opcoes = {}) {
 
     try {
       while (currentPage <= totalPages) {
-        const url = `https://login.smoobu.com/api/reservations?departureFrom=${from}&page=${currentPage}`;
-        const respostaSmoobu = await fetch(url, {
-          method: 'GET',
-          headers: {
-            'Api-Key': apiKey,
-            Accept: 'application/json',
-          },
-          signal: AbortSignal.timeout(30000),
+        // O Smoobu só respeita os filtros from/to (o departureFrom era ignorado e vinha
+        // o histórico inteiro). As saídas antes de hoje são descartadas a seguir.
+        const respostaSmoobu = await smoobuFetch(credSmoobu, '/api/reservations', {
+          query: { from, to, page: currentPage, pageSize: 100 },
+          timeoutMs: 30000,
         });
 
         if (!respostaSmoobu.ok) {
           const texto = await respostaSmoobu.text().catch(() => '');
           const e = new Error(
-            `Smoobu devolveu erro ${respostaSmoobu.status}: ${
-              texto.slice(0, 200) || respostaSmoobu.statusText
-            }`
+            respostaSmoobu.status === 401
+              ? MSG_SMOOBU_401
+              : `Smoobu devolveu erro ${respostaSmoobu.status}: ${texto.slice(0, 200) || respostaSmoobu.statusText}`
           );
           e.status = 502;
           throw e;
@@ -2230,7 +2262,11 @@ async function executarSincronizacaoCore(empresaId, apiKey, opcoes = {}) {
       throw err;
     }
 
-    const reservas = todasReservas;
+    // Só as reservas cuja saída (dia da limpeza) é hoje ou depois.
+    const reservas = todasReservas.filter((r) => {
+      const saida = String(r?.departure ?? r?.end_date ?? r?.endDate ?? '').slice(0, 10);
+      return !saida || saida >= from;
+    });
     console.log(`📥 [Smoobu] sincronizarReservas: ${reservas.length} reservas recebidas (departureFrom=${from}).`);
 
     if (!Array.isArray(reservas)) {
@@ -2658,6 +2694,7 @@ module.exports = {
   sincronizarReservas, // POST /api/gestor/smoobu/sincronizar (backfill em massa)
   reconciliarCancelamentos, // POST /api/gestor/smoobu/reconciliar-cancelamentos (admin)
   aguardarSincronizacoes, // FIX (timeout 502) — exportado para testes
+  testarLigacaoSmoobu, // usado por Configurações → Integrações e antes de apagar as futuras
   extrairMoradaSmoobu, // exportado para testes
   obterApiKeySmoobu, // exportado para reutilização
 };
