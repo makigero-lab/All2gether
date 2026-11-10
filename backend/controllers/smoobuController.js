@@ -663,7 +663,16 @@ async function criarTarefaPorReserva(
   // 14:00 locais (Europe/Lisbon, com hora de verão).
   const VIP_LIMITE_MINUTOS_LOCAIS = 14 * 60;
 
-  const staffExclusivoId = propriedade.funcionario_preferencial_id;
+  // O preferido antigo (funcionario_preferencial_id, já não se edita no ecrã) só conta se a casa
+  // não tiver equipa preferida ou se ele fizer parte dela. Antes ganhava sempre: em 10/11/2026 a
+  // sincronização deu à Tâmara as casas da Cortes Reais cuja equipa preferida é a Jucilene.
+  // Sem ele, o load balancer dá a prioridade à equipa_preferencial.
+  const equipaPref = (propriedade.equipa_preferencial || []).map(String);
+  const staffExclusivoId =
+    propriedade.funcionario_preferencial_id &&
+    (equipaPref.length === 0 || equipaPref.includes(String(propriedade.funcionario_preferencial_id)))
+      ? propriedade.funcionario_preferencial_id
+      : null;
 
   let utilizadorAtribuido = null;
   let tempoViagemMinutos = 0;
