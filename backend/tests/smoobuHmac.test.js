@@ -135,3 +135,24 @@ describe('apagar tarefas futuras', () => {
     expect(await Auditoria.countDocuments({ empresa_id: e._id, acao: 'apagar_tarefas_futuras' })).toBe(1);
   });
 });
+
+describe('sincronização e canceladas', () => {
+  test('type cancellation da REST API não cria nem reativa limpezas', async () => {
+    const { e } = await cenario({ api_secret: 's' });
+    const p = await Propriedade.create({ nome: 'PC', empresa_id: e._id, smoobu_id: '9' + n, ativo: true, tempo_limpeza_minutos: 60 });
+    const velha = await Tarefa.create({ empresa_id: e._id, propriedade_id: p._id, smoobu_reserva_id: '7001', data: new Date('2031-03-05T10:00:00Z'), tipo: 'limpeza', estado: 'cancelada', tempo_limpeza_minutos: 60 });
+    const bk = (id, type) => ({ id, type, arrival: '2031-03-01', departure: '2031-03-05', apartment: { id: Number(p.smoobu_id) }, 'guest-name': 'G', adults: 1, children: 0 });
+    const antigo = global.fetch;
+    global.fetch = async () => ({ ok: true, status: 200, json: async () => ({ page_count: 1, bookings: [bk(7001, 'cancellation'), bk(7002, 'cancellation'), bk(7003, 'reservation')] }) });
+    const { sincronizarReservas, aguardarSincronizacoes } = require('../controllers/smoobuController');
+    try {
+      await sincronizarReservas({ user: { empresa_id: e._id } }, { status: () => ({ json: () => {} }) });
+      await aguardarSincronizacoes();
+    } finally { global.fetch = antigo; }
+    expect((await Tarefa.findById(velha._id)).estado).toBe('cancelada');
+    expect(await Tarefa.countDocuments({ smoobu_reserva_id: '7002' })).toBe(0);
+    expect(await Tarefa.countDocuments({ smoobu_reserva_id: '7003', estado: { $ne: 'cancelada' } })).toBe(1);
+    const emp = await Empresa.findById(e._id).lean();
+    expect(emp.integracoes.smoobu.ultimo_resultado.ok).toBe(true);
+  });
+});

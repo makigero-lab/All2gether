@@ -2368,8 +2368,11 @@ async function executarSincronizacaoCore(empresaId, credSmoobu, opcoes = {}) {
         const statusReserva = String(
           reserva.status ?? reserva.bookingStatus ?? ''
         ).toLowerCase();
-        if (['cancelled', 'canceled', 'cancelada'].includes(statusReserva)) {
-          await cancelarTarefaPorReserva(reservaId);
+        // A REST API do Smoobu marca as canceladas em `type: 'cancellation'` (não há `status`);
+        // antes só se via o status e as canceladas eram criadas ou reativadas na sincronização.
+        const tipoReserva = String(reserva.type ?? '').toLowerCase();
+        if (['cancelled', 'canceled', 'cancelada'].includes(statusReserva) || /cancel/.test(tipoReserva)) {
+          await cancelarTarefaPorReserva(String(reservaId), empresaId);
           // Conta como "existente" (não cria nova, não conta como erro).
           existentes++;
           continue;
