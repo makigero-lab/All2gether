@@ -390,6 +390,24 @@
   overflow-wrap: anywhere;
 }
 
+/* Cartões de 15-30 min na Semana: uma só linha (hora + casa), sem cortar o texto a meio. */
+.fc-evt-block--curto {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.625rem;
+  line-height: 1.1;
+}
+.fc-timegrid-event .fc-evt-block--curto .fc-evt-block__title {
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.6875rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .fc-evt-block__subtitle {
   display: flex;
   align-items: center;
@@ -749,11 +767,9 @@
   line-height: 1.1 !important;
 }
 
-/* Reduz o espaço entre eventos allDay consecutivos no slot de topo. */
-.fc .fc-daygrid-day-frame .fc-daygrid-event-harness,
-.fc .fc-daygrid-day-frame .fc-daygrid-event-harness-abs {
-  margin-top: 0 !important;
-}
+/* (Removido em 2026-11-10: forçar margin-top: 0 nos «harness» anulava o espaço que o
+   FullCalendar calcula para pôr as limpezas de um dia por baixo das barras de vários dias,
+   e as férias ficavam tapadas pelas limpezas no Mês e na faixa «Todo o dia» da Semana.) */
 
 /* O slot de all-day em si fica mais compacto (menos padding vertical). */
 .fc .fc-daygrid-day-frame {

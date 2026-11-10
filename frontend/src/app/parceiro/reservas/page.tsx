@@ -1501,13 +1501,15 @@ export default function ParceiroReservasPage() {
                         <td className="p-0">
                           <CelulaNotas value={l.valores.observacoes} pendente={p("observacoes")} rotulo={`Observações, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "observacoes", v)} />
                         </td>
-                        <td className={`${FIXO_ESTADO} whitespace-nowrap px-2 ${cor.fixo}`}>
+                        <td className={`${FIXO_ESTADO} px-2 py-1 ${cor.fixo}`}>
                           {l.nova ? (
                             <span className="rounded bg-amber-200 px-1.5 py-0.5 text-xs font-medium text-amber-900">Por gravar</span>
                           ) : l.eliminada ? (
                             <span className="rounded bg-destructive/15 px-1.5 py-0.5 text-xs font-medium text-destructive">A eliminar</span>
                           ) : l.estado ? (
-                            <span className="inline-flex items-center gap-1">
+                            // Quebra de linha quando estado + «Alterada» não cabem (antes passavam
+                            // por cima do botão do lixo na coluna fixa ao lado).
+                            <span className="flex flex-wrap items-center gap-1 whitespace-nowrap">
                               {l.estado === "concluida" && l.reserva ? (
                                 <LimpezaConcluida reservaId={l.reserva._id} hora={l.horaConclusao ?? null} casa={nome} />
                               ) : (

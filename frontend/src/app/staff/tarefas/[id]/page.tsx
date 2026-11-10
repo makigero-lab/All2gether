@@ -6,7 +6,7 @@ import { Loader2, WifiOff } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { MSG_SEM_LIGACAO } from "@/lib/rascunho-staff";
-import { checklistDaTarefa } from "@/lib/utils";
+import { checklistDaTarefa, temHoraReal } from "@/lib/utils";
 
 import { DetalheTarefaClient } from "@/components/staff/detalhe-tarefa-client";
 
@@ -59,9 +59,22 @@ export default function DetalheTarefaPage({
   }, [params.id, tentativa]);
 
   if (loading) {
+    // Esqueleto com a forma do detalhe (cabeçalho, cartões e checklist), na mesma coluna,
+    // em vez de um ecrã branco só com o ícone a rodar.
     return (
-      <div className="flex min-h-screen items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      <div className="mx-auto flex min-h-screen w-full max-w-md flex-col gap-3 bg-muted/20 p-4 md:max-w-2xl md:border-x" aria-busy="true" aria-label="A carregar a limpeza">
+        <div className="flex items-center gap-3">
+          <div className="h-9 w-9 animate-pulse rounded-full bg-muted" />
+          <div className="h-5 w-48 animate-pulse rounded bg-muted" />
+          <Loader2 className="ml-auto h-4 w-4 animate-spin text-muted-foreground" aria-hidden />
+        </div>
+        <div className="h-28 animate-pulse rounded-lg bg-muted" />
+        <div className="h-20 animate-pulse rounded-lg bg-muted" />
+        <div className="space-y-2 rounded-lg border bg-background p-4">
+          {[0, 1, 2, 3, 4].map((i) => (
+            <div key={i} className="h-4 animate-pulse rounded bg-muted" style={{ width: `${90 - i * 10}%` }} />
+          ))}
+        </div>
       </div>
     );
   }
@@ -86,7 +99,10 @@ export default function DetalheTarefaPage({
   const tarefaAdaptada = {
     id: tarefa._id,
     propriedade_nome: tarefa.propriedade_id?.nome ?? "Propriedade",
-    hora_limite: "",
+    // Hora de início no cabeçalho (antes ficava vazio ao lado do relógio).
+    hora_limite: tarefa.data && temHoraReal(tarefa.data)
+      ? `Início ${new Intl.DateTimeFormat("pt-PT", { timeZone: "Europe/Lisbon", hour: "2-digit", minute: "2-digit" }).format(new Date(tarefa.data))}`
+      : "Sem hora marcada",
     tempo_estimado_minutos: tarefa.tempo_limpeza_minutos,
     tipo_limpeza: tarefa.tipo_limpeza ?? null,
     checklist_do_tipo: tarefa.checklist_do_tipo === true,

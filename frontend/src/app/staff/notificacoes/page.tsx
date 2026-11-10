@@ -142,7 +142,7 @@ export default function StaffNotificacoesPage() {
   }
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-md flex-col bg-muted/20">
+    <div className="mx-auto flex min-h-screen w-full max-w-md flex-col bg-muted/20 md:max-w-2xl md:border-x">
       {/* Cabeçalho */}
       <header className="sticky top-0 z-20 border-b bg-background/95 px-5 pb-4 pt-6 backdrop-blur">
         <div className="flex items-start justify-between gap-3">
