@@ -1554,229 +1554,211 @@ async function sincronizarReservas(req, res) {
       });
     }
 
-    // Data de hoje em YYYY-MM-DD (UTC) — não importamos o passado.
-    const agora = new Date();
-    const from = new Date(
-      Date.UTC(agora.getUTCFullYear(), agora.getUTCMonth(), agora.getUTCDate())
-    )
-      .toISOString()
-      .slice(0, 10);
-
-    // Fetch ao Smoobu com paginação.
-    // O parâmetro oficial é arrivalFrom (case-sensitive, 'F' maiúsculo).
-    // O array vem em body.bookings (oficial) ou body.reservations (variantes).
-    let currentPage = 1;
-    let totalPages = 1;
-    let todasReservas = [];
-
-    try {
-      while (currentPage <= totalPages) {
-        const url = `https://login.smoobu.com/api/reservations?arrivalFrom=${from}&page=${currentPage}`;
-        const respostaSmoobu = await fetch(url, {
-          method: 'GET',
-          headers: {
-            'Api-Key': apiKey,
-            Accept: 'application/json',
-          },
-          signal: AbortSignal.timeout(30000),
-        });
-
-        if (!respostaSmoobu.ok) {
-          const texto = await respostaSmoobu.text().catch(() => '');
-          const e = new Error(
-            `Smoobu devolveu erro ${respostaSmoobu.status}: ${
-              texto.slice(0, 200) || respostaSmoobu.statusText
-            }`
-          );
-          e.status = 502;
-          throw e;
-        }
-
-        const body = await respostaSmoobu.json();
-
-        const reservasPagina =
-          body?.bookings ??
-          body?.reservations ??
-          body?.data?.reservations ??
-          body?.data?.bookings ??
-          (Array.isArray(body) ? body : []);
-
-        todasReservas = todasReservas.concat(reservasPagina);
-
-        // Atualiza o total de páginas (se o Smoobu não enviar page_count, para no 1).
-        totalPages = body?.page_count || 1;
-        currentPage++;
-      }
-    } catch (err) {
-      if (err.status) {
-        return res.status(err.status).json({
-          erro: err.message,
-          ...(err.detalhe ? { detalhe: err.detalhe } : {}),
-        });
-      }
-      console.error('❌ [Smoobu] sincronizarReservas: fetch falhou:', err.message);
-      return res.status(502).json({
-        erro: 'Não foi possível ligar ao Smoobu.',
-        detalhe: err.message,
+    // FIX (timeout 502) — Verifica se já existe uma sincronização em curso.
+    if (syncEmCurso.has(String(empresaId))) {
+      return res.status(409).json({
+        erro: 'Já existe uma sincronização em curso para esta empresa. Aguarda a conclusão.',
       });
     }
 
-    const reservas = todasReservas;
-    console.log(`📥 [Smoobu] sincronizarReservas: ${reservas.length} reservas recebidas (arrivalFrom=${from}).`);
+    // FIX (timeout 502) — Responde IMEDIATAMENTE ao frontend (202 Accepted)
+    // e processa a sincronização em segundo plano. Antes, o endpoint corria
+    // toda a lógica (fetch ao Smoobu + loops + sync de parceiros) de forma
+    // síncrona, o que causava 502 Timeout/Bad Gateway com volume elevado.
+    res.status(202).json({
+      message:
+        'Sincronização iniciada em segundo plano. As tarefas serão atualizadas nos próximos minutos. Recarrega a página de Limpezas daqui a 1-2 minutos.',
+    });
 
-    if (!Array.isArray(reservas)) {
-      return res.status(502).json({
-        erro: 'Resposta do Smoobu não contém array "bookings" ou "reservations".',
-      });
-    }
-
-    let criadas = 0;
-    let existentes = 0;
-    let erros = 0;
-    const detalheErros = [];
-
-    for (const reserva of reservas) {
-      const reservaId =
-        reserva?.id ?? reserva?.reservationId ?? reserva?.reservation_id;
-
+    // Dispara a função pesada SEM await — corre em background.
+    setImmediate(async () => {
+      syncEmCurso.add(String(empresaId));
       try {
-        // Verifica idempotência ANTES de chamar o processador (otimização:
-        // evita refazer o load balancer se a tarefa já existe). O processador
-        // também verifica, mas assim poupamos trabalho e conseguimos distinguir
-        // "criada" de "já existente" nos contadores.
-        let jaExistia = false;
-        if (reservaId) {
-          const existente = await Tarefa.findOne({
-            smoobu_reserva_id: String(reservaId),
-          }).lean();
-          if (existente) {
-            jaExistia = true;
-          }
-        }
-
-        // Mapeia a reserva do formato REST API para o formato do webhook.
-        // O processador espera: { action, data: { id, arrival, departure,
-        // apartment: { id, name }, guests, guestName, ... } }
-        //
-        // Cobertura exaustiva do nome do hóspede no formato REST API do
-        // Smoobu: guestName, guest_name, guest-name (kebab), guest.name,
-        // guest.firstName + guest.lastName, firstName + lastName,
-        // customerName, customer.name, bookedForName, name.
-        const hospedeNomeSmoobu =
-          reserva.guestName ??
-          reserva.guest_name ??
-          reserva['guest-name'] ??
-          reserva.guest?.name ??
-          (reserva.guest?.firstName || reserva.guest?.lastName
-            ? [reserva.guest?.firstName, reserva.guest?.lastName]
-                .filter(Boolean)
-                .join(' ')
-            : null) ??
-          (reserva.firstName || reserva.lastName
-            ? [reserva.firstName, reserva.lastName].filter(Boolean).join(' ')
-            : null) ??
-          reserva.customerName ??
-          reserva.customer?.name ??
-          reserva.bookedForName ??
-          reserva.name ??
-          null;
-
-        const payloadWebhook = {
-          action: 'newReservation',
-          data: {
-            id: reserva.id,
-            arrival: reserva.arrival ?? reserva.start_date ?? reserva.startDate,
-            departure: reserva.departure ?? reserva.end_date ?? reserva.endDate,
-            apartment: {
-              id:
-                reserva.apartment?.id ??
-                reserva.apartment_id ??
-                reserva.apartmentId,
-              name: reserva.apartment?.name ?? reserva.apartment_name,
-            },
-            // Campos extras para detalhes_reserva.
-            guests:
-              reserva.guests ?? reserva.numPeople ?? reserva.numberOfGuests ?? undefined,
-            adults: reserva.adults,
-            children: reserva.children,
-            guestName: hospedeNomeSmoobu ?? undefined,
-            firstName: reserva.firstName ?? reserva.first_name ?? undefined,
-            lastName: reserva.lastName ?? reserva.last_name ?? undefined,
-          },
-        };
-
-        // Se a reserva estiver cancelada no Smoobu (status = 'cancelled' ou
-        // variante), dispara o gatilho de cancelamento em vez de criar uma
-        // tarefa fantasma.
-        const statusReserva = String(
-          reserva.status ?? reserva.bookingStatus ?? ''
-        ).toLowerCase();
-        if (['cancelled', 'canceled', 'cancelada'].includes(statusReserva)) {
-          await cancelarTarefaPorReserva(reservaId);
-          // Conta como "existente" (não cria nova, não conta como erro).
-          existentes++;
-          continue;
-        }
-
-        const resultado = await processarReservaSmoobu(payloadWebhook, empresaId);
-
-        if (jaExistia) {
-          existentes++;
-        } else if (resultado) {
-          criadas++;
-        }
-        // resultado null = action ignorada ou reserva sem tarefa (não conta)
+        await executarSincronizacaoBackground(empresaId, apiKey);
       } catch (err) {
-        erros++;
-        detalheErros.push({
-          reservaId: reservaId != null ? String(reservaId) : null,
+        // FIX (timeout 502) — Log de erro detalhado para não morrer silenciosamente.
+        console.error('❌ [Smoobu] sincronizarReservas (background): FALHOU a meio:', {
+          empresaId: String(empresaId),
           erro: err.message,
+          stack: err.stack ? err.stack.split('\n').slice(0, 5).join('\n') : undefined,
+          timestamp: new Date().toISOString(),
         });
-        console.error(
-          `⚠️  [Smoobu] sincronizarReservas: reserva ${reservaId} falhou:`,
-          err.message
-        );
-        // Continua para a próxima reserva.
+      } finally {
+        syncEmCurso.delete(String(empresaId));
       }
-    }
-
-    console.log(
-      `✅ [Smoobu] sincronizarReservas: ${reservas.length} recebidas, ${criadas} criadas, ` +
-        `${existentes} já existiam, ${erros} com erro.`
-    );
-
-    // Atualiza ultima_sincronizacao da empresa (HF6).
-    try {
-      const Empresa = require('../models/Empresa');
-      await Empresa.findByIdAndUpdate(empresaId, {
-        $set: { 'integracoes.smoobu.ultima_sincronizacao': new Date() },
-      });
-    } catch (updErr) {
-      console.warn(
-        '⚠️  [Smoobu] sincronizarReservas: falha ao atualizar ultima_sincronizacao (não bloqueia):',
-        updErr.message
-      );
-    }
-
-    // message legível para toasts (executarAcao do configuracoes/page.tsx).
-    let message = `${criadas} tarefa(s) criada(s)`;
-    if (existentes > 0) message += `, ${existentes} já existiam`;
-    if (erros > 0) message += `, ${erros} com erro`;
-    message += ` (de ${reservas.length} reservas).`;
-
-    return res.status(200).json({
-      totalRecebidas: reservas.length,
-      importadas: criadas + existentes,
-      criadas,
-      existentes,
-      erros,
-      detalheErros,
-      message,
     });
   } catch (err) {
     console.error('❌ [Smoobu] sincronizarReservas: erro interno:', err.message);
     return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
   }
+}
+
+/**
+ * FIX (timeout 502) — Set de empresas com sincronização em curso.
+ */
+const syncEmCurso = new Set();
+
+/**
+ * FIX (timeout 502) — Função de background que executa toda a lógica pesada.
+ */
+async function executarSincronizacaoBackground(empresaId, apiKey) {
+  const inicioJob = Date.now();
+  console.log('🔄 [Smoobu] sincronizarReservas (background): iniciada para empresa ' + String(empresaId) + '.');
+
+  const agora = new Date();
+  const from = new Date(Date.UTC(agora.getUTCFullYear(), agora.getUTCMonth(), agora.getUTCDate()))
+    .toISOString().slice(0, 10);
+
+  // Fetch ao Smoobu com paginação.
+  let currentPage = 1;
+  let totalPages = 1;
+  let todasReservas = [];
+
+  while (currentPage <= totalPages) {
+    const url = 'https://login.smoobu.com/api/reservations?arrivalFrom=' + from + '&page=' + currentPage;
+    const respostaSmoobu = await fetch(url, {
+      method: 'GET',
+      headers: { 'Api-Key': apiKey, Accept: 'application/json' },
+      signal: AbortSignal.timeout(30000),
+    });
+
+    if (!respostaSmoobu.ok) {
+      const texto = await respostaSmoobu.text().catch(() => '');
+      throw new Error('Smoobu devolveu erro ' + respostaSmoobu.status + ': ' + (texto.slice(0, 200) || respostaSmoobu.statusText));
+    }
+
+    const body = await respostaSmoobu.json();
+    const reservasPagina = body?.bookings ?? body?.reservations ?? body?.data?.reservations ?? body?.data?.bookings ?? (Array.isArray(body) ? body : []);
+    todasReservas = todasReservas.concat(reservasPagina);
+    totalPages = body?.page_count || 1;
+    currentPage++;
+  }
+
+  const reservas = todasReservas;
+  console.log('📥 [Smoobu] sincronizarReservas (background): ' + reservas.length + ' reservas recebidas.');
+
+  let criadas = 0;
+  let existentes = 0;
+  let erros = 0;
+
+  for (const reserva of reservas) {
+    const reservaId = reserva?.id ?? reserva?.reservationId ?? reserva?.reservation_id;
+    try {
+      let jaExistia = false;
+      if (reservaId) {
+        const existente = await Tarefa.findOne({ smoobu_reserva_id: String(reservaId) }).lean();
+        if (existente) jaExistia = true;
+      }
+
+      const hospedeNomeSmoobu = reserva.guestName ?? reserva.guest_name ?? reserva['guest-name'] ?? reserva.guest?.name
+        ?? (reserva.guest?.firstName || reserva.guest?.lastName ? [reserva.guest?.firstName, reserva.guest?.lastName].filter(Boolean).join(' ') : null)
+        ?? (reserva.firstName || reserva.lastName ? [reserva.firstName, reserva.lastName].filter(Boolean).join(' ') : null)
+        ?? reserva.customerName ?? reserva.customer?.name ?? reserva.bookedForName ?? reserva.name ?? null;
+
+      const payloadWebhook = {
+        action: 'newReservation',
+        data: {
+          id: reserva.id,
+          arrival: reserva.arrival ?? reserva.start_date ?? reserva.startDate,
+          departure: reserva.departure ?? reserva.end_date ?? reserva.endDate,
+          apartment: {
+            id: reserva.apartment?.id ?? reserva.apartment_id ?? reserva.apartmentId,
+            name: reserva.apartment?.name ?? reserva.apartment_name,
+          },
+          guests: reserva.guests ?? reserva.numPeople ?? reserva.numberOfGuests ?? undefined,
+          adults: reserva.adults,
+          children: reserva.children,
+          guestName: hospedeNomeSmoobu ?? undefined,
+          firstName: reserva.firstName ?? reserva.first_name ?? undefined,
+          lastName: reserva.lastName ?? reserva.last_name ?? undefined,
+        },
+      };
+
+      const statusReserva = String(reserva.status ?? reserva.bookingStatus ?? '').toLowerCase();
+      if (['cancelled', 'canceled', 'cancelada'].includes(statusReserva)) {
+        await cancelarTarefaPorReserva(reservaId);
+        existentes++;
+        continue;
+      }
+
+      const resultado = await processarReservaSmoobu(payloadWebhook, empresaId);
+      if (jaExistia) existentes++;
+      else if (resultado) criadas++;
+    } catch (err) {
+      erros++;
+      console.error('⚠️  [Smoobu] (background): reserva ' + reservaId + ' falhou:', err.message);
+    }
+  }
+
+  console.log('✅ [Smoobu] (background): ' + reservas.length + ' recebidas, ' + criadas + ' criadas, ' + existentes + ' já existiam, ' + erros + ' erros.');
+
+  // FIX (sync integral parceiros) — Recria tarefas de ReservaManual órfãs.
+  let parceirosCriadas = 0;
+  try {
+    const ReservaManual = require('../models/ReservaManual');
+    const hoje = new Date();
+    hoje.setUTCHours(0, 0, 0, 0);
+    const reservasManuais = await ReservaManual.find({ empresa_id: empresaId, check_out: { $gte: hoje } }).lean();
+
+    for (const rm of reservasManuais) {
+      let tarefaExiste = false;
+      if (rm.tarefa_gerada_id) {
+        tarefaExiste = await Tarefa.exists({ _id: rm.tarefa_gerada_id });
+      }
+      if (tarefaExiste) continue;
+
+      const propriedadeRM = await Propriedade.findById(rm.propriedade_id).lean();
+      if (!propriedadeRM) continue;
+
+      const dataCheckOutRM = new Date(rm.check_out);
+      const dataTarefaRM = new Date(Date.UTC(dataCheckOutRM.getUTCFullYear(), dataCheckOutRM.getUTCMonth(), dataCheckOutRM.getUTCDate()));
+      dataTarefaRM.setUTCHours(10, 0, 0, 0);
+      const numHospedesRM = rm.hospedes || propriedadeRM.capacidade_hospedes || null;
+
+      const novaTarefaRM = await Tarefa.create({
+        empresa_id: empresaId,
+        propriedade_id: rm.propriedade_id,
+        smoobu_reserva_id: null,
+        origem: 'manual',
+        utilizador_id: null,
+        equipa_atribuida: [],
+        data: dataTarefaRM,
+        tempo_limpeza_minutos: propriedadeRM.tempo_limpeza_minutos || 45,
+        tipo: 'limpeza',
+        estado: 'por_atribuir',
+        observacoes: rm.observacoes || '',
+        hospedes: numHospedesRM,
+        origem_parceiro: true,
+        checklist: propriedadeRM.checklist || [],
+        detalhes_reserva: {
+          checkin: rm.check_in ? new Date(rm.check_in).toISOString().slice(0, 10) : null,
+          checkout: new Date(rm.check_out).toISOString().slice(0, 10),
+          pax: numHospedesRM,
+        },
+      });
+
+      await ReservaManual.updateOne({ _id: rm._id }, { $set: { tarefa_gerada_id: novaTarefaRM._id } });
+      parceirosCriadas++;
+    }
+    if (parceirosCriadas > 0) {
+      console.log('🤝 [Parceiros] sync (background): ' + parceirosCriadas + ' tarefa(s) recriada(s).');
+    }
+  } catch (errParceiros) {
+    console.warn('⚠️  [Parceiros] sync (background) falhou:', errParceiros.message);
+  }
+
+  // Atualiza ultima_sincronizacao.
+  try {
+    const Empresa = require('../models/Empresa');
+    await Empresa.findByIdAndUpdate(empresaId, {
+      $set: { 'integracoes.smoobu.ultima_sincronizacao': new Date() },
+    });
+  } catch (updErr) {
+    console.warn('⚠️  [Smoobu] (background): falha ao atualizar ultima_sincronizacao:', updErr.message);
+  }
+
+  const duracaoSeg = ((Date.now() - inicioJob) / 1000).toFixed(1);
+  console.log('🏁 [Smoobu] (background): CONCLUÍDA em ' + duracaoSeg + 's — ' + criadas + ' Smoobu, ' + parceirosCriadas + ' parceiros, ' + erros + ' erros.');
 }
 
 module.exports = {
