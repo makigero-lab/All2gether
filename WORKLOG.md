@@ -2356,3 +2356,18 @@ Work Log:
 Stage Summary:
 - Testes novos: `backend/tests/rgpdExportApagar.test.js` (16) e `frontend/src/lib/rgpd.test.mjs`.
 - Por confirmar: ver a resposta ao pedido (export grande pela Vercel, `observacoes_staff`, retenção do registo mínimo de apagamento, verificação visual a 375/1366 px).
+
+---
+Task ID: merge-perda-smoobucontroller-e-background-job
+Agent: Dev
+Task: reparar a regressao do merge f5dfbd8 que apagou ~750 linhas do smoobuController (CI a falhar) e reaplicar o background job da sincronizacao sobre a versao correta.
+
+Work Log:
+- Causa: o commit a1a5ffd (background job) foi escrito sobre uma copia local do smoobuController.js desatualizada (base de 29/08). O merge f5dfbd8 com o origin/dev (e045efa, Nov 10) manteve a versao local inteira e perdeu tudo o que o remoto tinha acrescentado desde agosto: `reconciliarCancelamentos` (o CI falhava com "Route.post() requires a callback function" na rota /smoobu/reconciliar-cancelamentos), avisos agregados de limpezas por atribuir, campos de hóspedes (horas, adultos/criancas, notas), reatribuicao automatica apos update de data, modo reconciliacao do job e a sync integral de parceiros com `empresa_id`. O integracoes/page.tsx perdeu o mesmo tipo de conteudo.
+- `controllers/smoobuController.js` e `configuracoes/integracoes/page.tsx` restaurados de e045efa; o background job voltou a ser aplicado POR CIMA da versao atual: a sincronizacao manual responde 202 imediato e corre o novo `executarSincronizacaoCore` em background (setImmediate) com guarda `syncEmCurso` (409 se ja esta a correr, marca antes de responder para fechar a corrida). O modo reconciliacao (`req.reconciliacao`, usado por jobs/sincronizacaoSmoobu.js) continua SINCRONO e devolve os contadores que o job espera.
+- `aguardarSincronizacoes()` exportado para os testes esperarem pelo background (polling do syncEmCurso com timeout de seguranca).
+- Testes atualizados para o novo contrato: reconciliacao.test.js (manual = 202 + espera), tiposLimpeza.test.js (idem, tarefas de parceiros recriadas em background) e regressaoAuditoria.test.js (HTTP devolve 202; espera com o fetch ainda simulado).
+
+Stage Summary:
+- Suite completa local: 46 suites / 597 testes a passar; frontend lint e tsc --noEmit limpos.
+- Licao: antes de refatorizar ficheiros grandes, confirmar que a copia local esta sincronizada com o origin/dev (git pull) para o merge nao descartar trabalho do remoto.

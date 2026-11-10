@@ -49,6 +49,7 @@ import {
 import { adminGet, adminPut, adminPost, adminDelete } from "@/lib/api";
 import { lerUtilizador, type Role } from "@/lib/auth";
 
+import { plural } from "@/lib/utils";
 type Toast = { tipo: "sucesso" | "erro"; msg: string } | null;
 
 interface IntegracoesConfig {
@@ -119,6 +120,21 @@ export default function IntegracoesPage() {
   const [confirmarLimpar, setConfirmarLimpar] = useState(false);
   const [resultadoEmergencia, setResultadoEmergencia] = useState<string | null>(null);
 
+  // Cancelamentos do Smoobu por aplicar (webhooks que foram ignorados no passado).
+  type CancelamentoPendente = {
+    tarefa_id: string;
+    reserva_id: string;
+    propriedade: string;
+    data: string;
+    estado: string;
+    motivo: string;
+  };
+  const [verificando, setVerificando] = useState(false);
+  const [pendentes, setPendentes] = useState<{
+    candidatas: CancelamentoPendente[];
+    revisao_manual: CancelamentoPendente[];
+  } | null>(null);
+
   /** HF24 — Sincroniza reservas futuras do Smoobu (pull via REST API).
    *  FIX (timeout 502) — O backend agora responde 202 imediatamente e
    *  processa em background. O toast informa o utilizador que deve
@@ -139,7 +155,7 @@ export default function IntegracoesPage() {
       setResultadoEmergencia(msg);
       showToast(
         "sucesso",
-        "🔄 Sincronização em curso em pano de fundo. Recarrega a página de Limpezas daqui a 1-2 minutos para ver as tarefas atualizadas."
+        "🔄 Sincronização em curso em segundo plano. Recarrega a página de Limpezas daqui a 1-2 minutos para ver as tarefas atualizadas."
       );
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Erro ao sincronizar.";
@@ -147,6 +163,43 @@ export default function IntegracoesPage() {
       showToast("erro", `Sincronização falhou: ${msg}`);
     } finally {
       setSincronizando(false);
+    }
+  }
+
+  /** Verifica (sem alterar nada) limpezas ativas de reservas já canceladas no Smoobu. */
+  async function handleVerificarCancelamentos() {
+    setVerificando(true);
+    setResultadoEmergencia(null);
+    try {
+      const res = await adminPost<{
+        candidatas: CancelamentoPendente[];
+        revisao_manual: CancelamentoPendente[];
+      }>("/api/gestor/smoobu/reconciliar-cancelamentos", {});
+      setPendentes({ candidatas: res.candidatas, revisao_manual: res.revisao_manual });
+      const n = res.candidatas.length + res.revisao_manual.length;
+      showToast(n === 0 ? "sucesso" : "erro", n === 0 ? "Nada por cancelar." : `${plural(n, "limpeza")} de reservas canceladas.`);
+    } catch (e) {
+      showToast("erro", e instanceof Error ? e.message : "Erro ao verificar.");
+    } finally {
+      setVerificando(false);
+    }
+  }
+
+  /** Cancela as limpezas listadas (as "em curso" ficam para revisão manual). */
+  async function handleAplicarCancelamentos() {
+    setVerificando(true);
+    try {
+      const res = await adminPost<{ canceladas: number }>(
+        "/api/gestor/smoobu/reconciliar-cancelamentos",
+        { aplicar: true }
+      );
+      setPendentes(null);
+      setResultadoEmergencia(`${plural(plural(res.canceladas, "limpeza"), "cancelada")}.`);
+      showToast("sucesso", `${plural(plural(res.canceladas, "limpeza"), "cancelada")}.`);
+    } catch (e) {
+      showToast("erro", e instanceof Error ? e.message : "Erro ao cancelar.");
+    } finally {
+      setVerificando(false);
     }
   }
 
@@ -158,7 +211,7 @@ export default function IntegracoesPage() {
       const res = await adminPost<{
         criadas: number; atualizadas: number; existentes: number; erros: number; message?: string;
       }>("/api/gestor/smoobu/propriedades", {});
-      const msg = res.message || `${res.criadas} importada(s), ${res.atualizadas} atualizada(s).`;
+      const msg = res.message || `${plural(res.criadas, "importada")}, ${plural(res.atualizadas, "atualizada")}.`;
       setResultadoEmergencia(msg);
       showToast("sucesso", msg);
     } catch (e) {
@@ -178,7 +231,7 @@ export default function IntegracoesPage() {
       const res = await adminDelete<{ mensagem: string; apagadas: number }>(
         "/api/gestor/tarefas/futuras"
       );
-      const msg = res.mensagem || `${res.apagadas} tarefa(s) apagada(s).`;
+      const msg = res.mensagem || `${plural(plural(res.apagadas, "tarefa"), "apagada")}.`;
       setResultadoEmergencia(msg);
       showToast("sucesso", msg);
     } catch (e) {
@@ -315,7 +368,7 @@ export default function IntegracoesPage() {
       showToast(
         "sucesso",
         data.message ||
-          `${data.criadas ?? 0} importada(s), ${data.atualizadas ?? 0} atualizada(s).`
+          `${plural(data.criadas ?? 0, "importada")}, ${plural(data.atualizadas ?? 0, "atualizada")}.`
       );
       // Atualiza o timestamp de última sincronização.
       await carregar();
@@ -342,7 +395,7 @@ export default function IntegracoesPage() {
     <div className="mx-auto w-full max-w-3xl space-y-6 p-4 md:p-6">
       {/* Cabeçalho */}
       <div className="flex items-center gap-3">
-        <Plug className="h-6 w-6 text-primary" />
+        <Plug className="h-6 w-6 text-brand-text" />
         <div>
           <h1 className="text-2xl font-bold tracking-tight">
             Integrações &amp; Rotinas
@@ -540,7 +593,7 @@ export default function IntegracoesPage() {
                 ) : (
                   <RefreshCw className="mr-2 h-4 w-4" />
                 )}
-                Importar Propriedades
+                Importar propriedades
               </Button>
             </div>
           </CardContent>
@@ -608,7 +661,7 @@ export default function IntegracoesPage() {
             ) : (
               <Save className="mr-2 h-4 w-4" />
             )}
-            Guardar Configurações
+            Guardar configurações
           </Button>
         </div>
       </form>
@@ -638,7 +691,7 @@ export default function IntegracoesPage() {
           <CardTitle className="flex items-center gap-2 text-base text-destructive">
             <ShieldAlert className="h-5 w-5" />
             Ações de Manutenção
-            <Badge variant="outline" className="ml-1 text-[10px]">Admin</Badge>
+            <Badge variant="outline" className="ml-1 text-xs">Admin</Badge>
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -662,7 +715,22 @@ export default function IntegracoesPage() {
               ) : (
                 <Download className="h-4 w-4" />
               )}
-              {sincronizando ? "A sincronizar…" : "Sincronizar Smoobu"}
+              {sincronizando ? "A sincronizar…" : "Sincronizar Limpezas (Smoobu + Proprietários)"}
+            </Button>
+
+            {/* Verificar cancelamentos do Smoobu que ficaram por aplicar */}
+            <Button
+              variant="outline"
+              onClick={handleVerificarCancelamentos}
+              disabled={verificando}
+              title="Procura limpezas ativas de reservas que já foram canceladas no Smoobu."
+            >
+              {verificando ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <ShieldAlert className="h-4 w-4" />
+              )}
+              {verificando ? "A verificar…" : "Verificar Cancelamentos Pendentes"}
             </Button>
 
             {/* Importar Propriedades */}
@@ -692,9 +760,47 @@ export default function IntegracoesPage() {
               ) : (
                 <Trash2 className="h-4 w-4" />
               )}
-              Eliminar Limpezas Futuras
+              Eliminar limpezas futuras
             </Button>
           </div>
+
+          {pendentes && (
+            <div className="space-y-2 rounded-md border p-3 text-sm">
+              {pendentes.candidatas.length === 0 && pendentes.revisao_manual.length === 0 ? (
+                <p>Nenhuma limpeza ativa corresponde a reservas canceladas no Smoobu.</p>
+              ) : (
+                <>
+                  {pendentes.candidatas.length > 0 && (
+                    <>
+                      <p className="font-medium">
+                        {plural(pendentes.candidatas.length, "limpeza")} de reservas já canceladas ou bloqueadas no Smoobu:
+                      </p>
+                      <ul className="max-h-56 list-disc space-y-0.5 overflow-y-auto pl-5">
+                        {pendentes.candidatas.slice(0, 50).map((c) => (
+                          <li key={c.tarefa_id}>
+                            {c.propriedade} · {String(c.data).slice(0, 10)} · {c.motivo}
+                          </li>
+                        ))}
+                      </ul>
+                      <Button
+                        variant="outline"
+                        className="border-destructive/40 text-destructive hover:bg-destructive/10"
+                        onClick={handleAplicarCancelamentos}
+                        disabled={verificando}
+                      >
+                        Cancelar estas {plural(pendentes.candidatas.length, "limpeza")}
+                      </Button>
+                    </>
+                  )}
+                  {pendentes.revisao_manual.length > 0 && (
+                    <p className="text-muted-foreground">
+                      {plural(pendentes.revisao_manual.length, "limpeza")} já em curso de reservas canceladas: revê-as manualmente (não são canceladas automaticamente).
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+          )}
 
           {resultadoEmergencia && (
             <div className="rounded-md bg-muted/50 p-3 text-sm">
@@ -726,17 +832,17 @@ export default function IntegracoesPage() {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Trash2 className="h-5 w-5 text-destructive" />
-            Eliminar Limpezas Futuras
+            Eliminar limpezas futuras
           </DialogTitle>
           <DialogDescription>
-            Isto vai apagar todas as tarefas não concluídas de hoje para a frente.
+            Isto vai eliminar todas as tarefas não concluídas de hoje para a frente.
             As concluídas e canceladas serão preservadas. Queres continuar?
           </DialogDescription>
           <DialogClose onClick={() => setConfirmarLimpar(false)} />
         </DialogHeader>
         <DialogContent className="space-y-2">
           <p className="text-sm text-muted-foreground">
-            Depois de apagar, podes clicar em &ldquo;Sincronizar Smoobu&rdquo; para recriar
+            Depois de apagar, podes clicar em &ldquo;Sincronizar Limpezas&rdquo; para recriar
             as tarefas a partir das reservas ativas.
           </p>
         </DialogContent>
