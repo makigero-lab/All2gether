@@ -1470,6 +1470,15 @@ exports.atualizarPropriedade = async (req, res) => {
       const paraRemover = antigaEquipa.filter((sid) => !novaEquipa.includes(sid));
 
       propriedade.equipa_preferencial = novaEquipa;
+      // O preferido antigo (não aparece no ecrã) não pode contradizer a equipa escolhida.
+      if (
+        funcionario_preferencial_id === undefined &&
+        propriedade.funcionario_preferencial_id &&
+        novaEquipa.length > 0 &&
+        !novaEquipa.includes(String(propriedade.funcionario_preferencial_id))
+      ) {
+        propriedade.funcionario_preferencial_id = null;
+      }
 
       // Sincroniza propriedades_alocadas nos utilizadores (after save).
       if (paraAdicionar.length > 0) {

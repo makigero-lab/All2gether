@@ -156,3 +156,40 @@ describe('sincronização e canceladas', () => {
     expect(emp.integracoes.smoobu.ultimo_resultado.ok).toBe(true);
   });
 });
+
+describe('preferências da casa', () => {
+  const staff = (e, nome) => Utilizador.create({ nome, email: `${nome}${n}@x.pt`, password_hash: hash, empresa_id: e._id, role: 'staff', ativo: true, dias_folga: [] });
+  const reservaNova = (id, p) => ({ action: 'newReservation', data: { id, type: 'reservation', arrival: '2031-06-01', departure: '2031-06-03', apartment: { id: Number(p.smoobu_id) }, 'guest-name': 'G', adults: 1, children: 0 } });
+
+  test('a equipa preferida ganha ao preferido antigo que não faz parte dela', async () => {
+    const { e } = await cenario();
+    const antiga = await staff(e, 'antiga');
+    const nova = await staff(e, 'nova');
+    const p = await Propriedade.create({ nome: 'CR', empresa_id: e._id, smoobu_id: '81' + n, ativo: true, tempo_limpeza_minutos: 45, funcionario_preferencial_id: antiga._id, equipa_preferencial: [nova._id] });
+    const { processarReservaSmoobu } = require('../controllers/smoobuController');
+    await processarReservaSmoobu(reservaNova(9100 + n, p), e._id, e._id);
+    const t = await Tarefa.findOne({ propriedade_id: p._id }).lean();
+    expect(String(t.utilizador_id)).toBe(String(nova._id));
+  });
+
+  test('sem equipa preferida, o preferido antigo continua a valer', async () => {
+    const { e } = await cenario();
+    const antiga = await staff(e, 'antiga');
+    await staff(e, 'outra');
+    const p = await Propriedade.create({ nome: 'CR2', empresa_id: e._id, smoobu_id: '82' + n, ativo: true, tempo_limpeza_minutos: 45, funcionario_preferencial_id: antiga._id, equipa_preferencial: [] });
+    const { processarReservaSmoobu } = require('../controllers/smoobuController');
+    await processarReservaSmoobu(reservaNova(9200 + n, p), e._id, e._id);
+    const t = await Tarefa.findOne({ propriedade_id: p._id }).lean();
+    expect(String(t.utilizador_id)).toBe(String(antiga._id));
+  });
+
+  test('gravar a equipa no ecrã apaga o preferido antigo que a contradiz', async () => {
+    const { e, token } = await cenario();
+    const antiga = await staff(e, 'antiga');
+    const nova = await staff(e, 'nova');
+    const p = await Propriedade.create({ nome: 'CR3', empresa_id: e._id, smoobu_id: '83' + n, ativo: true, tempo_limpeza_minutos: 45, funcionario_preferencial_id: antiga._id });
+    const r = await request(app).put(`/api/gestor/propriedades/${p._id}`).set('Authorization', 'Bearer ' + token).send({ equipa_preferencial: [String(nova._id)] });
+    expect(r.status).toBe(200);
+    expect((await Propriedade.findById(p._id).lean()).funcionario_preferencial_id).toBeNull();
+  });
+});
