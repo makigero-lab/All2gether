@@ -1,7 +1,9 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import { RouteGuard } from "@/components/auth/route-guard";
 import { PushNotificationSetup } from "@/components/staff/push-notification-setup";
+import { StaffBottomNav } from "@/components/staff/staff-bottom-nav";
 
 /**
  * Layout da Área do Staff (mobile-first).
@@ -21,10 +23,16 @@ export default function StaffLayout({
 }: {
   children: React.ReactNode;
 }) {
+  // A barra inferior aparece nas 4 áreas principais; no detalhe da tarefa o
+  // ecrã é dedicado (checklist/fotos) e a barra fica escondida.
+  const pathname = usePathname() || "";
+  const mostrarNav = !pathname.startsWith("/staff/tarefas");
+
   return (
     <RouteGuard role="staff">
       <PushNotificationSetup />
-      {children}
+      <div className={mostrarNav ? "pb-[calc(5rem+env(safe-area-inset-bottom))]" : undefined}>{children}</div>
+      {mostrarNav && <StaffBottomNav />}
     </RouteGuard>
   );
 }

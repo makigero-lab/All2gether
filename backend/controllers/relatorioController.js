@@ -11,10 +11,12 @@ const mongoose = require('mongoose');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const crypto = require('crypto');
 const Tarefa = require('../models/Tarefa');
+const { EXPR_MEMBROS } = require('../utils/equipaTarefa');
 const Utilizador = require('../models/Utilizador');
 const Propriedade = require('../models/Propriedade');
 const { obterEmpresaId } = require('./gestorController');
 const { enviarEventoParaAutocell } = require('../utils/outboundWebhook');
+const { calcularPorCasa } = require('../utils/tempoReal');
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -170,9 +172,12 @@ exports.getRelatorioProdutividade = async (req, res) => {
     /* ---- Por staff (produtividade individual) ---- */
     const porStaffAgg = await Tarefa.aggregate([
       { $match: { ...matchBase, estado: { $ne: 'cancelada' } } },
+      // Produtividade por pessoa: cada membro da equipa conta a tarefa e a carga.
+      { $addFields: { _membros: EXPR_MEMBROS } },
+      { $unwind: { path: '$_membros', preserveNullAndEmptyArrays: true } },
       {
         $group: {
-          _id: '$utilizador_id',
+          _id: '$_membros',
           total: { $sum: 1 },
           concluidas: {
             $sum: { $cond: [{ $eq: ['$estado', 'concluida'] }, 1, 0] },
@@ -280,6 +285,57 @@ exports.getRelatorioProdutividade = async (req, res) => {
 };
 
 /* ------------------------------------------------------------------ */
+/* GET /api/gestor/relatorios/tempo-real                               */
+/* ------------------------------------------------------------------ */
+/**
+ * Tempo real vs estimado por casa (só limpezas normais concluídas no período, com início por
+ * botão ou por checklist) + quantas limpezas começaram por botão/automaticamente. Devolve
+ * sugestões de ajuste; nunca altera nada. Query: inicio, fim (como a produtividade).
+ */
+exports.getRelatorioTempoReal = async (req, res) => {
+  try {
+    const { ok, empresaId } = obterEmpresaId(req, res);
+    if (!ok) return;
+    const agora = new Date();
+    const hojeFim = new Date(Date.UTC(agora.getUTCFullYear(), agora.getUTCMonth(), agora.getUTCDate()) + 24 * 60 * 60 * 1000);
+    // `fim` é inclusivo (o dia escolhido conta): internamente [inicio, fim+1 dia[.
+    const fimEscolhido = normalizarDataUTC(req.query.fim);
+    const fim = fimEscolhido ? new Date(fimEscolhido.getTime() + 24 * 60 * 60 * 1000) : hojeFim;
+    const inicio = normalizarDataUTC(req.query.inicio) || new Date(fim.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+    const concluidas = await Tarefa.find({
+      empresa_id: empresaId,
+      tipo: 'limpeza',
+      estado: 'concluida',
+      data: { $gte: inicio, $lt: fim },
+    })
+      .select('propriedade_id tempo_limpeza_minutos tipo_limpeza hora_conclusao concluida_em iniciada_em inicio_origem primeiro_item_checklist_em')
+      .lean();
+
+    const props = await Propriedade.find({ empresa_id: empresaId }).select('nome tempo_limpeza_minutos').lean();
+    const mapa = new Map(props.map((p) => [String(p._id), { nome: p.nome, tempo: p.tempo_limpeza_minutos }]));
+    const { casas, excluidas } = calcularPorCasa(concluidas, mapa);
+
+    const inicios = { botao: 0, automatico: 0, sem_registo: 0 };
+    for (const t of concluidas) {
+      if (t.inicio_origem === 'botao') inicios.botao++;
+      else if (t.inicio_origem === 'automatico') inicios.automatico++;
+      else inicios.sem_registo++;
+    }
+    return res.status(200).json({
+      periodo: { inicio: inicio.toISOString(), fim: fim.toISOString() },
+      inicios,
+      limpezas_concluidas: concluidas.length,
+      excluidas_sem_inicio_fiavel: excluidas,
+      casas,
+    });
+  } catch (err) {
+    console.error('❌ getRelatorioTempoReal:', err.message);
+    return res.status(500).json({ erro: 'Erro interno do servidor.' });
+  }
+};
+
+/* ------------------------------------------------------------------ */
 /* POST /api/gestor/relatorios/ai-summary                              */
 /* ------------------------------------------------------------------ */
 /**
@@ -296,31 +352,63 @@ exports.getRelatorioProdutividade = async (req, res) => {
  * Body: payload do relatório (resumo + porStaff + porDia + ...).
  * Resposta 200: { resumo: "..." }
  */
+/**
+ * RGPD: os nomes das pessoas nunca saem para a IA. Troca cada nome de `porStaff` por «Pessoa N»
+ * e devolve também `repor(texto)`, que volta a pôr os nomes verdadeiros na resposta.
+ * («Por atribuir» e «Desconhecido» não são pessoas e ficam como estão.)
+ */
+function pseudonimizarContexto(contexto) {
+  const mapa = new Map(); // «Pessoa N» -> nome real
+  const nomeParaAlias = new Map();
+  const NAO_PESSOAS = new Set(['Por atribuir', 'Desconhecido']);
+  const porStaff = (contexto.porStaff || []).map((s) => {
+    if (!s || typeof s.nome !== 'string' || NAO_PESSOAS.has(s.nome)) return s;
+    if (!nomeParaAlias.has(s.nome)) {
+      const alias = `Pessoa ${nomeParaAlias.size + 1}`;
+      nomeParaAlias.set(s.nome, alias);
+      mapa.set(alias, s.nome);
+    }
+    return { ...s, nome: nomeParaAlias.get(s.nome) };
+  });
+  const repor = (texto) => {
+    let out = String(texto ?? '');
+    // «Pessoa 10» antes de «Pessoa 1»;  evita trocar parte de outro número.
+    const aliases = [...mapa.keys()].sort((a, b) => b.length - a.length);
+    for (const alias of aliases) {
+      out = out.replace(new RegExp(`${alias}(?![0-9])`, 'g'), () => mapa.get(alias));
+    }
+    return out;
+  };
+  return { contexto: { ...contexto, porStaff }, repor };
+}
+
 exports.getResumoIA = async (req, res) => {
   try {
     const dados = req.body || {};
 
     // Payload normalizado para construir o prompt / o placeholder.
-    const contexto = construirContexto(dados);
+    const contextoReal = construirContexto(dados);
+    // Só o contexto pseudonimizado vai para a IA; o placeholder local usa os nomes reais.
+    const { contexto, repor } = pseudonimizarContexto(contextoReal);
 
     /* ---- Tentativa LLM (best-effort) — Prompt 125: Gemini tem prioridade ---- */
     let resumoLLM = null;
 
     if (process.env.GEMINI_API_KEY) {
       try {
-        resumoLLM = await chamarGemini(contexto);
+        resumoLLM = repor(await chamarGemini(contexto));
       } catch (err) {
         console.warn('⚠️  Gemini falhou, a usar placeholder:', err.message);
       }
     } else if (process.env.OPENAI_API_KEY) {
       try {
-        resumoLLM = await chamarOpenAI(contexto);
+        resumoLLM = repor(await chamarOpenAI(contexto));
       } catch (err) {
         console.warn('⚠️  OpenAI falhou, a usar placeholder:', err.message);
       }
     }
 
-    const resumo = resumoLLM || gerarPlaceholder(contexto);
+    const resumo = resumoLLM || gerarPlaceholder(contextoReal);
 
     // Notifica o portal Autocell de que um relatório foi submetido/gerado.
     // Fire-and-forget (sem await): o envio do webhook não deve bloquear a
@@ -417,7 +505,7 @@ function construirPrompt(contexto) {
           s.taxaConclusao * 100
         )}%), carga ${Math.round(s.carga_minutos / 60 * 10) / 10}h`
     )
-    .join('\n') || '- (sem dados de staff)';
+    .join('\n') || '- (sem dados da equipa)';
 
   const topProps = [...contexto.porPropriedade]
     .sort((a, b) => b.total - a.total)
@@ -442,7 +530,7 @@ Dados:
 - Tempo médio estimado por tarefa: ${tempoMedio}h
 - Tempo real médio por tarefa (concluídas): ${tempoReal}h
 
-Top staff (por taxa de conclusão):
+Melhores da equipa (por taxa de conclusão):
 ${topStaff}
 
 Top propriedades (por nº de tarefas):
@@ -608,7 +696,7 @@ function gerarPlaceholder(contexto) {
       const min = Math.min(...cargas);
       if (max > min * 2) {
         tendencias.push(
-          `- **Distribuição de carga desequilibrada**: o staff com mais tarefas tem ${max} e o com menos tem ${min} — possível sobrecarga pontual.`
+          `- **Distribuição de carga desequilibrada**: o elemento da equipa com mais tarefas tem ${max} e o com menos tem ${min} — possível sobrecarga pontual.`
         );
       }
     }
@@ -657,7 +745,7 @@ function gerarPlaceholder(contexto) {
 
   if (contexto.porStaff.length > 1) {
     recomendacoes.push(
-      `Avaliar redistribuição de carga entre staff: equilibrar tarefas por capacidade e experiência, garantindo cobertura adequada das propriedades com maior volume.`
+      `Avaliar redistribuição de carga entre a equipa: equilibrar tarefas por capacidade e experiência, garantindo cobertura adequada das propriedades com maior volume.`
     );
   }
 
@@ -684,3 +772,7 @@ function gerarPlaceholder(contexto) {
     recFinal.map((r) => `- ${r}`).join('\n'),
   ].join('\n');
 }
+
+exports.pseudonimizarContexto = pseudonimizarContexto;
+exports.construirPrompt = construirPrompt;
+exports.construirContexto = construirContexto;

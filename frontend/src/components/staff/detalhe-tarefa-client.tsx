@@ -1,7 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { TipoLimpezaBadge, rotuloTipoLimpeza } from "@/components/tipo-limpeza-badge";
+
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { comprimirImagem } from "@/lib/imagem";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
@@ -26,12 +29,27 @@ import {
   X,
   AlertCircle,
   Navigation,
+  Shirt,
+  Play,
+  TriangleAlert,
 } from "lucide-react";
+import { textoEquipa } from "@/lib/equipa";
 
-import { cn, parsearDataSegura, googleMapsUrl } from "@/lib/utils";
+import { cn, parsearDataSegura, googleMapsUrl, plural } from "@/lib/utils";
+import {
+  MSG_SEM_LIGACAO,
+  eErroDeRede,
+  guardarRascunho,
+  guardarRascunhoAvaria,
+  lerRascunho,
+  lerRascunhoAvaria,
+  limparRascunho,
+  mensagemErro,
+} from "@/lib/rascunho-staff";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -51,6 +69,7 @@ import {
 import { adminPost, adminPatch } from "@/lib/api";
 import type { TarefaMock, EstadoTarefa, TipoTarefa } from "@/lib/api";
 import { DetalhesReservaCard } from "@/components/detalhes-reserva-card";
+import { BotaoComecei, BotaoNaoConsegui, horaCurta } from "@/components/staff/comecar-limpeza";
 
 const tipoIcon: Record<TarefaMock["tipo"], React.ComponentType<{ className?: string }>> = {
   limpeza: SprayCan,
@@ -102,6 +121,14 @@ export function DetalheTarefaClient({
   // Avaria. Mostra o estado final sem permitir editar.
   const jaConcluida = tarefa.estado === "concluida";
 
+  // Início da limpeza («Comecei» / automático): estado local, atualizado sem recarregar a página
+  // (recarregar perderia a checklist e as notas por gravar).
+  const [estadoLocal, setEstadoLocal] = useState<string>(tarefa.estado);
+  const [iniciadaEm, setIniciadaEm] = useState<string | null>(tarefa.iniciada_em ?? null);
+  const [inicioOrigem, setInicioOrigem] = useState<string | null>(tarefa.inicio_origem ?? null);
+  const [naoConseguiAvisado, setNaoConseguiAvisado] = useState<boolean>(!!tarefa.nao_consegui_comecar);
+  const podeComecar = estadoLocal === "atribuida" && !jaConcluida;
+
   // Prompt 133 — Checklist dinâmica (snapshot do ModeloChecklist).
   // Se existir e tiver pelo menos 1 item, renderiza secções em vez da
   // checklist flat. Caso contrário, cai no comportamento antigo (array de
@@ -123,11 +150,17 @@ export function DetalheTarefaClient({
     }))
   );
 
+  // Rascunho local (notas + checklist flat) para sobreviver a falhas de rede.
+  const [rascunhoInicial] = useState(() =>
+    jaConcluida || typeof window === "undefined"
+      ? null
+      : lerRascunho(String(tarefa.id), checklist.length)
+  );
   const [itensMarcados, setItensMarcados] = useState<boolean[]>(
     // Se já estiver concluída, pré-marca todos os itens (reflete o final).
-    () => checklist.map(() => jaConcluida)
+    () => rascunhoInicial?.itens ?? checklist.map(() => jaConcluida)
   );
-  const [observacoes, setObservacoes] = useState("");
+  const [observacoes, setObservacoes] = useState(jaConcluida ? (tarefa.observacoes_staff ?? "") : (rascunhoInicial?.observacoes ?? ""));
   const [concluida, setConcluida] = useState(jaConcluida);
   const [concluindo, setConcluindo] = useState(false);
   const [erroConcluir, setErroConcluir] = useState<string | null>(null);
@@ -135,20 +168,31 @@ export function DetalheTarefaClient({
   // HF19 — Modal de conclusão com fotos obrigatórias
   const [mostrarConcluir, setMostrarConcluir] = useState(false);
   const [concluirFotos, setConcluirFotos] = useState<string[]>([]);
+  // O erro «falta foto» só aparece depois de a pessoa tentar concluir sem foto.
+  const [tentouSemFoto, setTentouSemFoto] = useState(false);
   const [concluirResultado, setConcluirResultado] = useState<string | null>(null);
+  // FIX (portal lavandaria) — Sacos de roupa suja recolhidos pelo staff.
+  // Enviado no PATCH /concluir para o backend guardar em tarefa.sacos_roupa_suja.
+  const [sacosRoupaSuja, setSacosRoupaSuja] = useState<string>("");
 
   // Modal de reportar atraso
   const [mostrarAtraso, setMostrarAtraso] = useState(false);
   const [minutosAtraso, setMinutosAtraso] = useState<number | null>(null);
   const [atrasoSubmitting, setAtrasoSubmitting] = useState(false);
   const [atrasoResultado, setAtrasoResultado] = useState<string | null>(null);
+  // Erro (ex.: sem rede): NUNCA vai para o estado de sucesso; o formulário mantém-se.
+  const [atrasoErro, setAtrasoErro] = useState<string | null>(null);
 
   // Modal de reportar avaria (v1.38.0 / HF13 enriquecido com fotos)
   const [mostrarAvaria, setMostrarAvaria] = useState(false);
-  const [avariaDesc, setAvariaDesc] = useState("");
+  const [avariaDesc, setAvariaDesc] = useState(() =>
+    typeof window === "undefined" ? "" : lerRascunhoAvaria(String(tarefa.id))
+  );
+  const [avariaErro, setAvariaErro] = useState<string | null>(null);
   // HF13 — fotos em base64 (upload simplificado, sem object storage).
   // O input type="file" lê o ficheiro e converte para base64 via FileReader.
   const [avariaFotos, setAvariaFotos] = useState<string[]>([]);
+  const [erroFotosAvaria, setErroFotosAvaria] = useState<string | null>(null);
   const [avariaSubmitting, setAvariaSubmitting] = useState(false);
   const [avariaResultado, setAvariaResultado] = useState<string | null>(null);
 
@@ -168,6 +212,32 @@ export function DetalheTarefaClient({
   }, [temChecklistDinamica, dinamica, itensMarcados]);
   // Se a checklist estiver vazia, o botão fica sempre ativo (não há itens para marcar).
   const todasMarcadas = totalItens === 0 || itensConcluidos === totalItens;
+
+  // O texto da avaria sobrevive a fechar/reabrir e a recarregar (fotos não: RGPD).
+  useEffect(() => {
+    guardarRascunhoAvaria(String(tarefa.id), avariaDesc);
+  }, [tarefa.id, avariaDesc]);
+
+  // Guarda o rascunho sempre que muda (nunca fotos nem dados do hóspede).
+  useEffect(() => {
+    if (concluida) return;
+    guardarRascunho(String(tarefa.id), { observacoes, itens: itensMarcados });
+  }, [tarefa.id, observacoes, itensMarcados, concluida]);
+
+  // Se o envio falhou por falta de rede e o diálogo continua aberto, volta a
+  // tentar sozinho quando a rede regressa (o botão "Tentar de novo" também serve).
+  useEffect(() => {
+    const aoVoltarRede = () => {
+      if (mostrarAvaria && avariaErro === MSG_SEM_LIGACAO && !avariaSubmitting) {
+        void handleReportarAvaria();
+      } else if (mostrarAtraso && atrasoErro === MSG_SEM_LIGACAO && !atrasoSubmitting) {
+        void handleReportarAtraso();
+      }
+    };
+    window.addEventListener("online", aoVoltarRede);
+    return () => window.removeEventListener("online", aoVoltarRede);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mostrarAvaria, mostrarAtraso, avariaErro, atrasoErro, avariaSubmitting, atrasoSubmitting]);
 
   const toggleItem = (index: number, value: boolean) => {
     setItensMarcados((prev) => {
@@ -212,9 +282,11 @@ export function DetalheTarefaClient({
       // Erro — reverte ao estado anterior.
       setDinamica(estadoAnterior);
       setErroConcluir(
-        e instanceof Error
-          ? `Não foi possível atualizar o item: ${e.message}`
-          : "Erro ao atualizar item da checklist."
+        eErroDeRede(e)
+          ? MSG_SEM_LIGACAO
+          : e instanceof Error
+            ? `Não foi possível atualizar o item: ${e.message}`
+            : "Erro ao atualizar item da checklist."
       );
       // Limpa a mensagem após 4s.
       setTimeout(() => setErroConcluir(null), 4000);
@@ -225,29 +297,30 @@ export function DetalheTarefaClient({
   const handleConcluir = () => {
     if (!todasMarcadas || concluida || concluindo) return;
     setConcluirFotos([]);
+    setTentouSemFoto(false);
     setConcluirResultado(null);
     setMostrarConcluir(true);
   };
 
   // HF19 — Processa a seleção de fotos para a conclusão (mesma lógica das avarias).
-  function handleSelecionarFotosConcluir(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleSelecionarFotosConcluir(e: React.ChangeEvent<HTMLInputElement>) {
     const ficheiros = Array.from(e.target.files || []);
+    e.target.value = "";
     if (ficheiros.length === 0) return;
     const slotsDisponiveis = 5 - concluirFotos.length;
-    const ficheirosParaLer = ficheiros.slice(0, slotsDisponiveis);
-    for (const ficheiro of ficheirosParaLer) {
-      if (!ficheiro.type.startsWith("image/")) continue;
-      if (ficheiro.size > 2 * 1024 * 1024) continue;
-      const reader = new FileReader();
-      reader.onload = () => {
-        const base64 = reader.result as string;
-        if (base64) {
-          setConcluirFotos((prev) => [...prev, base64].slice(0, 5));
-        }
-      };
-      reader.readAsDataURL(ficheiro);
+    if (ficheiros.length > slotsDisponiveis) {
+      setErroConcluir("Máximo de 5 fotos. As restantes foram ignoradas.");
+    } else {
+      setErroConcluir(null);
     }
-    e.target.value = "";
+    for (const ficheiro of ficheiros.slice(0, Math.max(0, slotsDisponiveis))) {
+      const r = await comprimirImagem(ficheiro);
+      if (r.ok) {
+        setConcluirFotos((prev) => [...prev, r.dataUrl].slice(0, 5));
+      } else {
+        setErroConcluir(r.erro);
+      }
+    }
   }
 
   function removerFotoConcluir(index: number) {
@@ -256,7 +329,10 @@ export function DetalheTarefaClient({
 
   // HF19 — Confirma a conclusão: envia PATCH com fotos_conclusao obrigatórias.
   async function handleConfirmarConclusao() {
-    if (concluirFotos.length === 0) return;
+    if (concluirFotos.length === 0) {
+      setTentouSemFoto(true);
+      return;
+    }
     setConcluindo(true);
     setErroConcluir(null);
     try {
@@ -267,18 +343,19 @@ export function DetalheTarefaClient({
         body: JSON.stringify({
           observacoes_staff: observacoes,
           fotos_conclusao: concluirFotos,
+          // FIX (portal lavandaria) — Sacos de roupa suja recolhidos.
+          sacos_roupa_suja: sacosRoupaSuja === "" ? 0 : Number(sacosRoupaSuja),
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.erro || `Erro ${res.status}`);
       setConcluida(true);
+      limparRascunho(String(tarefa.id));
       setMostrarConcluir(false);
       // Mostra a mensagem verde durante 1.2s antes de redirecionar.
       setTimeout(() => router.push("/staff"), 1200);
     } catch (e) {
-      setErroConcluir(
-        e instanceof Error ? e.message : "Erro ao concluir tarefa."
-      );
+      setErroConcluir(mensagemErro(e, "Erro ao concluir tarefa."));
     } finally {
       setConcluindo(false);
     }
@@ -288,6 +365,7 @@ export function DetalheTarefaClient({
     if (minutosAtraso === null) return;
     setAtrasoSubmitting(true);
     setAtrasoResultado(null);
+    setAtrasoErro(null);
     try {
       // v1.55.0 (Prompt 77) — usa o endpoint do staff (não do gestor) para
       // evitar 403. O backend valida que a tarefa pertence ao req.user.id.
@@ -305,9 +383,7 @@ export function DetalheTarefaClient({
         );
       }
     } catch (e) {
-      setAtrasoResultado(
-        e instanceof Error ? e.message : "Erro ao reportar atraso."
-      );
+      setAtrasoErro(mensagemErro(e, "Erro ao reportar atraso."));
     } finally {
       setAtrasoSubmitting(false);
     }
@@ -318,6 +394,7 @@ export function DetalheTarefaClient({
     if (!avariaDesc.trim()) return;
     setAvariaSubmitting(true);
     setAvariaResultado(null);
+    setAvariaErro(null);
     try {
       const res = await fetch(`/api/staff/tarefas/${tarefa.id}/avaria`, {
         method: "POST",
@@ -334,15 +411,15 @@ export function DetalheTarefaClient({
       setAvariaResultado("Avaria reportada com sucesso. O gestor será notificado.");
       setAvariaDesc("");
       setAvariaFotos([]);
+      guardarRascunhoAvaria(String(tarefa.id), "");
       // Fecha o dialog após 1.5s.
       setTimeout(() => {
         setMostrarAvaria(false);
         setAvariaResultado(null);
       }, 1500);
     } catch (e) {
-      setAvariaResultado(
-        e instanceof Error ? e.message : "Erro ao reportar avaria."
-      );
+      // Erro: o formulário (texto e fotos) mantém-se e pode tentar-se de novo.
+      setAvariaErro(mensagemErro(e, "Erro ao reportar avaria."));
     } finally {
       setAvariaSubmitting(false);
     }
@@ -350,31 +427,22 @@ export function DetalheTarefaClient({
 
   // HF13 — Processa a seleção de ficheiros e converte para base64.
   // Limita a 5 fotos, cada uma até ~2MB (base64 incluído no payload JSON).
-  function handleSelecionarFotos(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleSelecionarFotos(e: React.ChangeEvent<HTMLInputElement>) {
     const ficheiros = Array.from(e.target.files || []);
-    if (ficheiros.length === 0) return;
-
-    // Limita a 5 fotos no total (incluindo as já adicionadas).
-    const slotsDisponiveis = 5 - avariaFotos.length;
-    const ficheirosParaLer = ficheiros.slice(0, slotsDisponiveis);
-
-    for (const ficheiro of ficheirosParaLer) {
-      // Valida tipo (só imagens).
-      if (!ficheiro.type.startsWith("image/")) continue;
-      // Valida tamanho (~2MB — base64 aumenta ~33%, pelo que ~2.6MB no payload).
-      if (ficheiro.size > 2 * 1024 * 1024) continue;
-
-      const reader = new FileReader();
-      reader.onload = () => {
-        const base64 = reader.result as string;
-        if (base64) {
-          setAvariaFotos((prev) => [...prev, base64].slice(0, 5));
-        }
-      };
-      reader.readAsDataURL(ficheiro);
-    }
-    // Limpa o input para permitir re-selecionar o mesmo ficheiro.
     e.target.value = "";
+    if (ficheiros.length === 0) return;
+    const slotsDisponiveis = 5 - avariaFotos.length;
+    setErroFotosAvaria(
+      ficheiros.length > slotsDisponiveis ? "Máximo de 5 fotos. As restantes foram ignoradas." : null
+    );
+    for (const ficheiro of ficheiros.slice(0, Math.max(0, slotsDisponiveis))) {
+      const r = await comprimirImagem(ficheiro);
+      if (r.ok) {
+        setAvariaFotos((prev) => [...prev, r.dataUrl].slice(0, 5));
+      } else {
+        setErroFotosAvaria(r.erro);
+      }
+    }
   }
 
   // HF13 — Remove uma foto da lista (botão X sobre a preview).
@@ -385,7 +453,7 @@ export function DetalheTarefaClient({
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-md flex-col bg-muted/20">
       {/* Cabeçalho com nome da propriedade no topo + voltar */}
-      <header className="sticky top-0 z-10 border-b bg-background/95 px-5 pb-4 pt-5 backdrop-blur">
+      <header className="sticky top-0 z-20 border-b bg-background/95 px-5 pb-4 pt-5 backdrop-blur">
         <Link
           href="/staff"
           prefetch
@@ -396,40 +464,48 @@ export function DetalheTarefaClient({
         </Link>
 
         <div className="flex items-start gap-3">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-brand-text">
             <Icon className="h-6 w-6" />
           </div>
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-lg font-semibold leading-tight">
               {tarefa.propriedade_nome}
             </h1>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {tipoLabel[tarefa.tipo]}
-            </p>
+            <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+              {tarefa.tipo === "limpeza" && tarefa.tipo_limpeza && tarefa.tipo_limpeza !== "normal"
+                ? <TipoLimpezaBadge tipo={tarefa.tipo_limpeza} />
+                : tipoLabel[tarefa.tipo]}
+            </div>
           </div>
         </div>
 
         {/* Metadados rápidos */}
-        <div className="mt-3 flex items-center gap-4 text-xs text-muted-foreground">
-          <span className="flex items-center gap-1">
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+          <span className="flex items-center gap-1 whitespace-nowrap">
             <Clock className="h-3.5 w-3.5" />
             {tarefa.hora_limite}
           </span>
-          <span className="flex items-center gap-1">
+          <span className="flex items-center gap-1 whitespace-nowrap">
             <Timer className="h-3.5 w-3.5" />
             {formatarMinutos(tarefa.tempo_estimado_minutos)}
           </span>
           {/* Prompt 138 (136 V2) — Tempo de viagem entre a tarefa anterior e esta. */}
           {tarefa.tempo_viagem_minutos != null && tarefa.tempo_viagem_minutos > 0 && (
-            <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
+            <span className="flex items-center gap-1 whitespace-nowrap text-amber-600 dark:text-amber-400">
               <MapPin className="h-3.5 w-3.5" />
               +{formatarMinutos(tarefa.tempo_viagem_minutos)} viagem
             </span>
           )}
+          {textoEquipa(tarefa.equipa_nomes) && (
+            <span className="flex basis-full items-center gap-1 font-medium text-foreground sm:basis-auto">
+              <Users className="h-3.5 w-3.5" />
+              Equipa: {textoEquipa(tarefa.equipa_nomes)}
+            </span>
+          )}
           {tarefa.endereco && (
-            <span className="flex min-w-0 items-center gap-1">
+            <span className="flex min-w-0 basis-full items-center gap-1">
               <MapPin className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate flex-1">{tarefa.endereco}</span>
+              <span className="min-w-0 flex-1 break-words">{tarefa.endereco}</span>
               {/* FIX (google maps integration) — Botão "Abrir no Google Maps"
                   para navegação direta à propriedade. */}
               {(() => {
@@ -440,7 +516,7 @@ export function DetalheTarefaClient({
                     href={url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex shrink-0 items-center gap-1 rounded text-primary hover:underline"
+                    className="-my-3.5 -mr-3 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded text-brand-text hover:underline"
                     title="Abrir no Google Maps"
                     aria-label="Abrir no Google Maps"
                   >
@@ -455,9 +531,9 @@ export function DetalheTarefaClient({
         {/* Prompt 118 — Data da Limpeza + Hora destacadas no topo */}
         {tarefa.data && (
           <div className="mt-3 flex items-center gap-3 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5">
-            <CalendarRange className="h-5 w-5 shrink-0 text-primary" />
+            <CalendarRange className="h-5 w-5 shrink-0 text-brand-text" />
             <div className="flex-1">
-              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 Data da Limpeza
               </p>
               <p className="text-sm font-bold text-foreground">
@@ -491,35 +567,51 @@ export function DetalheTarefaClient({
 
       {/* Conteúdo principal */}
       <main className="flex-1 space-y-5 p-5">
-        {/* Prompt 114 — Lotação/Capacidade Máxima destacada */}
-        {tarefa.capacidade_hospedes != null && tarefa.capacidade_hospedes > 0 && (
-          <div className="flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-50 px-3 py-2.5 text-sm dark:bg-amber-950/20">
-            <Users className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
-            <span className="text-amber-900 dark:text-amber-100">
-              <strong>Lotação máxima:</strong>{" "}
-              {tarefa.capacidade_hospedes} hóspede(s)
-            </span>
+        {/* Início da limpeza: «Comecei» (ou o estado atual) e «Não consegui começar». */}
+        {!jaConcluida && podeComecar && (
+          <div className="space-y-1 rounded-lg border border-primary/30 bg-primary/5 p-3">
+            <BotaoComecei
+              tarefaId={String(tarefa.id)}
+              onFeito={() => {
+                setEstadoLocal("em_curso");
+                setIniciadaEm(new Date().toISOString());
+                setInicioOrigem("botao");
+                setNaoConseguiAvisado(false);
+              }}
+            />
+            <BotaoNaoConsegui
+              tarefaId={String(tarefa.id)}
+              onFeito={() => setNaoConseguiAvisado(true)}
+            />
+            {naoConseguiAvisado && (
+              <p className="flex items-center gap-1.5 text-xs text-amber-800 dark:text-amber-200">
+                <TriangleAlert className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                Avisaste o gestor que não conseguiste começar.
+              </p>
+            )}
           </div>
         )}
+        {!jaConcluida && estadoLocal === "em_curso" && (
+          <p className="flex items-center gap-2 rounded-md bg-status-curso-bg px-3 py-2.5 text-sm font-medium text-status-curso">
+            <Play className="h-4 w-4 shrink-0" aria-hidden="true" />
+            Em curso{horaCurta(iniciadaEm) ? ` desde as ${horaCurta(iniciadaEm)}` : ""}
+            {inicioOrigem === "automatico" ? " (início automático)" : ""}
+          </p>
+        )}
 
-        {/* Prompt 95 — Card de detalhes da reserva Smoobu (se existir). */}
-        <DetalhesReservaCard detalhes={tarefa.detalhes_reserva} />
-
-        {/* Prompt 126 — Observações/notas internas da propriedade (regras de acesso, etc.). */}
-        {tarefa.observacoes_propriedade && tarefa.observacoes_propriedade.trim() && (
-          <Card className="border-primary/30">
-            <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-base">
-                <ClipboardList className="h-5 w-5 text-primary" />
-                Observações da Propriedade
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-0">
-              <p className="whitespace-pre-wrap text-sm text-foreground">
-                {tarefa.observacoes_propriedade}
-              </p>
-            </CardContent>
-          </Card>
+        {/* Avaria por resolver noutra limpeza desta casa. */}
+        {!jaConcluida && tarefa.avarias_abertas_casa && tarefa.avarias_abertas_casa.length > 0 && (
+          <div role="note" className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2.5 text-sm">
+            <p className="flex items-center gap-2 font-semibold text-destructive">
+              <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+              Avaria aberta nesta casa
+            </p>
+            <ul className="mt-1 list-disc space-y-0.5 pl-6 text-foreground">
+              {tarefa.avarias_abertas_casa.map((a, i) => (
+                <li key={i}>{a.descricao}</li>
+              ))}
+            </ul>
+          </div>
         )}
 
         {/* Checklist interativa */}
@@ -527,7 +619,7 @@ export function DetalheTarefaClient({
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between gap-2">
               <CardTitle className="flex items-center gap-2 text-base">
-                <ListChecks className="h-5 w-5 text-primary" />
+                <ListChecks className="h-5 w-5 text-brand-text" />
                 Checklist
               </CardTitle>
               <Badge variant={todasMarcadas ? "success" : "secondary"}>
@@ -547,14 +639,14 @@ export function DetalheTarefaClient({
                       {/* Sub-header da secção */}
                       <div className="flex items-center justify-between gap-2 rounded-md bg-muted/60 px-3 py-2">
                         <div className="flex min-w-0 items-center gap-2">
-                          <Folder className="h-4 w-4 shrink-0 text-primary" />
+                          <Folder className="h-4 w-4 shrink-0 text-brand-text" />
                           <span className="truncate text-sm font-semibold text-foreground">
                             {sec.nome || "Secção"}
                           </span>
                         </div>
                         <Badge
                           variant={secConcluidos === secTotal ? "success" : "outline"}
-                          className="shrink-0 text-[10px]"
+                          className="shrink-0 text-xs"
                         >
                           {secConcluidos}/{secTotal}
                         </Badge>
@@ -652,7 +744,7 @@ export function DetalheTarefaClient({
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
-              <StickyNote className="h-5 w-5 text-primary" />
+              <StickyNote className="h-5 w-5 text-brand-text" />
               Observações ou Problemas
               <span className="text-xs font-normal text-muted-foreground">
                 (opcional)
@@ -673,6 +765,62 @@ export function DetalheTarefaClient({
             </p>
           </CardContent>
         </Card>
+        {/* Tipo de limpeza especial: só promete checklist própria quando a tarefa a tem. */}
+        {tarefa.tipo === "limpeza" && tarefa.tipo_limpeza && tarefa.tipo_limpeza !== "normal" && (
+          <p className="rounded-md border bg-muted/40 px-3 py-2.5 text-sm">
+            <strong>Limpeza {rotuloTipoLimpeza(tarefa.tipo_limpeza).toLowerCase()}:</strong>{" "}
+            {tarefa.checklist_do_tipo
+              ? "segue a checklist própria desta casa"
+              : "segue a checklist habitual da casa"}
+          </p>
+        )}
+
+        {/* Prompt 114 — Lotação/Capacidade Máxima destacada */}
+        {tarefa.capacidade_hospedes != null && tarefa.capacidade_hospedes > 0 && (
+          <div className="flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-50 px-3 py-2.5 text-sm dark:bg-amber-950/20">
+            <Users className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+            <span className="text-amber-900 dark:text-amber-100">
+              <strong>Lotação máxima:</strong>{" "}
+              {plural(tarefa.capacidade_hospedes, "hóspede")}
+            </span>
+          </div>
+        )}
+
+        {/* Lavandaria: só com fornecedor associado à casa. */}
+        {tarefa.tem_lavandaria && tarefa.tipo === "limpeza" && (
+          <p
+            className={cn(
+              "flex items-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium",
+              tarefa.roupa_entregue
+                ? "bg-status-conc-bg text-status-conc"
+                : "border border-amber-500/40 bg-amber-50 text-amber-900 dark:bg-amber-950/20 dark:text-amber-100"
+            )}
+          >
+            <Shirt className="h-4 w-4 shrink-0" aria-hidden="true" />
+            Roupa limpa: {tarefa.roupa_entregue ? "entregue" : "em falta"}
+          </p>
+        )}
+
+        {/* Prompt 95 — Card de detalhes da reserva Smoobu (se existir). */}
+        <DetalhesReservaCard detalhes={tarefa.detalhes_reserva} />
+
+        {/* Prompt 126 — Observações/notas internas da propriedade (regras de acesso, etc.). */}
+        {tarefa.observacoes_propriedade && tarefa.observacoes_propriedade.trim() && (
+          <Card className="border-primary/30">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <ClipboardList className="h-5 w-5 text-brand-text" />
+                Observações da Propriedade
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0">
+              <p className="whitespace-pre-wrap text-sm text-foreground">
+                {tarefa.observacoes_propriedade}
+              </p>
+            </CardContent>
+          </Card>
+        )}
+
       </main>
 
       {/* Botão Concluir Limpeza — fixo no fundo */}
@@ -684,7 +832,7 @@ export function DetalheTarefaClient({
 
         {/* Mensagem de sucesso verde vibrante */}
         {concluida && (
-          <div className="flex items-center justify-center gap-2 rounded-lg bg-emerald-500 p-3 text-center text-white">
+          <div className="flex items-center justify-center gap-2 rounded-lg bg-status-conc p-3 text-center text-status-foreground">
             <CheckCircle2 className="h-5 w-5" />
             <span className="font-semibold">Limpeza Concluída!</span>
           </div>
@@ -693,26 +841,28 @@ export function DetalheTarefaClient({
         {/* Botão Reportar Atraso */}
         {!concluida && (
           <div className="flex gap-2">
-            <Button
+            <Button size="touch"
               variant="outline"
-              className="flex-1 gap-2 text-amber-600 border-amber-300 hover:bg-amber-50"
+              className="flex-1 gap-2 text-status-porat border-status-porat/40 hover:bg-status-porat-bg"
               onClick={() => {
                 setMostrarAtraso(true);
                 setMinutosAtraso(null);
                 setAtrasoResultado(null);
+                setAtrasoErro(null);
               }}
             >
               <AlertTriangle className="h-4 w-4" />
               Atraso
             </Button>
             {/* Botão Reportar Avaria (v1.38.0) */}
-            <Button
+            <Button size="touch"
               variant="outline"
               className="flex-1 gap-2 text-destructive border-destructive/40 hover:bg-destructive/10"
               onClick={() => {
+                // Mantém o texto e as fotos já escritos (rascunho).
                 setMostrarAvaria(true);
-                setAvariaDesc("");
                 setAvariaResultado(null);
+                setAvariaErro(null);
               }}
             >
               <AlertTriangle className="h-4 w-4" />
@@ -723,8 +873,14 @@ export function DetalheTarefaClient({
 
         {!concluida && (
           <Button
-            size="lg"
-            className="w-full bg-emerald-600 text-white hover:bg-emerald-700"
+            size="touch"
+            className={cn(
+              "w-full",
+              todasMarcadas
+                ? "bg-status-conc text-status-foreground hover:bg-status-conc/90"
+                : // Incompleto: cinzento tracejado com texto legível (não só "mais pálido").
+                  "border border-dashed border-border bg-muted text-muted-foreground disabled:opacity-100"
+            )}
             disabled={!todasMarcadas || concluindo}
             onClick={handleConcluir}
           >
@@ -736,10 +892,10 @@ export function DetalheTarefaClient({
             ) : todasMarcadas ? (
               <>
                 <CheckCircle2 className="h-5 w-5" />
-                Concluir Limpeza
+                Concluir limpeza
               </>
             ) : (
-              `Concluir Limpeza (${itensConcluidos}/${totalItens})`
+              `Concluir limpeza (${itensConcluidos}/${totalItens})`
             )}
           </Button>
         )}
@@ -759,7 +915,7 @@ export function DetalheTarefaClient({
           <div>
             <DialogTitle className="flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 text-amber-500" />
-              Reportar Atraso
+              Reportar atraso
             </DialogTitle>
             <DialogDescription>
               Quanto tempo extra precisas para concluir esta tarefa?
@@ -778,7 +934,7 @@ export function DetalheTarefaClient({
                     onClick={() => setMinutosAtraso(min)}
                     className={`rounded-md border px-4 py-3 text-sm font-medium transition-colors ${
                       minutosAtraso === min
-                        ? "border-amber-500 bg-amber-500 text-white"
+                        ? "border-status-porat bg-status-porat text-status-foreground"
                         : "border-input bg-background hover:bg-accent"
                     }`}
                   >
@@ -786,6 +942,11 @@ export function DetalheTarefaClient({
                   </button>
                 ))}
               </div>
+              {atrasoErro && (
+                <p role="alert" className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+                  {atrasoErro}
+                </p>
+              )}
             </>
           ) : (
             <div className="rounded-md bg-amber-50 dark:bg-amber-950/20 p-3 text-sm text-amber-800 dark:text-amber-200">
@@ -794,7 +955,7 @@ export function DetalheTarefaClient({
           )}
         </DialogContent>
         <DialogFooter>
-          <Button
+          <Button size="touch"
             type="button"
             variant="outline"
             onClick={() => setMostrarAtraso(false)}
@@ -803,9 +964,9 @@ export function DetalheTarefaClient({
             {atrasoResultado ? "Fechar" : "Cancelar"}
           </Button>
           {!atrasoResultado && (
-            <Button
+            <Button size="touch"
               type="button"
-              className="bg-amber-500 text-white hover:bg-amber-600"
+              className="bg-status-porat text-status-foreground hover:bg-status-porat/90"
               disabled={minutosAtraso === null || atrasoSubmitting}
               onClick={handleReportarAtraso}
             >
@@ -817,7 +978,7 @@ export function DetalheTarefaClient({
               ) : (
                 <>
                   <AlertTriangle className="h-4 w-4" />
-                  Confirmar Atraso
+                  {atrasoErro ? "Tentar de novo" : "Confirmar Atraso"}
                 </>
               )}
             </Button>
@@ -829,21 +990,15 @@ export function DetalheTarefaClient({
       <Dialog
         open={mostrarAvaria}
         onOpenChange={(o) => {
-          if (!o) {
-            setMostrarAvaria(false);
-            // Reseta estado ao fechar.
-            if (!avariaResultado) {
-              setAvariaDesc("");
-              setAvariaFotos([]);
-            }
-          }
+          // Fechar não apaga o que foi escrito: só o envio com sucesso limpa.
+          if (!o) setMostrarAvaria(false);
         }}
       >
         <DialogHeader>
           <div>
             <DialogTitle className="flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 text-destructive" />
-              Reportar Avaria
+              Reportar avaria
             </DialogTitle>
             <DialogDescription>
               Descreve o problema encontrado na propriedade. Podes anexar fotos
@@ -869,7 +1024,7 @@ export function DetalheTarefaClient({
               />
               </div>
 
-              {/* HF13 — Input de fotos (opcional, máx. 5, até 2MB cada) */}
+              {/* HF13 — Input de fotos (opcional, máx. 5) */}
               <div className="space-y-2">
                 <label className="text-sm font-medium">
                   Fotos (opcional)
@@ -918,10 +1073,18 @@ export function DetalheTarefaClient({
                     />
                   </label>
                 )}
+                {erroFotosAvaria && (
+                  <p role="alert" className="text-sm text-destructive">{erroFotosAvaria}</p>
+                )}
                 <p className="text-xs text-muted-foreground">
-                  Máx. 5 fotos, até 2MB cada (JPG, PNG).
+                  Máx. 5 fotos (são reduzidas automaticamente).
                 </p>
               </div>
+              {avariaErro && (
+                <p role="alert" className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
+                  {avariaErro}
+                </p>
+              )}
             </>
           ) : (
             <div className="rounded-md bg-emerald-50 dark:bg-emerald-950/20 p-3 text-sm text-emerald-800 dark:text-emerald-200">
@@ -930,7 +1093,7 @@ export function DetalheTarefaClient({
           )}
         </DialogContent>
         <DialogFooter>
-          <Button
+          <Button size="touch"
             type="button"
             variant="outline"
             onClick={() => setMostrarAvaria(false)}
@@ -939,7 +1102,7 @@ export function DetalheTarefaClient({
             {avariaResultado ? "Fechar" : "Cancelar"}
           </Button>
           {!avariaResultado && (
-            <Button
+            <Button size="touch"
               type="button"
               variant="destructive"
               disabled={!avariaDesc.trim() || avariaSubmitting}
@@ -953,7 +1116,7 @@ export function DetalheTarefaClient({
               ) : (
                 <>
                   <AlertTriangle className="mr-2 h-4 w-4" />
-                  Reportar Avaria
+                  {avariaErro ? "Tentar de novo" : "Reportar Avaria"}
                 </>
               )}
             </Button>
@@ -975,7 +1138,7 @@ export function DetalheTarefaClient({
           <div>
             <DialogTitle className="flex items-center gap-2">
               <CheckCircle2 className="h-5 w-5 text-emerald-600" />
-              Confirmar Conclusão
+              Confirmar conclusão
             </DialogTitle>
             <DialogDescription>
               Tira pelo menos 1 foto da propriedade limpa para confirmar a
@@ -1035,14 +1198,38 @@ export function DetalheTarefaClient({
 
           {/* Aviso se não há fotos */}
           {concluirFotos.length === 0 && (
-            <p className="text-sm text-destructive">
-              ⚠️ É obrigatório anexar pelo menos 1 foto para concluir.
-            </p>
+            tentouSemFoto ? (
+              <p role="alert" className="text-sm text-destructive">
+                ⚠️ É obrigatório anexar pelo menos 1 foto para concluir.
+              </p>
+            ) : (
+              <p className="text-sm text-muted-foreground">Anexa pelo menos 1 foto.</p>
+            )
           )}
 
           <p className="text-xs text-muted-foreground">
-            Máx. 5 fotos, até 2MB cada (JPG, PNG).
+            Máx. 5 fotos (são reduzidas automaticamente).
           </p>
+
+          {/* FIX (portal lavandaria) — Input de sacos de roupa suja recolhidos. */}
+          <div className="space-y-1.5 rounded-md border border-input p-3">
+            <label htmlFor="sacos-roupa-suja" className="text-sm font-medium flex items-center gap-1.5">
+              <Shirt className="h-4 w-4 text-brand-text" />
+              Sacos de Roupa Suja Recolhidos
+            </label>
+            <Input
+              id="sacos-roupa-suja"
+              type="number"
+              min={0}
+              step={1}
+              value={sacosRoupaSuja}
+              onChange={(e) => setSacosRoupaSuja(e.target.value)}
+              placeholder="0"
+            />
+            <p className="text-xs text-muted-foreground">
+              Nº de sacos de roupa suja recolhidos nesta limpeza (para a lavandaria).
+            </p>
+          </div>
 
           {erroConcluir && (
             <p className="flex items-center gap-2 text-sm text-destructive">
@@ -1052,7 +1239,7 @@ export function DetalheTarefaClient({
           )}
         </DialogContent>
         <DialogFooter>
-          <Button
+          <Button size="touch"
             type="button"
             variant="outline"
             onClick={() => setMostrarConcluir(false)}
@@ -1060,11 +1247,11 @@ export function DetalheTarefaClient({
           >
             Cancelar
           </Button>
-          <Button
+          <Button size="touch"
             type="button"
-            disabled={concluirFotos.length === 0 || concluindo}
+            disabled={concluindo}
             onClick={handleConfirmarConclusao}
-            className="bg-emerald-600 text-white hover:bg-emerald-700"
+            className="bg-status-conc text-status-foreground hover:bg-status-conc/90"
           >
             {concluindo ? (
               <>
@@ -1074,7 +1261,7 @@ export function DetalheTarefaClient({
             ) : (
               <>
                 <CheckCircle2 className="mr-2 h-4 w-4" />
-                Confirmar Conclusão
+                Confirmar conclusão
               </>
             )}
           </Button>

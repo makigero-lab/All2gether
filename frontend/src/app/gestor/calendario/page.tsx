@@ -1,9 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { rotuloTipoLimpeza, EtiquetaManutencao } from "@/components/tipo-limpeza-badge";
 import {
   CalendarRange,
+  CalendarClock,
+  Filter,
   Loader2,
   AlertCircle,
   AlertTriangle,
@@ -18,22 +21,32 @@ import {
   Download,
   Plus,
   Trash2,
+  ChevronLeft,
+  ChevronRight,
+  ArrowLeft,
+  Wrench,
 } from "lucide-react";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 // Prompt Extra — parsearDataSegura para compatibilidade Safari/iOS.
-import { parsearDataSegura, formatarDataSegura, extrairHoraISO, calcularHoraFimISO } from "@/lib/utils";
+import { MudarDiaDialog, podeMudarDia } from "@/components/gestor/mudar-dia-dialog";
+import { SeletorDisponiveis, corpoAtribuicao, type InfoDisponiveis } from "@/components/gestor/seletor-disponiveis";
+import { parsearDataSegura, formatarDataSegura, extrairHoraISO, calcularHoraFimISO, plural } from "@/lib/utils";
 
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import interactionPlugin from "@fullcalendar/interaction";
 import ptLocale from "@fullcalendar/core/locales/pt";
-import type { DatesSetArg, EventClickArg, EventContentArg, EventInput } from "@fullcalendar/core";
+import type { DatesSetArg, DayCellContentArg, EventClickArg, EventContentArg, EventInput } from "@fullcalendar/core";
+import type { DateClickArg } from "@fullcalendar/interaction";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { OfertaVagaBadge } from "@/components/gestor/oferta-vaga-badge";
+import { EstadoTarefaBadge } from "@/components/ui/estado-tarefa-badge";
+import { ESTADOS_TAREFA, infoEstadoTarefa } from "@/lib/estados";
 import { cn, temHoraReal } from "@/lib/utils";
 import {
   Dialog,
@@ -45,6 +58,8 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { adminGet, adminPost, adminPatch, type PropriedadeDTO, type UtilizadorDTO } from "@/lib/api";
+import { textoEquipaGestor, textoFalta } from "@/lib/equipa";
+import { DetalheTarefaModal, type TarefaDetalheGestor } from "@/components/gestor/detalhe-tarefa-modal";
 
 /* ------------------------------------------------------------------ */
 /* Tipos                                                               */
@@ -54,9 +69,16 @@ interface TarefaCalendario {
   _id: string;
   propriedade_id: { _id: string; nome: string; morada?: string } | null;
   utilizador_id: { _id: string; nome: string } | null;
+  equipa_atribuida?: { _id?: string; nome: string }[] | null;
+  pessoas_em_falta?: number;
+  /** Vaga oferecida à equipa (ver OfertaVagaBadge). */
+  oferta_estado?: string | null;
+  oferta_expira_em?: string | null;
   data: string;
   tempo_limpeza_minutos: number;
   tipo: string;
+  /** Tipo de limpeza; sem o campo = normal. */
+  tipo_limpeza?: string | null;
   estado: string;
   observacoes?: string;
   // HF25 — estado da ausência (aprovada | pendente | pendente_emergencia).
@@ -94,11 +116,7 @@ interface PeriodoState {
 
 const ESTADO_OPTS = [
   { value: "", label: "Todos os estados" },
-  { value: "por_atribuir", label: "Por atribuir" },
-  { value: "atribuida", label: "Atribuída" },
-  { value: "em_curso", label: "Em curso" },
-  { value: "concluida", label: "Concluída" },
-  { value: "cancelada", label: "Cancelada" },
+  ...Object.entries(ESTADOS_TAREFA).map(([value, info]) => ({ value, label: info.label })),
 ];
 
 const TIPO_LABEL: Record<string, string> = {
@@ -127,26 +145,14 @@ interface PaletaEvento {
 }
 
 function paletaPorEstado(estado: string): PaletaEvento {
-  switch (estado) {
-    case "concluida":
-      // Verde suave
-      return { bg: "#dcfce7", border: "#86efac", text: "#166534", dot: "#22c55e" };
-    case "atribuida":
-    case "em_curso":
-      // Amarelo suave (pendente/em curso)
-      return { bg: "#fef9c3", border: "#fde047", text: "#854d0e", dot: "#eab308" };
-    case "por_atribuir":
-      // Vermelho suave
-      return { bg: "#fee2e2", border: "#fca5a5", text: "#991b1b", dot: "#ef4444" };
-    case "nao_atribuida":
-      // Prompt 138 (136 V2) — vermelho escuro (SLA excedido, mais urgente).
-      return { bg: "#fecaca", border: "#f87171", text: "#7f1d1d", dot: "#dc2626" };
-    case "cancelada":
-      // Cinza suave
-      return { bg: "#f1f5f9", border: "#cbd5e1", text: "#475569", dot: "#94a3b8" };
-    default:
-      return { bg: "#f1f5f9", border: "#cbd5e1", text: "#475569", dot: "#94a3b8" };
-  }
+  // Cores vêm dos tokens --status-* (uma só fonte de verdade: @/lib/estados).
+  const token = infoEstadoTarefa(estado).token;
+  return {
+    bg: `hsl(var(--status-${token}-bg))`,
+    border: `hsl(var(--status-${token}))`,
+    text: `hsl(var(--status-${token}))`,
+    dot: `hsl(var(--status-${token}))`,
+  };
 }
 
 /** Emoji por tipo de tarefa (Prompt 74, ponto 4). */
@@ -167,7 +173,19 @@ function emojiPorTipo(tipo: string): string {
   }
 }
 
+/** Cor do ponto do tipo de limpeza (vista Mês). A normal não tem ponto: é o caso comum. */
+const COR_PONTO_TIPO: Record<string, string> = {
+  intermedia: "#0ea5e9",
+  profunda: "#8b5cf6",
+  preparacao: "#14b8a6",
+};
+
 /** Cor de fundo/borda do evento do FullCalendar por estado da tarefa. */
+const COR_TIPO_VALIDOS = ["normal", "intermedia", "profunda", "preparacao"];
+
+/** Glifo do estado (além da cor e do fundo): ✓ concluída, ▶ em curso, ? por atribuir, ! não atribuída. */
+const GLIFO_ESTADO: Record<string, string> = { concluida: "✓", em_curso: "▶", por_atribuir: "?", nao_atribuida: "!" };
+
 function corPorEstado(estado: string): string {
   return paletaPorEstado(estado).dot;
 }
@@ -198,29 +216,6 @@ function horaFimTarefa(dataISO: string, minutos: number): string {
 /* ------------------------------------------------------------------ */
 /* Helpers da Vista Tabela (Prompt 99)                                 */
 /* ------------------------------------------------------------------ */
-
-const ESTADO_LABEL_TAB: Record<string, string> = {
-  por_atribuir: "Por Atribuir",
-  atribuida: "Atribuída",
-  em_curso: "Em Curso",
-  concluida: "Concluída",
-  cancelada: "Cancelada",
-  // Prompt 138 (136 V2) — SLA excedido.
-  nao_atribuida: "Não Atribuída (SLA)",
-};
-
-const ESTADO_VARIANT_TAB: Record<
-  string,
-  "default" | "secondary" | "success" | "warning" | "destructive" | "outline"
-> = {
-  por_atribuir: "destructive",
-  atribuida: "default",
-  em_curso: "warning",
-  concluida: "success",
-  cancelada: "outline",
-  // Prompt 138 (136 V2) — vermelho (mais urgente que por_atribuir).
-  nao_atribuida: "destructive",
-};
 
 /**
  * Formata uma data ISO (ou YYYY-MM-DD) para DD/MM/YYYY.
@@ -333,15 +328,46 @@ export default function CalendarioOperacionalPage() {
   // Prompt 135 — Conflito de horário (soft block): modal de confirmação.
   const [conflitoModal, setConflitoModal] = useState<{ warning: string; tarefaCriada?: TarefaCalendario } | null>(null);
   const [conflitoForcar, setConflitoForcar] = useState(false);
+  // Telemóvel: tocar numa data do calendário abre a lista desse dia.
+  const [diaAberto, setDiaAberto] = useState<string | null>(null);
+  // Modo temporário a partir da Semana (computador): um só dia com a largura toda do calendário.
+  const [diaLargo, setDiaLargo] = useState<string | null>(null);
+  const voltarSemanaRef = useRef<HTMLButtonElement | null>(null);
+  // Prova da limpeza (fotos, hora, checklist) no modal partilhado.
+  const [provaTarefa, setProvaTarefa] = useState<TarefaCalendario | null>(null);
 
   // SSR-safe mount: FullCalendar só pode ser renderizado no cliente.
   const [mounted, setMounted] = useState(false);
+  // Telemóvel: abre na vista Dia (a semana não cabe). O utilizador pode mudar; desktop inalterado.
+  // Vistas numa só barra: Mês, Semana, Tabela, Equipa (sem vista Dia). Por omissão, Mês.
+  const [mudarDiaAberto, setMudarDiaAberto] = useState(false);
+  const [dataCal, setDataCal] = useState<Date | null>(null);
+  const [filtrosAbertos, setFiltrosAbertos] = useState(false);
+
+  // Telemóvel (< 640 px): o Mês mostra pontos + contador por dia e a Semana é uma lista agrupada por dia.
+  const [estreito, setEstreito] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 639px)");
+    const atualizar = () => setEstreito(mq.matches);
+    atualizar();
+    mq.addEventListener("change", atualizar);
+    return () => mq.removeEventListener("change", atualizar);
+  }, []);
+  const calRef = useRef<FullCalendar | null>(null);
+  const calBoxRef = useRef<HTMLDivElement | null>(null);
+  const asideRef = useRef<HTMLElement | null>(null);
+  // Largura do calendário: na Semana, só cabem lado a lado as limpezas com >= 70 px; as outras vão para «+N mais».
+  const [larguraCal, setLarguraCal] = useState(0);
+  // Semana: largura real de cada dia (calendário menos a margem interior e a coluna das horas). Com menos de
+  // 200 px só cabe 1 cartão por hora (hora completa + nome); a partir daí cabem 2, nunca mais.
+  const larguraDiaSemana = Math.max(0, (larguraCal - 32 - 62) / 7);
+  const cartoesPorHora = larguraDiaSemana >= 200 ? 2 : 1;
 
   // Período atual do calendário (definido via datesSet do FullCalendar).
   const [periodo, setPeriodo] = useState<PeriodoState | null>(null);
 
   // Prompt 99 — Toggle de vistas: "calendario" (FullCalendar) | "tabela" (Data Table).
-  const [vista, setVista] = useState<"calendario" | "tabela" | "equipa">("calendario");
+  const [vista, setVista] = useState<"mes" | "semana" | "tabela" | "equipa">("mes");
   const [exportando, setExportando] = useState(false);
 
   // Modal de detalhe.
@@ -349,13 +375,8 @@ export default function CalendarioOperacionalPage() {
   const [reatribuindoPara, setReatribuindoPara] = useState<string>("");
   const [reatribuindo, setReatribuindo] = useState(false);
 
-  // v1.59.0 (Prompt 81) — Staff indisponíveis (férias/doença) no dia da tarefa selecionada.
-  const [indisponiveis, setIndisponiveis] = useState<Array<{
-    utilizador_id: string;
-    tipo: string;
-    data_inicio: string;
-    data_fim: string;
-  }>>([]);
+  // Quem pode fazer a limpeza (o seletor pergunta ao servidor) e se é uma vaga de equipa.
+  const [infoDisp, setInfoDisp] = useState<InfoDisponiveis | null>(null);
 
   /* --- Marca montação no cliente (inibe o SSR do FullCalendar) --- */
   useEffect(() => {
@@ -427,14 +448,14 @@ export default function CalendarioOperacionalPage() {
         // e aplicamos uma classe CSS para o estilo de banner.
         return [{
           id: t._id,
-          title: t.title ?? `Ausência: ${t.utilizador_id?.nome ?? "Staff"}`,
+          title: t.title ?? `Ausência: ${t.utilizador_id?.nome ?? "Elemento da equipa"}`,
           start: t.start ?? t.data,
           end: t.end,
           allDay: true,
           // Roxo pastel suave com opacidade — distinto de tarefas normais.
-          backgroundColor: "#ede9fe",
-          borderColor: "#c4b5fd",
-          textColor: "#5b21b6",
+          backgroundColor: "hsl(var(--status-curso-bg))",
+          borderColor: "hsl(var(--status-curso))",
+          textColor: "hsl(var(--status-curso))",
           extendedProps: t,
           // Flag custom para o eventContent aplicar a classe de banner.
           classNames: ["fc-evt-ausencia"],
@@ -449,14 +470,14 @@ export default function CalendarioOperacionalPage() {
       if (t.tipo === "ausencia_pendente") {
         return [{
           id: t._id,
-          title: t.title ?? `Ausência (Pendente): ${t.utilizador_id?.nome ?? "Staff"}`,
+          title: t.title ?? `Ausência (Pendente): ${t.utilizador_id?.nome ?? "Elemento da equipa"}`,
           start: t.start ?? t.data,
           end: t.end,
           allDay: true,
           // Âmbar pastel com opacidade — sinal de atenção (precisa ação).
-          backgroundColor: "#fef3c7",
-          borderColor: "#f59e0b",
-          textColor: "#92400e",
+          backgroundColor: "hsl(var(--status-porat-bg))",
+          borderColor: "hsl(var(--status-porat))",
+          textColor: "hsl(var(--status-porat))",
           extendedProps: t,
           classNames: ["fc-evt-ausencia-pendente"],
         } as EventInput];
@@ -471,12 +492,12 @@ export default function CalendarioOperacionalPage() {
         const dataFolga = typeof t.data === "string" ? t.data.slice(0, 10) : new Date(t.data).toISOString().slice(0, 10);
         return [{
           id: t._id,
-          title: `Folga - ${t.utilizador_id?.nome ?? "Staff"}`,
+          title: `Folga - ${t.utilizador_id?.nome ?? "Elemento da equipa"}`,
           start: dataFolga,
           allDay: true,
-          backgroundColor: "#e2e8f0",
-          borderColor: "#cbd5e1",
-          textColor: "#475569",
+          backgroundColor: "hsl(var(--status-canc-bg))",
+          borderColor: "hsl(var(--status-canc))",
+          textColor: "hsl(var(--status-canc))",
           extendedProps: t,
         } as EventInput];
       }
@@ -493,7 +514,7 @@ export default function CalendarioOperacionalPage() {
       // e adiciona classe de alerta, override da paleta por estado.
       const isOrfao = !!t.alerta_orfao;
       const paletaFinal = isOrfao
-        ? { bg: "#fee2e2", border: "#ef4444", text: "#991b1b", dot: "#dc2626" }
+        ? { bg: "hsl(var(--status-naoat-bg))", border: "hsl(var(--status-naoat))", text: "hsl(var(--status-naoat))", dot: "hsl(var(--status-naoat))" }
         : paleta;
       const classNames = isOrfao
         ? ["fc-evt-orfao"]
@@ -544,9 +565,9 @@ export default function CalendarioOperacionalPage() {
         title: t.propriedade_id?.nome ?? "—",
         start: startLocal,
         end: endLocal,
-        backgroundColor: isOrfao ? paletaFinal.bg : (temConflito ? "#fef3c7" : paleta.bg),
-        borderColor: isOrfao ? paletaFinal.border : (temConflito ? "#f59e0b" : paleta.border),
-        textColor: isOrfao ? paletaFinal.text : (temConflito ? "#92400e" : paleta.text),
+        backgroundColor: isOrfao ? paletaFinal.bg : (temConflito ? "hsl(var(--status-porat-bg))" : paleta.bg),
+        borderColor: isOrfao ? paletaFinal.border : (temConflito ? "hsl(var(--status-porat))" : paleta.border),
+        textColor: isOrfao ? paletaFinal.text : (temConflito ? "hsl(var(--status-porat))" : paleta.text),
         extendedProps: t,
         classNames: isOrfao ? classNames : (temConflito ? [...classNames, "fc-evt-conflito"] : classNames),
       };
@@ -575,9 +596,9 @@ export default function CalendarioOperacionalPage() {
           start: startViagemLocal,
           end: startLocal,
           // Cinzento suave + borda tracejada (classe CSS fc-evt-viagem).
-          backgroundColor: "#f1f5f9",
-          borderColor: "#94a3b8",
-          textColor: "#475569",
+          backgroundColor: "hsl(var(--muted))",
+          borderColor: "hsl(var(--muted-foreground))",
+          textColor: "hsl(var(--status-canc))",
           extendedProps: { ...t, _isViagem: true },
           classNames: ["fc-evt-viagem"],
         };
@@ -597,13 +618,28 @@ export default function CalendarioOperacionalPage() {
     const isMonthView = arg.view.type === "dayGridMonth";
     const paleta = paletaPorEstado(t.estado);
     const emoji = emojiPorTipo(t.tipo);
-    const titulo = t.propriedade_id?.nome ?? "—";
+    const tipoEspecial = t.tipo === "limpeza" && t.tipo_limpeza && t.tipo_limpeza !== "normal" ? rotuloTipoLimpeza(t.tipo_limpeza) : null;
+    // Semana com 2 cartões lado a lado: cartão estreito, só a hora de início e o nome da casa (o tipo vai no ponto).
+    const duo = !isMonthView && cartoesPorHora === 2;
+    const titulo = `${tipoEspecial && !duo ? `${tipoEspecial} - ` : ""}${t.propriedade_id?.nome ?? "—"}`;
+    // Vista Mês: o tipo vai num ponto colorido (com rótulo acessível) e o título fica só com a casa.
+    const tituloMes = t.propriedade_id?.nome ?? "—";
+    const tipoVal = t.tipo === "limpeza" ? (t.tipo_limpeza && COR_TIPO_VALIDOS.includes(t.tipo_limpeza) ? t.tipo_limpeza : "normal") : null;
+    const pontoTipo = tipoVal ? (
+      <span role="img" aria-label={`Limpeza ${rotuloTipoLimpeza(tipoVal).toLowerCase()}`} title={`Limpeza ${rotuloTipoLimpeza(tipoVal).toLowerCase()}`} className="tipo-marca" data-tipo={tipoVal} />
+    ) : t.tipo === "manutencao" ? (
+      <span role="img" aria-label="Manutenção" title="Manutenção" className="inline-flex shrink-0 items-center"><Wrench className="h-3 w-3" aria-hidden="true" /></span>
+    ) : null;
+    const glifo = GLIFO_ESTADO[t.estado] ?? "";
+    const riscada = t.estado === "cancelada" ? " fc-evt-cancelada" : "";
     const staff = t.utilizador_id?.nome ?? null;
     const isFolga = t.tipo === "folga_fixa";
     const isAusencia = t.tipo === "ausencia";
     // HF25 — ausência pendente (pedido por aprovar).
     const isAusenciaPendente = t.tipo === "ausencia_pendente";
-    const isPorAtribuir = t.estado === "por_atribuir";
+    // por_atribuir e nao_atribuida têm o mesmo destaque; o rótulo vem de @/lib/estados.
+    const isPorAtribuir = t.estado === "por_atribuir" || t.estado === "nao_atribuida";
+    const rotuloEstado = infoEstadoTarefa(t.estado).label;
     const isViagem = !!t._isViagem;
 
     // --- Bloco de Viagem (Prompt 137) — cinzento + tracejado + ícone 🚗 ---
@@ -637,7 +673,7 @@ export default function CalendarioOperacionalPage() {
     // Renderiza um conteúdo minimalista — o título já vem do backend
     // ("🌴 Férias: Nome"). Não mostra hora nem bolinha.
     if (isAusencia) {
-      const bannerTitle = t.title ?? `Ausência: ${staff ?? "Staff"}`;
+      const bannerTitle = t.title ?? `Ausência: ${staff ?? "Elemento da equipa"}`;
       return (
         <div className="fc-evt-ausencia__content" title={bannerTitle}>
           <span className="fc-evt-ausencia__title">{bannerTitle}</span>
@@ -649,7 +685,7 @@ export default function CalendarioOperacionalPage() {
     // Visualmente distinto das aprovadas para o gestor perceber que precisa
     // de aprovar. Inclui a justificação no tooltip se existir.
     if (isAusenciaPendente) {
-      const bannerTitle = t.title ?? `Ausência (Pendente): ${staff ?? "Staff"}`;
+      const bannerTitle = t.title ?? `Ausência (Pendente): ${staff ?? "Elemento da equipa"}`;
       const tooltip = t.justificacao
         ? `${bannerTitle}\nJustificação: ${t.justificacao}`
         : bannerTitle;
@@ -657,6 +693,46 @@ export default function CalendarioOperacionalPage() {
         <div className="fc-evt-ausencia-pendente__content" title={tooltip}>
           <span className="fc-evt-ausencia-pendente__pulse" aria-hidden>⏳</span>
           <span className="fc-evt-ausencia-pendente__title">{bannerTitle}</span>
+        </div>
+      );
+    }
+
+    // --- FIX (nomes desaparecidos) — Folga Fixa: barra cinzenta compacta
+    //     com o NOME do staff explicitamente renderizado. Antes caía no
+    //     ramo genérico que usa propriedade_id?.nome ("—") porque folgas
+    //     não têm propriedade associada. Usa arg.event.title (que o backend
+    //     já define como "Folga - {nome}") ou o nome do staff diretamente. ---
+    if (isFolga) {
+      const folgaTitle = arg.event.title ?? `Folga - ${staff ?? "Elemento da equipa"}`;
+      if (isMonthView) {
+        return (
+          <div className="fc-evt-month fc-evt-month--folga" title={folgaTitle}>
+            <span
+              className="fc-evt-month__dot"
+              style={{ backgroundColor: "#94a3b8" }}
+              aria-hidden
+            />
+            <span className="fc-evt-month__title">{folgaTitle}</span>
+          </div>
+        );
+      }
+      return (
+        <div className="fc-evt-block fc-evt-block--folga" title={folgaTitle}>
+          <div className="fc-evt-block__header">
+            <span
+              className="fc-evt-block__dot"
+              style={{ backgroundColor: "#94a3b8" }}
+              aria-hidden
+            />
+            <span className="fc-evt-block__emoji" aria-hidden>😴</span>
+          </div>
+          <div className="fc-evt-block__title">{folgaTitle}</div>
+          {staff && (
+            <div className="fc-evt-block__subtitle">
+              <User className="fc-evt-block__icon" />
+              <span>{primeiroNome(staff)}</span>
+            </div>
+          )}
         </div>
       );
     }
@@ -672,58 +748,42 @@ export default function CalendarioOperacionalPage() {
             title={`⚠️ ${msg} — ${titulo}${staff ? ` (${staff})` : ""}`}
           >
             <span className="fc-evt-month__alert-icon" aria-hidden>🚨</span>
+            {pontoTipo}
             <span className="fc-evt-month__title">
-              {emoji} {titulo}
+              {emoji} {tituloMes}
             </span>
             <span className="fc-evt-month__alert-tag">Órfã</span>
           </div>
         );
       }
-      // Prompt 80, ponto 1 — destaque forte para por_atribuir na vista mensal.
-      if (isPorAtribuir) {
-        return (
-          <div className="fc-evt-month fc-evt-month--alert" title={`⚠️ Por atribuir — ${titulo}`}>
-            <span className="fc-evt-month__alert-icon" aria-hidden>⚠️</span>
-            <span className="fc-evt-month__title">
-              {emoji} {titulo}
-            </span>
-            <span className="fc-evt-month__alert-tag">Por Atribuir</span>
-          </div>
-        );
-      }
+      // Por atribuir / não atribuída: o fundo, a barra lateral e o glifo (? / !) já o dizem.
       return (
-        <div className="fc-evt-month">
-          <span
-            className="fc-evt-month__dot"
-            style={{ backgroundColor: isFolga ? "#94a3b8" : paleta.dot }}
-            aria-hidden
-          />
+        <div className={`fc-evt-month${riscada}`}>
+          {pontoTipo}
           <span className="fc-evt-month__time">{arg.timeText}</span>
-          <span className="fc-evt-month__title" title={titulo}>
-            {emoji} {titulo}
+          {glifo && <span className="fc-evt-glifo" aria-hidden="true">{glifo}</span>}
+          <span className="fc-evt-month__title" title={textoFalta(t.pessoas_em_falta) ? `${titulo} · ${textoFalta(t.pessoas_em_falta)}` : titulo}>
+            {tituloMes}{(t.pessoas_em_falta ?? 0) > 0 ? " ⚠" : ""}
           </span>
         </div>
       );
     }
 
     // --- Vistas semanal/diária: bloco rico com título + subtítulo ---
+    const equipaTexto = textoEquipaGestor(t.utilizador_id, t.equipa_atribuida);
+    const faltaTexto = textoFalta(t.pessoas_em_falta);
     const blockClass = t.alerta_orfao
       ? "fc-evt-block fc-evt-block--orfao"
       : isPorAtribuir
         ? "fc-evt-block fc-evt-block--alert"
         : "fc-evt-block";
     return (
-      <div className={blockClass}>
+      <div className={`${blockClass}${riscada}${duo ? " fc-evt-block--duo" : ""}`}>
         <div className="fc-evt-block__header">
-          <span
-            className="fc-evt-block__dot"
-            style={{ backgroundColor: t.alerta_orfao ? "#dc2626" : (isFolga ? "#94a3b8" : paleta.dot) }}
-            aria-hidden
-          />
-          <span className="fc-evt-block__emoji" aria-hidden>
-            {t.alerta_orfao ? "🚨" : emoji}
-          </span>
-          <span className="fc-evt-block__time">{arg.timeText}</span>
+          {pontoTipo}
+          {glifo && <span className="fc-evt-glifo" aria-hidden="true">{glifo}</span>}
+          {t.alerta_orfao && <span className="fc-evt-block__emoji" aria-hidden>🚨</span>}
+          <span className="fc-evt-block__time" title={arg.timeText}>{duo ? arg.timeText.split(" - ")[0] : arg.timeText}</span>
         </div>
         <div className="fc-evt-block__title" title={titulo}>
           {titulo}
@@ -736,18 +796,212 @@ export default function CalendarioOperacionalPage() {
           ) : staff ? (
             <>
               <User className="fc-evt-block__icon" />
-              <span>{primeiroNome(staff)}</span>
+              <span title={equipaTexto ?? undefined}>{equipaTexto ?? primeiroNome(staff)}</span>
+              {faltaTexto && <span className="fc-evt-block__unassigned"> · {faltaTexto}</span>}
             </>
           ) : (
-            <span className="fc-evt-block__unassigned">⚠️ Por Atribuir</span>
+            <span className="fc-evt-block__unassigned">⚠️ {rotuloEstado}</span>
           )}
         </div>
       </div>
     );
+  }, [cartoesPorHora]);
+
+  /* --- Lista de um dia (telemóvel) --- */
+  const itensDoDia = useMemo(() => {
+    if (!diaAberto) return [];
+    return tarefas
+      .filter((t) => {
+        const d = parsearDataSegura(t.data);
+        if (!d) return false;
+        return format(d, "yyyy-MM-dd") === diaAberto;
+      })
+      .filter((t) => t.tipo !== "viagem")
+      .slice()
+      .sort((a, b) => (parsearDataSegura(a.data)?.getTime() ?? 0) - (parsearDataSegura(b.data)?.getTime() ?? 0));
+  }, [diaAberto, tarefas]);
+
+  /* --- Telemóvel: resumo por dia (Mês) e lista agrupada (Semana) --- */
+  const ESPECIAIS = ["ausencia", "ausencia_pendente", "folga_fixa", "viagem"];
+  const porDia = useMemo(() => {
+    const m = new Map<string, TarefaCalendario[]>();
+    for (const t of tarefas) {
+      if (t.tipo === "viagem") continue;
+      const d = parsearDataSegura(t.data);
+      if (!d) continue;
+      const k = format(d, "yyyy-MM-dd");
+      const l = m.get(k);
+      if (l) l.push(t);
+      else m.set(k, [t]);
+    }
+    for (const l of m.values()) l.sort((a, b) => (parsearDataSegura(a.data)?.getTime() ?? 0) - (parsearDataSegura(b.data)?.getTime() ?? 0));
+    return m;
+  }, [tarefas]);
+
+  const diasDaSemana = useMemo(() => {
+    if (!periodo) return [] as string[];
+    const base = new Date(`${periodo.inicio}T12:00:00`);
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(base);
+      d.setDate(base.getDate() + i);
+      return format(d, "yyyy-MM-dd");
+    });
+  }, [periodo]);
+
+  // Dia em largura total: abre a partir da Semana, navega dia a dia e volta à semana desse dia.
+  const abrirDiaLargo = useCallback((iso: string) => {
+    setDiaLargo(iso);
+    calRef.current?.getApi().gotoDate(`${iso}T12:00:00`);
   }, []);
+  const mudarDiaLargo = (delta: number) => {
+    if (!diaLargo) return;
+    const d = new Date(`${diaLargo}T12:00:00`);
+    d.setDate(d.getDate() + delta);
+    abrirDiaLargo(format(d, "yyyy-MM-dd"));
+  };
+  const sairDiaLargo = useCallback(() => {
+    setDiaLargo(null);
+    // O FullCalendar esteve escondido: volta a medir a grelha.
+    requestAnimationFrame(() => calRef.current?.getApi().updateSize());
+  }, []);
+  // Só existe na Semana do computador.
+  useEffect(() => {
+    if (diaLargo && (vista !== "semana" || estreito)) setDiaLargo(null);
+  }, [diaLargo, vista, estreito]);
+  // Ao abrir, o foco vai para «← Semana»; Esc volta à Semana (se não houver detalhe/diálogo por cima).
+  const diaLargoAberto = diaLargo !== null;
+  useEffect(() => {
+    if (!diaLargoAberto) return;
+    voltarSemanaRef.current?.focus();
+  }, [diaLargoAberto]);
+  useEffect(() => {
+    if (!diaLargoAberto) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      if (tarefaSelecionada || document.querySelector("[role='dialog'],[role='alertdialog']")) return;
+      sairDiaLargo();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [diaLargoAberto, tarefaSelecionada, sairDiaLargo]);
+
+  // Semana: o «+N mais» do FullCalendar é desenhado por cima de cartões (fica escondido por CSS);
+  // o total escondido de cada dia vai para o cabeçalho do dia, onde nunca tapa nada.
+  const [maisPorDia, setMaisPorDia] = useState<Record<string, number>>({});
+  const contagemMaisRef = useRef(0);
+  const contarMais = useCallback(() => {
+    const raiz = calBoxRef.current;
+    const novo: Record<string, number> = {};
+    if (raiz) {
+      raiz.querySelectorAll<HTMLElement>(".fc-timegrid-col[data-date] .fc-timegrid-more-link").forEach((a) => {
+        const dia = a.closest<HTMLElement>(".fc-timegrid-col")?.dataset.date;
+        const n = Number((a.textContent ?? "").replace(/\D/g, ""));
+        if (dia && n > 0) novo[dia] = (novo[dia] ?? 0) + n;
+      });
+    }
+    setMaisPorDia((ant) => (JSON.stringify(ant) === JSON.stringify(novo) ? ant : novo));
+  }, []);
+  const agendarContagemMais = useCallback(() => {
+    window.clearTimeout(contagemMaisRef.current);
+    contagemMaisRef.current = window.setTimeout(contarMais, 60);
+  }, [contarMais]);
+  useEffect(() => {
+    if (vista !== "semana") return;
+    agendarContagemMais();
+    const t = window.setTimeout(agendarContagemMais, 400);
+    return () => window.clearTimeout(t);
+  }, [vista, eventos, larguraCal, diaLargo, agendarContagemMais]);
+  const conteudoCabecalhoSemana = (a: { date: Date; text: string }) => {
+    const iso = format(a.date, "yyyy-MM-dd");
+    const n = maisPorDia[iso] ?? 0;
+    return (
+      <div className="fc-cab-dia">
+        <button
+          type="button"
+          className="fc-cab-dia__abrir"
+          onClick={() => abrirDiaLargo(iso)}
+          aria-label={`Ver ${format(a.date, "EEEE, d 'de' MMMM", { locale: pt })} em largura total`}
+        >
+          {a.text}
+        </button>
+        {n > 0 && (
+          <button
+            type="button"
+            className="fc-cab-dia__mais"
+            onClick={() => abrirDiaLargo(iso)}
+            aria-label={`Mais ${n} limpezas escondidas em ${format(a.date, "EEEE, d 'de' MMMM", { locale: pt })}. Abrir o dia em largura total`}
+          >
+            +{n} mais
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  // Mede o calendário (para decidir quantas limpezas lado a lado cabem na Semana).
+  useEffect(() => {
+    const el = calBoxRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => setLarguraCal(el.clientWidth));
+    ro.observe(el);
+    setLarguraCal(el.clientWidth);
+    return () => ro.disconnect();
+  }, [vista, mounted, estreito]);
+
+  // Telemóvel: ao tocar num dia, a lista desse dia aparece por baixo e é trazida para o ecrã.
+  useEffect(() => {
+    if (!diaAberto || !estreito) return;
+    const id = requestAnimationFrame(() => asideRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    return () => cancelAnimationFrame(id);
+  }, [diaAberto, estreito]);
+
+  // Conteúdo da célula do Mês no telemóvel: nº do dia + pontos (forma = tipo, cor = estado) + contador.
+  const conteudoDia = useCallback(
+    (arg: DayCellContentArg) => {
+      if (!estreito || arg.view.type !== "dayGridMonth") return undefined;
+      const itens = (porDia.get(format(arg.date, "yyyy-MM-dd")) ?? []).filter((t) => !ESPECIAIS.includes(t.tipo));
+      if (itens.length === 0) return <>{arg.dayNumberText}</>;
+      const urgencia = (e: string) => (e === "nao_atribuida" ? 0 : e === "por_atribuir" ? 1 : e === "em_curso" ? 2 : e === "atribuida" ? 3 : 4);
+      const ordenados = itens.slice().sort((a, b) => urgencia(a.estado) - urgencia(b.estado));
+      const semPessoa = itens.filter((t) => t.estado === "por_atribuir" || t.estado === "nao_atribuida").length;
+      const emCurso = itens.filter((t) => t.estado === "em_curso").length;
+      return (
+        <span
+          className="dia-resumo"
+          role="img"
+          aria-label={`${arg.dayNumberText}: ${itens.length} ${itens.length === 1 ? "limpeza" : "limpezas"}${semPessoa ? `, ${semPessoa} por atribuir` : ""}${emCurso ? `, ${emCurso} em curso` : ""}`}
+        >
+          <span className="dia-resumo__num">{arg.dayNumberText}</span>
+          <span className="dia-resumo__pontos" aria-hidden="true">
+            {ordenados.slice(0, 4).map((t) => {
+              const tv = t.tipo_limpeza && COR_TIPO_VALIDOS.includes(t.tipo_limpeza) ? t.tipo_limpeza : "normal";
+              return <span key={t._id} className="dia-ponto" data-tipo={tv} data-estado={t.estado} style={{ ["--c" as string]: corPorEstado(t.estado) }} />;
+            })}
+          </span>
+          <span className="dia-resumo__total" aria-hidden="true">
+            {itens.length}
+            {semPessoa > 0 && <span className="dia-resumo__sinal dia-resumo__sinal--por">?{semPessoa}</span>}
+            {emCurso > 0 && <span className="dia-resumo__sinal dia-resumo__sinal--curso">▶{emCurso}</span>}
+          </span>
+        </span>
+      );
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [estreito, porDia]
+  );
 
   /* --- Callbacks do FullCalendar --- */
+  const handleDateClick = useCallback((arg: DateClickArg) => {
+    // Computador: abre a lista do dia ao lado; telemóvel: por baixo do calendário.
+    setDiaAberto(format(arg.date, "yyyy-MM-dd"));
+  }, []);
+
   const handleDatesSet = useCallback((arg: DatesSetArg) => {
+    setDataCal(arg.view.currentStart);
+    // «Hoje» desativado também para tecnologias de apoio (o FullCalendar só põe o atributo disabled).
+    requestAnimationFrame(() => {
+      document.querySelectorAll<HTMLButtonElement>(".fc .fc-today-button").forEach((b) => b.setAttribute("aria-disabled", String(b.disabled)));
+    });
     setPeriodo({
       inicio: format(arg.start, "yyyy-MM-dd"),
       fim: format(arg.end, "yyyy-MM-dd"),
@@ -757,57 +1011,43 @@ export default function CalendarioOperacionalPage() {
   const handleEventClick = useCallback((arg: EventClickArg) => {
     const tarefa = arg.event.extendedProps as TarefaCalendario;
     setTarefaSelecionada(tarefa);
-    setReatribuindoPara(tarefa.utilizador_id?._id ?? "");
+    setReatribuindoPara("");
+    setInfoDisp(null);
   }, []);
-
-  /* --- v1.59.0 (Prompt 81): busca staff indisponíveis para o dia da tarefa --- */
-  useEffect(() => {
-    if (!tarefaSelecionada) {
-      setIndisponiveis([]);
-      return;
-    }
-    let cancelado = false;
-    (async () => {
-      try {
-        // Extrai YYYY-MM-DD da data da tarefa.
-        const dia = tarefaSelecionada.data?.slice(0, 10);
-        if (!dia) {
-          setIndisponiveis([]);
-          return;
-        }
-        const res = await adminGet<{ indisponiveis: typeof indisponiveis }>(
-          `/api/gestor/tarefas/indisponiveis?data=${dia}`
-        );
-        if (!cancelado) {
-          setIndisponiveis(res.indisponiveis ?? []);
-        }
-      } catch {
-        if (!cancelado) setIndisponiveis([]);
-      }
-    })();
-    return () => {
-      cancelado = true;
-    };
-  }, [tarefaSelecionada]);
 
   /* --- Reatribuição Inteligente (Prompt 75) --- */
   // Chama PATCH /api/gestor/tarefas/:id/reatribuir, que recalcula a hora de
-  // início via scheduler sequencial (Haversine + almoço 13h-14h) no backend.
+  // início via scheduler sequencial (Haversine + almoço de 1 h entre as 12:00 e as 14:00) no backend.
   async function handleReatribuir() {
     if (!tarefaSelecionada || !reatribuindoPara) return;
     setReatribuindo(true);
     try {
       // Prompt 114 — Captura warning de distância.
+      const vaga = infoDisp?.modo === "vaga";
       const res = await adminPatch<{
         tarefa: TarefaCalendario;
         novo_inicio: string;
         origem: string;
         tempo_viagem: number;
         warning?: string;
-      }>(`/api/gestor/tarefas/${tarefaSelecionada._id}/reatribuir`, {
-        utilizador_id: reatribuindoPara,
-      });
-      if (res.warning) setWarningToast(res.warning);
+        aviso_horario?: string;
+      }>(
+        vaga ? `/api/gestor/tarefas/${tarefaSelecionada._id}/atribuir` : `/api/gestor/tarefas/${tarefaSelecionada._id}/reatribuir`,
+        vaga
+          ? corpoAtribuicao(reatribuindoPara, infoDisp, tarefaSelecionada.utilizador_id, tarefaSelecionada.equipa_atribuida)
+          : { utilizador_id: reatribuindoPara }
+      );
+      if (vaga) {
+        // A equipa mudou: volta a pedir a lista (traz a equipa completa e as vagas atualizadas).
+        const avisoVaga = [res.warning, res.aviso_horario].filter(Boolean).join(" | ");
+        if (avisoVaga) setWarningToast(avisoVaga);
+        setTarefaSelecionada(null);
+        setReatribuindoPara("");
+        await carregarTarefas();
+        return;
+      }
+      const avisoReatribuir = [res.warning, res.aviso_horario].filter(Boolean).join(" | ");
+      if (avisoReatribuir) setWarningToast(avisoReatribuir);
 
       // Atualiza localmente a tarefa no estado com a data recalculada.
       const novoStaff = equipa.find((u) => u._id === reatribuindoPara);
@@ -880,10 +1120,10 @@ export default function CalendarioOperacionalPage() {
       const msg =
         res.processadas === 0
           ? res.mensagem ?? "Não há tarefas por atribuir a partir de hoje."
-          : `Foram reatribuídas ${res.reatribuidas} tarefa(s). ` +
+          : `Foram reatribuídas ${plural(res.reatribuidas, "tarefa")}. ` +
             (res.orfas > 0
-              ? `${res.orfas} continuam órfãs (sem staff disponível).`
-              : "Nenhuma ficou órfã. ✅");
+              ? `${res.orfas} continuam por atribuir (sem staff disponível).`
+              : "Nenhuma ficou por atribuir. ✅");
       setAutoAtribuirResultado(msg);
 
       // Atualiza o calendário para mostrar os blocos a mudarem de vermelho para as cores dos funcionários.
@@ -929,7 +1169,12 @@ export default function CalendarioOperacionalPage() {
       // Prompt 114 — Captura warning de distância (Haversine > 15km).
       // Prompt 117 — envia hora, check_in, check_out, hospedes. A combinação
       // data + hora é tratada pelo backend como LOCAL (não UTC midnight).
-      const res = await adminPost<{ tarefa: TarefaCalendario; warning?: string }>(
+      const res = await adminPost<{
+        tarefa: TarefaCalendario;
+        warning?: string;
+        conflito_horario?: boolean;
+        aviso_horario?: string;
+      }>(
         "/api/gestor/tarefas",
         {
           propriedade_id: novaForm.propriedade_id,
@@ -944,8 +1189,10 @@ export default function CalendarioOperacionalPage() {
           tipo: novaForm.tipo,
         }
       );
+      // Conflito real: `conflito_horario`. O aviso «fora do horário de trabalho» vem em
+      // `aviso_horario` (toast informativo; a tarefa fica criada e o modal fecha).
+      const temConflito = res.conflito_horario === true;
       if (res.warning) {
-        const temConflito = res.warning.toLowerCase().includes("horário");
         if (temConflito && !conflitoForcar) {
           // 1º clique com conflito: abre modal de confirmação.
           // A tarefa JÁ FOI CRIADA pelo backend (soft block). Mostramos o
@@ -972,7 +1219,9 @@ export default function CalendarioOperacionalPage() {
           return;
         }
         // 2º clique (conflitoForcar=true) ou warning de distância: mostra toast.
-        setWarningToast(res.warning);
+        setWarningToast([res.warning, res.aviso_horario].filter(Boolean).join(" | "));
+      } else if (res.aviso_horario) {
+        setWarningToast(res.aviso_horario);
       }
       setConflitoForcar(false);
       setNovaForm({
@@ -1072,11 +1321,11 @@ export default function CalendarioOperacionalPage() {
         Reserva: formatarReservaExcel(t.detalhes_reserva),
         Funcionário: t.utilizador_id?.nome ?? "Por Atribuir",
         Horário: formatarHorario(t) === "—" ? "" : formatarHorario(t),
-        Estado: ESTADO_LABEL_TAB[t.estado] ?? t.estado,
+        Estado: infoEstadoTarefa(t.estado).label,
       }));
 
       const ws = XLSX.utils.json_to_sheet(linhas, {
-        header: ["Data", "Propriedade", "Reserva", "Funcionário", "Horário", "Estado"],
+        header: ["Data", "Propriedade", "Reserva", "Equipa", "Horário", "Estado"],
       });
       // Larguras de coluna estimadas (em caracteres).
       ws["!cols"] = [
@@ -1098,11 +1347,145 @@ export default function CalendarioOperacionalPage() {
     }
   }, [periodo, filtros]);
 
+  // Linha de uma limpeza (painel do dia e lista da semana no telemóvel): o nome ocupa até 2 linhas.
+  const renderLinhaDia = (x: TarefaCalendario) => {
+    const ausencia = ESPECIAIS.includes(x.tipo);
+    const titulo = ausencia ? (x.title ?? "Ausência") : (x.propriedade_id?.nome ?? "—");
+    return (
+      <button
+        key={x._id}
+        type="button"
+        disabled={ausencia}
+        onClick={() => { setTarefaSelecionada(x); setReatribuindoPara(""); setInfoDisp(null); }}
+        className="flex min-h-11 w-full flex-wrap items-center justify-between gap-x-2 gap-y-1.5 rounded-md border px-3 py-2 text-left text-sm disabled:cursor-default"
+      >
+        <span className="min-w-0 flex-1 basis-40">
+          <span className="flex items-start gap-1.5 font-medium">
+            {!ausencia && x.tipo === "limpeza" && <span className="tipo-marca mt-1" data-tipo={x.tipo_limpeza && COR_TIPO_VALIDOS.includes(x.tipo_limpeza) ? x.tipo_limpeza : "normal"} aria-hidden="true" />}
+            <span className="line-clamp-2 break-words">{titulo}</span>
+            {!ausencia && x.tipo === "manutencao" && <EtiquetaManutencao className="mt-0.5" />}
+          </span>
+          <span className="block truncate text-xs text-muted-foreground">
+            {ausencia ? "" : `${temHoraReal(x.data) ? horaTarefa(x.data) : "sem hora"} · ${x.utilizador_id?.nome ?? "Por atribuir"}`}
+          </span>
+        </span>
+        {!ausencia && <EstadoTarefaBadge estado={x.estado} className="shrink-0" />}
+        {!ausencia && <OfertaVagaBadge tarefa={x} className="basis-full" />}
+      </button>
+    );
+  };
+
+  // Cartão de uma limpeza no dia em largura total: o nome ocupa até 2 linhas.
+  const renderCartaoDia = (x: TarefaCalendario) => {
+    const paleta = paletaPorEstado(x.estado);
+    const tipoVal = x.tipo_limpeza && COR_TIPO_VALIDOS.includes(x.tipo_limpeza) ? x.tipo_limpeza : "normal";
+    const glifo = GLIFO_ESTADO[x.estado] ?? "";
+    const nome = x.propriedade_id?.nome ?? "—";
+    const equipaTexto = textoEquipaGestor(x.utilizador_id, x.equipa_atribuida);
+    const faltaTexto = textoFalta(x.pessoas_em_falta);
+    const hora = temHoraReal(x.data) ? horaTarefa(x.data) : "Sem hora";
+    const resumo = `${hora}, ${nome}, ${equipaTexto ?? "por atribuir"}, ${infoEstadoTarefa(x.estado).label}`;
+    return (
+      <li key={x._id} className="min-w-0">
+        <button
+          type="button"
+          onClick={() => { setTarefaSelecionada(x); setReatribuindoPara(""); setInfoDisp(null); }}
+          aria-label={resumo}
+          className={cn("dia-largo__cartao flex h-full w-full min-w-0 flex-col gap-0.5 rounded-md border-2 p-2 text-left", x.estado === "cancelada" && "fc-evt-cancelada")}
+          style={{ background: paleta.bg, borderColor: paleta.border, color: paleta.text }}
+        >
+          <span className="fc-evt-block__header">
+            {x.tipo === "limpeza" && <span className="tipo-marca" data-tipo={tipoVal} aria-hidden="true" />}
+            {x.tipo === "manutencao" && <EtiquetaManutencao />}
+            {glifo && <span className="fc-evt-glifo" aria-hidden="true">{glifo}</span>}
+            <span className="fc-evt-block__time">{hora}</span>
+          </span>
+          <span className="fc-evt-block__title dia-largo__titulo" title={nome}>{nome}</span>
+          <span className="fc-evt-block__subtitle dia-largo__sub">
+            {equipaTexto ? (
+              <>
+                <User className="fc-evt-block__icon" aria-hidden="true" />
+                <span>{equipaTexto}{faltaTexto ? ` · ${faltaTexto}` : ""}</span>
+              </>
+            ) : (
+              <span className="fc-evt-block__unassigned">{infoEstadoTarefa(x.estado).label}</span>
+            )}
+          </span>
+          <OfertaVagaBadge tarefa={x} curto className="mt-1 self-start whitespace-normal px-1.5 text-[11px]" />
+        </button>
+      </li>
+    );
+  };
+
+  /** Dia em largura total: cartões agrupados por hora, a quebrar em linhas (nunca sobrepostos). */
+  const renderDiaLargo = () => {
+    if (!diaLargo) return null;
+    const d = new Date(`${diaLargo}T12:00:00`);
+    const nomeDia = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"][d.getDay()];
+    const titulo = `${nomeDia}, ${format(d, "d MMM", { locale: pt })}`;
+    const todos = porDia.get(diaLargo) ?? [];
+    const limpezas = todos.filter((t) => !ESPECIAIS.includes(t.tipo));
+    const outros = todos.filter((t) => ESPECIAIS.includes(t.tipo));
+    const grupos = new Map<string, TarefaCalendario[]>();
+    for (const t of limpezas) {
+      const k = temHoraReal(t.data) ? horaTarefa(t.data) : "Sem hora";
+      const l = grupos.get(k);
+      if (l) l.push(t);
+      else grupos.set(k, [t]);
+    }
+    const horas = [...grupos.keys()].sort((a, b) => (a === "Sem hora" ? 1 : b === "Sem hora" ? -1 : a.localeCompare(b)));
+    return (
+      <section data-testid="dia-largura" aria-label={`Limpezas de ${titulo}`}>
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <Button ref={voltarSemanaRef} variant="outline" className="gap-1.5" onClick={sairDiaLargo} aria-label="Voltar à semana">
+            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+            Semana
+          </Button>
+          <Button variant="outline" size="icon" aria-label="Dia anterior" onClick={() => mudarDiaLargo(-1)}>
+            <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+          </Button>
+          <Button variant="outline" size="icon" aria-label="Dia seguinte" onClick={() => mudarDiaLargo(1)}>
+            <ChevronRight className="h-4 w-4" aria-hidden="true" />
+          </Button>
+          <h2 className="ml-1 text-lg font-semibold" aria-live="polite">{titulo}</h2>
+          <span className="text-sm text-muted-foreground">
+            {loading ? "A carregar…" : limpezas.length === 0 ? "Sem limpezas" : plural(limpezas.length, "limpeza")}
+          </span>
+        </div>
+        {horas.map((h) => {
+          const l = grupos.get(h) ?? [];
+          return (
+            <div key={h} className="mb-4">
+              <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                {h} · {plural(l.length, "limpeza")}
+              </h3>
+              <ul className="dia-largo__grelha">{l.map(renderCartaoDia)}</ul>
+            </div>
+          );
+        })}
+        {outros.length > 0 && (
+          <p className="text-xs text-muted-foreground">
+            {outros.map((o) => o.title ?? "Ausência").join(" · ")}
+          </p>
+        )}
+      </section>
+    );
+  };
+
+  const tituloSemana = (() => {
+    if (diasDaSemana.length === 0) return "";
+    const a = new Date(`${diasDaSemana[0]}T12:00:00`);
+    const b = new Date(`${diasDaSemana[6]}T12:00:00`);
+    return `${format(a, "d MMM", { locale: pt })} – ${format(b, "d MMM yyyy", { locale: pt })}`;
+  })();
+  const hojeISO = format(new Date(), "yyyy-MM-dd");
+  const listaSemana = vista === "semana" && estreito;
+
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
       {/* Cabeçalho */}
       <div className="hidden flex-col gap-1 lg:flex">
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-2xl font-bold tracking-tight">Calendário Operacional</h1>
           <Button
             variant="outline"
@@ -1125,13 +1508,13 @@ export default function CalendarioOperacionalPage() {
             className="gap-2"
           >
             <Plus className="h-4 w-4" />
-            Nova Limpeza
+            Nova limpeza
           </Button>
           {/* v1.64.0 (Prompt 87) — Auto-Atribuir Pendentes */}
           <Button
             onClick={() => setConfirmarAutoAtribuir(true)}
             disabled={autoAtribuindo || loading}
-            title="Corre o load balancer para atribuir automaticamente todas as tarefas futuras sem funcionário."
+            title="Atribui automaticamente todas as tarefas futuras sem funcionário."
             className="gap-2"
           >
             {autoAtribuindo ? (
@@ -1142,51 +1525,7 @@ export default function CalendarioOperacionalPage() {
             {autoAtribuindo ? "A atribuir…" : "Auto-Atribuir Pendentes"}
           </Button>
 
-          {/* Prompt 99 — Toggle de vistas (Calendário / Tabela) */}
-          <div className="ml-auto flex items-center gap-1 rounded-md border bg-muted/40 p-1">
-            <button
-              type="button"
-              onClick={() => setVista("calendario")}
-              className={cn(
-                "flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors",
-                vista === "calendario"
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-              aria-pressed={vista === "calendario"}
-            >
-              <CalendarRange className="h-3.5 w-3.5" />
-              Vista Calendário
-            </button>
-            <button
-              type="button"
-              onClick={() => setVista("tabela")}
-              className={cn(
-                "flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors",
-                vista === "tabela"
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-              aria-pressed={vista === "tabela"}
-            >
-              <Table className="h-3.5 w-3.5" />
-              Vista Tabela
-            </button>
-            <button
-              type="button"
-              onClick={() => setVista("equipa")}
-              className={cn(
-                "flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium transition-colors",
-                vista === "equipa"
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-              aria-pressed={vista === "equipa"}
-            >
-              <Users className="h-3.5 w-3.5" />
-              Vista Equipa
-            </button>
-          </div>
+          <div className="ml-auto" />
 
           {/* Prompt 99 — Exportar Excel (só relevante na Vista Tabela) */}
           <Button
@@ -1205,14 +1544,52 @@ export default function CalendarioOperacionalPage() {
           </Button>
         </div>
         <p className="text-sm text-muted-foreground">
-          Vista mensal, semanal e diária de todas as tarefas de limpeza. Filtra por
+          Vista mensal e semanal de todas as tarefas de limpeza. Filtra por
           propriedade, staff ou estado. Clica numa limpeza para ver o detalhe e reatribuir.
           Alterna para a Vista Tabela e exporta para Excel.
         </p>
       </div>
 
+      {/* Vistas numa só barra (Mês, Semana, Tabela, Equipa) + Filtros no telemóvel */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div role="group" aria-label="Vista do calendário" className="flex w-full max-w-full items-center gap-1 overflow-x-auto rounded-md border bg-muted/40 p-1 sm:w-auto">
+          {([["mes", "Mês", CalendarRange], ["semana", "Semana", CalendarRange], ["tabela", "Tabela", Table], ["equipa", "Equipa", Users]] as const).map(([v, rotulo, Ic]) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => {
+                if (v === "semana" && vista === "mes") setDataCal(diaAberto ? new Date(`${diaAberto}T12:00:00`) : new Date());
+                setDiaLargo(null);
+                setVista(v);
+              }}
+              aria-pressed={vista === v}
+              className={cn(
+                "flex min-h-11 shrink-0 flex-1 items-center justify-center gap-1.5 rounded px-2.5 py-1.5 text-sm font-medium transition-colors sm:min-h-9 sm:flex-none sm:px-3",
+                vista === v ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <Ic className="hidden h-3.5 w-3.5 min-[400px]:block" aria-hidden="true" />
+              {rotulo}
+            </button>
+          ))}
+        </div>
+        <Button
+          variant="outline"
+          className="gap-1.5 lg:hidden"
+          aria-expanded={filtrosAbertos}
+          onClick={() => setFiltrosAbertos((v) => !v)}
+        >
+          <Filter className="h-4 w-4" aria-hidden="true" />
+          Filtros
+          {(filtros.propriedadeId || filtros.utilizadorId || filtros.estado) && <span className="h-2 w-2 rounded-full bg-primary" aria-label="com filtros ativos" />}
+        </Button>
+        <Button variant="outline" size="icon" className="lg:hidden" onClick={carregarTarefas} disabled={loading || !periodo} aria-label="Atualizar">
+          <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
+        </Button>
+      </div>
+
       {/* Zona de Filtros */}
-      <div className="flex flex-col gap-4 rounded-lg border bg-card p-4 lg:flex-row lg:items-end lg:justify-between">
+      <div className={cn("flex-col gap-4 rounded-lg border bg-card p-4 lg:flex lg:flex-row lg:items-end lg:justify-between", filtrosAbertos ? "flex" : "hidden")}>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 lg:flex lg:gap-3">
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-medium text-muted-foreground">Propriedade</label>
@@ -1231,7 +1608,7 @@ export default function CalendarioOperacionalPage() {
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Staff</label>
+            <label className="text-xs font-medium text-muted-foreground">Equipa</label>
             <select
               value={filtros.utilizadorId}
               onChange={(e) => setFiltros((f) => ({ ...f, utilizadorId: e.target.value }))}
@@ -1323,18 +1700,56 @@ export default function CalendarioOperacionalPage() {
       )}
 
       {/* Prompt 99 — Vista Calendário (FullCalendar) */}
-      {vista === "calendario" && (
-        <div className="rounded-lg border bg-card p-2 sm:p-4">
+      {(vista === "mes" || vista === "semana") && (
+        <div className={cn("grid gap-4", diaAberto && "lg:grid-cols-[minmax(0,1fr)_24rem]")}>
+        {listaSemana && (
+          <section aria-label="Limpezas da semana" className="rounded-lg border bg-card p-2">
+            <div className="mb-2 flex items-center gap-2">
+              <Button variant="outline" size="icon" aria-label="Semana anterior" onClick={() => calRef.current?.getApi().prev()}>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Button variant="outline" size="icon" aria-label="Semana seguinte" onClick={() => calRef.current?.getApi().next()}>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+              <Button variant="outline" onClick={() => calRef.current?.getApi().today()}>Hoje</Button>
+              <h2 className="ml-1 min-w-0 flex-1 truncate text-sm font-semibold">{tituloSemana}</h2>
+            </div>
+            <div className="space-y-4">
+              {diasDaSemana.map((dia) => {
+                const itens = porDia.get(dia) ?? [];
+                return (
+                  <div key={dia}>
+                    <h3 className={cn("mb-1 flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-muted-foreground", dia === hojeISO && "text-primary")}>
+                      <span>{formatarDataSegura(`${dia}T12:00:00`, (d) => format(d, "EEE, d 'de' MMM", { locale: pt }), dia)}{dia === hojeISO ? " · hoje" : ""}</span>
+                      <span>{itens.filter((t) => !ESPECIAIS.includes(t.tipo)).length || ""}</span>
+                    </h3>
+                    {itens.length === 0 ? (
+                      <p className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">Sem limpezas.</p>
+                    ) : (
+                      <div className="space-y-1.5">{itens.map(renderLinhaDia)}</div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+        <div ref={calBoxRef} className={cn("min-w-0 rounded-lg border bg-card p-2 sm:p-4", listaSemana && "hidden")}>
+          {diaLargo && renderDiaLargo()}
           {mounted ? (
+            <div className={cn(diaLargo && "hidden")}>
             <FullCalendar
+              ref={calRef}
               plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
-              initialView="timeGridWeek"
+              key={vista}
+              initialView={vista === "semana" ? "timeGridWeek" : "dayGridMonth"}
+              initialDate={dataCal ?? undefined}
               locale={ptLocale}
               timeZone="local"
               headerToolbar={{
                 left: "prev,next today",
                 center: "title",
-                right: "dayGridMonth,timeGridWeek,timeGridDay",
+                right: "",
               }}
               // Ponto 1 — Horário comercial (esconde madrugada/noite)
               slotMinTime="08:00:00"
@@ -1350,10 +1765,20 @@ export default function CalendarioOperacionalPage() {
               eventDurationEditable={false}
               events={eventos}
               eventClick={handleEventClick}
+              dateClick={handleDateClick}
               datesSet={handleDatesSet}
               // FIX (calendário compacto) — Limita a 2 o nº de eventos allDay
               // visíveis por dia; o excesso fica escondido num botão "+X mais".
               dayMaxEvents={2}
+              // Semana: no máximo 2 colunas lado a lado; o resto fica em «+N mais» (popover que fecha ao clicar fora ou Esc).
+              slotEventOverlap={false}
+              eventMaxStack={vista === "semana" ? cartoesPorHora : 2}
+              dayCellContent={conteudoDia}
+              dayCellClassNames={(a) => (estreito && format(a.date, "yyyy-MM-dd") === diaAberto ? ["dia-selecionado"] : [])}
+              dayHeaderContent={vista === "semana" ? conteudoCabecalhoSemana : undefined}
+              moreLinkDidMount={vista === "semana" ? agendarContagemMais : undefined}
+              moreLinkClick={vista === "semana" ? (arg) => { abrirDiaLargo(format(arg.date, "yyyy-MM-dd")); } : "popover"}
+              moreLinkContent={(a) => `+${a.num} mais`}
               eventDisplay="block"
               // Ponto 4 — Renderização customizada do bloco
               eventContent={renderEventContent}
@@ -1371,12 +1796,34 @@ export default function CalendarioOperacionalPage() {
                 hour12: false,
               }}
             />
+            </div>
           ) : (
             <div className="flex h-[700px] items-center justify-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="h-5 w-5 animate-spin" />
               A preparar calendário…
             </div>
           )}
+        </div>
+        {diaAberto && !listaSemana && (
+          <aside ref={asideRef} aria-label="Limpezas do dia" className="scroll-mt-20 rounded-lg border bg-card lg:sticky lg:top-4 lg:self-start">
+            <div className="flex items-start justify-between gap-2 border-b p-3">
+              <div>
+                <h2 className="text-sm font-semibold first-letter:uppercase">
+                  {formatarDataSegura(`${diaAberto}T12:00:00`, (d) => format(d, "EEEE, d 'de' MMMM", { locale: pt }), diaAberto)}
+                </h2>
+                <p className="text-xs text-muted-foreground">
+                  {itensDoDia.some((x) => x.tipo !== "ausencia" && x.tipo !== "ausencia_pendente" && x.tipo !== "folga_fixa") ? "Escolhe uma limpeza para ver o detalhe." : "Sem limpezas neste dia."}
+                </p>
+              </div>
+              <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => setDiaAberto(null)} aria-label="Fechar a lista do dia">
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="space-y-2 p-3">
+              {itensDoDia.map(renderLinhaDia)}
+            </div>
+          </aside>
+        )}
         </div>
       )}
 
@@ -1397,13 +1844,13 @@ export default function CalendarioOperacionalPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="rt w-full text-sm">
                 <thead>
                   <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
                     <th className="px-4 py-3 font-medium">Data</th>
                     <th className="px-4 py-3 font-medium">Propriedade</th>
                     <th className="px-4 py-3 font-medium">Reserva</th>
-                    <th className="px-4 py-3 font-medium">Funcionário</th>
+                    <th className="px-4 py-3 font-medium">Equipa</th>
                     <th className="px-4 py-3 font-medium">Horário</th>
                     <th className="px-4 py-3 font-medium">Estado</th>
                   </tr>
@@ -1425,17 +1872,18 @@ export default function CalendarioOperacionalPage() {
                         {formatarReserva(t.detalhes_reserva, t.data)}
                       </td>
                       <td className="px-4 py-3">
-                        {t.utilizador_id?.nome ?? (
-                          <span className="text-amber-600 dark:text-amber-400">Por Atribuir</span>
+                        {textoEquipaGestor(t.utilizador_id, t.equipa_atribuida) ?? (
+                          <span className="text-amber-600 dark:text-amber-400">Por atribuir</span>
+                        )}
+                        {textoFalta(t.pessoas_em_falta) && (
+                          <span className="block text-xs font-medium text-amber-700 dark:text-amber-400">{textoFalta(t.pessoas_em_falta)}</span>
                         )}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
                         {formatarHorario(t)}
                       </td>
                       <td className="px-4 py-3">
-                        <Badge variant={ESTADO_VARIANT_TAB[t.estado] ?? "secondary"}>
-                          {ESTADO_LABEL_TAB[t.estado] ?? t.estado}
-                        </Badge>
+                        <EstadoTarefaBadge estado={t.estado} />
                       </td>
                     </tr>
                   ))}
@@ -1445,7 +1893,7 @@ export default function CalendarioOperacionalPage() {
           )}
           <div className="flex items-center justify-between border-t px-4 py-2.5 text-xs text-muted-foreground">
             <span>
-              {tarefasTabela.length} tarefa(s) no período selecionado
+              {plural(tarefasTabela.length, "tarefa")} no período selecionado
               {periodo ? ` (${formatarDataDMY(periodo.inicio)} → ${formatarDataDMY(periodo.fim)})` : ""}.
             </span>
             <span>Clica numa linha para ver o detalhe.</span>
@@ -1464,44 +1912,56 @@ export default function CalendarioOperacionalPage() {
       )}
 
       {/* Legenda */}
-      <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+      <div className="hidden flex-wrap items-center gap-3 text-xs text-muted-foreground lg:flex">
         <span className="font-medium">Legenda:</span>
+        {Object.values(ESTADOS_TAREFA).map((info) => (
+          <span key={info.token} className="flex items-center gap-1.5">
+            <span
+              className="h-3 w-3 rounded border"
+              style={{
+                backgroundColor: `hsl(var(--status-${info.token}-bg))`,
+                borderColor: `hsl(var(--status-${info.token}) / 0.45)`,
+              }}
+            />
+            {info.label}
+          </span>
+        ))}
         <span className="flex items-center gap-1.5">
-          <span
-            className="h-3 w-3 rounded border"
-            style={{ backgroundColor: "#fee2e2", borderColor: "#fca5a5" }}
-          />
-          Por atribuir
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span
-            className="h-3 w-3 rounded border"
-            style={{ backgroundColor: "#fef9c3", borderColor: "#fde047" }}
-          />
-          Atribuída / Em curso
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span
-            className="h-3 w-3 rounded border"
-            style={{ backgroundColor: "#dcfce7", borderColor: "#86efac" }}
-          />
-          Concluída
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span
-            className="h-3 w-3 rounded border"
-            style={{ backgroundColor: "#f1f5f9", borderColor: "#cbd5e1" }}
-          />
-          Cancelada
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span
-            className="h-3 w-3 rounded border"
-            style={{ backgroundColor: "#e2e8f0", borderColor: "#cbd5e1" }}
-          />
+          <span className="h-3 w-3 rounded border border-slate-300 bg-slate-200 dark:border-slate-500 dark:bg-slate-700" />
           Folga fixa
         </span>
+        <span className="flex flex-wrap items-center gap-3">
+          <span className="font-medium">Tipo:</span>
+          {COR_TIPO_VALIDOS.map((tp) => (
+            <span key={tp} className="flex items-center gap-1.5">
+              <span className="tipo-marca" data-tipo={tp} aria-hidden />
+              {rotuloTipoLimpeza(tp)}
+            </span>
+          ))}
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span aria-hidden>✓ ▶ ? !</span> concluída, em curso, por atribuir, não atribuída
+        </span>
       </div>
+
+
+      <MudarDiaDialog
+        tarefa={tarefaSelecionada}
+        open={mudarDiaAberto}
+        onOpenChange={setMudarDiaAberto}
+        onFeito={async (aviso) => {
+          if (aviso) setWarningToast(aviso);
+          setTarefaSelecionada(null);
+          await carregarTarefas();
+        }}
+      />
+
+      {/* Prova da limpeza (modal partilhado com a página de limpezas) */}
+      <DetalheTarefaModal
+        tarefa={provaTarefa as unknown as TarefaDetalheGestor | null}
+        open={provaTarefa !== null}
+        onOpenChange={(o) => !o && setProvaTarefa(null)}
+      />
 
       {/* Modal de detalhe + reatribuição */}
       <Dialog
@@ -1515,22 +1975,26 @@ export default function CalendarioOperacionalPage() {
         </DialogHeader>
         {tarefaSelecionada && (
           <DialogContent className="space-y-4">
+            {tarefaSelecionada.estado === "concluida" && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="w-full"
+                onClick={() => { setProvaTarefa(tarefaSelecionada); setTarefaSelecionada(null); }}
+              >
+                Ver prova da limpeza (fotos, hora e checklist)
+              </Button>
+            )}
             {/* Estado + tipo + propriedade */}
             <div className="flex flex-wrap items-center gap-2">
-              <Badge
-                variant={
-                  tarefaSelecionada.estado === "concluida"
-                    ? "default"
-                    : tarefaSelecionada.estado === "cancelada"
-                    ? "secondary"
-                    : tarefaSelecionada.estado === "por_atribuir"
-                    ? "destructive"
-                    : "outline"
-                }
-              >
-                {ESTADO_OPTS.find((o) => o.value === tarefaSelecionada.estado)?.label ??
-                  tarefaSelecionada.estado}
-              </Badge>
+              <EstadoTarefaBadge estado={tarefaSelecionada.estado} />
+              {tarefaSelecionada.tipo === "limpeza" && podeMudarDia(tarefaSelecionada) && (
+                <Button type="button" variant="outline" size="sm" className="ml-auto h-9 gap-1.5" onClick={() => setMudarDiaAberto(true)}>
+                  <CalendarClock className="h-4 w-4" aria-hidden="true" />
+                  Mudar dia
+                </Button>
+              )}
               {/* v1.58.0 (Prompt 80, ponto 4) — Badge de tipo para deixar claro
                   que manutenções também podem ser atribuídas/reatribuídas. */}
               {tarefaSelecionada.tipo && TIPO_LABEL[tarefaSelecionada.tipo] && (
@@ -1577,7 +2041,7 @@ export default function CalendarioOperacionalPage() {
                   {tarefaSelecionada.utilizador_id ? (
                     <Link
                       href={`/gestor/equipa?editar=${tarefaSelecionada.utilizador_id._id}`}
-                      className="text-primary underline-offset-2 hover:underline font-medium"
+                      className="text-brand-text underline-offset-2 hover:underline font-medium"
                       title="Editar funcionário"
                     >
                       {tarefaSelecionada.utilizador_id.nome}
@@ -1590,50 +2054,32 @@ export default function CalendarioOperacionalPage() {
             </div>
 
             {/* Reatribuição Inteligente (Prompt 75) */}
-            <div className="space-y-1.5">
-              <label htmlFor="reatribuir" className="text-sm font-medium">
-                Reatribuir a (recalcula horário)
-              </label>
-              <p className="text-xs text-muted-foreground">
-                O sistema recalcula a hora de início com base nas tarefas
-                existentes do staff, tempo de viagem e hora de almoço (13h-14h).
-              </p>
-              <select
-                id="reatribuir"
-                value={reatribuindoPara}
-                onChange={(e) => setReatribuindoPara(e.target.value)}
-                disabled={tarefaSelecionada.estado === "concluida"}
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <option value="">— Selecionar staff —</option>
-                {equipa.map((u) => {
-                  // FIX (folgas/férias) — Em vez de OMITIR os staff
-                  // indisponíveis (férias/doença/ausência nesse dia), mostramos
-                  // TODOS no dropdown com a option disabled e a label
-                  // " [Indisponível]" ao lado do nome. Assim o gestor vê quem
-                  // existe mas não consegue selecionar quem está de folga/férias.
-                  const indisponivel = indisponiveis.some(
-                    (i) => i.utilizador_id === u._id
-                  );
-                  return (
-                    <option
-                      key={u._id}
-                      value={indisponivel ? "" : u._id}
-                      disabled={indisponivel}
-                    >
-                      {u.nome}
-                      {indisponivel ? " — [Indisponível]" : ""}
-                    </option>
-                  );
-                })}
-              </select>
-              {/* Aviso visual de staff indisponível (mostrados como disabled) */}
-              {indisponiveis.length > 0 && (
-                <p className="text-xs text-amber-600 dark:text-amber-400">
-                  ⚠️ {indisponiveis.length} membro(s) da equipa está(ão) de folga/férias neste dia e apareceram como [Indisponível] na lista (não selecionáveis).
+            {/* Folgas e ausências também abrem este detalhe, mas não são limpezas: sem atribuição. */}
+            {tarefaSelecionada.tipo !== "ausencia" && tarefaSelecionada.tipo !== "ausencia_pendente" && tarefaSelecionada.tipo !== "folga_fixa" && (
+              <div className="space-y-1.5">
+                <label htmlFor="reatribuir" className="text-sm font-medium">
+                  {infoDisp?.modo === "vaga" ? "Preencher a vaga (a hora mantém-se)" : "Reatribuir a (recalcula horário)"}
+                </label>
+                <p className="text-xs text-muted-foreground">
+                  O sistema recalcula a hora de início com base nas tarefas
+                  existentes do staff, tempo de viagem e hora de almoço (1 h, a começar entre as 12:00 e as 14:00).
                 </p>
-              )}
-            </div>
+                {tarefaSelecionada.estado === "concluida" || tarefaSelecionada.estado === "cancelada" ? (
+                  <p className="text-sm text-muted-foreground">Limpeza {tarefaSelecionada.estado === "concluida" ? "concluída" : "cancelada"}: já não pode ser reatribuída.</p>
+                ) : (
+                  <SeletorDisponiveis
+                    id="reatribuir"
+                    tarefaId={tarefaSelecionada._id}
+                    acao="reatribuir"
+                    value={reatribuindoPara}
+                    onChange={setReatribuindoPara}
+                    onInfo={setInfoDisp}
+                    disabled={tarefaSelecionada.estado === "concluida"}
+                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+                  />
+                )}
+              </div>
+            )}
 
             {/* v1.68.0 (Prompt 91) — Bloco de destaque para observações.
                 Se for manutenção (avaria), fundo amarelado/vermelho claro
@@ -1694,7 +2140,7 @@ export default function CalendarioOperacionalPage() {
                 ) : (
                   <>
                     <Trash2 className="mr-2 h-4 w-4" />
-                    Cancelar Limpeza
+                    Cancelar limpeza
                   </>
                 )}
               </Button>
@@ -1737,7 +2183,7 @@ export default function CalendarioOperacionalPage() {
       <Dialog open={confirmarAutoAtribuir} onOpenChange={setConfirmarAutoAtribuir}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Sparkles className="h-5 w-5 text-primary" />
+            <Sparkles className="h-5 w-5 text-brand-text" />
             Auto-Atribuir Pendentes
           </DialogTitle>
           <DialogDescription>
@@ -1748,9 +2194,9 @@ export default function CalendarioOperacionalPage() {
         </DialogHeader>
         <DialogContent className="space-y-2">
           <p className="text-sm text-muted-foreground">
-            O load balancer vai procurar o staff com menor carga para cada
+            O sistema vai procurar o funcionário com menor carga para cada
             tarefa, respeitando férias, folgas fixas, tempo de viagem e hora
-            de almoço (13h-14h). As tarefas que não conseguirem ser atribuídas
+            de almoço (1 h, a começar entre as 12:00 e as 14:00). As tarefas que não conseguirem ser atribuídas
             (sem staff disponível) continuam por atribuir.
           </p>
         </DialogContent>
@@ -1787,8 +2233,8 @@ export default function CalendarioOperacionalPage() {
       <Dialog open={mostrarNovaTarefa} onOpenChange={setMostrarNovaTarefa}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Plus className="h-5 w-5 text-primary" />
-            Nova Limpeza
+            <Plus className="h-5 w-5 text-brand-text" />
+            Nova limpeza
           </DialogTitle>
           <DialogDescription>
             Cria uma tarefa manual no calendário. A data é tratada como local
@@ -1913,7 +2359,7 @@ export default function CalendarioOperacionalPage() {
                 onChange={(e) => setNovaForm((f) => ({ ...f, utilizador_id: e.target.value }))}
                 className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
               >
-                <option value="">— Por atribuir (deixar órfã) —</option>
+                <option value="">— Por atribuir (sem responsável) —</option>
                 {equipa.map((u) => (
                   <option key={u._id} value={u._id}>{u.nome}</option>
                 ))}
@@ -1947,7 +2393,7 @@ export default function CalendarioOperacionalPage() {
             ) : (
               <>
                 <Plus className="mr-2 h-4 w-4" />
-                Criar Limpeza
+                Criar limpeza
               </>
             )}
           </Button>
@@ -2003,7 +2449,7 @@ export default function CalendarioOperacionalPage() {
             className="bg-amber-600 hover:bg-amber-700"
             onClick={() => setConflitoModal(null)}
           >
-            Manter Limpeza
+            Manter limpeza
           </Button>
         </DialogFooter>
       </Dialog>
@@ -2122,7 +2568,7 @@ function EquipaMapa({ tarefas, equipa, periodo, loading }: EquipaMapaProps) {
     if (tarefasDia.length > 0) {
       return {
         tipo: "tarefas",
-        label: `${tarefasDia.length} tarefa(s)`,
+        label: `${plural(tarefasDia.length, "tarefa")}`,
         count: tarefasDia.length,
       };
     }
@@ -2178,7 +2624,7 @@ function EquipaMapa({ tarefas, equipa, periodo, loading }: EquipaMapaProps) {
               {dias.map((dia, i) => (
                 <th key={i} className="px-2 py-2 text-center font-medium min-w-[60px]">
                   <div className="flex flex-col">
-                    <span className="text-[10px] uppercase">
+                    <span className="text-xs uppercase">
                       {format(dia, "EEE", { locale: pt })}
                     </span>
                     <span className="text-sm font-bold">
@@ -2215,7 +2661,7 @@ function EquipaMapa({ tarefas, equipa, periodo, loading }: EquipaMapaProps) {
 
       {/* Resumo */}
       <p className="text-xs text-muted-foreground">
-        {equipa.length} membro(s) da equipa · {dias.length} dia(s) no período.
+        {plural(equipa.length, "membro")} da equipa · {plural(dias.length, "dia")} no período.
         Clica numa célula para ver detalhes (em breve).
       </p>
     </div>

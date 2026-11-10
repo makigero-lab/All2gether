@@ -7,6 +7,9 @@
  *   GET    /empresas                                          — lista todas as empresas + gestor principal
  *   POST   /empresas                                          — cria nova empresa
  *   POST   /empresas/:id/impersonar                           — gera token JWT do gestor (impersonation)
+ *   GET    /empresas/:id/exportar                             — RGPD: export completo da empresa (JSON)
+ *   POST   /empresas/:id/agendar-eliminacao                   — RGPD: agenda a eliminação definitiva (nome exato)
+ *   POST   /empresas/:id/cancelar-eliminacao                  — RGPD: cancela a eliminação agendada
  *   GET    /empresas/:empresaId/utilizadores                  — lista utilizadores de uma empresa
  *   POST   /empresas/:empresaId/utilizadores                  — cria gestor/staff numa empresa
  *   PATCH  /empresas/:empresaId/utilizadores/:utilizadorId/estado — alterna ativo/inativo
@@ -39,6 +42,7 @@ const {
   criarUtilizadorEmpresa,
   alternarEstadoUtilizadorEmpresa,
 } = require('../controllers/superAdminController');
+const rgpd = require('../controllers/rgpdController');
 
 // Todas as rotas exigem auth + isAdmin (só Super Admin).
 router.use(auth, isAdmin);
@@ -48,6 +52,11 @@ router.get('/empresas', listarEmpresas);
 
 // Impersonar gestor de uma empresa (gera token JWT do gestor).
 router.post('/empresas/:id/impersonar', impersonarGestor);
+
+// RGPD (fim de contrato): exportação completa, eliminação agendada (com período de segurança) e cancelamento.
+router.get('/empresas/:id/exportar', rgpd.exportarEmpresa);
+router.post('/empresas/:id/agendar-eliminacao', rgpd.agendarEliminacaoEmpresa);
+router.post('/empresas/:id/cancelar-eliminacao', rgpd.cancelarEliminacaoEmpresa);
 
 // Gestão de utilizadores de empresas terceiras.
 router.get('/empresas/:empresaId/utilizadores', listarUtilizadoresEmpresa);
@@ -66,9 +75,11 @@ router.delete('/hard-reset', async (req, res) => {
     const mongoose = require('mongoose');
 
     const empresaId = req.user && req.user.empresa_id;
-    const filtro = empresaId && mongoose.isValidObjectId(empresaId)
-      ? { empresa_id: empresaId }
-      : {};
+    // SEGURANÇA: nunca apaga com filtro vazio (= todas as empresas).
+    if (!empresaId || !mongoose.isValidObjectId(empresaId)) {
+      return res.status(400).json({ erro: 'empresa_id inválido no token. Operação cancelada.' });
+    }
+    const filtro = { empresa_id: empresaId };
 
     const propsResult = await Propriedade.deleteMany(filtro);
     const tarefasResult = await Tarefa.deleteMany(filtro);
@@ -89,7 +100,7 @@ router.delete('/hard-reset', async (req, res) => {
     });
   } catch (err) {
     console.error('❌ hard-reset:', err.message);
-    return res.status(500).json({ erro: 'Erro interno do servidor.', detalhe: err.message });
+    return res.status(500).json({ erro: 'Erro interno do servidor.' });
   }
 });
 
@@ -102,7 +113,7 @@ router.post('/forcar-daily-briefing', async (req, res) => {
     await executarBriefing();
     return res.status(200).json({ message: 'Daily Briefing executado com sucesso.' });
   } catch (err) {
-    return res.status(500).json({ erro: 'Erro ao executar Daily Briefing.', detalhe: err.message });
+    return res.status(500).json({ erro: 'Erro ao executar Daily Briefing.' });
   }
 });
 
@@ -113,7 +124,7 @@ router.post('/forcar-agenda-amanha', async (req, res) => {
     await executarAgendaAmanha();
     return res.status(200).json({ message: 'Agenda de Amanhã executada com sucesso.' });
   } catch (err) {
-    return res.status(500).json({ erro: 'Erro ao executar Agenda de Amanhã.', detalhe: err.message });
+    return res.status(500).json({ erro: 'Erro ao executar Agenda de Amanhã.' });
   }
 });
 
@@ -128,7 +139,7 @@ router.post('/forcar-cao-guarda', async (req, res) => {
       alertas: resultado.alertas,
     });
   } catch (err) {
-    return res.status(500).json({ erro: 'Erro ao executar Cão de Guarda.', detalhe: err.message });
+    return res.status(500).json({ erro: 'Erro ao executar Cão de Guarda.' });
   }
 });
 
@@ -149,7 +160,7 @@ router.post('/push-teste', async (req, res) => {
     );
     return res.status(200).json({ message: 'Push de teste enviado. Verifica o teu dispositivo (se tiveres subscrição ativa).' });
   } catch (err) {
-    return res.status(500).json({ erro: 'Erro ao enviar push.', detalhe: err.message });
+    return res.status(500).json({ erro: 'Erro ao enviar push.' });
   }
 });
 
@@ -174,7 +185,7 @@ router.get('/config-empresa', async (req, res) => {
       email: empresa.email || '',
     });
   } catch (err) {
-    return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
+    return res.status(500).json({ erro: 'Erro interno.' });
   }
 });
 
@@ -211,7 +222,7 @@ router.put('/config-empresa', async (req, res) => {
       email: empresa.email || '',
     });
   } catch (err) {
-    return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
+    return res.status(500).json({ erro: 'Erro interno.' });
   }
 });
 
@@ -234,7 +245,7 @@ router.post('/empresas', async (req, res) => {
     });
     return res.status(201).json({ empresa: nova });
   } catch (err) {
-    return res.status(500).json({ erro: 'Erro ao criar empresa.', detalhe: err.message });
+    return res.status(500).json({ erro: 'Erro ao criar empresa.' });
   }
 });
 
@@ -272,7 +283,7 @@ router.delete('/empresas/:id', async (req, res) => {
       empresa: { _id: String(empresa._id), apagada: empresa.apagada, ativa: empresa.ativa },
     });
   } catch (err) {
-    return res.status(500).json({ erro: 'Erro ao eliminar empresa.', detalhe: err.message });
+    return res.status(500).json({ erro: 'Erro ao eliminar empresa.' });
   }
 });
 
@@ -310,7 +321,7 @@ router.patch('/empresas/:id/restaurar', async (req, res) => {
       empresa: { _id: String(empresa._id), apagada: empresa.apagada, ativa: empresa.ativa },
     });
   } catch (err) {
-    return res.status(500).json({ erro: 'Erro ao restaurar empresa.', detalhe: err.message });
+    return res.status(500).json({ erro: 'Erro ao restaurar empresa.' });
   }
 });
 
@@ -331,6 +342,9 @@ router.patch('/empresas/:id/toggle-status', async (req, res) => {
       return res.status(404).json({ erro: 'Empresa não encontrada.' });
     }
     const novoEstado = typeof req.body?.ativa === 'boolean' ? req.body.ativa : !empresa.ativa;
+    if (novoEstado && empresa.eliminacao_agendada_para) {
+      return res.status(409).json({ erro: 'Esta empresa tem uma eliminação agendada. Cancela-a primeiro para a reativar.' });
+    }
     empresa.ativa = novoEstado;
     await empresa.save();
     return res.status(200).json({
@@ -338,7 +352,7 @@ router.patch('/empresas/:id/toggle-status', async (req, res) => {
       empresa: { _id: String(empresa._id), nome: empresa.nome, ativa: empresa.ativa },
     });
   } catch (err) {
-    return res.status(500).json({ erro: 'Erro ao alterar estado da empresa.', detalhe: err.message });
+    return res.status(500).json({ erro: 'Erro ao alterar estado da empresa.' });
   }
 });
 
@@ -382,7 +396,7 @@ router.post('/empresas/:id/hard-reset', async (req, res) => {
       },
     });
   } catch (err) {
-    return res.status(500).json({ erro: 'Erro no hard reset da empresa.', detalhe: err.message });
+    return res.status(500).json({ erro: 'Erro no hard reset da empresa.' });
   }
 });
 
@@ -409,7 +423,7 @@ router.get('/empresas/:id/config', async (req, res) => {
       ativa: emp.ativa,
     });
   } catch (err) {
-    return res.status(500).json({ erro: 'Erro ao carregar config.', detalhe: err.message });
+    return res.status(500).json({ erro: 'Erro ao carregar config.' });
   }
 });
 
@@ -443,7 +457,7 @@ router.put('/empresas/:id/config', async (req, res) => {
       email: emp.email || '',
     });
   } catch (err) {
-    return res.status(500).json({ erro: 'Erro ao guardar config.', detalhe: err.message });
+    return res.status(500).json({ erro: 'Erro ao guardar config.' });
   }
 });
 
@@ -576,7 +590,7 @@ router.post('/seed-checklists', async (req, res) => {
     });
   } catch (err) {
     console.error('❌ seed-checklists:', err.message);
-    return res.status(500).json({ erro: 'Erro ao executar seed.', detalhe: err.message });
+    return res.status(500).json({ erro: 'Erro ao executar seed.' });
   }
 });
 
@@ -602,7 +616,7 @@ router.get('/webhook-logs', async (req, res) => {
 
     return res.status(200).json({ logs, total: logs.length });
   } catch (err) {
-    return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
+    return res.status(500).json({ erro: 'Erro interno.' });
   }
 });
 
@@ -621,7 +635,7 @@ router.delete('/webhook-logs/limpar', async (req, res) => {
       apagados: resultado.deletedCount,
     });
   } catch (err) {
-    return res.status(500).json({ erro: 'Erro ao limpar logs.', detalhe: err.message });
+    return res.status(500).json({ erro: 'Erro ao limpar logs.' });
   }
 });
 

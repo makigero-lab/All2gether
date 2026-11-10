@@ -48,18 +48,24 @@ const {
   getAuditoria,
   getWebhooks,
   reprocessarWebhook,
-  setupClienteZero,
   // FIX (gestão de parceiros) — novo controller para listar parceiros B2B.
   getParceiros,
+  // FIX (restrição lavandaria) — novo controller para listar fornecedores.
+  getFornecedores,
+  getContactoHospede,
 } = require('../controllers/gestorController');
-const { reportarAtrasoTarefa, criarTarefa, atribuirTarefa, reatribuirTarefa, atualizarEstadoTarefa, apagarTarefasFuturas, listarIndisponiveisData, autoAtribuirTarefas, criarTarefaEspontanea } = require('../controllers/tarefaController');
+const { reportarAtrasoTarefa, criarTarefa, atribuirTarefa, reatribuirTarefa, atualizarEstadoTarefa, apagarTarefasFuturas, listarIndisponiveisData, autoAtribuirTarefas, criarTarefaEspontanea, listarDisponiveisTarefa, mudarDiaTarefa } = require('../controllers/tarefaController');
 // CRUD de Modelos de Checklist (futuro: Modelos de Protocolo Clínico)
+const { getProvaLimpeza, resolverAvaria } = require('../controllers/provaController');
 const { listarModelos, criarModelo, obterModelo, atualizarModelo, apagarModelo } = require('../controllers/checklistController');
 // Smoobu — importação/sincronização de propriedades (HF5) + reservas (HF7).
-const { getPropriedadesSmoobu, importarPropriedades, sincronizarReservas } = require('../controllers/smoobuController');
+const { getPropriedadesSmoobu, importarPropriedades, sincronizarReservas, reconciliarCancelamentos } = require('../controllers/smoobuController');
+// FIX (import/export excel) — Controller de importação/exportação de Excel.
+const { exportarExcel } = require('../controllers/excelController');
+const rgpd = require('../controllers/rgpdController');
 
-// Bootstrap do ambiente de testes — Cliente Zero. PÚBLICO (sem auth).
-router.get('/setup', setupClienteZero);
+// SEGURANÇA: a rota pública GET /setup foi removida (criava admin com password fixa).
+// O admin inicial é criado por `seed-admin.js` (npm start / npm run seed:admin).
 
 // Dashboard com dados reais.
 router.get('/dashboard', auth, isGestor, getDashboard);
@@ -103,7 +109,7 @@ router.post('/propriedades/default-checklist', auth, isGestor, async (req, res) 
       correspondidas: resultado.matchedCount,
     });
   } catch (err) {
-    return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
+    return res.status(500).json({ erro: 'Erro interno.' });
   }
 });
 
@@ -119,6 +125,8 @@ router.post('/propriedades/default-checklist', auth, isGestor, async (req, res) 
 router.get('/smoobu/propriedades', auth, isGestor, getPropriedadesSmoobu);
 router.post('/smoobu/propriedades', auth, isGestor, importarPropriedades);
 router.post('/smoobu/sincronizar', auth, isAdmin, sincronizarReservas);
+// Cancela limpezas de reservas já canceladas/bloqueadas no Smoobu cujo webhook foi ignorado.
+router.post('/smoobu/reconciliar-cancelamentos', auth, isAdmin, reconciliarCancelamentos);
 
 // Calendário Geral de Operações — lista tarefas com filtro de datas.
 router.get('/tarefas', auth, isGestor, getTarefas);
@@ -129,12 +137,20 @@ router.get('/calendario/dados', auth, isGestor, getDadosCalendario);
 // Exportação CSV de tarefas.
 router.get('/tarefas/export', auth, isGestor, exportarTarefasCSV);
 
+// FIX (import/export excel) — Exportação de reservas.
+router.get('/reservas/exportar-excel', auth, isGestor, exportarExcel);
+
 // Reportar atraso numa tarefa.
 router.post('/tarefas/:id/atraso', auth, isGestor, reportarAtrasoTarefa);
+// Prova da limpeza (fotos só ao abrir) e avarias (ciclo fechado).
+router.get('/tarefas/:id/prova', auth, isGestor, getProvaLimpeza);
+router.patch('/tarefas/:id/avarias/:avariaId/resolver', auth, isGestor, resolverAvaria);
 
 // Gestão manual de tarefas.
 router.post('/tarefas', auth, isGestor, criarTarefa);
 router.post('/tarefas/espontanea', auth, isGestor, criarTarefaEspontanea);
+router.get('/tarefas/:id/disponiveis', auth, isGestor, listarDisponiveisTarefa);
+router.patch('/tarefas/:id/data', auth, isGestor, mudarDiaTarefa);
 router.patch('/tarefas/:id/atribuir', auth, isGestor, atribuirTarefa);
 router.patch('/tarefas/:id/reatribuir', auth, isGestor, reatribuirTarefa);
 router.patch('/tarefas/:id/estado', auth, isGestor, atualizarEstadoTarefa);
@@ -154,9 +170,15 @@ router.get('/equipa', auth, isGestor, getEquipa);
 router.post('/equipa', auth, isGestor, criarMembroEquipa);
 // FIX (gestão de parceiros) — rota dedicada para parceiros B2B.
 router.get('/parceiros', auth, isGestor, getParceiros);
+
+// FIX (restrição lavandaria) — rota dedicada para fornecedores (lavandarias).
+router.get('/fornecedores', auth, isGestor, getFornecedores);
 router.put('/equipa/:id', auth, isGestor, atualizarMembroEquipa);
 router.patch('/equipa/:id/estado', auth, isGestor, alternarEstadoMembro);
 router.delete('/equipa/:id', auth, isGestor, eliminarMembroEquipa);
+// RGPD: exportar e apagar os dados pessoais de uma pessoa da equipa (art. 28.º, n.º 3, al. e).
+router.get('/equipa/:id/exportar-dados', auth, isGestor, rgpd.exportarDadosMembro);
+router.post('/equipa/:id/apagar-dados-pessoais', auth, isGestor, rgpd.apagarDadosMembro);
 
 // Falta súbita — reatribuição de emergência.
 router.post('/equipa/:id/falta-subita', auth, isGestor, reportarFaltaSubita);
@@ -176,6 +198,8 @@ router.get('/auditoria', auth, isGestor, getAuditoria);
 
 // Webhooks — logs de integrações externas (lista + reproccessamento manual).
 router.get('/webhooks', auth, isGestor, getWebhooks);
+// Email/telefone do hóspede: EXCLUSIVO do admin (RGPD), com registo em auditoria.
+router.get('/tarefas/:id/contacto-hospede', auth, isAdmin, getContactoHospede);
 router.post('/webhooks/:id/reprocessar', auth, isGestor, reprocessarWebhook);
 
 // Configurações do Gestor (tenant local).
@@ -188,19 +212,34 @@ router.get('/configuracoes', auth, isGestor, async (req, res) => {
     if (!empresaId) {
       return res.status(400).json({ erro: 'empresa_id em falta no token.' });
     }
-    const empresa = await Empresa.findById(empresaId).select('nome nif morada telefone email').lean();
+    // FIX (status smoobu configs principais) — Inclui integracoes.smoobu no
+    // select para a página principal de configurações poder mostrar o estado
+    // real da integração (env var OU chave BD).
+    const empresa = await Empresa.findById(empresaId)
+      .select('nome nif morada telefone email integracoes.smoobu')
+      .lean();
     if (!empresa) {
       return res.status(404).json({ erro: 'Empresa não encontrada.' });
     }
+    const smoobu = empresa.integracoes?.smoobu || {};
+    const temChaveBD = Boolean(smoobu.api_key && smoobu.api_key.trim());
     return res.status(200).json({
       nome: empresa.nome,
       nif: empresa.nif || '',
       morada: empresa.morada || '',
       telefone: empresa.telefone || '',
       email: empresa.email || '',
+      // FIX (status smoobu configs principais) — Estado real da integração
+      // Smoobu: smoobu_ativo avalia estritamente a env var SMOOBU_API_KEY
+      // (fonte de verdade quando o backend corre no Render) com fallback à
+      // chave da BD. Isto resolve o bug em que o cliente via "Não configurada"
+      // na página principal de configurações apesar de a API estar a funcionar.
+      smoobu_api_key_mascarada: mascararApiKey(smoobu.api_key),
+      tem_api_key: temChaveBD,
+      smoobu_ativo: Boolean(process.env.SMOOBU_API_KEY || temChaveBD),
     });
   } catch (err) {
-    return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
+    return res.status(500).json({ erro: 'Erro interno.' });
   }
 });
 
@@ -224,10 +263,14 @@ router.put('/configuracoes', auth, isGestor, async (req, res) => {
       return res.status(400).json({ erro: 'Nenhum campo para atualizar.' });
     }
 
-    const empresa = await Empresa.findByIdAndUpdate(empresaId, { $set: update }, { new: true }).select('nome nif morada telefone email').lean();
+    const empresa = await Empresa.findByIdAndUpdate(empresaId, { $set: update }, { new: true }).select('nome nif morada telefone email integracoes.smoobu').lean();
     if (!empresa) {
       return res.status(404).json({ erro: 'Empresa não encontrada.' });
     }
+    // FIX (status smoobu configs principais) — Devolve também o estado do
+    // Smoobu para o frontend atualizar a UI após guardar.
+    const smoobu = empresa.integracoes?.smoobu || {};
+    const temChaveBD = Boolean(smoobu.api_key && smoobu.api_key.trim());
     return res.status(200).json({
       message: 'Configuração guardada com sucesso.',
       nome: empresa.nome,
@@ -235,9 +278,12 @@ router.put('/configuracoes', auth, isGestor, async (req, res) => {
       morada: empresa.morada || '',
       telefone: empresa.telefone || '',
       email: empresa.email || '',
+      smoobu_api_key_mascarada: mascararApiKey(smoobu.api_key),
+      tem_api_key: temChaveBD,
+      smoobu_ativo: Boolean(process.env.SMOOBU_API_KEY || temChaveBD),
     });
   } catch (err) {
-    return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
+    return res.status(500).json({ erro: 'Erro interno.' });
   }
 });
 
@@ -248,7 +294,7 @@ router.post('/configuracoes/forcar-daily-briefing', auth, isGestor, async (req, 
     await executarBriefing();
     return res.status(200).json({ message: 'Daily Briefing executado.' });
   } catch (err) {
-    return res.status(500).json({ erro: 'Erro ao executar.', detalhe: err.message });
+    return res.status(500).json({ erro: 'Erro ao executar.' });
   }
 });
 
@@ -259,7 +305,7 @@ router.post('/configuracoes/forcar-agenda-amanha', auth, isGestor, async (req, r
     await executarAgendaAmanha();
     return res.status(200).json({ message: 'Agenda de Amanhã executada.' });
   } catch (err) {
-    return res.status(500).json({ erro: 'Erro ao executar.', detalhe: err.message });
+    return res.status(500).json({ erro: 'Erro ao executar.' });
   }
 });
 
@@ -326,7 +372,7 @@ router.get('/configuracoes/integracoes', auth, isGestor, async (req, res) => {
       google_maps_ativo: require('../utils/geocoding').googleMapsAtivo(),
     });
   } catch (err) {
-    return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
+    return res.status(500).json({ erro: 'Erro interno.' });
   }
 });
 
@@ -407,7 +453,7 @@ router.put('/configuracoes/integracoes', auth, isGestor, async (req, res) => {
       },
     });
   } catch (err) {
-    return res.status(500).json({ erro: 'Erro interno.', detalhe: err.message });
+    return res.status(500).json({ erro: 'Erro interno.' });
   }
 });
 

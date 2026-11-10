@@ -20,12 +20,12 @@ import { format, isSameDay, addDays } from "date-fns";
 import { pt } from "date-fns/locale";
 
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { EstadoTarefaBadge } from "@/components/ui/estado-tarefa-badge";
 import {
   Card,
   CardContent,
 } from "@/components/ui/card";
-import { cn, parsearDataSegura } from "@/lib/utils";
+import { cn, parsearDataSegura, extrairHoraISO } from "@/lib/utils";
 import { fazerLogout } from "@/lib/auth";
 
 /**
@@ -73,15 +73,8 @@ const tipoIcon: Record<string, React.ComponentType<{ className?: string }>> = {
 
 /** Extrai HH:mm de um ISO; "—" se meia-noite (sem hora definida). */
 function horaInicio(dataISO?: string): string {
-  if (!dataISO) return "—";
-  try {
-    const d = parsearDataSegura(dataISO);
-    if (!d) return "—";
-    if (d.getHours() === 0 && d.getMinutes() === 0) return "—";
-    return format(d, "HH:mm", { locale: pt });
-  } catch {
-    return "—";
-  }
+  // Hora de Lisboa (com hora de verão), seja qual for o fuso do telemóvel; 00:00 = sem hora definida.
+  return extrairHoraISO(dataISO);
 }
 
 export default function StaffCalendarioPage() {
@@ -162,23 +155,27 @@ export default function StaffCalendarioPage() {
 
   // Dia de hoje (primeiro do array) para a vista em bloco.
   const diaHoje = dias[0];
+  // Próximos dias: só os que têm tarefas (ou ausência). Os outros contam-se como dias livres.
+  const proximos = dias.slice(1);
+  const diasComConteudo = proximos.filter((d) => d.tarefas.length > 0 || d.ausencia !== null);
+  const diasLivres = proximos.length - diasComConteudo.length;
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-md flex-col bg-muted/20">
       {/* Cabeçalho */}
-      <header className="sticky top-0 z-10 border-b bg-background/95 px-5 pb-4 pt-6 backdrop-blur">
+      <header className="sticky top-0 z-20 border-b bg-background/95 px-5 pb-4 pt-6 backdrop-blur">
         <div className="flex items-start justify-between gap-3">
           <div className="flex-1">
             <Link
               href="/staff"
               prefetch
-              className="mb-3 inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+              className="mb-3 inline-flex min-h-11 items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
             >
               <ArrowLeft className="h-4 w-4" />
               Voltar
             </Link>
             <div className="flex items-center gap-2">
-              <CalendarDays className="h-5 w-5 text-primary" />
+              <CalendarDays className="h-5 w-5 text-brand-text" />
               <h1 className="text-xl font-semibold tracking-tight">
                 A minha Agenda
               </h1>
@@ -191,7 +188,7 @@ export default function StaffCalendarioPage() {
           <Button
             variant="ghost"
             size="icon"
-            className="text-muted-foreground hover:text-destructive"
+            className="h-11 w-11 sm:h-9 sm:w-9 text-muted-foreground hover:text-destructive"
             onClick={() => fazerLogout()}
             aria-label="Terminar sessão"
             title="Terminar sessão"
@@ -223,7 +220,7 @@ export default function StaffCalendarioPage() {
             {diaHoje && (
               <section>
                 <div className="mb-2 flex items-center gap-2">
-                  <h2 className="text-sm font-semibold uppercase tracking-wide text-primary">
+                  <h2 className="text-sm font-semibold uppercase tracking-wide text-brand-text">
                     Hoje · {format(diaHoje.data, "d MMM", { locale: pt })}
                   </h2>
                   <span className="h-px flex-1 bg-primary/30" />
@@ -276,10 +273,10 @@ export default function StaffCalendarioPage() {
                             <CardContent className="flex items-center gap-3 p-3">
                               {/* Bloco de hora (destaque visual) */}
                               <div className="flex w-14 shrink-0 flex-col items-center justify-center rounded-md bg-primary/10 py-1.5">
-                                <span className="text-sm font-bold tabular-nums text-primary">
+                                <span className="text-sm font-bold tabular-nums text-brand-text">
                                   {hora}
                                 </span>
-                                <span className="text-[10px] uppercase text-primary/70">
+                                <span className="text-xs uppercase text-brand-text">
                                   início
                                 </span>
                               </div>
@@ -288,10 +285,10 @@ export default function StaffCalendarioPage() {
                                 className={cn(
                                   "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg",
                                   t.estado === "concluida"
-                                    ? "bg-emerald-100 text-emerald-700"
+                                    ? "bg-status-conc-bg text-status-conc"
                                     : t.estado === "por_atribuir"
-                                    ? "bg-amber-100 text-amber-700"
-                                    : "bg-primary/10 text-primary"
+                                    ? "bg-status-porat-bg text-status-porat"
+                                    : "bg-primary/10 text-brand-text"
                                 )}
                               >
                                 <Icon className="h-4 w-4" />
@@ -329,8 +326,20 @@ export default function StaffCalendarioPage() {
                 <span className="h-px flex-1 bg-border" />
               </div>
 
+              {/* Só aparecem os dias com tarefas (ou ausência); os restantes entram no resumo. */}
+              {diasLivres > 0 && (
+                <p className="mb-3 rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground" role="status">
+                  {diasLivres} {diasLivres === 1 ? "dia livre" : "dias livres"} nos próximos 30 dias, sem tarefas.
+                </p>
+              )}
+              {diasComConteudo.length === 0 && (
+                <p className="rounded-md border border-dashed px-3 py-4 text-center text-sm text-muted-foreground">
+                  Sem tarefas nos próximos dias.
+                </p>
+              )}
+
               <div className="space-y-3">
-                {dias.slice(1).map((dia, idx) => {
+                {diasComConteudo.map((dia, idx) => {
                   const diaFmt = format(dia.data, "EEE, d MMM", { locale: pt });
                   const temTarefas = dia.tarefas.length > 0;
                   const temAusencia = dia.ausencia !== null;
@@ -383,7 +392,7 @@ export default function StaffCalendarioPage() {
                               <Link key={t._id} href={`/staff/tarefas/${t._id}`} prefetch>
                                 <Card className="cursor-pointer border-border/60 transition-all hover:border-primary/40 hover:shadow-sm active:scale-[0.99]">
                                   <CardContent className="flex items-center gap-3 p-3">
-                                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-brand-text">
                                       <Icon className="h-4 w-4" />
                                     </div>
                                     <div className="min-w-0 flex-1">
@@ -402,21 +411,7 @@ export default function StaffCalendarioPage() {
                                         </span>
                                       </p>
                                     </div>
-                                    <Badge
-                                      variant={
-                                        t.estado === "concluida"
-                                          ? "success"
-                                          : t.estado === "por_atribuir"
-                                          ? "warning"
-                                          : "secondary"
-                                      }
-                                    >
-                                      {t.estado === "concluida"
-                                        ? "Concluída"
-                                        : t.estado === "por_atribuir"
-                                        ? "Por atribuir"
-                                        : "Atribuída"}
-                                    </Badge>
+                                    <EstadoTarefaBadge estado={t.estado} />
                                   </CardContent>
                                 </Card>
                               </Link>

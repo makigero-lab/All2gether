@@ -40,8 +40,13 @@ import { fazerLogout } from "@/lib/auth";
 /* ------------------------------------------------------------------ */
 
 // Prompt 131b — adicionado "cancelada" (soft cancel mantém histórico).
-type EstadoAusencia = "pendente" | "aprovada" | "rejeitada" | "cancelada";
-type TipoAusencia = "ferias" | "doenca" | "outro";
+type EstadoAusencia =
+  | "pendente"
+  | "pendente_emergencia"
+  | "aprovada"
+  | "rejeitada"
+  | "cancelada";
+type TipoAusencia = "ferias" | "doenca" | "falta" | "outro";
 
 interface AusenciaDTO {
   _id: string;
@@ -60,6 +65,7 @@ interface AusenciaDTO {
 const TIPO_LABEL: Record<TipoAusencia, string> = {
   ferias: "Férias",
   doenca: "Doença",
+  falta: "Falta",
   outro: "Outro",
 };
 
@@ -68,10 +74,17 @@ const ESTADO_CONFIG: Record<
   { label: string; variant: "default" | "secondary" | "destructive" | "outline" }
 > = {
   pendente: { label: "Pendente", variant: "secondary" },
+  pendente_emergencia: { label: "Emergência", variant: "secondary" },
   aprovada: { label: "Aprovada", variant: "default" },
   rejeitada: { label: "Rejeitada", variant: "destructive" },
   cancelada: { label: "Cancelada", variant: "outline" },
 };
+
+/** Estado desconhecido (ex.: novo no backend) nunca rebenta a página. */
+const ESTADO_DESCONHECIDO = { label: "Desconhecido", variant: "outline" as const };
+function configEstado(estado: string) {
+  return (ESTADO_CONFIG as Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }>)[estado] ?? { ...ESTADO_DESCONHECIDO, label: estado || ESTADO_DESCONHECIDO.label };
+}
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -244,25 +257,25 @@ export default function StaffAusenciasPage() {
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-md flex-col bg-muted/20">
       {/* Cabeçalho */}
-      <header className="sticky top-0 z-10 border-b bg-background/95 px-5 pb-4 pt-6 backdrop-blur">
+      <header className="sticky top-0 z-20 border-b bg-background/95 px-5 pb-4 pt-6 backdrop-blur">
         <div className="flex items-start justify-between gap-3">
           <div className="flex-1">
             <Link
               href="/staff"
               prefetch
-              className="mb-3 inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+              className="mb-3 inline-flex min-h-11 items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
             >
               <ArrowLeft className="h-4 w-4" />
               Voltar
             </Link>
             <div className="flex items-center gap-2">
-              <CalendarOff className="h-5 w-5 text-primary" />
+              <CalendarOff className="h-5 w-5 text-brand-text" />
               <h1 className="text-xl font-semibold tracking-tight">
                 Pedidos de Ausência
               </h1>
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
-              Pede férias ou reporta ausência. O admin aprova.
+              Pede férias ou reporta ausência. O gestor aprova.
             </p>
           </div>
           {/* HF15 — Logout sempre visível em mobile */}
@@ -270,7 +283,7 @@ export default function StaffAusenciasPage() {
             <Button
               variant="ghost"
               size="icon"
-              className="text-muted-foreground hover:text-destructive"
+              className="h-11 w-11 sm:h-9 sm:w-9 text-muted-foreground hover:text-destructive"
               onClick={() => fazerLogout()}
               aria-label="Terminar sessão"
               title="Terminar sessão"
@@ -308,7 +321,7 @@ export default function StaffAusenciasPage() {
               <span>{erro}</span>
               <Button
                 variant="outline"
-                size="sm"
+                size="touch"
                 onClick={carregar}
                 className="ml-auto"
               >
@@ -319,7 +332,7 @@ export default function StaffAusenciasPage() {
         )}
 
         {/* Botão Novo Pedido */}
-        <Button
+        <Button size="touch"
           onClick={() => {
             setMostrarForm(true);
             setFormErro(null);
@@ -349,7 +362,7 @@ export default function StaffAusenciasPage() {
         ) : (
           <div className="space-y-3">
             {ausencias.map((a) => {
-              const config = ESTADO_CONFIG[a.estado];
+              const config = configEstado(a.estado);
               return (
                 <Card key={a._id}>
                   <CardContent className="p-4">
@@ -372,17 +385,17 @@ export default function StaffAusenciasPage() {
                             {a.notas}
                           </p>
                         )}
-                        <p className="mt-1 text-[11px] text-muted-foreground/70">
+                        <p className="mt-1 text-xs text-muted-foreground">
                           Pedido em {formatarData(a.createdAt)}
                         </p>
                       </div>
                       {/* Prompt 131b — Botão Cancelar (soft cancel) visível
                           para pendentes E aprovadas (não rejeitadas/canceladas). */}
-                      {(a.estado === "pendente" || a.estado === "aprovada") && (
+                      {(a.estado === "pendente" || a.estado === "pendente_emergencia" || a.estado === "aprovada") && (
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-8 w-8 shrink-0 text-destructive hover:text-destructive"
+                          className="h-11 w-11 sm:h-9 sm:w-9 h-8 w-8 shrink-0 text-destructive hover:text-destructive"
                           onClick={() => setACancelar(a)}
                           aria-label="Cancelar pedido"
                           title="Cancelar pedido"
@@ -404,7 +417,7 @@ export default function StaffAusenciasPage() {
         <DialogHeader>
           <DialogTitle>Novo Pedido de Ausência</DialogTitle>
           <DialogDescription>
-            O teu pedido fica pendente até o admin aprovar.
+            O teu pedido fica pendente até o gestor aprovar.
           </DialogDescription>
           <DialogClose onClick={() => setMostrarForm(false)} />
         </DialogHeader>
@@ -424,6 +437,7 @@ export default function StaffAusenciasPage() {
               >
                 <option value="ferias">Férias</option>
                 <option value="doenca">Doença</option>
+                <option value="falta">Falta</option>
                 <option value="outro">Outro</option>
               </select>
             </div>
@@ -482,7 +496,7 @@ export default function StaffAusenciasPage() {
             )}
           </DialogContent>
           <DialogFooter>
-            <Button
+            <Button size="touch"
               type="button"
               variant="outline"
               onClick={() => setMostrarForm(false)}
@@ -490,7 +504,7 @@ export default function StaffAusenciasPage() {
             >
               Cancelar
             </Button>
-            <Button type="submit" disabled={submitting}>
+            <Button size="touch" type="submit" disabled={submitting}>
               {submitting ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -499,7 +513,7 @@ export default function StaffAusenciasPage() {
               ) : (
                 <>
                   <CheckCircle2 className="mr-2 h-4 w-4" />
-                  Rever Pedido
+                  Rever pedido
                 </>
               )}
             </Button>
@@ -514,7 +528,7 @@ export default function StaffAusenciasPage() {
       <Dialog open={mostrarConfirmacao} onOpenChange={setMostrarConfirmacao}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <CheckCircle2 className="h-5 w-5 text-primary" />
+            <CheckCircle2 className="h-5 w-5 text-brand-text" />
             Confirmar Pedido de Ausência
           </DialogTitle>
           <DialogDescription>
@@ -554,7 +568,7 @@ export default function StaffAusenciasPage() {
           )}
         </DialogContent>
         <DialogFooter>
-          <Button
+          <Button size="touch"
             type="button"
             variant="outline"
             onClick={() => setMostrarConfirmacao(false)}
@@ -562,7 +576,7 @@ export default function StaffAusenciasPage() {
           >
             Cancelar
           </Button>
-          <Button
+          <Button size="touch"
             type="button"
             onClick={handleConfirmarEnvio}
             disabled={submitting}
@@ -575,7 +589,7 @@ export default function StaffAusenciasPage() {
             ) : (
               <>
                 <Send className="mr-2 h-4 w-4" />
-                Confirmar Envio
+                Confirmar envio
               </>
             )}
           </Button>
@@ -609,8 +623,8 @@ export default function StaffAusenciasPage() {
               </div>
               <div className="flex items-center justify-between gap-2">
                 <span className="text-sm text-muted-foreground">Estado atual</span>
-                <Badge variant={ESTADO_CONFIG[aCancelar.estado].variant}>
-                  {ESTADO_CONFIG[aCancelar.estado].label}
+                <Badge variant={configEstado(aCancelar.estado).variant}>
+                  {configEstado(aCancelar.estado).label}
                 </Badge>
               </div>
               <div className="flex items-center justify-between gap-2">
@@ -635,7 +649,7 @@ export default function StaffAusenciasPage() {
           )}
         </DialogContent>
         <DialogFooter>
-          <Button
+          <Button size="touch"
             type="button"
             variant="outline"
             onClick={() => setACancelar(null)}
@@ -643,7 +657,7 @@ export default function StaffAusenciasPage() {
           >
             Voltar
           </Button>
-          <Button
+          <Button size="touch"
             type="button"
             variant="destructive"
             onClick={handleCancelar}
@@ -657,7 +671,7 @@ export default function StaffAusenciasPage() {
             ) : (
               <>
                 <X className="mr-2 h-4 w-4" />
-                Cancelar Pedido
+                Cancelar pedido
               </>
             )}
           </Button>

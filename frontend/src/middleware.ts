@@ -28,7 +28,7 @@ import type { NextRequest } from "next/server";
 
 const TOKEN_COOKIE = "all2gether_token";
 
-type Role = "admin" | "gestor" | "staff" | "parceiro";
+type Role = "admin" | "gestor" | "staff" | "parceiro" | "fornecedor";
 
 interface JwtPayload {
   id?: string;
@@ -66,6 +66,7 @@ function rotaPorRole(role: Role): string {
   if (role === "admin") return "/gestor";
   if (role === "gestor") return "/gestor";
   if (role === "parceiro") return "/parceiro";
+  if (role === "fornecedor") return "/fornecedor";
   return "/staff";
 }
 
@@ -81,13 +82,15 @@ export function middleware(req: NextRequest) {
   const isGestor = pathname === "/gestor" || pathname.startsWith("/gestor/");
   const isStaff = pathname === "/staff" || pathname.startsWith("/staff/");
   const isParceiro = pathname === "/parceiro" || pathname.startsWith("/parceiro/");
+  // FIX (portal lavandaria) — /fornecedor/* é o portal da lavandaria.
+  const isFornecedor = pathname === "/fornecedor" || pathname.startsWith("/fornecedor/");
 
   // Não aplicar proteção às rotas /api/* (são proxy routes, têm a sua própria lógica).
   if (pathname.startsWith("/api/")) {
     return NextResponse.next();
   }
 
-  if (isGestor || isStaff || isParceiro) {
+  if (isGestor || isStaff || isParceiro || isFornecedor) {
     if (!autenticado) {
       const loginUrl = req.nextUrl.clone();
       loginUrl.pathname = "/login";
@@ -103,7 +106,8 @@ export function middleware(req: NextRequest) {
     const rotaErrada =
       (isGestor && role !== "gestor" && role !== "admin") ||
       (isStaff && role !== "staff") ||
-      (isParceiro && role !== "parceiro");
+      (isParceiro && role !== "parceiro") ||
+      (isFornecedor && role !== "fornecedor");
     if (rotaErrada) {
       const url = req.nextUrl.clone();
       url.pathname = rotaEsperada;
@@ -128,5 +132,5 @@ export function middleware(req: NextRequest) {
 export const config = {
   // Rebrand SSO: /admin/:path* removido (páginas eliminadas).
   // HF27 — /parceiro/:path* adicionado (portal B2B).
-  matcher: ["/", "/login", "/gestor/:path*", "/staff/:path*", "/parceiro/:path*"],
+  matcher: ["/", "/login", "/gestor/:path*", "/staff/:path*", "/parceiro/:path*", "/fornecedor/:path*"],
 };

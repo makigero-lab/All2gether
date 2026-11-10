@@ -6,9 +6,7 @@ import {
   Clock,
   ClipboardList,
   LogOut,
-  CalendarDays,
-  CalendarOff,
-  Bell,
+  UserRound,
   Loader2,
   AlertTriangle,
   Send,
@@ -19,6 +17,7 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { TaskCard } from "@/components/staff/task-card";
+import { LimpezasLivres } from "@/components/staff/limpezas-livres";
 import {
   Dialog,
   DialogHeader,
@@ -32,7 +31,8 @@ import { fazerLogout, lerUtilizador } from "@/lib/auth";
 import type { UtilizadorAuth } from "@/lib/auth";
 import { NotificationBell } from "@/components/notification-bell";
 // Prompt Extra — parsearDataSegura para compatibilidade Safari/iOS.
-import { parsearDataSegura } from "@/lib/utils";
+import { dataPorExtenso, parsearDataSegura } from "@/lib/utils";
+import { mensagemErro } from "@/lib/rascunho-staff";
 
 /**
  * Interface para a tarefa real vinda da API.
@@ -40,11 +40,12 @@ import { parsearDataSegura } from "@/lib/utils";
  */
 interface TarefaReal {
   _id: string;
-  propriedade_id?: { nome: string; morada?: string } | null;
+  propriedade_id?: { nome: string; morada?: string; fornecedor_id?: string | null } | null;
   data: string;
   tipo: string;
   estado: string;
   tempo_limpeza_minutos: number;
+  tipo_limpeza?: string | null;
   // Prompt 136 — detalhes_reserva (para mostrar nome_hospede no cartão).
   detalhes_reserva?: {
     checkin?: string | null;
@@ -54,6 +55,11 @@ interface TarefaReal {
   } | null;
   // Prompt 137 — tempo de viagem (para badge no cartão).
   tempo_viagem_minutos?: number | null;
+  equipa_nomes?: Array<{ _id: string; nome: string; responsavel: boolean; eu?: boolean }> | null;
+  iniciada_em?: string | null;
+  inicio_origem?: "botao" | "automatico" | null;
+  nao_consegui_comecar?: { motivo: string; nota?: string; em?: string } | null;
+  roupa_entregue?: boolean;
 }
 
 /**
@@ -66,6 +72,7 @@ function adaptarTarefa(t: TarefaReal) {
     propriedade_nome: t.propriedade_id?.nome ?? "Propriedade",
     hora_limite: "",
     tempo_estimado_minutos: t.tempo_limpeza_minutos,
+    tipo_limpeza: t.tipo_limpeza ?? null,
     estado: t.estado as "por_atribuir" | "atribuida" | "em_curso" | "concluida" | "cancelada",
     tipo: t.tipo as "limpeza" | "check_in" | "check_out" | "manutencao" | "outro",
     endereco: t.propriedade_id?.morada,
@@ -76,6 +83,12 @@ function adaptarTarefa(t: TarefaReal) {
     detalhes_reserva: t.detalhes_reserva ?? null,
     // Prompt 137 — repassa tempo_viagem_minutos para o badge no cartão.
     tempo_viagem_minutos: t.tempo_viagem_minutos ?? null,
+    equipa_nomes: t.equipa_nomes ?? null,
+    iniciada_em: t.iniciada_em ?? null,
+    inicio_origem: t.inicio_origem ?? null,
+    nao_consegui_comecar: t.nao_consegui_comecar ?? null,
+    tem_lavandaria: !!t.propriedade_id?.fornecedor_id,
+    roupa_entregue: t.roupa_entregue === true,
   };
 }
 
@@ -90,6 +103,7 @@ export default function StaffPage() {
   const [user, setUser] = useState<UtilizadorAuth | null>(null);
   const [tarefas, setTarefas] = useState<TarefaReal[]>([]);
   const [loading, setLoading] = useState(true);
+  const [erroCarregar, setErroCarregar] = useState(false); // falha de rede/servidor (≠ lista vazia)
 
   // Estado da funcionalidade "Reportar Falta Hoje".
   const [faltaPendente, setFaltaPendente] = useState(false); // já reportou hoje?
@@ -98,8 +112,10 @@ export default function StaffPage() {
   const [submetendoFalta, setSubmetendoFalta] = useState(false);
   const [erroFalta, setErroFalta] = useState<string | null>(null);
 
-  const carregar = useCallback(async () => {
-    setLoading(true);
+  // `silencioso`: recarrega sem o ecrã de carregamento (não desmonta as Limpezas livres,
+  // que mostram a confirmação depois de Aceitar).
+  const carregar = useCallback(async (silencioso = false) => {
+    if (!silencioso) setLoading(true);
     try {
       // Prompt 113 — Usa lerUtilizador() (com cache temporal) em vez de
       // fetch direto a /api/auth/me. Isto evita:
@@ -113,6 +129,7 @@ export default function StaffPage() {
       const userData = await lerUtilizador();
       if (userData) setUser(userData);
 
+      setErroCarregar(false);
       const [tarefasRes, ausenciasRes] = await Promise.all([
         fetch("/api/auth/me/tarefas", { credentials: "include", cache: "no-store" }),
         fetch("/api/staff/ausencias", { credentials: "include", cache: "no-store" }),
@@ -121,6 +138,9 @@ export default function StaffPage() {
       if (tarefasRes.ok) {
         const data = await tarefasRes.json();
         setTarefas(data.tarefas ?? []);
+      } else {
+        // 401 é tratado pelo middleware/login; qualquer outra falha é mostrada.
+        setErroCarregar(true);
       }
 
       // Verifica se já existe uma ausência pendente_emergencia para hoje.
@@ -140,7 +160,7 @@ export default function StaffPage() {
         setFaltaPendente(temFaltaHoje);
       }
     } catch {
-      // silencioso
+      setErroCarregar(true);
     } finally {
       setLoading(false);
     }
@@ -173,13 +193,13 @@ export default function StaffPage() {
       setJustificacao("");
       setFaltaPendente(true);
     } catch (e) {
-      setErroFalta(e instanceof Error ? e.message : "Erro ao reportar falta.");
+      setErroFalta(mensagemErro(e, "Erro ao reportar falta."));
     } finally {
       setSubmetendoFalta(false);
     }
   }
 
-  const nome = user?.nome ?? "Staff";
+  const nome = user?.nome ?? "Equipa";
   const iniciais = nome
     .split(" ")
     .map((p) => p[0])
@@ -187,10 +207,6 @@ export default function StaffPage() {
     .join("")
     .toUpperCase();
 
-  const totalMinutos = tarefas.reduce(
-    (acc, t) => acc + t.tempo_limpeza_minutos,
-    0
-  );
 
   // Prompt 120 — Evitar mismatch de hidratação: a data formatada depende do
   // timezone do cliente. No SSR (servidor UTC) e no CSR (browser Lisboa) o
@@ -206,11 +222,7 @@ export default function StaffPage() {
   const [offsetDia, setOffsetDia] = useState(0);
 
   const hoje = mounted
-    ? new Date().toLocaleDateString("pt-PT", {
-        weekday: "long",
-        day: "numeric",
-        month: "long",
-      })
+    ? dataPorExtenso(new Date())
     : "";
 
   // Calcula a data do dia selecionado.
@@ -227,12 +239,7 @@ export default function StaffPage() {
     if (offsetDia === 0) return "Hoje";
     if (offsetDia === -1) return "Ontem";
     if (offsetDia === 1) return "Amanhã";
-    return diaSelecionadoDate.toLocaleDateString("pt-PT", {
-      weekday: "long",
-      day: "numeric",
-      month: "long",
-      timeZone: "Europe/Lisbon",
-    });
+    return dataPorExtenso(diaSelecionadoDate);
   }, [offsetDia, diaSelecionadoDate]);
 
   // Filtra as tarefas do dia selecionado (ativas + concluídas).
@@ -244,12 +251,14 @@ export default function StaffPage() {
   }, [tarefas, diaSelecionadoStr]);
 
   const tarefasAtivasDia = tarefasDoDia.filter((t) => t.estado !== "concluida");
+  // Resumo do cabeçalho: só tarefas por fazer do dia selecionado.
+  const totalMinutos = tarefasAtivasDia.reduce((acc, t) => acc + t.tempo_limpeza_minutos, 0);
   const tarefasConcluidasDia = tarefasDoDia.filter((t) => t.estado === "concluida");
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-md flex-col bg-muted/20">
       {/* Cabeçalho */}
-      <header className="sticky top-0 z-10 border-b bg-background/95 px-5 pb-4 pt-6 backdrop-blur">
+      <header className="sticky top-0 z-20 border-b bg-background/95 px-5 pb-4 pt-6 backdrop-blur">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <Avatar>
@@ -265,10 +274,18 @@ export default function StaffPage() {
           {/* Prompt 114 — Sino de Notificações + Botão logout */}
           <div className="flex items-center gap-1">
             <NotificationBell />
+            <Link
+              href="/staff/perfil"
+              aria-label="O meu perfil"
+              title="O meu perfil"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground sm:h-9 sm:w-9"
+            >
+              <UserRound className="h-5 w-5" />
+            </Link>
             <Button
               variant="ghost"
               size="icon"
-              className="text-muted-foreground hover:text-destructive"
+              className="h-11 w-11 sm:h-9 sm:w-9 text-muted-foreground hover:text-destructive"
               onClick={() => fazerLogout()}
               aria-label="Terminar sessão"
               title="Terminar sessão"
@@ -280,11 +297,11 @@ export default function StaffPage() {
 
         {/* Data + resumo */}
         <div className="mt-4 flex items-center justify-between">
-          <p className="text-sm capitalize text-muted-foreground">{hoje}</p>
+          <p className="text-sm text-muted-foreground">{hoje}</p>
           <div className="flex items-center gap-3 text-xs text-muted-foreground">
             <span className="flex items-center gap-1">
               <ClipboardList className="h-3.5 w-3.5" />
-              {tarefas.length} tarefas
+              {tarefasAtivasDia.length} {tarefasAtivasDia.length === 1 ? "tarefa" : "tarefas"}
             </span>
             <span className="flex items-center gap-1">
               <Clock className="h-3.5 w-3.5" />
@@ -299,51 +316,32 @@ export default function StaffPage() {
         {/* v1.66.0 (Prompt 89) — PushNotificationSetup movido para staff/layout.tsx
             para que apareça em TODAS as páginas do staff, não só no dashboard. */}
 
-        {/* Reportar Falta Hoje — botão ou aviso de já reportado */}
+        {/* Reportar Falta Hoje — aviso se já reportada, senão ação discreta.
+            (Agenda, Ausências e Avisos estão na barra de navegação inferior.) */}
         {faltaPendente ? (
           <div className="flex items-start gap-2 rounded-lg border border-amber-500/50 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
             <span>
-              <strong>Falta reportada.</strong> Aguarda confirmação do Administrador.
+              <strong>Falta reportada.</strong> Aguarda confirmação do Gestor.
             </span>
           </div>
         ) : (
-          <Button
-            variant="outline"
-            className="w-full justify-center gap-2 border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive"
-            onClick={() => {
-              setMostrarDialogFalta(true);
-              setErroFalta(null);
-            }}
-          >
-            <AlertTriangle className="h-4 w-4" />
-            Reportar Falta Hoje
-          </Button>
+          <div className="-my-2 flex justify-end">
+            {/* Discreto (texto pequeno) mas com a área de toque de 44 px (size touch). */}
+            <Button
+              variant="ghost"
+              size="touch"
+              className="gap-1.5 px-2 text-xs font-normal text-destructive hover:bg-destructive/10 hover:text-destructive"
+              onClick={() => {
+                setMostrarDialogFalta(true);
+                setErroFalta(null);
+              }}
+            >
+              <AlertTriangle className="h-3.5 w-3.5" />
+              Reportar falta hoje
+            </Button>
+          </div>
         )}
-
-        {/* Botão Ver a minha Agenda */}
-        <Link href="/staff/calendario" prefetch>
-          <Button variant="outline" className="w-full justify-center gap-2">
-            <CalendarDays className="h-4 w-4" />
-            Ver a minha Agenda
-          </Button>
-        </Link>
-
-        {/* Botão Pedidos de Ausência */}
-        <Link href="/staff/ausencias" prefetch>
-          <Button variant="outline" className="w-full justify-center gap-2">
-            <CalendarOff className="h-4 w-4" />
-            Pedidos de Ausência
-          </Button>
-        </Link>
-
-        {/* Task 131 — Botão Histórico de Notificações */}
-        <Link href="/staff/notificacoes" prefetch>
-          <Button variant="outline" className="w-full justify-center gap-2">
-            <Bell className="h-4 w-4" />
-            Histórico de Notificações
-          </Button>
-        </Link>
 
         {loading ? (
           <div className="flex items-center justify-center gap-2 py-20 text-sm text-muted-foreground">
@@ -356,7 +354,7 @@ export default function StaffPage() {
             <div className="flex items-center justify-between gap-2">
               <Button
                 variant="outline"
-                size="sm"
+                size="touch"
                 onClick={() => setOffsetDia((d) => d - 1)}
                 className="gap-1"
                 title="Dia anterior"
@@ -365,13 +363,13 @@ export default function StaffPage() {
                 Anterior
               </Button>
               <div className="flex flex-col items-center">
-                <span className={`text-sm font-bold capitalize ${offsetDia === 0 ? "text-primary" : "text-foreground"}`}>
+                <span className={`text-sm font-bold ${offsetDia === 0 ? "text-brand-text" : "text-foreground"}`}>
                   {diaLabel}
                 </span>
                 {offsetDia !== 0 && (
                   <button
                     onClick={() => setOffsetDia(0)}
-                    className="text-xs text-primary hover:underline"
+                    className="px-2 py-2 text-xs font-medium text-brand-text hover:underline"
                   >
                     Voltar a Hoje
                   </button>
@@ -379,7 +377,7 @@ export default function StaffPage() {
               </div>
               <Button
                 variant="outline"
-                size="sm"
+                size="touch"
                 onClick={() => setOffsetDia((d) => d + 1)}
                 className="gap-1"
                 title="Dia seguinte"
@@ -393,10 +391,13 @@ export default function StaffPage() {
             {tarefasAtivasDia.length > 0 && (
               <div className="space-y-4">
                 {tarefasAtivasDia.map((t) => (
-                  <TaskCard key={t._id} tarefa={adaptarTarefa(t)} />
+                  <TaskCard key={t._id} tarefa={adaptarTarefa(t)} onAtualizar={carregar} />
                 ))}
               </div>
             )}
+
+            {/* Limpezas livres oferecidas a toda a equipa (aceita quem chegar primeiro): depois do trabalho do dia */}
+            <LimpezasLivres onAceite={() => carregar(true)} limite={3} />
 
             {/* Tarefas concluídas do dia selecionado */}
             {tarefasConcluidasDia.length > 0 && (
@@ -415,8 +416,21 @@ export default function StaffPage() {
               </div>
             )}
 
+            {/* Falha ao carregar — distinto de "sem tarefas" */}
+            {erroCarregar && (
+              <div
+                role="alert"
+                className="flex flex-col items-center gap-3 rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-center text-sm text-destructive"
+              >
+                <p>Não foi possível carregar as tuas tarefas. Verifica a ligação e tenta de novo.</p>
+                <Button variant="outline" size="touch" onClick={() => { setLoading(true); carregar(); }}>
+                  Tentar de novo
+                </Button>
+              </div>
+            )}
+
             {/* Sem tarefas no dia selecionado */}
-            {tarefasDoDia.length === 0 && (
+            {!erroCarregar && tarefasDoDia.length === 0 && (
               <div className="mt-10 flex flex-col items-center gap-2 text-center text-muted-foreground">
                 <ClipboardList className="h-10 w-10 opacity-40" />
                 <p className="text-sm">Sem tarefas neste dia.</p>
@@ -436,11 +450,11 @@ export default function StaffPage() {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <AlertTriangle className="h-5 w-5 text-destructive" />
-            Reportar Falta Hoje
+            Reportar falta hoje
           </DialogTitle>
           <DialogDescription>
-            Tem a certeza que não pode trabalhar hoje? O Administrador será
-            notificado para redistribuir as suas tarefas.
+            Tens a certeza de que não podes trabalhar hoje? O gestor será
+            notificado para redistribuir as tuas tarefas.
           </DialogDescription>
           <DialogClose onClick={() => setMostrarDialogFalta(false)} />
         </DialogHeader>
@@ -464,7 +478,7 @@ export default function StaffPage() {
             )}
           </DialogContent>
           <DialogFooter>
-            <Button
+            <Button size="touch"
               type="button"
               variant="outline"
               onClick={() => setMostrarDialogFalta(false)}
@@ -472,7 +486,7 @@ export default function StaffPage() {
             >
               Cancelar
             </Button>
-            <Button
+            <Button size="touch"
               type="submit"
               variant="destructive"
               disabled={submetendoFalta}
@@ -485,7 +499,7 @@ export default function StaffPage() {
               ) : (
                 <>
                   <Send className="mr-2 h-4 w-4" />
-                  Confirmar Falta
+                  Confirmar falta
                 </>
               )}
             </Button>

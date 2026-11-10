@@ -78,7 +78,7 @@ export function PaginationBar({
               onChange={(e) => onPageSizeChange(Number(e.target.value))}
               aria-label="Itens por página"
               className={cn(
-                "h-7 rounded-md border border-input bg-background px-2 text-xs",
+                "h-11 rounded-md border border-input bg-background px-2 text-xs sm:h-7",
                 "focus:outline-none focus:ring-2 focus:ring-ring"
               )}
             >
@@ -97,7 +97,7 @@ export function PaginationBar({
           <Button
             variant="outline"
             size="icon"
-            className="h-8 w-8"
+            className="h-11 w-11 sm:h-8 sm:w-8"
             onClick={() => irPara(1)}
             disabled={page === 1}
             aria-label="Primeira página"
@@ -107,7 +107,7 @@ export function PaginationBar({
           <Button
             variant="outline"
             size="icon"
-            className="h-8 w-8"
+            className="h-11 w-11 sm:h-8 sm:w-8"
             onClick={() => irPara(page - 1)}
             disabled={page === 1}
             aria-label="Página anterior"
@@ -124,7 +124,7 @@ export function PaginationBar({
                 key={p}
                 variant={p === page ? "default" : "outline"}
                 size="icon"
-                className="h-8 w-8 text-xs"
+                className="h-11 w-11 text-xs sm:h-8 sm:w-8"
                 onClick={() => irPara(p)}
                 aria-label={`Página ${p}`}
                 aria-current={p === page ? "page" : undefined}
@@ -136,7 +136,7 @@ export function PaginationBar({
           <Button
             variant="outline"
             size="icon"
-            className="h-8 w-8"
+            className="h-11 w-11 sm:h-8 sm:w-8"
             onClick={() => irPara(page + 1)}
             disabled={page === totalPages}
             aria-label="Página seguinte"
@@ -146,7 +146,7 @@ export function PaginationBar({
           <Button
             variant="outline"
             size="icon"
-            className="h-8 w-8"
+            className="h-11 w-11 sm:h-8 sm:w-8"
             onClick={() => irPara(totalPages)}
             disabled={page === totalPages}
             aria-label="Última página"

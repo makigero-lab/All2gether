@@ -68,7 +68,7 @@ async function verificarDisponibilidadeUtilizador(utilizadorId, dataTarefa) {
 
   const candidatos = await Ausencia.find({
     utilizador_id: utilizadorId,
-    estado: 'aprovada',
+    estado: { $in: ['aprovada', 'pendente_emergencia'] },
     data_inicio: { $lte: diaFim },
     data_fim: { $gte: diaInicio },
   })
@@ -107,6 +107,7 @@ function mensagemIndisponivel(ausencia) {
   const tipoLabel =
     ausencia.tipo === 'ferias' ? 'Férias'
     : ausencia.tipo === 'doenca' ? 'Baixa por doença'
+    : ausencia.tipo === 'falta' ? 'Falta'
     : 'Ausência aprovada';
 
   const inicio = dataLisboa(ausencia.data_inicio);

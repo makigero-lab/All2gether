@@ -94,7 +94,7 @@ export default function ParceirosPage() {
       );
       setParceiros(data.utilizadores ?? []);
     } catch (e) {
-      setErro(e instanceof Error ? e.message : "Erro ao carregar parceiros.");
+      setErro(e instanceof Error ? e.message : "Erro ao carregar proprietários.");
     } finally {
       setLoading(false);
     }
@@ -108,7 +108,7 @@ export default function ParceirosPage() {
     e.preventDefault();
     setCriarErro(null);
     if (!criarForm.nome.trim() || !criarForm.email.trim() || !criarForm.password) {
-      setCriarErro("Nome, Email e Password são obrigatórios.");
+      setCriarErro("Nome, email e palavra-passe são obrigatórios.");
       return;
     }
     if (criarForm.password.length < 6) {
@@ -130,7 +130,7 @@ export default function ParceirosPage() {
       setCriarOpen(false);
       await carregar();
     } catch (e) {
-      setCriarErro(e instanceof Error ? e.message : "Erro ao criar parceiro.");
+      setCriarErro(e instanceof Error ? e.message : "Erro ao criar proprietário.");
     } finally {
       setCriarSubmitting(false);
     }
@@ -176,7 +176,7 @@ export default function ParceirosPage() {
       setEditando(null);
       await carregar();
     } catch (e) {
-      setEditErro(e instanceof Error ? e.message : "Erro ao editar parceiro.");
+      setEditErro(e instanceof Error ? e.message : "Erro ao editar proprietário.");
     } finally {
       setEditSubmitting(false);
     }
@@ -203,9 +203,9 @@ export default function ParceirosPage() {
       {/* Cabeçalho */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="hidden flex-col gap-1 lg:flex">
-          <h1 className="text-2xl font-bold tracking-tight">Parceiros</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Proprietários</h1>
           <p className="text-sm text-muted-foreground">
-            Gestão de parceiros B2B externos (criam reservas no portal /parceiro).
+            Gestão de proprietários externos (criam reservas no portal do proprietário).
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -220,7 +220,7 @@ export default function ParceirosPage() {
           </Button>
           <Button onClick={() => { setCriarOpen(true); setCriarErro(null); }}>
             <Plus className="h-4 w-4" />
-            Novo Parceiro
+            Novo proprietário
           </Button>
         </div>
       </div>
@@ -241,17 +241,17 @@ export default function ParceirosPage() {
         <CardContent className="p-0">
           {loading ? (
             <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
-              <Loader2 className="h-5 w-5 animate-spin" />A carregar parceiros…
+              <Loader2 className="h-5 w-5 animate-spin" />A carregar proprietários…
             </div>
           ) : parceiros.length === 0 ? (
             <div className="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">
               <Handshake className="h-10 w-10 opacity-40" />
-              <p className="text-sm">Ainda não há parceiros.</p>
-              <p className="text-xs">Clica em &quot;Novo Parceiro&quot; para adicionar o primeiro.</p>
+              <p className="text-sm">Ainda não há proprietários.</p>
+              <p className="text-xs">Clica em &quot;Novo Proprietário&quot; para adicionar o primeiro.</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="rt w-full text-sm">
                 <thead>
                   <tr className="border-b bg-muted/40 text-left">
                     <th className="px-4 py-3 font-medium">Nome</th>
@@ -315,11 +315,11 @@ export default function ParceirosPage() {
       <Dialog open={criarOpen} onOpenChange={setCriarOpen}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Handshake className="h-5 w-5 text-primary" />
-            Novo Parceiro
+            <Handshake className="h-5 w-5 text-brand-text" />
+            Novo proprietário
           </DialogTitle>
           <DialogDescription>
-            Cria um parceiro B2B. Ele terá acesso ao portal /parceiro para criar reservas.
+            Cria um proprietário. Terá acesso ao portal do proprietário para criar reservas.
           </DialogDescription>
           <DialogClose onClick={() => setCriarOpen(false)} />
         </DialogHeader>
@@ -347,13 +347,13 @@ export default function ParceirosPage() {
                 type="email"
                 value={criarForm.email}
                 onChange={(e) => setCriarForm((f) => ({ ...f, email: e.target.value }))}
-                placeholder="parceiro@empresa.com"
+                placeholder="proprietario@empresa.com"
                 required
               />
             </div>
             <div className="space-y-1.5">
               <label htmlFor="criar-password" className="text-sm font-medium">
-                Password <span className="text-destructive">*</span>
+                Palavra-passe <span className="text-destructive">*</span>
               </label>
               <div className="relative">
                 <Input
@@ -368,7 +368,7 @@ export default function ParceirosPage() {
                   type="button"
                   onClick={() => setShowPassword((v) => !v)}
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                  aria-label={showPassword ? "Ocultar password" : "Mostrar password"}
+                  aria-label={showPassword ? "Ocultar palavra-passe" : "Mostrar palavra-passe"}
                 >
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
@@ -382,7 +382,7 @@ export default function ParceirosPage() {
                   type="tel"
                   value={criarForm.telefone}
                   onChange={(e) => setCriarForm((f) => ({ ...f, telefone: e.target.value }))}
-                  placeholder="+351 912 345 678"
+                  placeholder="900 000 000"
                 />
               </div>
               <div className="space-y-1.5">
@@ -402,7 +402,7 @@ export default function ParceirosPage() {
                 value={criarForm.observacoes}
                 onChange={(e) => setCriarForm((f) => ({ ...f, observacoes: e.target.value }))}
                 rows={2}
-                placeholder="Notas internas (ex: Parceiro desde 2024, desconto 10%)"
+                placeholder="Notas internas (ex: Proprietário desde 2024, desconto 10%)"
                 className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </div>
@@ -421,7 +421,7 @@ export default function ParceirosPage() {
               {criarSubmitting ? (
                 <><Loader2 className="mr-2 h-4 w-4 animate-spin" />A criar…</>
               ) : (
-                <><Handshake className="mr-2 h-4 w-4" />Criar Parceiro</>
+                <><Handshake className="mr-2 h-4 w-4" />Criar Proprietário</>
               )}
             </Button>
           </DialogFooter>
@@ -432,8 +432,8 @@ export default function ParceirosPage() {
       <Dialog open={editando !== null} onOpenChange={(o) => !o && setEditando(null)}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Pencil className="h-5 w-5 text-primary" />
-            Editar Parceiro
+            <Pencil className="h-5 w-5 text-brand-text" />
+            Editar proprietário
           </DialogTitle>
           <DialogDescription>{editando?.email}</DialogDescription>
           <DialogClose onClick={() => setEditando(null)} />
@@ -461,7 +461,7 @@ export default function ParceirosPage() {
             </div>
             <div className="space-y-1.5">
               <label htmlFor="edit-password" className="text-sm font-medium">
-                Nova Password (opcional)
+                Nova palavra-passe (opcional)
               </label>
               <div className="relative">
                 <Input
@@ -475,7 +475,7 @@ export default function ParceirosPage() {
                   type="button"
                   onClick={() => setShowEditPassword((v) => !v)}
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                  aria-label={showEditPassword ? "Ocultar password" : "Mostrar password"}
+                  aria-label={showEditPassword ? "Ocultar palavra-passe" : "Mostrar palavra-passe"}
                 >
                   {showEditPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>

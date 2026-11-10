@@ -24,10 +24,67 @@
 
 const cron = require('node-cron');
 const Tarefa = require('../models/Tarefa');
+const Propriedade = require('../models/Propriedade');
+const { membrosPopulados } = require('../utils/equipaTarefa');
+const H = require('../utils/horario');
+const { notificarSino } = require('../utils/notificar');
+const { horaLisboa } = require('../utils/cicloTarefa');
 // Nota: notificarUtilizador é carregado via require lazy dentro da função
 // (e não no topo) para permitir que os testes façam jest.spyOn do módulo
 // 'utils/notificar' e interceptem as chamadas. Se fosse importado no topo,
 // a referência ficaria "fechada" (closed over) e o spy não teria efeito.
+
+/**
+ * Aviso no sino da lavandaria: «Amanhã: N casas» (casas com limpeza amanhã, das que lhe estão
+ * atribuídas). Sem push. Idempotente: a chave leva o dia, por isso reexecutar não duplica.
+ */
+async function avisarLavandarias(amanhaInicio, amanhaFim) {
+  const dia = amanhaInicio.toISOString().slice(0, 10);
+  const comLavandaria = await Propriedade.find({ fornecedor_id: { $ne: null }, ativo: true })
+    .select('_id nome fornecedor_id empresa_id')
+    .lean();
+  if (comLavandaria.length === 0) return { avisados: 0 };
+  const porId = new Map(comLavandaria.map((p) => [String(p._id), p]));
+  const tarefas = await Tarefa.find({
+    propriedade_id: { $in: comLavandaria.map((p) => p._id) },
+    tipo: 'limpeza',
+    data: { $gte: amanhaInicio, $lt: amanhaFim },
+    estado: { $nin: ['cancelada'] },
+  }).select('propriedade_id').lean();
+  const porFornecedor = new Map();
+  for (const t of tarefas) {
+    const p = porId.get(String(t.propriedade_id));
+    if (!p) continue;
+    const f = String(p.fornecedor_id);
+    if (!porFornecedor.has(f)) porFornecedor.set(f, { empresa: p.empresa_id, casas: new Map() });
+    porFornecedor.get(f).casas.set(String(p._id), p.nome);
+  }
+  let avisados = 0;
+  for (const [fornecedorId, { empresa, casas }] of porFornecedor) {
+    const nomes = [...casas.values()];
+    const texto = `Amanhã: ${nomes.length} ${nomes.length === 1 ? 'casa' : 'casas'} (${nomes.slice(0, 5).join(', ')}${nomes.length > 5 ? '…' : ''}).`;
+    const criada = await notificarSino(fornecedorId, texto, {
+      tipo: 'aviso', url: '/fornecedor/tarefas', empresa_id: empresa ? String(empresa) : null, chave: `lav_amanha:${dia}`,
+    });
+    if (criada) avisados++;
+  }
+  return { avisados };
+}
+
+/**
+ * Texto do aviso da véspera: nº de tarefas + hora e casa da PRIMEIRA limpeza (a que tem hora
+ * real e é mais cedo). Sem hora real (ainda por calcular), diz só a casa.
+ */
+function textoAgenda(tarefasUser) {
+  const count = tarefasUser.length;
+  const base = `Tens ${count} ${count === 1 ? 'tarefa agendada' : 'tarefas agendadas'}`;
+  const ordenadas = [...tarefasUser].sort((a, b) => new Date(a.data) - new Date(b.data));
+  const primeira = ordenadas.find((t) => H.temHoraReal(t.data)) || ordenadas[0];
+  const casa = primeira && primeira.propriedade_id && primeira.propriedade_id.nome;
+  if (!primeira || !casa) return `${base}. Entra na app para ver o itinerário`;
+  const quando = H.temHoraReal(primeira.data) ? `às ${horaLisboa(primeira.data)}` : 'amanhã';
+  return `${base}. A primeira é ${quando} em ${casa}. Entra na app para ver o itinerário`;
+}
 
 /**
  * Executa o job "Agenda de Amanhã".
@@ -50,6 +107,13 @@ async function executarAgendaAmanha() {
     amanhaInicio.setUTCDate(amanhaInicio.getUTCDate() + 1);
     const amanhaFim = new Date(amanhaInicio.getTime() + 24 * 60 * 60 * 1000);
 
+    // 1b) Lavandaria: «Amanhã: N casas» no sino (independente de haver staff atribuído).
+    try {
+      await avisarLavandarias(amanhaInicio, amanhaFim);
+    } catch (e) {
+      console.error('⚠️  [Agenda de Amanhã] lavandaria:', e.message);
+    }
+
     // 2) Procura as Tarefas do dia seguinte com estado 'atribuida' ou
     //    'por_atribuir'. Popula o utilizador (nome + ativo + eliminado_em)
     //    para poder filtrar e agrupar.
@@ -57,8 +121,13 @@ async function executarAgendaAmanha() {
       data: { $gte: amanhaInicio, $lt: amanhaFim },
       estado: { $in: ['atribuida', 'por_atribuir'] },
     })
+      .populate({ path: 'propriedade_id', select: 'nome' })
       .populate({
         path: 'utilizador_id',
+        select: 'nome ativo eliminado_em',
+      })
+      .populate({
+        path: 'equipa_atribuida',
         select: 'nome ativo eliminado_em',
       })
       .lean();
@@ -73,16 +142,18 @@ async function executarAgendaAmanha() {
     //    (utilizador_id = null) não têm destinatário → não geram push.
     const porUtilizador = new Map();
 
+    // Todos os membros da equipa (não só o responsável) recebem a agenda.
     for (const t of tarefas) {
-      const u = t.utilizador_id;
-      // Ignora tarefas sem utilizador, eliminados ou inativos.
-      if (!u || u.eliminado_em || !u.ativo) continue;
+      for (const u of membrosPopulados(t)) {
+        // Ignora eliminados ou inativos.
+        if (u.eliminado_em || !u.ativo) continue;
 
-      const key = String(u._id);
-      if (!porUtilizador.has(key)) {
-        porUtilizador.set(key, { utilizador: u, tarefas: [] });
+        const key = String(u._id);
+        if (!porUtilizador.has(key)) {
+          porUtilizador.set(key, { utilizador: u, tarefas: [] });
+        }
+        porUtilizador.get(key).tarefas.push(t);
       }
-      porUtilizador.get(key).tarefas.push(t);
     }
 
     if (porUtilizador.size === 0) {
@@ -103,11 +174,11 @@ async function executarAgendaAmanha() {
       notificarUtilizador(
         String(utilizador._id),
         '📅 Agenda de Amanhã',
-        `Tens ${count} ${count === 1 ? 'tarefa agendada' : 'tarefas agendadas'}. ` +
-          `Entra na app para ver o itinerário`,
+        textoAgenda(tarefasUser),
         '/staff',
-        // Prompt 115 — Agenda de Amanhã é "principal" → cria in-app.
-        { criarInApp: true, tipo: 'sistema' }
+        // Prompt 115 — Agenda de Amanhã é "principal" → cria in-app. A chave do dia impede
+        // duplicados se o job correr duas vezes.
+        { criarInApp: true, tipo: 'sistema', chave: `agenda_amanha:${amanhaInicio.toISOString().slice(0, 10)}` }
       );
       notificados++;
     }
@@ -154,4 +225,4 @@ function iniciarAgendaAmanha() {
   return { executarAgendaAmanha };
 }
 
-module.exports = { iniciarAgendaAmanha, executarAgendaAmanha };
+module.exports = { iniciarAgendaAmanha, executarAgendaAmanha, textoAgenda, avisarLavandarias };

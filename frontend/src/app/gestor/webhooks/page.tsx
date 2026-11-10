@@ -23,7 +23,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { adminGet, adminPost } from "@/lib/api";
-import { parsearDataSegura } from "@/lib/utils";
+import { parsearDataSegura, plural } from "@/lib/utils";
 
 /* ------------------------------------------------------------------ */
 /* Tipos                                                               */
@@ -227,11 +227,11 @@ export default function WebhooksPage() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <WebhookIcon className="h-5 w-5 text-primary" />
+            <WebhookIcon className="h-5 w-5 text-brand-text" />
             Logs recentes
           </CardTitle>
           <CardDescription>
-            {total} webhook(s) no total. Ordenados por data decrescente.
+            {plural(total, "webhook")} no total. Ordenados por data decrescente.
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">

@@ -2232,3 +2232,127 @@ Stage Summary:
 - **UI limpa:** ferramentas de dev (Diagnóstico, Reaplicar) removidas da página de Ausências. Produção sem utilitários técnicos.
 - **Sem regressões:** 111/111 testes Jest; tsc 0 erros; ESLint 0 erros.
 - **Próximo passo (este commit):** commit + push para `dev` com a mensagem `fix: associa parceiro relacional, status smoobu real, configs restritas a admin e limpa dev UI`.
+
+
+---
+
+Task ID: SMOOBU-DADOS-RESERVA
+Agent: Claude Code (Master)
+Task: Guardar mais dados das reservas do Smoobu, ignorar bloqueios e rever a retenção RGPD.
+
+Work Log:
+- **Campos novos em `detalhes_reserva`** (Tarefa e TarefaArquivo): `hora_checkin`, `hora_checkout`, `adultos`, `criancas`, `notas_hospede`, `tipo_reserva`. Extraídos em `extrairDadosReserva` (também pela sincronização manual, que agora passa a reserva completa). Um `updateReservation` junta os dados novos aos já guardados em vez de os substituir.
+- **Email e telefone** ficam na coleção separada `ContactoHospede` (nunca dentro da tarefa), com índice TTL: apagam-se 90 dias depois do check-out. Só o admin os lê, em `GET /api/gestor/tarefas/:id/contacto-hospede`, e cada consulta fica em auditoria. No modal do gestor só se mostram se o utilizador for admin.
+- **Reservas bloqueadas** (`is-blocked-booking`): são ignoradas (não geram limpeza) e, se uma reserva com tarefa passar a bloqueio, a tarefa é cancelada. A limpeza faz-se no check-out da reserva anterior.
+- **Cancelamentos**: passam a ser reconhecidos `cancelReservation` e `deleteReservation` (nomes oficiais do Smoobu) e `updateReservation` com `type` "cancellation".
+- **Retenção dos logs de webhooks**: `WebhookLog.expira_em` = check-out + 90 dias (antes eram 90 dias após a receção, o que apagava a cópia de reservas feitas com muita antecedência). Migração idempotente no arranque: remove o índice TTL antigo sobre `createdAt` e calcula `expira_em` nos logs existentes.
+- **Logs no painel**: o email e o telefone aparecem como "[oculto]" para quem não é admin.
+
+Stage Summary:
+- Backend: 171/171 testes ✓ (3 execuções seguidas); frontend: `tsc`, lint e build ✓.
+- Atenção no primeiro arranque após o deploy: o log do servidor mostra "Retenção de WebhookLog: índice antigo removido=true, logs atualizados=N".
+
+
+---
+
+Task ID: SMOOBU-REVISAO-LOGS-RENDER
+Agent: Claude Code (Master)
+Task: Rever os logs do Render, limpar falsos erros do Smoobu e recuperar cancelamentos ignorados.
+
+Work Log:
+- **Falsos erros "Payload sem datas"**: eventos do Smoobu sem datas de reserva (`updateRates`, `newMessage`, `onlineCheckInUpdate`...) eram validados antes de a ação ser reconhecida e ficavam marcados como `erro` no painel de webhooks. Passam a ser ignorados logo no início e ficam `processado`.
+- **Cancelamentos antigos**: `cancelReservation` esteve a ser ignorado até à correção de 3/11 (logs de 12:42, 14:34 e 16:30). Novo `POST /api/gestor/smoobu/reconciliar-cancelamentos` (só admin, por defeito apenas lista): compara cada limpeza ativa com o ÚLTIMO webhook da reserva e cancela as que ficaram canceladas ou convertidas em bloqueio. As limpezas `em_curso` ficam para revisão manual e as `concluida` nunca são alteradas. Botão "Verificar Cancelamentos Pendentes" em Configurações → Integrações → Ações de Manutenção.
+- **Cancelar** nunca reescreve limpezas já concluídas.
+- **Push (VAPID)**: as chaves passam por normalização (aspas, espaços, quebras de linha e `=` finais), e a mensagem de erro diz o comprimento recebido (a chave pública deve ter 87 caracteres).
+- **Google Maps**: `duration.value = 0` (origem e destino no mesmo local, ex.: quartos do mesmo edifício) passa a ser aceite em vez de cair no fallback Haversine com aviso.
+- **Testes**: esperam pelo fim do processamento dos webhooks em vez de um tempo fixo (falhavam de forma intermitente); 180 testes, 6 execuções seguidas.
+
+Stage Summary:
+- No Render, o log do arranque de 3/11 21:58 confirma a migração de retenção: "índice antigo removido=true, logs atualizados=11609".
+- Pendente (config no Render, fora do código): confirmar `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY`; sem chaves válidas as notificações push não funcionam.
+
+
+---
+
+Task ID: DUAS-SAIDAS-BACKLOG-VAGAS-LIVRES
+Agent: Claude Code (@dev)
+Task: Duas saídas no mesmo dia, backlog da auditoria, vagas livres oferecidas à equipa e correções do @UX.
+
+Work Log:
+- **Duas saídas no mesmo dia e casa** deixam de dar 409 (`RESERVA_DUPLICADA`): a 2.ª reserva grava e fica associada à limpeza que já existia (`tarefa_gerada_id` partilhado, sem campo novo), com `aviso` e `associada_a_existente` na resposta (criar, alterar datas/tipo e, no gestor, «Mudar dia»: junta as duas, cancela a movida com motivo e passa as reservas para a existente). Ciclo de vida: eliminar ou mudar a 1.ª reserva mantém a limpeza enquanto houver outra reserva ligada (passa a descrever essa); só se cancela quando já não sobra nenhuma. A reconciliação do Smoobu recria uma só limpeza por casa/dia/tipo. No «Mudar dia» de uma limpeza que não é de proprietário (Smoobu, rotina) mantém-se o 409. O ecrã do parceiro mostra o aviso e a linha fica gravada.
+- **Backlog da auditoria**: (a) só o admin cria/edita/ativa/elimina gestores (um gestor edita-se a si, sem mudar o role); parceiro/fornecedor já não cancelam ausências nem usam `/api/staff/ausencias`; `diagnosticoAusencia` filtra por empresa; impersonation com sessão de 2 h, claim `imp` e auditoria; `/api/auth/me/tarefas/:id/concluir` exige fotos (delega no caminho do staff). (b) Webhook Smoobu: corpo máx. 256 KB (413 claro) só em `/api/smoobu`; continua aberto, sem autenticação nova. (c) CSP + `nosniff` + Referrer-Policy em `next.config.mjs`. (d) Service Worker: `/api/*` e outras origens em `NetworkOnly` (regras antes das predefinidas; estáticos continuam em cache). (e) Listagens do staff/Excel/CSV sem `fotos_conclusao` e `avarias.fotos`; o detalhe e a prova mantêm-nas. (f) Backend já usava Europe/Lisbon; corrigidos os crons sem fuso (briefing 08:00, rotinas, fotos) e a hora mostrada no staff/modal passa a ser a de Lisboa. (g) O modal de baixa tem seletor de tipo. (h) Novo tipo de ausência `falta`: falta súbita e «Falta hoje» deixam de gravar `doenca`/`outro` (dados antigos não foram migrados). (i) Relatório com IA: nomes enviados como «Pessoa N» e repostos na resposta. (j) Retenção RGPD (`jobs/retencao.js`, 03:30): nomes/notas de hóspedes anonimizados 90 dias depois; ausências por doença apagadas 12 meses após o fim e as outras 36 meses (por defeito, via `RETENCAO_*`); a confirmar com o @Legal. (k) Arquivista valida `meses` (1-120), valida cada tarefa antes de copiar, trabalha em lotes e só apaga o que ficou no arquivo.
+- **Vagas livres** (`utils/ofertaVaga.js`, `jobs/ofertaVagas.js`, `controllers/staffVagasController.js`): limpeza sem ninguém (ou com vaga numa equipa) é oferecida a todo o staff ativo não ausente nesse dia (sino + push «Há uma limpeza livre em X no dia d»); aceita quem chegar primeiro (compare-and-set; equipas de 2+ aceitam até preencher); hora recalculada ao aceitar, com aviso se ficar fora do horário. Prazo = o que vier primeiro entre as 18:00 de Lisboa da véspera e 2 h antes do início; sem tempo, não se oferece. Job de 5 em 5 min expira (gestores avisados, fica «por atribuir») e abre as ofertas em falta; a atribuição manual, o cancelamento e a mudança de dia fecham/recomeçam a oferta. Gestores veem «Vaga oferecida à equipa até HH:MM» (dashboard, tarefas, detalhe). Staff: cartão «Limpeza livre» com Aceitar. Desligada nos testes (`OFERTA_VAGAS_TESTE=1` liga) e com `OFERTA_VAGAS_DESLIGADA=1`.
+- **UX (parcial)**: tabela de tarefas com ações fixas à direita, Propriedade com 2 linhas, Hóspede/Qtd./Observações só a partir de 1440 px; filtros e diálogos sem estourar a largura a 375 px; dashboard com nomes truncados; separadores com scroll e alvos de 44 px; paginação com alvos de 44 px; cabeçalho «Horário».
+
+Stage Summary:
+- Testes novos: limpezaPartilhada, backlogAuditoria, vagasLivres; ajustados mudarDia, parceiroLote, tiposLimpeza, ultimoLote.
+- Fica por fazer das correções do @UX: I1/I2/I3 (calendário no telemóvel e Semana), I4, I6, P1, P2, P3, P5.
+- **Achados do @Tester (tarefa 5)**: Mudar dia e ausências (DELETE/cancelar/aprovar) devolvem 409 `CONFLITO_CONCORRENCIA` em vez de 500 (cancelar é atómico; `utils/concorrencia.js` nos outros `save()` de tarefa); Mudar dia recusa dias passados (Lisboa) e > 2 anos e avisa se a hora pedida está fora do horário; «Dia da limpeza recalculado» só quando o dia mudou; intermédia no passado dá 400; `desatribuida_manual` impede `preencherVagasPeriodo` de preencher o que o gestor desatribuiu; notas da nova reserva crescem (mín. 4 linhas); «Parceiro» -> «Proprietário» no gestor; Hóspede com 2 linhas.
+- Totais finais: backend 532/532 testes (40 suites), frontend 42/42, tsc e lint limpos, build OK.
+
+
+---
+
+Task ID: RETENCAO-RGPD-PRAZOS-FINAIS
+Agent: Claude Code (@dev)
+Task: Prazos de retenção RGPD recomendados pelo @Legal.
+
+Work Log:
+- `ContactoHospede` e `WebhookLog`: 90 -> 30 dias após o check-out. Migrações idempotentes no arranque (`server.js`): WebhookLog encurta `expira_em` para max(departure, receção) + 30 d (só reduz); ContactoHospede usa o marcador `retencao_dias` (registos sem ele perdem 60 d, uma só vez). Reservas futuras e em curso mantêm os logs, por isso `reconciliar-cancelamentos` continua a funcionar (teste).
+- `jobs/retencao.js` reescrito: regras independentes, por empresa e em lotes de 500, só sobre registos antigos que ainda têm dados; devolve contagens por categoria e por empresa e regista-as no log.
+- `jobs/limpezaFotos.js`: as fotos sobrevivem em `TarefaArquivo` (o arquivista copia tudo, `strict: false`); a mesma limpeza aplica-se lá (prazos finais: ver abaixo).
+- Notas do hóspede separadas do nome; doença: texto limpo a 30 d e ausência apagada a 12 meses; ausências não aprovadas a 12 meses; aprovadas (não doença) mantêm 36 meses; arquivo anonimizado ao fim de 5 anos; auditoria 3 anos; notificações 90 d; contas eliminadas anonimizadas a 30 d (email `eliminado-<id>@invalido`, sem password, inativa; o nome fica). O registo de acesso ao contacto do hóspede não guarda email nem telefone (teste).
+
+Prazos finais (variável de ambiente = nome da constante; valor inválido volta ao por defeito):
+| Dado | Prazo | Variável |
+|---|---|---|
+| Email/telefone do hóspede (ContactoHospede) | check-out + 30 d | (fixo no modelo) |
+| Payload dos webhooks (WebhookLog) | check-out + 30 d | (fixo no modelo) |
+| Notas do hóspede (Tarefa, TarefaArquivo) | 30 d | RETENCAO_NOTAS_HOSPEDE_DIAS |
+| Nome do hóspede (Tarefa, TarefaArquivo, ReservaManual) | 90 d | RETENCAO_HOSPEDES_DIAS |
+| Justificação/notas de ausência por doença | 30 d após o fim | RETENCAO_JUSTIFICACAO_DOENCA_DIAS |
+| Ausência por doença | 12 meses após o fim | RETENCAO_AUSENCIAS_DOENCA_MESES |
+| Ausências pendente, pendente_emergencia, rejeitada, cancelada | 12 meses após o fim | RETENCAO_AUSENCIAS_NAO_APROVADAS_MESES |
+| Ausências aprovadas (não doença) | 36 meses após o fim | RETENCAO_AUSENCIAS_MESES |
+| TarefaArquivo (equipa e pessoas) | anterior a 1 jan (ano - 5) | RETENCAO_ARQUIVO_ANOS |
+| Auditoria | 3 anos | RETENCAO_AUDITORIA_ANOS |
+| Notificações | 90 d | RETENCAO_NOTIFICACOES_DIAS |
+| Contas eliminadas (email, telefone, nif, observações, password) | 30 d | RETENCAO_CONTAS_ELIMINADAS_DIAS |
+| Fotos de conclusão das limpezas (Tarefa e TarefaArquivo) | 30 d após a conclusão | RETENCAO_FOTOS_DIAS (mín. 7) |
+| Fotos das avarias (Tarefa e TarefaArquivo) | 90 d após a resolução (`data_resolucao`; nas antigas sem data, o registo) E só com a avaria resolvida (aberta mantém) | RETENCAO_FOTOS_AVARIAS_DIAS (mín. 7) |
+
+Fotos e proteção do espaço do Atlas (`jobs/limpezaFotos.js`): prazos separados (30 d conclusão, 90 d avarias resolvidas; a data da resolução é guardada em `data_resolucao` (ver entrada de 2026-11-08); nas avarias antigas sem ela usa-se `data_registo`). No fim do job lê `db.stats()` (o maior de dataSize/storageSize) face a `ATLAS_LIMITE_MB` (512). >= 80%: aviso no sino aos utilizadores `admin` (chave `atlas_espaco:AAAA-MM-DD`, no máximo 1x por dia) e log; >= 90%: nesse dia as fotos de conclusão passam ao prazo de 7 d (avarias não mudam) e o aviso di-lo. Log sempre com o tamanho da BD e a estimativa das fotos (`$strLenBytes`, amostra de 2000 documentos por coleção se houver mais). Falha do `db.stats()` não impede a limpeza. Testes: `tests/retencaoRgpd.test.js` (bloco «limpezaFotos: prazos 30/90 e proteção de espaço»).
+
+Stage Summary:
+- Testes novos em `tests/retencaoRgpd.test.js`; `smoobu.test.js` ajustado de 90 para 30 dias.
+- Primeiro arranque em produção: as migrações encurtam TTL e o job das 03:30 trata o histórico acumulado (ver a resposta ao pedido para como estimar).
+
+---
+Task ID: avarias-data-resolucao-e-teste-restauro
+Agent: Dev
+Task: guardar a data de resolução das avarias; provar o restauro do backup de forma automática.
+
+Work Log:
+- `models/Tarefa.js`: novo `avarias[].data_resolucao` (Date, default null). `utils/avarias.js` (manutenção concluída) e `controllers/provaController.js` (resolução manual) gravam a data ao resolver; reabrir põe-na a null; repetir «resolver» numa avaria já resolvida não a renova. As respostas do gestor devolvem o campo. O arquivista copia o subdocumento inteiro (`Mixed`), por isso não perde o campo.
+- `jobs/limpezaFotos.js`: os 90 dias contam desde `data_resolucao`; sem ela (avarias antigas) usa `data_registo`, e sem esta a data da tarefa (comportamento anterior). Igual em `Tarefa` e `TarefaArquivo`. Antes, uma avaria resolvida tarde perdia as fotos logo.
+- Novo `.github/workflows/backup-restauro-teste.yml` (domingo 04:17 UTC + manual): descarrega o artifact do último backup bem-sucedido (`gh run download`, `permissions: actions: read`), decifra, `mongorestore` num `mongo:7.0.14` service container, verifica tarefas, utilizadors, propriedades e empresas com contagem > 0, resumo só com nomes e contagens, limpeza dos ficheiros em claro com `if: always()`. `docs/OPERACOES.md`: secção «Teste de restauro».
+
+Stage Summary:
+- Testes novos em `tests/retencaoRgpd.test.js` e `tests/cicloLimpeza.test.js`.
+- Por confirmar na 1.ª corrida do workflow (não testável fora do GitHub): ver resposta ao pedido.
+
+---
+Task ID: rgpd-exportar-apagar-pessoa-e-empresa
+Agent: Dev
+Task: funções RGPD prometidas no acordo de subcontratação (art. 28.º, n.º 3, al. e) e g)): exportar/apagar por pessoa e apagamento completo de uma empresa.
+
+Work Log:
+- Backend, por pessoa (`utils/rgpdPessoa.js`, `controllers/rgpdController.js`): `GET /api/auth/me/exportar-dados` (o próprio), `GET /api/gestor/equipa/:id/exportar-dados` e `POST /api/gestor/equipa/:id/apagar-dados-pessoais` (`{ confirmar: "APAGAR" }`; gestor/admin da empresa, 404 se for de outra). O export traz conta, tarefas (e arquivo) sem hóspedes nem colegas e sem fotos (só a contagem), avarias, ausências, notificações, reservas manuais sem hóspede, propriedades do proprietário/lavandaria e auditoria (ações da pessoa sem texto livre; registos sobre ela). Nunca `password_hash`, tokens nem `pushSubscription`. O apagamento anonimiza (mesma regra de `jobs/retencao.js`: "Pessoa removida", email `eliminado-<id>@invalido`, telefone/NIF/observações vazios, sem password nem push, inativa, `eliminado_em`), apaga notificações e ausências, tira-a das propriedades, retira-a das tarefas futuras (`desatribuirTarefasPeriodo` + `reatribuirAutomaticamente`) e troca o nome na auditoria e em textos livres. Recusas: o próprio (403), admin (403), gestor por um gestor (403, só o admin), único gestor/admin da empresa (409), sem confirmação (400). Idempotente. Auditoria regista quem pediu, sem copiar dados.
+- Backend, por empresa (`utils/rgpdEmpresa.js`, `jobs/eliminacaoEmpresas.js`, campos novos em `models/Empresa.js`): `GET /api/admin/empresas/:id/exportar` (JSON em streaming), `POST .../agendar-eliminacao` (`{ confirmar: <nome exato>, dias? }`, por omissão 30, mínimo 7, máximo 365; desativa a empresa) e `POST .../cancelar-eliminacao` (repõe `ativa`). Job diário às 04:10 apaga depois da data: todas as coleções com `empresa_id` (descobertas pelos esquemas) e as ligadas por `utilizador_id`, apaga a empresa no fim e repete a varredura; deixa um registo `empresa_apagada` na auditoria da plataforma. Usa os locks `eliminar-empresa:<id>` e `vagas:<id>`. Recusa empresas com contas de Super Admin (409).
+- `middleware/auth.js`: empresa desativada deixa de aceitar sessões antigas (401), exceto Super Admin e sessões de suporte; `toggle-status` não reativa uma empresa com eliminação agendada.
+- Frontend: botão «Descarregar os meus dados» no perfil (novas páginas `/staff/perfil` e `/gestor/perfil`; `perfil-content` do proprietário e da lavandaria), ações «Exportar dados» e «Apagar dados pessoais» na Equipa (separadas, diálogo destrutivo com palavra APAGAR) e, em Configurações (Super Admin), «Exportar empresa», «Agendar eliminação» (escrever o nome) e «Cancelar eliminação» com a data prevista. Proxies: anexos passam em streaming (`proxy-utils`, proxy `/api/admin`), nova rota `/api/auth/me/exportar-dados`.
+- `docs/OPERACOES.md` (secção 7): backups cifrados expiram em 14 dias, por isso o apagamento chega aos backups nesse prazo. `trabalho-local/legal/` atualizado (acordo, cláusulas 6.ª e 10.ª, e `LEIA-ME.md`).
+
+Stage Summary:
+- Testes novos: `backend/tests/rgpdExportApagar.test.js` (16) e `frontend/src/lib/rgpd.test.mjs`.
+- Por confirmar: ver a resposta ao pedido (export grande pela Vercel, `observacoes_staff`, retenção do registo mínimo de apagamento, verificação visual a 375/1366 px).

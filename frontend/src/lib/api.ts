@@ -94,7 +94,9 @@ async function handleResponse<T>(res: Response): Promise<T> {
     } catch {
       /* corpo não-JSON, manter mensagem padrão */
     }
-    throw new Error(mensagem);
+    const err = new Error(mensagem) as Error & { status?: number };
+    err.status = res.status;
+    throw err;
   }
   return (await res.json()) as T;
 }
@@ -103,7 +105,7 @@ async function handleResponse<T>(res: Response): Promise<T> {
 /* Tipos que espelham os modelos do backend                            */
 /* ------------------------------------------------------------------ */
 
-export type Role = "admin" | "gestor" | "staff" | "parceiro";
+export type Role = "admin" | "gestor" | "staff" | "parceiro" | "fornecedor";
 
 export type EstadoTarefa =
   | "por_atribuir"
@@ -134,6 +136,10 @@ export interface TarefaMock {
   detalhes_reserva?: DetalhesReservaDTO | null;
   // Prompt 114 — Lotação máxima da propriedade (para destaque no detalhe).
   capacidade_hospedes?: number | null;
+  // Tipo de limpeza (sem o campo = normal).
+  tipo_limpeza?: string | null;
+  // A checklist desta tarefa é uma checklist PRÓPRIA do tipo de limpeza (não a base da casa).
+  checklist_do_tipo?: boolean;
   // Prompt 126 — Observações/notes internas da propriedade (ex.: regras de acesso).
   observacoes_propriedade?: string | null;
   // Prompt 133 — Checklist dinâmica (snapshot do ModeloChecklist associado à
@@ -147,6 +153,19 @@ export interface TarefaMock {
   // anterior do staff e esta. Guardado pelo scheduler para o frontend
   // poder desenhar rotas e mostrar o itinerário.
   tempo_viagem_minutos?: number | null;
+  // Equipa da limpeza (2+ pessoas): nomes, responsável primeiro. `eu` = a própria pessoa.
+  equipa_nomes?: Array<{ _id: string; nome: string; responsavel: boolean; eu?: boolean }> | null;
+  // Início da limpeza (botão «Comecei» ou automático à hora marcada).
+  observacoes_staff?: string | null;
+  iniciada_em?: string | null;
+  inicio_origem?: "botao" | "automatico" | null;
+  // «Não consegui começar»: último registo do staff.
+  nao_consegui_comecar?: { motivo: string; nota?: string; em?: string } | null;
+  // Lavandaria: a casa tem lavandaria associada? (só então se mostra «Roupa limpa»).
+  tem_lavandaria?: boolean;
+  roupa_entregue?: boolean;
+  // Avarias por resolver nesta casa (reportadas noutras limpezas).
+  avarias_abertas_casa?: Array<{ descricao: string; data_registo?: string | null }> | null;
 }
 
 /**
@@ -172,6 +191,19 @@ export interface DetalhesReservaDTO {
   checkout?: string | null;
   pax?: number | null;
   nome_hospede?: string | null;
+  // Dados adicionais vindos do Smoobu.
+  hora_checkin?: string | null;
+  hora_checkout?: string | null;
+  adultos?: number | null;
+  criancas?: number | null;
+  notas_hospede?: string | null;
+  tipo_reserva?: string | null;
+}
+
+/** Email/telefone do hóspede — só o admin os obtém (GET /api/gestor/tarefas/:id/contacto-hospede). */
+export interface ContactoHospedeDTO {
+  email?: string | null;
+  telefone?: string | null;
 }
 
 export interface PropriedadeDTO {
@@ -184,6 +216,9 @@ export interface PropriedadeDTO {
   tempo_limpeza_minutos: number;
   ativo: boolean;
   checklist?: string[];
+  // Tipos de limpeza — tempo (min) e checklist próprios por tipo; sem valor = os da casa.
+  tempos_limpeza_por_tipo?: Partial<Record<"intermedia" | "profunda" | "preparacao", number | null>>;
+  checklists_por_tipo?: Partial<Record<"intermedia" | "profunda" | "preparacao", string[]>>;
   // v1.61.0 (Prompt 84) — Capacidade máxima de hóspedes (do Smoobu).
   capacidade_hospedes?: number | null;
   // Prompt 92 (Fase 1.5) — Funcionário preferencial (Algoritmo VIP).
@@ -197,6 +232,12 @@ export interface PropriedadeDTO {
   modelo_checklist_id?: string | null;
   // HF21 — Nº de staff necessário para limpar esta propriedade.
   staff_necessario?: number;
+  /** true = nº de pessoas posto à mão (a regra por defeito não lhe mexe). */
+  staff_necessario_manual?: boolean;
+  /** Tipologia (nº de quartos): 0 = T0, 2 = T2... null = desconhecida. */
+  tipologia?: number | null;
+  /** Casa de um cliente particular: com T2+ leva 2 pessoas por defeito. */
+  cliente_particular?: boolean;
   // HF22 — Dias fixos de limpeza (0=Dom, 1=Seg, ..., 6=Sáb).
   dias_fixos_limpeza?: number[];
   // HF23 — Campos de gestão da propriedade.
@@ -213,6 +254,8 @@ export interface PropriedadeDTO {
   // Populado pelo backend com { _id, nome, email, role } para o frontend
   // mostrar no Badge sem extrair das observações.
   parceiro_id?: string | { _id: string; nome: string; email: string; role: string } | null;
+  // FIX (restrição lavandaria) — Fornecedor (lavandaria) atribuído à propriedade.
+  fornecedor_id?: string | { _id: string; nome: string; email: string; role: string } | null;
   // FIX (morada estruturada) — Morada decomposta (rua, codigo_postal, cidade).
   // Retrocompatível: se vazio, o frontend faz fallback para `morada` (string única).
   morada_estruturada?: {
@@ -261,6 +304,9 @@ export interface UtilizadorDTO {
   exclusivo_preferenciais?: boolean;
   // FIX (alocação bidirecional) — Propriedades às quais este staff está alocado.
   propriedades_alocadas?: string[];
+  // FIX (atribuição bidirecional fornecedor) — Propriedades atribuídas ao
+  // fornecedor (lavandaria). Injetado pelo backend no getEquipa.
+  propriedades_atribuidas?: string[];
   createdAt?: string;
   updatedAt?: string;
 }

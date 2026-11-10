@@ -1,3 +1,5 @@
+"use client";
+
 import Link from "next/link";
 import {
   Clock,
@@ -9,14 +11,19 @@ import {
   Wrench,
   ChevronRight,
   User,
+  Users,
   Navigation,
+  Shirt,
+  Play,
+  TriangleAlert,
 } from "lucide-react";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 
-import { cn, parsearDataSegura, googleMapsUrl } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { cn, parsearDataSegura, googleMapsUrl, extrairHoraISO } from "@/lib/utils";
+import { textoEquipa } from "@/lib/equipa";
+import { EstadoTarefaBadge } from "@/components/ui/estado-tarefa-badge";
+import { buttonVariants } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -24,6 +31,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import type { TarefaMock, EstadoTarefa, TipoTarefa } from "@/lib/api";
+import { TipoLimpezaBadge } from "@/components/tipo-limpeza-badge";
+import { BotaoComecei, BotaoNaoConsegui, horaCurta } from "@/components/staff/comecar-limpeza";
 
 const tipoIcon: Record<TarefaMock["tipo"], React.ComponentType<{ className?: string }>> = {
   limpeza: SprayCan,
@@ -53,16 +62,8 @@ function formatarMinutos(min: number) {
  * Retorna "—" se a data for inválida ou não tiver componente de tempo.
  */
 function horaInicio(dataISO?: string): string {
-  if (!dataISO) return "—";
-  try {
-    const d = parsearDataSegura(dataISO);
-    if (!d) return "—";
-    // Se for meia-noite exata (00:00), considera "sem hora definida".
-    if (d.getHours() === 0 && d.getMinutes() === 0) return "—";
-    return format(d, "HH:mm", { locale: pt });
-  } catch {
-    return "—";
-  }
+  // Hora de Lisboa (com hora de verão), seja qual for o fuso do telemóvel; 00:00 = sem hora definida.
+  return extrairHoraISO(dataISO);
 }
 
 /**
@@ -71,8 +72,14 @@ function horaInicio(dataISO?: string): string {
  *
  * v1.56.0 (Prompt 78): o cartão inteiro é clicável e leva a /staff/tarefas/[id].
  * Mesmo as tarefas por atribuir são clicáveis (para ver detalhe/morada).
+ *
+ * Sem links aninhados (HTML inválido): o <Link> da tarefa está no título e a
+ * sua área de toque é expandida a todo o cartão com um pseudo-elemento
+ * (`after:absolute after:inset-0`, o cartão é `relative`). A ligação do Google
+ * Maps fica por cima (`relative z-10`), por isso não abre a tarefa. O "botão"
+ * "Ver detalhes" é só visual (div): o clique cai no overlay do link.
  */
-export function TaskCard({ tarefa }: { tarefa: TarefaMock }) {
+export function TaskCard({ tarefa, onAtualizar }: { tarefa: TarefaMock; onAtualizar?: () => void }) {
   const Icon = tipoIcon[tarefa.tipo];
   const porAtribuir = tarefa.estado === "por_atribuir";
   const hora = horaInicio(tarefa.data);
@@ -80,13 +87,21 @@ export function TaskCard({ tarefa }: { tarefa: TarefaMock }) {
   const nomeHospede = tarefa.detalhes_reserva?.nome_hospede;
   // Prompt 137 — tempo de viagem estimado (para badge no cartão).
   const tempoViagem = Number(tarefa.tempo_viagem_minutos) || 0;
+  const equipa = textoEquipa(tarefa.equipa_nomes);
+  // «Comecei»: só em tarefas atribuídas, de hoje (ou de dias passados por fechar).
+  const dataTarefa = parsearDataSegura(tarefa.data ?? "");
+  const ate = new Date();
+  ate.setHours(23, 59, 59, 999);
+  const podeComecar = tarefa.estado === "atribuida" && !!dataTarefa && dataTarefa.getTime() <= ate.getTime() && !!onAtualizar;
+  const emCurso = tarefa.estado === "em_curso";
+  const desde = horaCurta(tarefa.iniciada_em);
 
   return (
-    <Link href={`/staff/tarefas/${tarefa.id}`} prefetch className="block">
+    <div className="block">
       <Card
         className={cn(
-          "cursor-pointer overflow-hidden transition-all hover:shadow-md hover:border-primary/40 active:scale-[0.99]",
-          porAtribuir && "border-amber-300/70"
+          "relative cursor-pointer overflow-hidden transition-all hover:shadow-md hover:border-primary/40 active:scale-[0.99]",
+          porAtribuir && "border-status-porat/40"
         )}
       >
         <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-3">
@@ -95,24 +110,32 @@ export function TaskCard({ tarefa }: { tarefa: TarefaMock }) {
               className={cn(
                 "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg",
                 porAtribuir
-                  ? "bg-amber-100 text-amber-700"
-                  : "bg-primary/10 text-primary"
+                  ? "bg-status-porat-bg text-status-porat"
+                  : "bg-primary/10 text-brand-text"
               )}
             >
               <Icon className="h-5 w-5" />
             </div>
             <div className="min-w-0">
               <CardTitle className="truncate text-base">
-                {tarefa.propriedade_nome}
+                <Link
+                  href={`/staff/tarefas/${tarefa.id}`}
+                  prefetch
+                  className="after:absolute after:inset-0 after:content-[''] focus-visible:outline-none focus-visible:after:rounded-lg focus-visible:after:ring-2 focus-visible:after:ring-ring"
+                >
+                  {tarefa.propriedade_nome}
+                  <span className="sr-only"> — {tipoLabel[tarefa.tipo]}{porAtribuir ? ", aguarda atribuição" : ""}, ver detalhes</span>
+                </Link>
               </CardTitle>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {tipoLabel[tarefa.tipo]}
-              </p>
+              <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                {/* Só a etiqueta do tipo («Limpeza intermédia»), sem «Limpeza» a repetir. */}
+                {tarefa.tipo === "limpeza" && tarefa.tipo_limpeza && tarefa.tipo_limpeza !== "normal"
+                  ? <TipoLimpezaBadge tipo={tarefa.tipo_limpeza} />
+                  : tipoLabel[tarefa.tipo]}
+              </div>
             </div>
           </div>
-          <Badge variant={porAtribuir ? "warning" : "success"} className="shrink-0">
-            {porAtribuir ? "Por atribuir" : "Atribuída"}
-          </Badge>
+          <EstadoTarefaBadge estado={tarefa.estado} className="shrink-0" />
         </CardHeader>
 
         <CardContent className="space-y-3">
@@ -120,7 +143,7 @@ export function TaskCard({ tarefa }: { tarefa: TarefaMock }) {
             <div className="flex items-center gap-2">
               <Clock className="h-4 w-4 text-muted-foreground" />
               <div className="flex flex-col">
-                <span className="text-[11px] uppercase text-muted-foreground">
+                <span className="text-xs uppercase text-muted-foreground">
                   Início
                 </span>
                 <span className="font-medium tabular-nums">{hora}</span>
@@ -129,7 +152,7 @@ export function TaskCard({ tarefa }: { tarefa: TarefaMock }) {
             <div className="flex items-center gap-2">
               <Timer className="h-4 w-4 text-muted-foreground" />
               <div className="flex flex-col">
-                <span className="text-[11px] uppercase text-muted-foreground">
+                <span className="text-xs uppercase text-muted-foreground">
                   Estimativa
                 </span>
                 <span className="font-medium">
@@ -154,7 +177,7 @@ export function TaskCard({ tarefa }: { tarefa: TarefaMock }) {
                     href={url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex shrink-0 items-center gap-0.5 rounded text-primary hover:underline"
+                    className="relative z-10 -my-3.5 -mr-3 inline-flex h-11 w-11 shrink-0 items-center justify-center self-center rounded text-brand-text hover:underline"
                     title="Abrir no Google Maps"
                     aria-label="Abrir no Google Maps"
                   >
@@ -170,8 +193,16 @@ export function TaskCard({ tarefa }: { tarefa: TarefaMock }) {
               a quem vai receber. */}
           {nomeHospede && (
             <p className="flex items-center gap-1.5 rounded-md bg-primary/5 px-2 py-1.5 text-xs">
-              <User className="h-3.5 w-3.5 shrink-0 text-primary" />
+              <User className="h-3.5 w-3.5 shrink-0 text-brand-text" />
               <span className="font-medium text-foreground">{nomeHospede}</span>
+            </p>
+          )}
+
+          {/* Equipa da limpeza (2+ pessoas): com quem trabalhas. */}
+          {equipa && (
+            <p className="flex items-center gap-1.5 rounded-md bg-primary/5 px-2 py-1.5 text-xs">
+              <Users className="h-3.5 w-3.5 shrink-0 text-brand-text" />
+              <span className="font-medium text-foreground">Equipa: {equipa}</span>
             </p>
           )}
 
@@ -187,12 +218,52 @@ export function TaskCard({ tarefa }: { tarefa: TarefaMock }) {
             </p>
           )}
 
-          <Button
-            variant={porAtribuir ? "outline" : "default"}
-            className="w-full"
-            disabled={porAtribuir}
-            // O Link envolve o Card, o botão é visual (não há onClick).
-            // Mesmo por atribuir, mostra "Ver detalhes" para inspecionar a morada.
+          {/* Lavandaria: só com fornecedor associado à casa. */}
+          {tarefa.tem_lavandaria && tarefa.tipo === "limpeza" && (
+            <p
+              className={cn(
+                "flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium",
+                tarefa.roupa_entregue
+                  ? "bg-status-conc-bg text-status-conc"
+                  : "border border-amber-500/40 bg-amber-50 text-amber-900 dark:bg-amber-950/20 dark:text-amber-100"
+              )}
+            >
+              <Shirt className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              Roupa limpa: {tarefa.roupa_entregue ? "entregue" : "em falta"}
+            </p>
+          )}
+
+          {emCurso && desde && (
+            <p className="flex items-center gap-1.5 rounded-md bg-status-curso-bg px-2 py-1.5 text-xs font-medium text-status-curso">
+              <Play className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              Em curso desde as {desde}
+              {tarefa.inicio_origem === "automatico" ? " (início automático)" : ""}
+            </p>
+          )}
+
+          {tarefa.nao_consegui_comecar && !emCurso && (
+            <p className="flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-50 px-2 py-1.5 text-xs text-amber-900 dark:bg-amber-950/20 dark:text-amber-100">
+              <TriangleAlert className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              Avisaste o gestor que não conseguiste começar.
+            </p>
+          )}
+
+          {/* Botões por cima do link do cartão (z-10): não abrem a tarefa. */}
+          {podeComecar && (
+            <div className="relative z-10 space-y-1">
+              <BotaoComecei tarefaId={tarefa.id} onFeito={onAtualizar!} />
+              <BotaoNaoConsegui tarefaId={tarefa.id} onFeito={onAtualizar!} />
+            </div>
+          )}
+
+          {/* Visual apenas: o clique é tratado pelo link do título (overlay). */}
+          <div
+            aria-hidden="true"
+            className={cn(
+              buttonVariants({ size: "touch", variant: porAtribuir ? "outline" : "default" }),
+              "w-full",
+              porAtribuir && "opacity-50"
+            )}
           >
             {porAtribuir ? (
               "Aguarda atribuição"
@@ -202,9 +273,9 @@ export function TaskCard({ tarefa }: { tarefa: TarefaMock }) {
                 <ChevronRight className="h-4 w-4" />
               </>
             )}
-          </Button>
+          </div>
         </CardContent>
       </Card>
-    </Link>
+    </div>
   );
 }

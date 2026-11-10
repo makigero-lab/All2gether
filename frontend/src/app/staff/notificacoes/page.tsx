@@ -84,6 +84,10 @@ function formatarData(iso: string): string {
 
 const TIPO_LABEL: Record<string, string> = {
   tarefa: "Limpeza",
+  tarefa_atribuida: "Limpeza atribuída",
+  tarefa_reatribuida: "Limpeza reatribuída",
+  tarefa_cancelada: "Limpeza cancelada",
+  aviso: "Aviso",
   atraso: "Atraso",
   avaria: "Avaria",
   atribuicao: "Atribuição",
@@ -140,19 +144,19 @@ export default function StaffNotificacoesPage() {
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-md flex-col bg-muted/20">
       {/* Cabeçalho */}
-      <header className="sticky top-0 z-10 border-b bg-background/95 px-5 pb-4 pt-6 backdrop-blur">
+      <header className="sticky top-0 z-20 border-b bg-background/95 px-5 pb-4 pt-6 backdrop-blur">
         <div className="flex items-start justify-between gap-3">
           <div className="flex-1">
             <Link
               href="/staff"
               prefetch
-              className="mb-3 inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+              className="mb-3 inline-flex min-h-11 items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
             >
               <ArrowLeft className="h-4 w-4" />
               Voltar
             </Link>
             <div className="flex items-center gap-2">
-              <Bell className="h-5 w-5 text-primary" />
+              <Bell className="h-5 w-5 text-brand-text" />
               <h1 className="text-xl font-semibold tracking-tight">Notificações</h1>
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
@@ -164,7 +168,7 @@ export default function StaffNotificacoesPage() {
             <Button
               variant="ghost"
               size="icon"
-              className="text-muted-foreground hover:text-destructive"
+              className="h-11 w-11 sm:h-9 sm:w-9 text-muted-foreground hover:text-destructive"
               onClick={() => fazerLogout()}
               aria-label="Terminar sessão"
               title="Terminar sessão"
@@ -180,7 +184,7 @@ export default function StaffNotificacoesPage() {
         {/* Ações */}
         <div className="flex flex-wrap items-center gap-2">
           {naoLidas > 0 && (
-            <Button
+            <Button size="touch"
               onClick={handleMarcarTodas}
               disabled={marcando}
               className="flex-1 justify-center gap-2"
@@ -195,7 +199,7 @@ export default function StaffNotificacoesPage() {
           )}
           <Button
             variant="outline"
-            size="icon"
+            size="icon" className="h-11 w-11 sm:h-9 sm:w-9"
             onClick={carregar}
             disabled={loading}
             aria-label="Atualizar"
@@ -212,7 +216,7 @@ export default function StaffNotificacoesPage() {
               <span>{erro}</span>
               <Button
                 variant="outline"
-                size="sm"
+                size="touch"
                 onClick={carregar}
                 className="ml-auto"
               >
@@ -241,7 +245,7 @@ export default function StaffNotificacoesPage() {
             <div className="space-y-3 sm:hidden">
               <p className="text-xs text-muted-foreground">
                 {notificacoes.length} notificação(ões)
-                {naoLidas > 0 && ` · ${naoLidas} não lida(s)`}
+                {naoLidas > 0 && ` · ${naoLidas} ${naoLidas === 1 ? "não lida" : "não lidas"}`}
               </p>
               {notificacoes.map((n) => (
                 <Card
@@ -264,7 +268,7 @@ export default function StaffNotificacoesPage() {
                           </Badge>
                         )}
                       </div>
-                      <span className="text-[11px] text-muted-foreground/70 tabular-nums whitespace-nowrap">
+                      <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
                         {formatarData(n.data)}
                       </span>
                     </div>
@@ -280,12 +284,12 @@ export default function StaffNotificacoesPage() {
             <Card className="hidden sm:block">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <Bell className="h-5 w-5 text-primary" />
+                  <Bell className="h-5 w-5 text-brand-text" />
                   Notificações
                 </CardTitle>
                 <CardDescription>
                   {notificacoes.length} notificação(ões) no total
-                  {naoLidas > 0 && ` · ${naoLidas} não lida(s)`}.
+                  {naoLidas > 0 && ` · ${naoLidas} ${naoLidas === 1 ? "não lida" : "não lidas"}`}.
                 </CardDescription>
               </CardHeader>
               <CardContent className="p-0">

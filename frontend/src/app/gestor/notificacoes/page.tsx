@@ -61,6 +61,10 @@ function formatarData(iso: string): string {
 
 const TIPO_LABEL: Record<string, string> = {
   tarefa: "Limpeza",
+  tarefa_atribuida: "Limpeza atribuída",
+  tarefa_reatribuida: "Limpeza reatribuída",
+  tarefa_cancelada: "Limpeza cancelada",
+  aviso: "Aviso",
   atraso: "Atraso",
   avaria: "Avaria",
   atribuicao: "Atribuição",
@@ -172,12 +176,12 @@ export default function GestorNotificacoesPage() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Bell className="h-5 w-5 text-primary" />
+            <Bell className="h-5 w-5 text-brand-text" />
             Notificações
           </CardTitle>
           <CardDescription>
             {notificacoes.length} notificação(ões) no total
-            {naoLidas > 0 && ` · ${naoLidas} não lida(s)`}.
+            {naoLidas > 0 && ` · ${naoLidas} ${naoLidas === 1 ? "não lida" : "não lidas"}`}.
           </CardDescription>
         </CardHeader>
         <CardContent className="p-0">
@@ -193,7 +197,7 @@ export default function GestorNotificacoesPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="rt w-full text-sm">
                 <thead>
                   <tr className="border-b bg-muted/40 text-left">
                     <th className="px-4 py-3 font-medium">Mensagem</th>

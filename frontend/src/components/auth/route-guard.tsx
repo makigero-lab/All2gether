@@ -54,7 +54,7 @@ export function RouteGuard({ role, children }: RouteGuardProps) {
       // Sem retry. O fazerLogout limpa o cookie e faz window.location.href.
       if (!user) {
         limparCacheAuth();
-        await fazerLogout();
+        await fazerLogout({ sessaoExpirada: true });
         return;
       }
 

@@ -9,6 +9,7 @@
  */
 
 const mongoose = require('mongoose');
+const { pl } = require('../utils/plural');
 const bcrypt = require('bcryptjs');
 const Empresa = require('../models/Empresa');
 const Propriedade = require('../models/Propriedade');
@@ -19,6 +20,11 @@ const Auditoria = require('../models/Auditoria');
 const WebhookLog = require('../models/WebhookLog');
 const { obterCoordenadas } = require('../utils/geocoding');
 const { registarAuditoria } = require('../utils/auditoria');
+const { comMembro, filtroMembro, retirarMembroDoc, membrosPopulados, EXPR_MEMBROS } = require('../utils/equipaTarefa');
+const { FILTRO_SEM_PESSOA } = require('../utils/atribuicaoAutomatica');
+const { contarAvariasAbertas } = require('../utils/avarias');
+const { lerConfigTipos } = require('../utils/tipoLimpeza');
+const { lerCamposCasa, decidirPessoas } = require('../utils/pessoasCasa');
 
 /* ------------------------------------------------------------------ */
 /* Helper — obter empresa_id do JWT (req.user)                        */
@@ -105,7 +111,12 @@ exports.getDashboard = async (req, res) => {
       Tarefa.countDocuments({
         empresa_id: empresaId,
         data: { $gte: hojeInicio, $lt: amanhaInicio },
-        estado: 'por_atribuir',
+        // 'nao_atribuida' (nenhuma pessoa coube) também precisa de atenção do gestor,
+        // tal como as 'atribuida'/'em_curso' sem ninguém (estado incoerente).
+        $or: [
+          { estado: { $in: ['por_atribuir', 'nao_atribuida'] } },
+          FILTRO_SEM_PESSOA,
+        ],
       }),
       Tarefa.countDocuments({
         empresa_id: empresaId,
@@ -113,6 +124,14 @@ exports.getDashboard = async (req, res) => {
         estado: 'concluida',
       }),
     ]);
+
+    // Limpezas (de hoje em diante) a que falta pelo menos uma pessoa e não houve substituto.
+    const tarefasEquipaIncompleta = await Tarefa.countDocuments({
+      empresa_id: empresaId,
+      data: { $gte: hojeInicio },
+      estado: { $in: ['atribuida', 'em_curso'] },
+      pessoas_em_falta: { $gt: 0 },
+    });
 
     // Carga por staff (aggregate).
     const cargasPorStaff = await Tarefa.aggregate([
@@ -124,9 +143,12 @@ exports.getDashboard = async (req, res) => {
           utilizador_id: { $ne: null },
         },
       },
+      // Cada membro da equipa conta a tarefa e a carga (não só o responsável).
+      { $addFields: { _membros: EXPR_MEMBROS } },
+      { $unwind: '$_membros' },
       {
         $group: {
-          _id: '$utilizador_id',
+          _id: '$_membros',
           tarefas: { $sum: 1 },
           carga_minutos: { $sum: '$tempo_limpeza_minutos' },
         },
@@ -155,7 +177,7 @@ exports.getDashboard = async (req, res) => {
     const tarefasRiscoRaw = await Tarefa.find({
       empresa_id: empresaId,
       data: { $gte: agora, $lte: limiteRisco48h },
-      estado: 'por_atribuir',
+      estado: { $in: ['por_atribuir', 'nao_atribuida'] },
     })
       .populate({ path: 'propriedade_id', select: 'nome' })
       .select('data estado propriedade_id tempo_limpeza_minutos')
@@ -173,15 +195,82 @@ exports.getDashboard = async (req, res) => {
       })),
     };
 
+    // Próximas 48 h (todas as ativas, não só as por atribuir): para a coluna do dashboard.
+    const proximasRaw = await Tarefa.find({
+      empresa_id: empresaId,
+      tipo: 'limpeza',
+      data: { $gte: agora, $lte: limiteRisco48h },
+      estado: { $in: ['por_atribuir', 'nao_atribuida', 'atribuida'] },
+    })
+      .populate({ path: 'propriedade_id', select: 'nome' })
+      .select('data estado propriedade_id tipo_limpeza utilizador_id pessoas_em_falta oferta_estado oferta_expira_em')
+      .sort({ data: 1 })
+      .limit(12)
+      .lean();
+    const proximas48h = proximasRaw.map((t) => ({
+      _id: String(t._id),
+      data: t.data,
+      estado: t.estado,
+      tipo_limpeza: t.tipo_limpeza || 'normal',
+      propriedade_nome: t.propriedade_id?.nome ?? '—',
+      utilizador_id: t.utilizador_id ? String(t.utilizador_id) : null,
+      pessoas_em_falta: t.pessoas_em_falta || 0,
+      oferta_estado: t.oferta_estado || null,
+      oferta_expira_em: t.oferta_expira_em || null,
+    }));
+
+    // «A decorrer agora»: limpezas em curso (início por botão ou automático).
+    const emCursoDocs = await Tarefa.find({
+      empresa_id: empresaId,
+      estado: 'em_curso',
+      data: { $gte: new Date(hojeInicio.getTime() - 24 * 60 * 60 * 1000), $lt: amanhaInicio },
+    })
+      .populate({ path: 'propriedade_id', select: 'nome' })
+      .populate({ path: 'utilizador_id', select: 'nome' })
+      .select('data propriedade_id utilizador_id iniciada_em inicio_origem tipo tipo_limpeza')
+      .sort({ iniciada_em: 1 })
+      .lean();
+    const aDecorrerAgora = {
+      total: emCursoDocs.length,
+      tarefas: emCursoDocs.map((t) => ({
+        _id: String(t._id),
+        propriedade_nome: t.propriedade_id?.nome ?? '—',
+        pessoa: t.utilizador_id?.nome ?? null,
+        iniciada_em: t.iniciada_em || null,
+        inicio_origem: t.inicio_origem || null,
+        tipo: t.tipo,
+        tipo_limpeza: t.tipo_limpeza || 'normal',
+      })),
+    };
+
+    // Avarias abertas (ciclo fechado) e limpezas de hoje sem roupa limpa entregue.
+    const avariasAbertas = await contarAvariasAbertas(empresaId);
+    const propsComLavandaria = await Propriedade.find({ empresa_id: empresaId, fornecedor_id: { $ne: null } })
+      .select('_id')
+      .lean();
+    const limpezasSemRoupa = propsComLavandaria.length === 0 ? 0 : await Tarefa.countDocuments({
+      empresa_id: empresaId,
+      tipo: 'limpeza',
+      data: { $gte: hojeInicio, $lt: amanhaInicio },
+      estado: { $nin: ['cancelada', 'concluida'] },
+      roupa_entregue: { $ne: true },
+      propriedade_id: { $in: propsComLavandaria.map((p) => p._id) },
+    });
+
     return res.status(200).json({
       totalPropriedades,
       propriedadesAtivas,
       membrosEquipaAtivos,
       tarefasHoje,
       tarefasPorAtribuir,
+      tarefasEquipaIncompleta,
+      aDecorrerAgora,
+      avariasAbertas,
+      limpezasSemRoupa,
       tarefasConcluidasHoje,
       tarefasPorStaff,
       checkinsEmRisco,
+      proximas48h,
     });
   } catch (err) {
     console.error('❌ getDashboard:', err.message);
@@ -228,7 +317,19 @@ exports.criarPropriedade = async (req, res) => {
     const { ok, empresaId } = obterEmpresaId(req, res);
     if (!ok) return;
 
-    const { nome, morada, tempo_limpeza_minutos, parceiro_id, staff_necessario, dias_fixos_limpeza, nome_responsavel, contacto, frequencia_limpeza, horario_limpeza, observacoes, morada_estruturada, equipa_preferencial } = req.body || {};
+    const { nome, morada, tempo_limpeza_minutos, parceiro_id, fornecedor_id, staff_necessario, dias_fixos_limpeza, nome_responsavel, contacto, frequencia_limpeza, horario_limpeza, observacoes, morada_estruturada, equipa_preferencial, capacidade_hospedes } = req.body || {};
+
+    // Tipos de limpeza: tempo e checklist por tipo (opcionais).
+    const cfgTipos = lerConfigTipos(req.body);
+    if (cfgTipos.erro) return res.status(400).json({ erro: cfgTipos.erro });
+
+    // Tipologia e cliente particular: definem as pessoas por defeito (particular ou T2+ = 2).
+    const camposCasa = lerCamposCasa(req.body);
+    if (camposCasa.erro) return res.status(400).json({ erro: camposCasa.erro });
+    const staffEnviado = staff_necessario === undefined || staff_necessario === null || staff_necessario === ''
+      ? undefined
+      : Math.max(1, Math.min(10, Number(staff_necessario) || 1));
+    const pessoas = decidirPessoas({ ...camposCasa.set, staff_necessario_manual: false }, staffEnviado);
 
     // Validações de presença.
     // FIX (morada estruturada) — Aceita morada OU morada_estruturada (pelo menos
@@ -242,6 +343,32 @@ exports.criarPropriedade = async (req, res) => {
     }
 
     // F0 — Validação de unicidade do smoobu_id removida.
+
+    // SEGURANÇA (multi-tenant): parceiro_id / fornecedor_id, quando enviados,
+    // têm de ser utilizadores da MESMA empresa com a role certa.
+    {
+      const Utilizador = require('../models/Utilizador');
+      for (const [campo, valorCampo, roleEsperada] of [
+        ['parceiro_id', parceiro_id, 'parceiro'],
+        ['fornecedor_id', fornecedor_id, 'fornecedor'],
+      ]) {
+        if (valorCampo === undefined || valorCampo === null || valorCampo === '') continue;
+        if (!mongoose.isValidObjectId(valorCampo)) {
+          return res.status(400).json({ erro: `${campo} inválido.` });
+        }
+        const existe = await Utilizador.exists({
+          _id: valorCampo,
+          empresa_id: empresaId,
+          role: roleEsperada,
+          eliminado_em: null,
+        });
+        if (!existe) {
+          return res.status(400).json({
+            erro: `${campo} não corresponde a um utilizador "${roleEsperada}" desta empresa.`,
+          });
+        }
+      }
+    }
 
     // Validação de tempo_limpeza_minutos (se vier, tem de ser número >= 0).
     let tempo = 45;
@@ -310,7 +437,8 @@ exports.criarPropriedade = async (req, res) => {
       ...(parceiro_id && mongoose.isValidObjectId(parceiro_id)
         ? { parceiro_id: String(parceiro_id).trim() }
         : {}),
-      staff_necessario: Math.max(1, Math.min(10, Number(staff_necessario) || 1)), // HF21
+      ...camposCasa.set,
+      ...pessoas, // HF21 + regra por defeito (particular ou T2+ = 2 pessoas)
       ...(Array.isArray(dias_fixos_limpeza)
         ? { dias_fixos_limpeza: dias_fixos_limpeza.filter((d) => Number.isInteger(d) && d >= 0 && d <= 6) }
         : {}), // HF22
@@ -320,14 +448,29 @@ exports.criarPropriedade = async (req, res) => {
       horario_limpeza: horario_limpeza ? String(horario_limpeza).trim().slice(0, 100) : '', // HF23
       // FIX (parceiro associado) — Observações livres (notas internas do gestor).
       observacoes: observacoes ? String(observacoes).trim().slice(0, 2000) : '',
+      // FIX (restrição lavandaria) — Fornecedor (lavandaria) atribuído.
+      ...(fornecedor_id && mongoose.isValidObjectId(fornecedor_id)
+        ? { fornecedor_id: String(fornecedor_id).trim() }
+        : {}),
       // FIX (equipas preferenciais) — Array de IDs de staff preferenciais.
       ...(Array.isArray(equipa_preferencial)
         ? { equipa_preferencial: equipa_preferencial.filter((id) => mongoose.isValidObjectId(id)) }
+        : {}),
+      // FIX (lotação máxima) — capacidade_hospedes (lotação máxima da casa).
+      // Usado como fallback quando o Smoobu não envia o número de hóspedes
+      // da reserva. O campo já existia no schema (v1.61.0) mas não era aceito
+      // no fluxo manual de criação de propriedades.
+      ...(capacidade_hospedes !== undefined && capacidade_hospedes !== null && capacidade_hospedes !== ''
+        ? { capacidade_hospedes: Math.max(0, Number(capacidade_hospedes) || 0) }
         : {}),
       checklist: Array.isArray(req.body?.checklist)
         ? req.body.checklist.filter((s) => typeof s === 'string' && s.trim())
         : [],
     });
+    if (Object.keys(cfgTipos.set).length > 0) {
+      for (const [k, v] of Object.entries(cfgTipos.set)) nova.set(k, v);
+      await nova.save();
+    }
 
     // Auditoria.
     registarAuditoria({
@@ -440,6 +583,9 @@ exports.getTarefas = async (req, res) => {
       // populam o nome do staff — utilizador_id fica null no resultado,
       // e o frontend trata a tarefa como 'Por Atribuir'.
       .populate({ path: 'utilizador_id', select: 'nome', match: { ativo: true, eliminado_em: null } })
+      .populate({ path: 'equipa_atribuida', select: 'nome', match: { ativo: true, eliminado_em: null } })
+      // As fotos (pesadas) só se carregam ao abrir a prova da limpeza (GET /tarefas/:id/prova).
+      .select('-fotos_conclusao -avarias.fotos')
       .sort({ data: 1 })
       .lean();
 
@@ -554,11 +700,14 @@ exports.getDadosCalendario = async (req, res) => {
 
     // Filtro opcional por utilizador (funcionário).
     // Nota: utilizadorId pode ser 'null' (string) para filtrar tarefas por atribuir.
+    let utilizadorFiltrado = null;
     if (utilizadorId !== undefined && utilizadorId !== null && utilizadorId !== '') {
       if (utilizadorId === 'null' || utilizadorId === 'sem_atribuicao') {
         filtro.utilizador_id = null;
       } else if (mongoose.isValidObjectId(utilizadorId)) {
-        filtro.utilizador_id = utilizadorId;
+        // Responsável OU membro da equipa.
+        filtro.$or = filtroMembro(utilizadorId).$or;
+        utilizadorFiltrado = utilizadorId;
       }
     }
 
@@ -585,6 +734,9 @@ exports.getDadosCalendario = async (req, res) => {
       .populate({ path: 'propriedade_id', select: 'nome morada coordenadas capacidade_hospedes' })
       // FIX (fantasmas de inativos) — match: { ativo: true, eliminado_em: null }
       .populate({ path: 'utilizador_id', select: 'nome', match: { ativo: true, eliminado_em: null } })
+      .populate({ path: 'equipa_atribuida', select: 'nome', match: { ativo: true, eliminado_em: null } })
+      // As fotos (pesadas) só se carregam ao abrir a prova da limpeza (GET /tarefas/:id/prova).
+      .select('-fotos_conclusao -avarias.fotos')
       .sort({ data: 1 })
       .lean();
 
@@ -648,8 +800,8 @@ exports.getDadosCalendario = async (req, res) => {
         .lean();
 
       // Se o filtro utilizadorId for específico, filtra só esse staff.
-      const staffFiltrados = (filtro.utilizador_id && filtro.utilizador_id !== null)
-        ? staffComFolgas.filter((s) => String(s._id) === String(filtro.utilizador_id))
+      const staffFiltrados = utilizadorFiltrado
+        ? staffComFolgas.filter((s) => String(s._id) === String(utilizadorFiltrado))
         : staffComFolgas;
 
       // Gera objetos virtuais de folga para cada dia do intervalo.
@@ -705,8 +857,8 @@ exports.getDadosCalendario = async (req, res) => {
         data_fim: { $gte: dataInicio },
       };
       // Se o filtro utilizadorId for específico, filtra só esse staff.
-      if (filtro.utilizador_id && filtro.utilizador_id !== null) {
-        filtroAusencias.utilizador_id = filtro.utilizador_id;
+      if (utilizadorFiltrado) {
+        filtroAusencias.utilizador_id = utilizadorFiltrado;
       }
 
       const ausenciasAprovadas = await Ausencia.find(filtroAusencias)
@@ -745,6 +897,7 @@ exports.getDadosCalendario = async (req, res) => {
         const tituloPorTipo =
           a.tipo === 'ferias' ? '🌴 Férias'
           : a.tipo === 'doenca' ? '🤒 Doença'
+          : a.tipo === 'falta' ? '📅 Falta'
           : '📅 Ausência';
 
         return {
@@ -757,7 +910,7 @@ exports.getDadosCalendario = async (req, res) => {
           start: new Date(a.data_inicio),
           end: endExclusive,
           allDay: true,
-          title: `${tituloPorTipo}: ${a.utilizador_id?.nome ?? 'Staff'}`,
+          title: `${tituloPorTipo}: ${a.utilizador_id?.nome ?? 'Elemento da equipa'}`,
           utilizador_id: a.utilizador_id
             ? { _id: String(a.utilizador_id._id), nome: a.utilizador_id.nome }
             : null,
@@ -779,6 +932,7 @@ exports.getDadosCalendario = async (req, res) => {
         const tituloPorTipo =
           a.tipo === 'ferias' ? '🌴 Férias'
           : a.tipo === 'doenca' ? '🤒 Doença'
+          : a.tipo === 'falta' ? '📅 Falta'
           : '📅 Ausência';
         const sufixoEmergencia =
           a.estado === 'pendente_emergencia' ? ' (Emergência)' : '';
@@ -790,7 +944,7 @@ exports.getDadosCalendario = async (req, res) => {
           start: new Date(a.data_inicio),
           end: endExclusive,
           allDay: true,
-          title: `${tituloPorTipo}${sufixoEmergencia} (Pendente): ${a.utilizador_id?.nome ?? 'Staff'}`,
+          title: `${tituloPorTipo}${sufixoEmergencia} (Pendente): ${a.utilizador_id?.nome ?? 'Elemento da equipa'}`,
           utilizador_id: a.utilizador_id
             ? { _id: String(a.utilizador_id._id), nome: a.utilizador_id.nome }
             : null,
@@ -824,18 +978,18 @@ exports.getDadosCalendario = async (req, res) => {
         }
         // Marca tarefas atribuídas cujo staff está de férias nesse dia.
         for (const t of tarefasComViagem) {
-          if (!t.utilizador_id || !t.utilizador_id._id) continue;
-          const uid = String(t.utilizador_id._id);
-          const intervalos = mapaAusencias.get(uid);
-          if (!intervalos || intervalos.length === 0) continue;
+          // Qualquer membro da equipa ausente conta (não só o responsável).
           const instante = new Date(t.data).getTime();
-          const estaAusente = intervalos.some(
-            (iv) => instante >= iv.inicio && instante < iv.fim
-          );
-          if (estaAusente) {
-            t.alerta_orfao = true;
-            t.alerta_mensagem = 'Staff de férias nesta data — tarefa órfã';
-          }
+          const ausentes = membrosPopulados(t).filter((m) => {
+            const intervalos = mapaAusencias.get(String(m._id));
+            return intervalos && intervalos.some((iv) => instante >= iv.inicio && instante < iv.fim);
+          });
+          if (ausentes.length === 0) continue;
+          t.alerta_orfao = true;
+          const todos = membrosPopulados(t).length;
+          t.alerta_mensagem = ausentes.length >= todos
+            ? 'Equipa de férias nesta data — tarefa órfã'
+            : `${ausentes.map((m) => m.nome).join(', ')} ausente nesta data — falta pessoa na equipa`;
         }
       }
 
@@ -932,7 +1086,7 @@ exports.alternarEstadoPropriedade = async (req, res) => {
           data: { $gte: hojeInicio },
           estado: { $nin: ['concluida', 'cancelada'] },
         },
-        { $set: { utilizador_id: null, estado: 'por_atribuir' } }
+        { $set: { utilizador_id: null, equipa_atribuida: [], pessoas_em_falta: 0, estado: 'por_atribuir' } }
       );
 
       tarefasDesatribuidas = resultado?.modifiedCount || 0;
@@ -1027,11 +1181,11 @@ exports.eliminarPropriedade = async (req, res) => {
 
       console.log(
         `🗑️ [eliminarPropriedade] HARD DELETE: "${propriedade.nome}" (${id}) ` +
-          `+ ${tarefasApagadas.deletedCount} tarefa(s) futura(s) apagada(s).`
+          `+ ${pl(tarefasApagadas.deletedCount, 'tarefa futura apagada', 'tarefas futuras apagadas')}.`
       );
 
       return res.status(200).json({
-        mensagem: `Propriedade "${propriedade.nome}" eliminada definitivamente. ${tarefasApagadas.deletedCount} tarefa(s) futura(s) apagada(s).`,
+        mensagem: `Propriedade "${propriedade.nome}" eliminada definitivamente. ${pl(tarefasApagadas.deletedCount, 'tarefa futura apagada', 'tarefas futuras apagadas')}.`,
         propriedade_id: id,
         hard_delete: true,
         tarefas_apagadas: tarefasApagadas.deletedCount,
@@ -1052,7 +1206,7 @@ exports.eliminarPropriedade = async (req, res) => {
         data: { $gte: hojeInicio },
         estado: { $in: ['atribuida', 'em_curso'] },
       },
-      { $set: { utilizador_id: null, estado: 'por_atribuir' } }
+      { $set: { utilizador_id: null, equipa_atribuida: [], pessoas_em_falta: 0, estado: 'por_atribuir' } }
     );
 
     registarAuditoria({
@@ -1066,7 +1220,7 @@ exports.eliminarPropriedade = async (req, res) => {
     });
 
     return res.status(200).json({
-      mensagem: `Propriedade "${propriedade.nome}" desativada. ${resultadoTarefas.modifiedCount} tarefa(s) futura(s) desatribuída(s).`,
+      mensagem: `Propriedade "${propriedade.nome}" desativada. ${pl(resultadoTarefas.modifiedCount, 'tarefa futura desatribuída', 'tarefas futuras desatribuídas')}.`,
       propriedade_id: id,
       hard_delete: false,
       tarefas_desatribuidas: resultadoTarefas.modifiedCount,
@@ -1115,23 +1269,37 @@ exports.atualizarPropriedade = async (req, res) => {
       });
     }
 
-    const { nome, morada, tempo_limpeza_minutos, funcionario_preferencial_id, modelo_checklist_id, observacoes, morada_estruturada, parceiro_id, equipa_preferencial } = req.body || {};
+    const { nome, morada, tempo_limpeza_minutos, funcionario_preferencial_id, modelo_checklist_id, observacoes, morada_estruturada, parceiro_id, fornecedor_id, equipa_preferencial, capacidade_hospedes, staff_necessario } = req.body || {};
 
     // Tem de haver pelo menos um campo para atualizar.
     if (
       nome === undefined &&
       morada === undefined &&
       tempo_limpeza_minutos === undefined &&
+      staff_necessario === undefined &&
+      req.body?.tipologia === undefined &&
+      req.body?.cliente_particular === undefined &&
+      equipa_preferencial === undefined &&
+      parceiro_id === undefined &&
       funcionario_preferencial_id === undefined &&
       modelo_checklist_id === undefined &&
       observacoes === undefined &&
       morada_estruturada === undefined &&
-      req.body?.checklist === undefined
+      req.body?.checklist === undefined &&
+      req.body?.tempos_limpeza_por_tipo === undefined &&
+      req.body?.checklists_por_tipo === undefined &&
+      capacidade_hospedes === undefined &&
+      req.body?.dias_fixos_limpeza === undefined &&
+      fornecedor_id === undefined
     ) {
       return res.status(400).json({
         erro: 'Nenhum campo para atualizar. Envie nome, morada, tempo_limpeza_minutos, checklist, funcionario_preferencial_id, modelo_checklist_id, observacoes ou morada_estruturada.',
       });
     }
+
+    // Tipos de limpeza: tempo e checklist por tipo (validados antes de gravar).
+    const cfgTipos = lerConfigTipos(req.body);
+    if (cfgTipos.erro) return res.status(400).json({ erro: cfgTipos.erro });
 
     // Validações de formato (se vierem).
     if (nome !== undefined && !String(nome).trim()) {
@@ -1149,8 +1317,22 @@ exports.atualizarPropriedade = async (req, res) => {
         });
       }
     }
+    // Pessoas necessárias: número inteiro de 1 a 10 (antes era ignorado ao editar).
+    if (staff_necessario !== undefined && staff_necessario !== null) {
+      const n = Number(staff_necessario);
+      if (!Number.isInteger(n) || n < 1 || n > 10) {
+        return res.status(400).json({ erro: 'staff_necessario deve ser um número inteiro de 1 a 10.' });
+      }
+    }
 
     // F0 — Validação de unicidade do smoobu_id removida.
+
+    // Valores antes de gravar: as limpezas por começar seguem a mudança (ver configCasaNasLimpezas).
+    const configAntes = {
+      tempo_limpeza_minutos: propriedade.tempo_limpeza_minutos,
+      tempos_limpeza_por_tipo: { ...(propriedade.toObject().tempos_limpeza_por_tipo || {}) },
+      staff_necessario: propriedade.staff_necessario,
+    };
 
     // Nome.
     if (nome !== undefined) {
@@ -1161,6 +1343,23 @@ exports.atualizarPropriedade = async (req, res) => {
     if (tempo_limpeza_minutos !== undefined && tempo_limpeza_minutos !== null) {
       propriedade.tempo_limpeza_minutos = Number(tempo_limpeza_minutos);
     }
+
+    // Tipologia / cliente particular e pessoas necessárias (regra: particular ou T2+ = 2,
+    // salvo valor posto à mão; staff_necessario já validado acima).
+    const camposCasa = lerCamposCasa(req.body);
+    if (camposCasa.erro) return res.status(400).json({ erro: camposCasa.erro });
+    for (const [k, v] of Object.entries(camposCasa.set)) propriedade[k] = v;
+    const pessoas = decidirPessoas(
+      {
+        tipologia: propriedade.tipologia,
+        cliente_particular: propriedade.cliente_particular,
+        staff_necessario: propriedade.staff_necessario,
+        staff_necessario_manual: propriedade.staff_necessario_manual,
+      },
+      staff_necessario === undefined || staff_necessario === null ? undefined : Number(staff_necessario)
+    );
+    propriedade.staff_necessario = pessoas.staff_necessario;
+    propriedade.staff_necessario_manual = pessoas.staff_necessario_manual;
 
     // Morada — se mudou, re-faz geocoding (best-effort).
     // Prompt 114 — Se geocoding falhar/devolver vazio, mantém coordenadas
@@ -1247,7 +1446,7 @@ exports.atualizarPropriedade = async (req, res) => {
         }).lean();
         if (!parceiro) {
           return res.status(400).json({
-            erro: 'Parceiro não encontrado (não é um utilizador com role "parceiro" desta empresa).',
+            erro: 'Proprietário não encontrado (não é um proprietário desta empresa).',
           });
         }
       }
@@ -1294,6 +1493,8 @@ exports.atualizarPropriedade = async (req, res) => {
         : [];
     }
 
+    for (const [k, v] of Object.entries(cfgTipos.set)) propriedade.set(k, v);
+
     // Prompt 95 (Fase 1.5) — Funcionário preferencial (Algoritmo VIP).
     // HF11 — Sistema HÍBRIDO: um staff PODE ser o preferencial de MÚLTIPLAS
     // propriedades (X, Y, Z). A desassociação automática da HF9 foi REMOVIDA.
@@ -1316,7 +1517,7 @@ exports.atualizarPropriedade = async (req, res) => {
         }).lean();
         if (!staffPref) {
           return res.status(400).json({
-            erro: 'Funcionário preferencial não encontrado (não é staff ativo desta empresa).',
+            erro: 'Elemento da equipa preferencial não encontrado (não está ativo nesta empresa).',
           });
         }
       }
@@ -1348,7 +1549,64 @@ exports.atualizarPropriedade = async (req, res) => {
       propriedade.modelo_checklist_id = valor;
     }
 
+    // FIX (lotação máxima) — capacidade_hospedes (lotação máxima da casa).
+    // Aceita null/string vazia para limpar o valor. O campo já existia no schema
+    // (v1.61.0) mas não era atualizável via PUT /propriedades/:id.
+    if (capacidade_hospedes !== undefined) {
+      const n = capacidade_hospedes === null || capacidade_hospedes === ''
+        ? null
+        : Number(capacidade_hospedes);
+      if (n !== null && (Number.isNaN(n) || n < 0)) {
+        return res.status(400).json({
+          erro: 'capacidade_hospedes deve ser um número maior ou igual a 0 (ou null).',
+        });
+      }
+      propriedade.capacidade_hospedes = n;
+    }
+
+    // Dias fixos de limpeza (0 = domingo ... 6 = sábado): também ao editar.
+    if (req.body && req.body.dias_fixos_limpeza !== undefined) {
+      const d = req.body.dias_fixos_limpeza;
+      if (!Array.isArray(d) || d.some((x) => !Number.isInteger(x) || x < 0 || x > 6)) {
+        return res.status(400).json({ erro: 'dias_fixos_limpeza deve ser uma lista de dias (0 a 6).' });
+      }
+      propriedade.dias_fixos_limpeza = [...new Set(d)].sort();
+    }
+
+    // FIX (restrição lavandaria) — fornecedor_id (lavandaria atribuída).
+    // Aceita null/string vazia para limpar a associação.
+    if (fornecedor_id !== undefined) {
+      const valor = fornecedor_id === null || fornecedor_id === ''
+        ? null
+        : String(fornecedor_id).trim();
+      if (valor !== null) {
+        if (!mongoose.isValidObjectId(valor)) {
+          return res.status(400).json({ erro: 'fornecedor_id inválido.' });
+        }
+        // Valida que é um utilizador com role 'fornecedor' da mesma empresa.
+        const Utilizador = require('../models/Utilizador');
+        const fornecedor = await Utilizador.findOne({
+          _id: valor,
+          empresa_id: empresaId,
+          role: 'fornecedor',
+          eliminado_em: null,
+        }).lean();
+        if (!fornecedor) {
+          return res.status(400).json({
+            erro: 'Lavandaria não encontrada (não é uma lavandaria desta empresa).',
+          });
+        }
+      }
+      propriedade.fornecedor_id = valor;
+    }
+
     await propriedade.save();
+
+    // Tempo base / por tipo / pessoas mudaram: as limpezas por começar desta casa seguem a mudança.
+    const { aplicarConfigCasaComPrazo, mudouConfig } = require('../utils/configCasaNasLimpezas');
+    const limpezas = mudouConfig(configAntes, propriedade).algo
+      ? await aplicarConfigCasaComPrazo({ empresaId, antes: configAntes, propriedade: propriedade.toObject() })
+      : null;
 
     // Auditoria.
     registarAuditoria({
@@ -1364,6 +1622,7 @@ exports.atualizarPropriedade = async (req, res) => {
 
     return res.status(200).json({
       propriedade,
+      ...(limpezas ? { limpezas } : {}),
       ...(geocodingFalhou
         ? { warning: 'Não foi possível georreferenciar a nova morada. Coordenadas antigas mantidas. Tenta simplificar a morada.' }
         : {}),
@@ -1408,6 +1667,9 @@ exports.getEquipa = async (req, res) => {
     // FIX (soft-delete com desatribuição) — Mostra tanto ativos como inativos
     // (removido o filtro ativo: true) para o gestor poder ver e reativar
     // utilizadores inativos. O soft-delete (eliminado_em) continua a excluir.
+    // FIX (visibilidade fornecedor) — fornecedores voltam a ser listados na
+    // Equipa (removido 'fornecedor' do $nin) para o gestor poder editá-los
+    // e atribuir propriedades no modal de edição.
     const utilizadores = await Utilizador.find({
       empresa_id: empresaId,
       eliminado_em: null,
@@ -1430,6 +1692,33 @@ exports.getEquipa = async (req, res) => {
           : null,
       };
     });
+
+    // FIX (atribuição bidirecional) — Para cada fornecedor, busca as
+    // propriedades onde fornecedor_id === user._id e injeta um array
+    // com esses IDs num novo campo `propriedades_atribuidas` no objeto.
+    const fornecedoresComProps = transformados.filter((u) => u.role === 'fornecedor');
+    if (fornecedoresComProps.length > 0) {
+      const fornecedorIds = fornecedoresComProps.map((u) => u._id);
+      const props = await Propriedade.find({
+        fornecedor_id: { $in: fornecedorIds },
+        empresa_id: empresaId,
+      })
+        .select('_id fornecedor_id')
+        .lean();
+      // Mapa: fornecedor_id → [propriedade_id, ...]
+      const mapa = new Map();
+      for (const p of props) {
+        const fid = String(p.fornecedor_id);
+        if (!mapa.has(fid)) mapa.set(fid, []);
+        mapa.get(fid).push(String(p._id));
+      }
+      // Injeta propriedades_atribuidas em cada fornecedor.
+      for (const u of transformados) {
+        if (u.role === 'fornecedor') {
+          u.propriedades_atribuidas = mapa.get(String(u._id)) ?? [];
+        }
+      }
+    }
 
     return res.status(200).json({ utilizadores: transformados });
   } catch (err) {
@@ -1469,6 +1758,52 @@ exports.getParceiros = async (req, res) => {
 };
 
 /**
+ * GET /api/gestor/fornecedores
+ * FIX (restrição lavandaria) — Lista utilizadores com role 'fornecedor'
+ * (lavandarias). Usado pelo select "Lavandaria Atribuída" no formulário
+ * de propriedades. Mostra ativos e inativos; exclui eliminados (soft delete).
+ *
+ * Resposta 200: { utilizadores: [...] } (sem password_hash).
+ */
+exports.getFornecedores = async (req, res) => {
+  try {
+    const { ok, empresaId } = obterEmpresaId(req, res);
+    if (!ok) return;
+
+    const utilizadores = await Utilizador.find({
+      empresa_id: empresaId,
+      eliminado_em: null,
+      role: 'fornecedor',
+    })
+      .select('-password_hash')
+      .sort({ nome: 1 })
+      .lean();
+
+    return res.status(200).json({ utilizadores });
+  } catch (err) {
+    console.error('❌ getFornecedores:', err.message);
+    return res.status(500).json({ erro: 'Erro interno do servidor.' });
+  }
+};
+
+/**
+ * Só o Super Admin mexe em gestores (criar, editar, ativar/inativar, eliminar). Um gestor pode
+ * editar-se a si próprio (nome, password...), mas não o seu role nem os de outros gestores.
+ * Devolve true (e responde 403) quando o pedido deve ser recusado.
+ */
+function recusaMexerEmGestor(req, res, { alvo = null, roleNovo = undefined } = {}) {
+  if (req.user && req.user.role === 'admin') return false;
+  const eOutroGestor = alvo && alvo.role === 'gestor' && String(alvo._id) !== String(req.user && req.user.id);
+  const mudaParaGestor = roleNovo === 'gestor' && !(alvo && alvo.role === 'gestor');
+  const mudaOProprioRole = alvo && alvo.role === 'gestor' && roleNovo !== undefined && roleNovo !== 'gestor';
+  if (eOutroGestor || mudaParaGestor || mudaOProprioRole) {
+    res.status(403).json({ erro: 'Só o administrador pode criar ou alterar gestores.' });
+    return true;
+  }
+  return false;
+}
+
+/**
  * POST /api/admin/equipa
  * Cria um novo membro de equipa (Utilizador) para a empresa.
  *
@@ -1486,7 +1821,7 @@ exports.criarMembroEquipa = async (req, res) => {
     const { ok, empresaId } = obterEmpresaId(req, res);
     if (!ok) return;
 
-    const { nome, email, password, role, responsavel_id, dias_folga, telefone, nif, observacoes, exclusivo_preferenciais, propriedades_alocadas } = req.body || {};
+    const { nome, email, password, role, responsavel_id, dias_folga, telefone, nif, observacoes, exclusivo_preferenciais, propriedades_alocadas, propriedades_atribuidas } = req.body || {};
 
     // Validações de presença.
     if (!nome || !email || !password) {
@@ -1495,22 +1830,24 @@ exports.criarMembroEquipa = async (req, res) => {
       });
     }
 
-    // Validação da password (mínimo 6 caracteres).
-    if (String(password).length < 6) {
+    // Validação da password (mínimo 10 caracteres).
+    if (String(password).length < 10) {
       return res.status(400).json({
-        erro: 'A password deve ter pelo menos 6 caracteres.',
+        erro: 'A password deve ter pelo menos 10 caracteres.',
       });
     }
 
     // Validação do role (se vier, tem de ser um dos permitidos).
     // HF27 — adicionado 'parceiro' (B2B externo que cria reservas manuais).
+    // FIX (role fornecedor) — adicionado 'fornecedor' (Lavandaria — portal /fornecedor).
     const roleFinal = role || 'staff';
-    if (!['admin', 'gestor', 'staff', 'parceiro'].includes(roleFinal)) {
+    if (!['admin', 'gestor', 'staff', 'parceiro', 'fornecedor'].includes(roleFinal)) {
       return res.status(400).json({
-        erro: 'Role inválido. Valores permitidos: admin, gestor, staff, parceiro.',
+        erro: 'Role inválido. Valores permitidos: admin, gestor, staff, parceiro, fornecedor.',
       });
     }
 
+    if (recusaMexerEmGestor(req, res, { roleNovo: roleFinal })) return;
     // SEGURANÇA: Não é possível criar utilizadores com role 'admin'.
     // O admin é criado apenas via /api/admin/setup (bootstrap) ou processo separado.
     if (roleFinal === 'admin') {
@@ -1602,6 +1939,21 @@ exports.criarMembroEquipa = async (req, res) => {
     const utilizador = novo.toObject();
     delete utilizador.password_hash;
 
+    // FIX (atribuição bidirecional fornecedor) — Se o role for fornecedor e
+    // o body contiver propriedades_atribuidas (array de IDs), atribui esse
+    // fornecedor a essas propriedades (fornecedor_id = novoUser._id).
+    if (roleFinal === 'fornecedor' && Array.isArray(propriedades_atribuidas)) {
+      const idsValidos = propriedades_atribuidas.filter((pid) => mongoose.isValidObjectId(pid));
+      if (idsValidos.length > 0) {
+        await Propriedade.updateMany(
+          { _id: { $in: idsValidos }, empresa_id: empresaId },
+          { fornecedor_id: novo._id }
+        );
+      }
+      // Injeta no objeto de resposta para o frontend ficar consistente.
+      utilizador.propriedades_atribuidas = idsValidos;
+    }
+
     // Auditoria.
     registarAuditoria({
       utilizador_id: req.user.id,
@@ -1657,7 +2009,7 @@ exports.atualizarMembroEquipa = async (req, res) => {
       return res.status(400).json({ erro: 'ID de utilizador inválido.' });
     }
 
-    const { nome, email, role, password, responsavel_id, dias_folga, telefone, folgas_rotativas, nif, observacoes, exclusivo_preferenciais, propriedades_alocadas } = req.body || {};
+    const { nome, email, role, password, responsavel_id, dias_folga, telefone, folgas_rotativas, nif, observacoes, exclusivo_preferenciais, propriedades_alocadas, propriedades_atribuidas } = req.body || {};
     if (
       nome === undefined &&
       email === undefined &&
@@ -1696,6 +2048,8 @@ exports.atualizarMembroEquipa = async (req, res) => {
         erro: 'Não é possível modificar um administrador.',
       });
     }
+    // SEGURANÇA: só o admin altera outros gestores (email/password = tomar a conta).
+    if (recusaMexerEmGestor(req, res, { alvo: utilizador, roleNovo: role })) return;
 
     // --- Nome ---
     if (nome !== undefined) {
@@ -1725,11 +2079,24 @@ exports.atualizarMembroEquipa = async (req, res) => {
 
     // --- Role ---
     // HF27 — adicionado 'parceiro' (B2B externo).
+    // FIX (role fornecedor) — adicionado 'fornecedor' (Lavandaria — portal /fornecedor).
     if (role !== undefined) {
-      if (!['gestor', 'staff', 'parceiro'].includes(role)) {
+      if (!['gestor', 'staff', 'parceiro', 'fornecedor'].includes(role)) {
         return res.status(400).json({
-          erro: 'Role inválido. Valores permitidos via edição: gestor, staff, parceiro.',
+          erro: 'Role inválido. Valores permitidos via edição: gestor, staff, parceiro, fornecedor.',
         });
+      }
+      if (utilizador.role === 'fornecedor' && role !== 'fornecedor') {
+        await Propriedade.updateMany(
+          { fornecedor_id: utilizador._id, empresa_id: empresaId },
+          { $set: { fornecedor_id: null } }
+        );
+      }
+      if (utilizador.role === 'parceiro' && role !== 'parceiro') {
+        await Propriedade.updateMany(
+          { parceiro_id: utilizador._id, empresa_id: empresaId },
+          { $set: { parceiro_id: null } }
+        );
       }
       utilizador.role = role;
     }
@@ -1866,12 +2233,35 @@ exports.atualizarMembroEquipa = async (req, res) => {
 
     // --- Password (opcional: só se vier, faz hash nova) ---
     if (password !== undefined && password !== null && String(password) !== '') {
-      if (String(password).length < 6) {
+      if (String(password).length < 10) {
         return res.status(400).json({
-          erro: 'A password deve ter pelo menos 6 caracteres.',
+          erro: 'A password deve ter pelo menos 10 caracteres.',
         });
       }
       utilizador.password_hash = await bcrypt.hash(String(password), 10);
+    }
+
+    // FIX (atribuição bidirecional fornecedor) — Se o role do utilizador for
+    // (ou ficar) fornecedor e o body contiver propriedades_atribuidas:
+    //   1. Limpa todas as propriedades onde fornecedor_id === user._id (antigas).
+    //   2. Atribui as novas propriedades (fornecedor_id = user._id).
+    const isFornecedorFinal = role !== undefined ? role === 'fornecedor' : utilizador.role === 'fornecedor';
+    if (isFornecedorFinal && propriedades_atribuidas !== undefined) {
+      // Passo 1: limpa as antigas.
+      await Propriedade.updateMany(
+        { fornecedor_id: utilizador._id, empresa_id: empresaId },
+        { fornecedor_id: null }
+      );
+      // Passo 2: aplica as novas.
+      const idsValidos = Array.isArray(propriedades_atribuidas)
+        ? propriedades_atribuidas.filter((pid) => mongoose.isValidObjectId(pid))
+        : [];
+      if (idsValidos.length > 0) {
+        await Propriedade.updateMany(
+          { _id: { $in: idsValidos }, empresa_id: empresaId },
+          { fornecedor_id: utilizador._id }
+        );
+      }
     }
 
     await utilizador.save();
@@ -1928,6 +2318,7 @@ exports.alternarEstadoMembro = async (req, res) => {
         erro: 'Não é possível modificar o estado de um administrador.',
       });
     }
+    if (recusaMexerEmGestor(req, res, { alvo: utilizador })) return;
 
     // Se vier `ativo` no body, usa-o; senão alterna.
     const novoEstado =
@@ -1954,12 +2345,14 @@ exports.alternarEstadoMembro = async (req, res) => {
             Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth(), hoje.getUTCDate())
           );
           // Desatribui tarefas desde hoje até 1 ano no futuro (cobre todas
-          // as tarefas futuras — o helper filtra por estado 'atribuida'/'em_curso').
+          // as tarefas futuras — o helper recebe incluirEmCurso: quem fica inativo não consegue autenticar-se,
+          // por isso uma 'em_curso' ficaria presa).
           const futuro = new Date(inicio.getTime() + 365 * 24 * 60 * 60 * 1000);
           const resultado = await desatribuirTarefasPeriodo(
             utilizador._id,
             inicio,
-            futuro
+            futuro,
+            { incluirEmCurso: true }
           );
           tarefasDesatribuidas = resultado.desatribuidas;
         } catch (err) {
@@ -2028,6 +2421,7 @@ exports.eliminarMembroEquipa = async (req, res) => {
         erro: 'Não é possível eliminar um administrador.',
       });
     }
+    if (recusaMexerEmGestor(req, res, { alvo: utilizador })) return;
 
     const nomeEliminado = utilizador.nome;
     // Soft delete: marca eliminado_em em vez de remover fisicamente.
@@ -2036,6 +2430,38 @@ exports.eliminarMembroEquipa = async (req, res) => {
     utilizador.eliminado_em = new Date();
     utilizador.ativo = false; // garante que não consegue fazer login
     await utilizador.save();
+
+    // Limpa dependências: tarefas futuras não iniciadas voltam ao pool e as propriedades
+    // deixam de apontar para o utilizador eliminado (equipa/preferencial/lavandaria/proprietário).
+    try {
+      const hojeUTC = new Date();
+      hojeUTC.setUTCHours(0, 0, 0, 0);
+      const tarefasDele = await Tarefa.find(
+        comMembro({ data: { $gte: hojeUTC }, estado: 'atribuida' }, utilizador._id)
+      );
+      for (const td of tarefasDele) {
+        retirarMembroDoc(td, utilizador._id); // equipa de 2+: sai só ele
+        await td.save();
+      }
+      await Propriedade.updateMany(
+        { empresa_id: empresaId },
+        { $pull: { equipa_preferencial: utilizador._id } }
+      );
+      await Propriedade.updateMany(
+        { empresa_id: empresaId, funcionario_preferencial_id: utilizador._id },
+        { $set: { funcionario_preferencial_id: null } }
+      );
+      await Propriedade.updateMany(
+        { empresa_id: empresaId, fornecedor_id: utilizador._id },
+        { $set: { fornecedor_id: null } }
+      );
+      await Propriedade.updateMany(
+        { empresa_id: empresaId, parceiro_id: utilizador._id },
+        { $set: { parceiro_id: null } }
+      );
+    } catch (e) {
+      console.error('⚠️  limpeza de dependências (eliminar membro):', e.message);
+    }
 
     // Auditoria.
     registarAuditoria({
@@ -2063,19 +2489,44 @@ exports.eliminarMembroEquipa = async (req, res) => {
 /* ------------------------------------------------------------------ */
 
 /**
+ * Cria a ausência SÓ se o período ainda não estiver coberto por outra ativa
+ * (pendente, pendente_emergencia ou aprovada) da mesma pessoa. Evita
+ * duplicados ao repetir a falta súbita/baixa. Devolve true se criou.
+ * Lança o erro original da BD (exceto duplicado 11000, que conta como já existente).
+ */
+async function criarAusenciaSeNaoCoberta(dados) {
+  const jaCoberta = await Ausencia.findOne({
+    utilizador_id: dados.utilizador_id,
+    data_inicio: { $lte: dados.data_inicio },
+    data_fim: { $gte: dados.data_fim },
+    estado: { $in: ['pendente', 'pendente_emergencia', 'aprovada'] },
+  }).select('_id').lean();
+  if (jaCoberta) return false;
+  try {
+    await Ausencia.create(dados);
+    return true;
+  } catch (err) {
+    if (err.code === 11000) return false;
+    throw err;
+  }
+}
+
+/**
  * POST /api/admin/equipa/:id/falta-subita
  *
- * Regista uma ausência de hoje para o utilizador e desatribui as suas
- * tarefas de hoje (passam a 'por_atribuir').
+ * Regista uma ausência de hoje para o utilizador, desatribui as suas tarefas
+ * de hoje e reatribui-as logo a outro staff disponível (sem clique).
  *
- * Lógica (Prompt 97 — "Desligar a Histeria Automática"):
+ * Lógica:
  *   1. Valida utilizador (pertence à empresa, não é admin, não é si próprio).
  *   2. Regista Ausencia para hoje (ignora duplicado).
  *   3. Desatribui as tarefas de hoje do utilizador (utilizador_id = null +
- *      estado = 'por_atribuir') — NÃO chama o load balancer. O recálculo
- *      fica a cargo do Gestor (manual) ou do Fail-Safe noturno.
+ *      estado = 'por_atribuir'); 'em_curso' fica com a pessoa (gestores avisados).
+ *   4. Reatribui automaticamente (best-effort). Sem ninguém disponível, ficam
+ *      'por_atribuir' e os gestores são avisados.
  *
- * Resposta 200: { desatribuidas, total, detalhes: [...] }
+ * Resposta 200: { desatribuidas, total, detalhes, reatribuicao: { total,
+ *   reatribuidas, orfas, erro? }, ... }
  */
 exports.reportarFaltaSubita = async (req, res) => {
   try {
@@ -2113,55 +2564,75 @@ exports.reportarFaltaSubita = async (req, res) => {
 
     // 2) Registra Ausencia para hoje (ignora erro de duplicado).
     // v1.24.0: falta súbita é uma ação do admin → estado 'aprovada'.
+    // Repetir a falta no mesmo dia não duplica a ausência (o resto da operação segue).
     try {
-      await Ausencia.create({
+      await criarAusenciaSeNaoCoberta({
         utilizador_id: id,
         empresa_id: empresaId,
         data_inicio: hojeInicio,
         data_fim: hojeInicio,
-        tipo: 'outro',
+        tipo: 'falta',
         estado: 'aprovada',
         notas: 'Falta súbita reportada pelo admin',
       });
     } catch (err) {
-      if (err.code !== 11000) {
-        console.error('⚠️  Erro ao criar ausência de falta súbita:', err.message);
-      }
-      // Se duplicado, não é problema — o utilizador já tem ausência hoje.
+      console.error('⚠️  Erro ao criar ausência de falta súbita:', err.message);
+      return res.status(500).json({ erro: 'Não foi possível registar a falta. Nada foi alterado.' });
     }
 
     // 3) Procura tarefas de hoje do utilizador (atribuida ou por_atribuir).
-    const tarefas = await Tarefa.find({
-      utilizador_id: id,
+    const tarefas = await Tarefa.find(comMembro({
       data: { $gte: hojeInicio, $lt: amanhaInicio },
       estado: { $in: ['atribuida', 'por_atribuir'] },
-    }).populate({ path: 'propriedade_id', select: 'nome' });
+    }, id)).populate({ path: 'propriedade_id', select: 'nome' });
+
+    // Limpezas 'em_curso' NÃO são desatribuídas: ficam com a pessoa e o
+    // gestor é avisado (resposta + sino/push a todos os gestores).
+    const { listarEmCurso, textoEmCurso, avisarGestoresEmCurso, reatribuirAutomaticamente, textoReatribuicao } = require('./ausenciaController');
+    const emCurso = await listarEmCurso(id, hojeInicio, amanhaInicio);
+    const infoEmCurso = { em_curso_mantidas: emCurso.length, em_curso: emCurso };
+    if (emCurso.length > 0) await avisarGestoresEmCurso(empresaId, utilizador.nome, infoEmCurso);
+    const avisoEmCurso = textoEmCurso(infoEmCurso, utilizador.nome);
 
     if (tarefas.length === 0) {
+      // Mesmo sem tarefas dela, outras por atribuir de hoje podem ser cobertas.
+      const reatribuicao = await reatribuirAutomaticamente(empresaId, id, hojeInicio, hojeInicio);
+      const txtRe = textoReatribuicao(reatribuicao);
       return res.status(200).json({
-        mensagem: 'Sem tarefas para desatribuir hoje.',
+        mensagem:
+          'Sem tarefas para desatribuir hoje.' +
+          (txtRe ? ` ${txtRe}` : '') +
+          (avisoEmCurso ? ` ${avisoEmCurso}` : ''),
         desatribuidas: 0,
         total: 0,
         detalhes: [],
+        reatribuicao,
+        ...infoEmCurso,
+        aviso: avisoEmCurso || undefined,
       });
     }
 
-    // 4) Desatribui cada tarefa (SEM load balancer — Prompt 97).
+    // 4) Desatribui cada tarefa; a reatribuição vem logo a seguir.
     let desatribuidas = 0;
+    let parciais = 0;
     const detalhes = [];
 
     for (const tarefa of tarefas) {
-      tarefa.utilizador_id = null;
-      tarefa.estado = 'por_atribuir';
+      // Equipa de 2+: sai só esta pessoa (a tarefa fica com os restantes e
+      // `pessoas_em_falta` sobe); equipa de 1: volta a por_atribuir.
+      const vazia = retirarMembroDoc(tarefa, id);
       await tarefa.save();
-      desatribuidas++;
+      if (vazia) desatribuidas++;
+      else parciais++;
       detalhes.push({
         tarefa_id: String(tarefa._id),
         propriedade: tarefa.propriedade_id?.nome ?? '?',
-        novo_utilizador_id: null,
-        reatribuida: false,
+        ...(vazia ? {} : { parcial: true }),
       });
     }
+
+    // 5) Reatribuição automática (best-effort; nunca lança).
+    const reatribuicao = await reatribuirAutomaticamente(empresaId, id, hojeInicio, hojeInicio);
 
     // Auditoria.
     registarAuditoria({
@@ -2171,15 +2642,21 @@ exports.reportarFaltaSubita = async (req, res) => {
       acao: 'falta_subita',
       recurso: 'utilizador',
       recurso_id: id,
-      descricao: `Falta súbita reportada para "${utilizador.nome}": ${desatribuidas} tarefa(s) desatribuída(s)`,
-      detalhes: { desatribuidas, total: tarefas.length },
+      descricao: `Falta súbita reportada para "${utilizador.nome}": ${desatribuidas} tarefa(s) desatribuída(s), ${reatribuicao.reatribuidas} reatribuída(s), ${reatribuicao.orfas} por atribuir`,
+      detalhes: { desatribuidas, total: tarefas.length, reatribuicao },
     });
 
     return res.status(200).json({
-      mensagem: `Falta súbita processada: ${desatribuidas} tarefa(s) desatribuída(s) (por atribuir).`,
+      mensagem:
+        `Falta súbita processada: ${pl(desatribuidas, 'tarefa desatribuída', 'tarefas desatribuídas')}. ${textoReatribuicao(reatribuicao)}` +
+        (avisoEmCurso ? ` ${avisoEmCurso}` : ''),
       desatribuidas,
+      parciais,
       total: tarefas.length,
       detalhes,
+      reatribuicao,
+      ...infoEmCurso,
+      aviso: avisoEmCurso || undefined,
     });
   } catch (err) {
     console.error('❌ reportarFaltaSubita:', err.message);
@@ -2199,15 +2676,17 @@ exports.reportarFaltaSubita = async (req, res) => {
  *
  * Body: { data_inicio, data_fim, tipo?, notas? }
  *
- * Lógica (Prompt 97 — "Desligar a Histeria Automática"):
+ * Lógica:
  *   1. Valida utilizador (empresa, não admin, não eliminado).
  *   2. Cria Ausencia (ignora duplicado).
  *   3. Desatribui as tarefas atribuídas no período [data_inicio, data_fim]
- *      (utilizador_id = null + estado = 'por_atribuir') — NÃO chama o load
- *      balancer. O recálculo fica a cargo do Gestor (manual) ou do
- *      Fail-Safe noturno.
+ *      (utilizador_id = null + estado = 'por_atribuir'); 'em_curso' fica com
+ *      a pessoa (gestores avisados).
+ *   4. Reatribui automaticamente (best-effort). Sem ninguém disponível, ficam
+ *      'por_atribuir' e os gestores são avisados.
  *
- * Resposta 200: { desatribuidas, total, detalhes: [...] }
+ * Resposta 200: { desatribuidas, total, detalhes, reatribuicao: { total,
+ *   reatribuidas, orfas, erro? }, ... }
  */
 exports.registarBaixaProlongada = async (req, res) => {
   try {
@@ -2261,58 +2740,83 @@ exports.registarBaixaProlongada = async (req, res) => {
       });
     }
 
+    const tipoBaixa = tipo || 'ferias';
+    if (!['ferias', 'doenca', 'falta', 'outro'].includes(tipoBaixa)) {
+      return res.status(400).json({
+        erro: 'tipo inválido. Valores permitidos: ferias, doenca, falta, outro.',
+      });
+    }
+
     // 1) Cria a Ausencia (ignora duplicado).
     // v1.24.0: baixa prolongada é uma ação do admin → estado 'aprovada'.
     try {
-      await Ausencia.create({
+      await criarAusenciaSeNaoCoberta({
         utilizador_id: id,
         empresa_id: empresaId,
         data_inicio: inicio,
         data_fim: fim,
-        tipo: tipo || 'ferias',
+        tipo: tipoBaixa,
         estado: 'aprovada',
         notas: notas ? String(notas).trim() : '',
       });
     } catch (err) {
-      if (err.code !== 11000) {
-        console.error('⚠️  Erro ao criar ausência de baixa:', err.message);
-      }
-      // Se duplicado, não é problema.
+      // Antes o erro era engolido: desatribuía as tarefas mas sem ausência, e o LB voltava a dar-lhe trabalho.
+      console.error('⚠️  Erro ao criar ausência de baixa:', err.message);
+      return res.status(500).json({ erro: 'Não foi possível registar a ausência. Nada foi alterado.' });
     }
 
     // 2) Procura tarefas atribuídas no período.
-    const tarefas = await Tarefa.find({
-      utilizador_id: id,
+    const tarefas = await Tarefa.find(comMembro({
       data: { $gte: inicio, $lt: fimDia },
       estado: 'atribuida',
-    }).populate({ path: 'propriedade_id', select: 'nome' });
+    }, id)).populate({ path: 'propriedade_id', select: 'nome' });
+
+    // Limpezas 'em_curso' NÃO são desatribuídas: ficam com a pessoa e o
+    // gestor é avisado (resposta + sino/push a todos os gestores).
+    const { listarEmCurso, textoEmCurso, avisarGestoresEmCurso, reatribuirAutomaticamente, textoReatribuicao } = require('./ausenciaController');
+    const emCurso = await listarEmCurso(id, inicio, fimDia);
+    const infoEmCurso = { em_curso_mantidas: emCurso.length, em_curso: emCurso };
+    if (emCurso.length > 0) await avisarGestoresEmCurso(empresaId, utilizador.nome, infoEmCurso);
+    const avisoEmCurso = textoEmCurso(infoEmCurso, utilizador.nome);
 
     if (tarefas.length === 0) {
+      // Mesmo sem tarefas dela, outras por atribuir no período podem ser cobertas.
+      const reatribuicao = await reatribuirAutomaticamente(empresaId, id, inicio, fim);
+      const txtRe = textoReatribuicao(reatribuicao);
       return res.status(200).json({
-        mensagem: 'Sem tarefas para desatribuir no período.',
+        mensagem:
+          'Sem tarefas para desatribuir no período.' +
+          (txtRe ? ` ${txtRe}` : '') +
+          (avisoEmCurso ? ` ${avisoEmCurso}` : ''),
         desatribuidas: 0,
         total: 0,
         detalhes: [],
+        reatribuicao,
+        ...infoEmCurso,
+        aviso: avisoEmCurso || undefined,
       });
     }
 
-    // 3) Desatribui cada tarefa (SEM load balancer — Prompt 97).
+    // 3) Desatribui cada tarefa; a reatribuição vem logo a seguir.
     let desatribuidas = 0;
+    let parciais = 0;
     const detalhes = [];
 
     for (const tarefa of tarefas) {
-      tarefa.utilizador_id = null;
-      tarefa.estado = 'por_atribuir';
+      const vazia = retirarMembroDoc(tarefa, id);
       await tarefa.save();
-      desatribuidas++;
+      if (vazia) desatribuidas++;
+      else parciais++;
       detalhes.push({
         tarefa_id: String(tarefa._id),
+        ...(vazia ? {} : { parcial: true }),
         data: tarefa.data,
         propriedade: tarefa.propriedade_id?.nome ?? '?',
-        novo_utilizador_id: null,
-        reatribuida: false,
       });
     }
+
+    // 4) Reatribuição automática (best-effort; nunca lança).
+    const reatribuicao = await reatribuirAutomaticamente(empresaId, id, inicio, fim);
 
     // Auditoria.
     registarAuditoria({
@@ -2322,15 +2826,21 @@ exports.registarBaixaProlongada = async (req, res) => {
       acao: 'baixa_prolongada',
       recurso: 'utilizador',
       recurso_id: id,
-      descricao: `Baixa/férias registadas para "${utilizador.nome}": ${desatribuidas} tarefa(s) desatribuída(s)`,
-      detalhes: { data_inicio: inicio, data_fim: fim, desatribuidas, total: tarefas.length },
+      descricao: `Baixa/férias registadas para "${utilizador.nome}": ${desatribuidas} tarefa(s) desatribuída(s), ${reatribuicao.reatribuidas} reatribuída(s), ${reatribuicao.orfas} por atribuir`,
+      detalhes: { data_inicio: inicio, data_fim: fim, desatribuidas, total: tarefas.length, reatribuicao },
     });
 
     return res.status(200).json({
-      mensagem: `Baixa processada: ${desatribuidas} tarefa(s) desatribuída(s) (por atribuir).`,
+      mensagem:
+        `Baixa processada: ${pl(desatribuidas, 'tarefa desatribuída', 'tarefas desatribuídas')}. ${textoReatribuicao(reatribuicao)}` +
+        (avisoEmCurso ? ` ${avisoEmCurso}` : ''),
       desatribuidas,
+      parciais,
       total: tarefas.length,
       detalhes,
+      reatribuicao,
+      ...infoEmCurso,
+      aviso: avisoEmCurso || undefined,
     });
   } catch (err) {
     console.error('❌ registarBaixaProlongada:', err.message);
@@ -2371,7 +2881,10 @@ exports.exportarTarefasCSV = async (req, res) => {
     const tarefas = await Tarefa.find(filtro)
       .populate({ path: 'propriedade_id', select: 'nome' })
       .populate({ path: 'utilizador_id', select: 'nome' })
+      .populate({ path: 'equipa_atribuida', select: 'nome' })
       .sort({ data: 1 })
+      // Listagem leve: as fotos (base64) só vão no detalhe/prova.
+      .select('-fotos_conclusao -avarias.fotos')
       .lean();
 
     // Cabeçalho CSV.
@@ -2379,7 +2892,8 @@ exports.exportarTarefasCSV = async (req, res) => {
     const linhas = tarefas.map((t) => {
       const data = new Date(t.data).toLocaleDateString('pt-PT');
       const prop = (t.propriedade_id?.nome || '').replace(/,/g, ';');
-      const func = (t.utilizador_id?.nome || 'Por atribuir').replace(/,/g, ';');
+      const nomes = membrosPopulados(t).map((m) => m.nome).filter(Boolean);
+      const func = (nomes.length ? nomes.join(' + ') : 'Por atribuir').replace(/,/g, ';');
       const obs = (t.observacoes || '').replace(/[\n\r,]/g, ' ');
       return `${data},${prop},${func},${t.tipo},${t.estado},${t.tempo_limpeza_minutos},${obs}`;
     }).join('\n');
@@ -2428,157 +2942,22 @@ exports.getAuditoria = async (req, res) => {
 /* Setup do "Cliente Zero" (bootstrap do ambiente de testes)          */
 /* ------------------------------------------------------------------ */
 
-/**
- * GET /api/gestor/setup
- *
- * Cria o "Cliente Zero" — dados iniciais para testes:
- *   - 1 Empresa: "All2gether Teste"
- *   - 1 Utilizador Staff: "João Staff"
- *   - 1 Propriedade: "Apartamento Teste"
- *
- * F0: Removido smoobu_id (integração Smoobu eliminada).
- *
- * Idempotente: antes de criar, verifica se a empresa já existe (por nome).
- * Se já existir, reutiliza-a e cria apenas o que faltar.
- *
- * Devolve o `empresa_id` gerado/reutilizado no JSON de resposta.
- */
-exports.setupClienteZero = async (req, res) => {
-  try {
-    const NOME_EMPRESA = 'All2gether Teste';
-    const NOME_PROPRIEDADE = 'Apartamento Teste';
-    // F0 — SMOOBU_ID_TESTE removido.
-    // Password comum de teste do Cliente Zero (em produção, cada utilizador
-    // deve alterar a sua password após o primeiro login).
-    const PASSWORD_TESTE = 'all2gether123';
-
-    // Utilizadores a garantir (admin + gestor + staff).
-    const UTILIZADORES_TESTE = [
-      {
-        nome: 'Diretor All2gether', // admin — para ti (dono da conta)
-        email: 'admin@all2gether.pt',
-        role: 'admin',
-      },
-      {
-        nome: 'Gestor de Operações', // gestor — gere a equipa
-        email: 'gestor@all2gether.pt',
-        role: 'gestor',
-      },
-      {
-        nome: 'João Staff', // staff — executante
-        email: 'joao.staff@all2gether.pt',
-        role: 'staff',
-      },
-    ];
-
-    // 1) Empresa — não duplicar (procura por nome).
-    let empresa = await Empresa.findOne({ nome: NOME_EMPRESA });
-    let empresaCriada = false;
-    if (!empresa) {
-      empresa = await Empresa.create({
-        nome: NOME_EMPRESA,
-      });
-      empresaCriada = true;
-    }
-
-    // 2) Utilizadores (admin + gestor + staff) — não duplicar (email único).
-    //    Para cada um: cria se não existir, ou define password se existir sem.
-    const utilizadores = [];
-    for (const u of UTILIZADORES_TESTE) {
-      let user = await Utilizador.findOne({ email: u.email });
-      let criado = false;
-      let passwordDefinida = false;
-
-      if (!user) {
-        const password_hash = await bcrypt.hash(PASSWORD_TESTE, 10);
-        user = await Utilizador.create({
-          nome: u.nome,
-          email: u.email,
-          password_hash,
-          empresa_id: empresa._id,
-          role: u.role,
-          ativo: true,
-        });
-        criado = true;
-        passwordDefinida = true;
-      } else if (!user.password_hash) {
-        // Retrocompatibilidade: utilizador criado antes do auth, sem password.
-        const password_hash = await bcrypt.hash(PASSWORD_TESTE, 10);
-        user.empresa_id = user.empresa_id || empresa._id;
-        user.password_hash = password_hash;
-        // Garante que o role está correto (caso tenha sido criado com role antigo).
-        user.role = u.role;
-        await user.save();
-        passwordDefinida = true;
-      }
-
-      utilizadores.push({
-        id: user._id,
-        nome: user.nome,
-        email: user.email,
-        role: user.role,
-        criado,
-        password_definida: passwordDefinida,
-        credenciais_teste: {
-          email: u.email,
-          password: PASSWORD_TESTE,
-        },
-      });
-    }
-
-    // 3) Propriedade — não duplicar (procura por nome + empresa).
-    // F0 — procura por nome em vez de smoobu_id (campo removido).
-    let propriedade = await Propriedade.findOne({ nome: NOME_PROPRIEDADE, empresa_id: empresa._id });
-    let propriedadeCriada = false;
-    if (!propriedade) {
-      propriedade = await Propriedade.create({
-        nome: NOME_PROPRIEDADE,
-        empresa_id: empresa._id,
-        tempo_limpeza_minutos: 45,
-      });
-      propriedadeCriada = true;
-    }
-
-    const algoCriado =
-      empresaCriada ||
-      utilizadores.some((u) => u.criado) ||
-      propriedadeCriada;
-
-    return res.status(200).json({
-      mensagem: algoCriado
-        ? 'Cliente Zero criado com sucesso.'
-        : 'Cliente Zero já existia (nada foi alterado).',
-      empresa_id: empresa._id,
-      empresa: {
-        id: empresa._id,
-        nome: empresa.nome,
-        criada: empresaCriada,
-      },
-      // 3 utilizadores: admin (dono), gestor (responsável clínico), staff (executante).
-      utilizadores,
-      propriedade: {
-        id: propriedade._id,
-        nome: propriedade.nome,
-        criada: propriedadeCriada,
-      },
-    });
-  } catch (err) {
-    console.error('❌ setupClienteZero:', err.message);
-
-    if (err.code === 11000) {
-      return res.status(409).json({
-        erro: 'Conflito de dados duplicados.',
-        detalhe: err.keyValue,
-      });
-    }
-
-    return res.status(500).json({ erro: 'Erro interno do servidor.' });
-  }
-};
-
 /* ------------------------------------------------------------------ */
 /* Webhooks — Logs de integrações externas                           */
 /* ------------------------------------------------------------------ */
+
+/** Substitui email/telefone (e o link da app do hóspede) por "[oculto]", em qualquer nível. */
+function ocultarContactos(valor) {
+  if (Array.isArray(valor)) return valor.map(ocultarContactos);
+  if (valor && typeof valor === 'object') {
+    const r = {};
+    for (const [k, v] of Object.entries(valor)) {
+      r[k] = /^(email|phone|telefone|guest-app-url)$/i.test(k) ? '[oculto]' : ocultarContactos(v);
+    }
+    return r;
+  }
+  return valor;
+}
 
 /**
  * GET /api/gestor/webhooks
@@ -2595,13 +2974,16 @@ exports.setupClienteZero = async (req, res) => {
  */
 exports.getWebhooks = async (req, res) => {
   try {
-    // Não usamos obterEmpresaId aqui porque o WebhookLog é global — não tem
-    // empresa_id. A auth continua a ser exigida (rota protegida) para que só
-    // admins autenticados vejam os logs.
+    // SEGURANÇA (multi-tenant): só devolve logs da empresa do token. Nunca
+    // aceita empresa_id vindo da query. Logs sem empresa resolvida ficam ocultos.
+    const empresaId = req.user?.empresa_id;
+    if (!empresaId) {
+      return res.status(400).json({ erro: 'empresa_id em falta no token.' });
+    }
     const { status } = req.query;
     const limit = Math.min(Number(req.query?.limit) || 50, 200);
 
-    const filtro = {};
+    const filtro = { empresa_id: empresaId };
     if (status && ['recebido', 'processado', 'erro'].includes(status)) {
       filtro.status = status;
     }
@@ -2614,7 +2996,13 @@ exports.getWebhooks = async (req, res) => {
       WebhookLog.countDocuments(filtro),
     ]);
 
-    return res.status(200).json({ webhooks, total });
+    // RGPD: email/telefone do hóspede só são visíveis ao admin.
+    const visiveis =
+      req.user && req.user.role === 'admin'
+        ? webhooks
+        : webhooks.map((w) => ({ ...w, payload: ocultarContactos(w.payload) }));
+
+    return res.status(200).json({ webhooks: visiveis, total });
   } catch (err) {
     console.error('❌ getWebhooks:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
@@ -2631,4 +3019,48 @@ exports.reprocessarWebhook = async (req, res) => {
   return res.status(410).json({
     erro: 'Reprocessamento de webhooks foi desativado (integração Smoobu removida na F0).',
   });
+};
+
+/**
+ * GET /api/gestor/tarefas/:id/contacto-hospede   (EXCLUSIVO do admin)
+ *
+ * Devolve o email e o telefone do hóspede (guardados à parte, em ContactoHospede,
+ * e apagados 30 dias depois do check-out). Cada consulta fica em auditoria.
+ *
+ * Resposta 200: { email: string|null, telefone: string|null }
+ */
+exports.getContactoHospede = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const empresaId = req.user && req.user.empresa_id;
+    if (!mongoose.isValidObjectId(id) || !empresaId) {
+      return res.status(400).json({ erro: 'Pedido inválido.' });
+    }
+    const Tarefa = require('../models/Tarefa');
+    const ContactoHospede = require('../models/ContactoHospede');
+
+    const tarefa = await Tarefa.findOne({ _id: id, empresa_id: empresaId }).select('_id').lean();
+    if (!tarefa) {
+      return res.status(404).json({ erro: 'Tarefa não encontrada.' });
+    }
+    const contacto = await ContactoHospede.findOne({ tarefa_id: id, empresa_id: empresaId }).lean();
+
+    registarAuditoria({
+      utilizador_id: req.user.id,
+      utilizador_nome: req.user.nome || 'Admin',
+      empresa_id: empresaId,
+      acao: 'ver_contacto_hospede',
+      recurso: 'tarefa',
+      recurso_id: id,
+      descricao: 'Consulta do email/telefone do hóspede de uma tarefa.',
+    });
+
+    return res.status(200).json({
+      email: contacto ? contacto.email : null,
+      telefone: contacto ? contacto.telefone : null,
+    });
+  } catch (err) {
+    console.error('❌ getContactoHospede:', err.message);
+    return res.status(500).json({ erro: 'Erro interno do servidor.' });
+  }
 };

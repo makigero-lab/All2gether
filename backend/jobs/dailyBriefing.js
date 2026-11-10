@@ -20,6 +20,7 @@
 const cron = require('node-cron');
 const mongoose = require('mongoose');
 const Tarefa = require('../models/Tarefa');
+const { membrosPopulados } = require('../utils/equipaTarefa');
 const Utilizador = require('../models/Utilizador');
 const { notificarUtilizador } = require('../utils/notificar');
 
@@ -30,11 +31,11 @@ const { notificarUtilizador } = require('../utils/notificar');
  * @param {string} telefone - número em formato internacional (ex.: +351912345678)
  * @param {string} mensagem - texto a enviar
  */
-function enviarWhatsApp(telefone, mensagem) {
-  console.log(`\n📱 WHATSAPP → ${telefone}`);
-  console.log('─────────────────────────────────────');
-  console.log(mensagem);
-  console.log('─────────────────────────────────────\n');
+function enviarWhatsApp(telefone, mensagem, utilizadorId) {
+  // RGPD: o log não leva o telefone, o nome nem a lista de casas (dados pessoais).
+  // Enquanto não houver integração real, nada é enviado.
+  void telefone; void mensagem;
+  console.log(`📱 [Daily Briefing] WhatsApp simulado (não enviado) para o utilizador ${utilizadorId}.`);
 }
 
 /**
@@ -89,6 +90,10 @@ async function executarBriefing() {
         path: 'utilizador_id',
         select: 'nome telefone ativo eliminado_em',
       })
+      .populate({
+        path: 'equipa_atribuida',
+        select: 'nome telefone ativo eliminado_em',
+      })
       .lean();
 
     if (tarefas.length === 0) {
@@ -99,16 +104,18 @@ async function executarBriefing() {
     // 3) Agrupa por utilizador_id (ignora tarefas sem utilizador atribuído).
     const porUtilizador = new Map();
 
+    // Todos os membros da equipa (não só o responsável) recebem o briefing.
     for (const t of tarefas) {
-      const u = t.utilizador_id;
-      // Ignora tarefas sem utilizador, utilizadores eliminados ou inativos.
-      if (!u || u.eliminado_em || !u.ativo) continue;
+      for (const u of membrosPopulados(t)) {
+        // Ignora utilizadores eliminados ou inativos.
+        if (u.eliminado_em || !u.ativo) continue;
 
-      const key = String(u._id);
-      if (!porUtilizador.has(key)) {
-        porUtilizador.set(key, { utilizador: u, tarefas: [] });
+        const key = String(u._id);
+        if (!porUtilizador.has(key)) {
+          porUtilizador.set(key, { utilizador: u, tarefas: [] });
+        }
+        porUtilizador.get(key).tarefas.push(t);
       }
-      porUtilizador.get(key).tarefas.push(t);
     }
 
     if (porUtilizador.size === 0) {
@@ -128,10 +135,10 @@ async function executarBriefing() {
 
       if (!telefone) {
         semTelefone++;
-        console.log(`⚠️  [Daily Briefing] ${utilizador.nome} não tem telefone — skipping WhatsApp.`);
+        console.log(`⚠️  [Daily Briefing] utilizador ${utilizador._id} sem telefone — sem WhatsApp.`);
       } else {
         const mensagem = gerarMensagem(utilizador, tarefasUser);
-        enviarWhatsApp(telefone, mensagem);
+        enviarWhatsApp(telefone, mensagem, String(utilizador._id));
         enviados++;
       }
 
@@ -152,7 +159,7 @@ async function executarBriefing() {
     }
 
     console.log(
-      `✅ [Daily Briefing] Concluído: ${enviados} mensagem(s) WhatsApp enviada(s), ` +
+      `✅ [Daily Briefing] Concluído: ${enviados} WhatsApp simulado(s) (não enviados), ` +
         `${semTelefone} utilizador(es) sem telefone, ${pushesEnviados} push(es) enviados(s).`
     );
   } catch (err) {
@@ -167,11 +174,12 @@ async function executarBriefing() {
  * se necessário — ex.: TZ=Europe/Lisbon no Render).
  */
 function iniciarDailyBriefing() {
-  console.log('⏰ [Daily Briefing] Cron agendado para 08:00 diariamente (0 8 * * *).');
+  console.log('⏰ [Daily Briefing] Cron agendado para 08:00 (Europe/Lisbon) diariamente (0 8 * * *).');
 
+  // 08:00 de Lisboa (hora de verão incluída), não do servidor (UTC no Render).
   cron.schedule('0 8 * * *', async () => {
     await executarBriefing();
-  });
+  }, { timezone: 'Europe/Lisbon' });
 
   // Permite execução manual para teste (exporta a função).
   return { executarBriefing };

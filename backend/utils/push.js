@@ -24,9 +24,21 @@ let configured = false;
  * Se as variáveis não estiverem definidas, o push fica desativado
  * (silencioso — não quebra o servidor).
  */
+let chavePublica = null;
+
+/**
+ * Normaliza uma chave VAPID vinda do ambiente: tira espaços, quebras de linha e
+ * aspas à volta (erros comuns ao colar no painel do Render) e o preenchimento '='
+ * (as chaves VAPID são base64 URL-safe sem padding).
+ */
+function normalizarChaveVapid(valor) {
+  if (!valor) return valor;
+  return String(valor).trim().replace(/^["']+|["']+$/g, '').replace(/\s+/g, '').replace(/=+$/, '');
+}
+
 function configurarWebPush() {
-  const publicKey = process.env.VAPID_PUBLIC_KEY;
-  const privateKey = process.env.VAPID_PRIVATE_KEY;
+  const publicKey = normalizarChaveVapid(process.env.VAPID_PUBLIC_KEY);
+  const privateKey = normalizarChaveVapid(process.env.VAPID_PRIVATE_KEY);
   let subject =
     process.env.VAPID_SUBJECT || 'mailto:admin@all2gether.com';
 
@@ -47,8 +59,13 @@ function configurarWebPush() {
 
   try {
     webpush.setVapidDetails(subject, publicKey, privateKey);
+    chavePublica = publicKey;
   } catch (err) {
-    console.error('❌ Erro ao configurar VAPID:', err.message);
+    console.error(
+      `❌ Erro ao configurar VAPID: ${err.message} ` +
+        `(a chave pública tem ${String(publicKey).length} caracteres; deve ter 87 e ser a chave PÚBLICA gerada por ` +
+        '`npx web-push generate-vapid-keys`, sem aspas nem espaços).'
+    );
     configured = false;
     return;
   }
@@ -68,7 +85,7 @@ function isConfigured() {
  * Devolve null se não estiver configurado.
  */
 function getPublicKey() {
-  return configured ? process.env.VAPID_PUBLIC_KEY : null;
+  return configured ? chavePublica : null;
 }
 
 /**

@@ -16,9 +16,31 @@ const Tarefa = require('../models/Tarefa');
 const Ausencia = require('../models/Ausencia');
 const Propriedade = require('../models/Propriedade');
 const { JWT_SECRET } = require('../middleware/auth');
+const { comMembro } = require('../utils/equipaTarefa');
 
 // Tempo de expiração do token (pode ser overridden por env).
 const TOKEN_EXPIRACAO = process.env.JWT_EXPIRACAO || '7d';
+
+/**
+ * Junta `equipa_nomes` a cada tarefa: [{ _id, nome, responsavel }] (responsável
+ * primeiro). Só o nome (sem contactos): é para o staff saber com quem trabalha.
+ */
+async function juntarNomesEquipa(tarefas, meuId = null) {
+  const { idsEquipa } = require('../utils/equipaTarefa');
+  const Utilizador = require('../models/Utilizador');
+  const todos = new Set();
+  for (const t of tarefas) idsEquipa(t).forEach((i) => todos.add(i));
+  if (todos.size === 0) return tarefas.map((t) => ({ ...t, equipa_nomes: [] }));
+  const us = await Utilizador.find({ _id: { $in: [...todos] } }).select('nome').lean();
+  const nomes = new Map(us.map((u) => [String(u._id), u.nome]));
+  return tarefas.map((t) => {
+    const ids = idsEquipa(t);
+    return {
+      ...t,
+      equipa_nomes: ids.map((id, i) => ({ _id: id, nome: nomes.get(id) || 'Colega', responsavel: i === 0, eu: !!meuId && String(meuId) === id })),
+    };
+  });
+}
 
 /**
  * POST /api/auth/login
@@ -61,13 +83,13 @@ exports.login = async (req, res) => {
     if (!utilizador.ativo) {
       return res
         .status(401)
-        .json({ erro: 'Utilizador inativo. Contacta o administrador.' });
+        .json({ erro: 'Utilizador inativo. Contacta o gestor.' });
     }
 
     if (!utilizador.password_hash) {
       // Utilizador migrado sem password (ex.: criado antes do auth).
       return res.status(401).json({
-        erro: 'Ainda não tem password definida. Contacta o administrador.',
+        erro: 'Ainda não tem password definida. Contacta o gestor.',
       });
     }
 
@@ -141,10 +163,53 @@ exports.me = async (req, res) => {
         email: utilizador.email,
         role: utilizador.role,
         empresa_id: String(utilizador.empresa_id),
+        // Só o do próprio (a rota usa o id do token).
+        telefone: utilizador.telefone || '',
       },
     });
   } catch (err) {
     console.error('❌ me:', err.message);
+    return res.status(500).json({ erro: 'Erro interno do servidor.' });
+  }
+};
+
+/**
+ * PATCH /api/auth/me  (requer JWT)
+ * O utilizador atualiza o seu próprio telemóvel (qualquer perfil).
+ * Body: { telefone: string }  (vazio apaga; máx. 30 caracteres)
+ */
+exports.atualizarMe = async (req, res) => {
+  try {
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({ erro: 'Não autenticado.' });
+    }
+    // Sessão de suporte (impersonação) não altera dados da conta de outra pessoa.
+    if (req.user.impersonado_por) {
+      return res.status(403).json({ erro: 'Numa sessão de suporte não é possível alterar o perfil.' });
+    }
+    const { telefone } = req.body || {};
+    if (typeof telefone !== 'string') {
+      return res.status(400).json({ erro: 'Telemóvel inválido.' });
+    }
+    const limpo = telefone.trim();
+    if (limpo.length > 30) {
+      return res.status(400).json({ erro: 'Telemóvel inválido (máximo 30 caracteres).' });
+    }
+    // Só dígitos, espaços e + - ( ). Vazio apaga.
+    if (limpo && !/^[0-9 +()-]+$/.test(limpo)) {
+      return res.status(400).json({ erro: 'Telemóvel inválido: usa só números, espaços e + - ( ).' });
+    }
+    const utilizador = await Utilizador.findByIdAndUpdate(
+      req.user.id,
+      { $set: { telefone: limpo } },
+      { new: true }
+    ).select('telefone');
+    if (!utilizador) {
+      return res.status(404).json({ erro: 'Utilizador não encontrado.' });
+    }
+    return res.status(200).json({ telefone: utilizador.telefone || '' });
+  } catch (err) {
+    console.error('❌ atualizarMe:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
   }
 };
@@ -173,13 +238,14 @@ exports.meuCalendario = async (req, res) => {
     );
 
     // Tarefas do utilizador a partir de hoje (não canceladas).
-    const tarefas = await Tarefa.find({
-      utilizador_id: utilizadorId,
+    const tarefas = await Tarefa.find(comMembro({
       data: { $gte: hoje },
       estado: { $ne: 'cancelada' },
-    })
+    }, utilizadorId))
       .populate({ path: 'propriedade_id', select: 'nome' })
       .sort({ data: 1 })
+      // Listagem leve: as fotos (base64) só vão no detalhe/prova.
+      .select('-fotos_conclusao -avarias.fotos')
       .lean();
 
     // Ausências do utilizador a partir de hoje.
@@ -190,7 +256,7 @@ exports.meuCalendario = async (req, res) => {
       .sort({ data_inicio: 1 })
       .lean();
 
-    return res.status(200).json({ tarefas, ausencias });
+    return res.status(200).json({ tarefas: await juntarNomesEquipa(tarefas, utilizadorId), ausencias });
   } catch (err) {
     console.error('❌ meuCalendario:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
@@ -220,13 +286,14 @@ exports.minhasTarefas = async (req, res) => {
     // poder navegar para dias anteriores e rever tarefas concluídas.
     const limitePassado = new Date(hoje.getTime() - 30 * 24 * 60 * 60 * 1000);
 
-    const tarefas = await Tarefa.find({
-      utilizador_id: req.user.id,
+    const tarefas = await Tarefa.find(comMembro({
       data: { $gte: limitePassado },
       estado: { $ne: 'cancelada' },
-    })
-      .populate({ path: 'propriedade_id', select: 'nome morada coordenadas checklist capacidade_hospedes observacoes' })
+    }, req.user.id))
+      .populate({ path: 'propriedade_id', select: 'nome morada coordenadas checklist capacidade_hospedes observacoes fornecedor_id' })
       .sort({ data: 1 })
+      // Listagem leve: as fotos (base64) só vão no detalhe/prova.
+      .select('-fotos_conclusao -avarias.fotos')
       .lean();
 
     // Prompt 139 — Cálculo on-the-fly de tempo_viagem_minutos para tarefas
@@ -244,7 +311,7 @@ exports.minhasTarefas = async (req, res) => {
       const tarefaAnterior = tarefas.find((outra) => {
         if (String(outra._id) === String(t._id)) return false;
         if (!outra.utilizador_id || !outra.propriedade_id) return false;
-        if (String(outra.utilizador_id) !== String(t.utilizador_id)) return false;
+        // (todas as tarefas desta lista são do próprio utilizador, responsável ou não)
         const diaOutra = new Date(outra.data).toISOString().slice(0, 10);
         return diaOutra === diaStr && new Date(outra.data).getTime() < diaTarefa.getTime();
       });
@@ -258,7 +325,7 @@ exports.minhasTarefas = async (req, res) => {
       return { ...t, tempo_viagem_minutos: 0 };
     });
 
-    return res.status(200).json({ tarefas: tarefasComViagem });
+    return res.status(200).json({ tarefas: await juntarNomesEquipa(tarefasComViagem, req.user.id) });
   } catch (err) {
     console.error('❌ minhasTarefas:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
@@ -285,13 +352,10 @@ exports.minhaTarefaDetalhe = async (req, res) => {
       return res.status(400).json({ erro: 'ID inválido.' });
     }
 
-    const tarefa = await Tarefa.findOne({
-      _id: id,
-      utilizador_id: req.user.id,
-    })
+    const tarefa = await Tarefa.findOne(comMembro({ _id: id }, req.user.id))
       // Prompt 114 — Inclui capacidade_hospedes para destaque no detalhe.
       // Prompt 133 — Inclui modelo_checklist_id e observacoes.
-      .populate({ path: 'propriedade_id', select: 'nome morada coordenadas checklist capacidade_hospedes observacoes modelo_checklist_id' })
+      .populate({ path: 'propriedade_id', select: 'nome morada coordenadas checklist capacidade_hospedes observacoes modelo_checklist_id fornecedor_id' })
       .lean();
 
     if (!tarefa) {
@@ -340,11 +404,10 @@ exports.minhaTarefaDetalhe = async (req, res) => {
       try {
         const { calcularTempoViagem, obterRangeDia } = require('../utils/scheduler');
         const range = obterRangeDia(new Date(tarefa.data));
-        const tarefaAnterior = await Tarefa.findOne({
-          utilizador_id: tarefa.utilizador_id,
+        const tarefaAnterior = await Tarefa.findOne(comMembro({
           data: { $gte: range.start, $lt: tarefa.data },
           estado: { $nin: ['cancelada'] },
-        })
+        }, req.user.id))
           .populate({ path: 'propriedade_id', select: 'coordenadas' })
           .sort({ data: -1 })
           .lean();
@@ -362,7 +425,17 @@ exports.minhaTarefaDetalhe = async (req, res) => {
       }
     }
 
-    return res.status(200).json({ tarefa });
+    const [comEquipa] = await juntarNomesEquipa([tarefa], req.user.id);
+    // Avarias por resolver nesta casa (reportadas noutras limpezas): aviso no detalhe.
+    try {
+      const pid = tarefa.propriedade_id && tarefa.propriedade_id._id;
+      comEquipa.avarias_abertas_casa = pid && tarefa.tipo === 'limpeza'
+        ? await require('../utils/avarias').avariasAbertasDaCasa(pid, tarefa._id)
+        : [];
+    } catch (e) {
+      comEquipa.avarias_abertas_casa = [];
+    }
+    return res.status(200).json({ tarefa: comEquipa });
   } catch (err) {
     console.error('❌ minhaTarefaDetalhe:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
@@ -379,53 +452,29 @@ exports.minhaTarefaDetalhe = async (req, res) => {
  *
  * Resposta 200: { tarefa: { ... } }
  */
-exports.concluirMinhaTarefa = async (req, res) => {
-  try {
-    if (!req.user || !req.user.id) {
-      return res.status(401).json({ erro: 'Não autenticado.' });
-    }
-
-    const { id } = req.params;
-    const mongoose = require('mongoose');
-    if (!mongoose.isValidObjectId(id)) {
-      return res.status(400).json({ erro: 'ID inválido.' });
-    }
-
-    const tarefa = await Tarefa.findOne({
-      _id: id,
-      utilizador_id: req.user.id,
-    });
-
-    if (!tarefa) {
-      return res.status(404).json({ erro: 'Tarefa não encontrada.' });
-    }
-
-    if (tarefa.estado === 'concluida') {
-      return res.status(400).json({ erro: 'Tarefa já concluída.' });
-    }
-
-    // Atualiza estado e guarda observações.
-    tarefa.estado = 'concluida';
-    tarefa.concluida_em = new Date();
-    if (req.body?.observacoes !== undefined) {
-      tarefa.observacoes = String(req.body.observacoes || '');
-    }
-
-    await tarefa.save();
-
-    const resp = tarefa.toObject();
-    delete resp.password_hash;
-
-    return res.status(200).json({ tarefa: resp });
-  } catch (err) {
-    console.error('❌ concluirMinhaTarefa:', err.message);
-    return res.status(500).json({ erro: 'Erro interno do servidor.' });
-  }
+exports.concluirMinhaTarefa = (req, res) => {
+  // Mesma regra do /api/staff/tarefas/:id/concluir (inclui as fotos obrigatórias): este
+  // caminho não pode ser um atalho para concluir sem prova.
+  return require('./staffController').concluirTarefa(req, res);
 };
 
 /* ------------------------------------------------------------------ */
 /* Single Sign-On (SSO) com o portal Autocell                          */
 /* ------------------------------------------------------------------ */
+
+// Tokens SSO já consumidos (hash -> expiração). Em memória: protege contra
+// reutilização dentro da janela de validade numa instância.
+const tokensSsoUsados = new Map();
+function registarTokenSsoUsado(token) {
+  const agora = Date.now();
+  for (const [h, ate] of tokensSsoUsados) {
+    if (ate <= agora) tokensSsoUsados.delete(h);
+  }
+  const hash = require('crypto').createHash('sha256').update(String(token)).digest('hex');
+  if (tokensSsoUsados.has(hash)) return false;
+  tokensSsoUsados.set(hash, agora + 15 * 60 * 1000);
+  return true;
+}
 
 /**
  * GET /api/auth/sso  (PÚBLICO — sem auth, validado por segredo partilhado)
@@ -517,11 +566,21 @@ exports.ssoLogin = async (req, res) => {
     }
 
     // 2. Valida o JWT externo com o segredo partilhado do Autocell.
+    // SEGURANÇA: só HS256 e idade máxima de 10 min (o Autocell emite tokens
+    // de 5 min com iat; maxAge também rejeita tokens sem iat).
     let payload;
     try {
-      payload = jwt.verify(token, SSO_SECRET);
+      payload = jwt.verify(token, SSO_SECRET, {
+        algorithms: ['HS256'],
+        maxAge: '10m',
+      });
     } catch (err) {
       return responderErro(`token SSO inválido/expirado: ${err.message}`);
+    }
+
+    // Anti-replay: cada token SSO só pode ser usado uma vez.
+    if (!registarTokenSsoUsado(token)) {
+      return responderErro('token SSO já utilizado (replay).');
     }
 
     // 3. Extrai o email do payload (suporta email ou sub — convenção JWT).
@@ -625,6 +684,21 @@ exports.pushVapidPublicKey = async (req, res) => {
  * Resposta 400: subscription em falta ou inválida
  * Resposta 503: Web Push não configurado
  */
+const HOSTS_PUSH = [
+  /^fcm\.googleapis\.com$/,
+  /^updates\.push\.services\.mozilla\.com$/,
+  /(^|\.)push\.apple\.com$/,
+  /(^|\.)notify\.windows\.com$/,
+];
+function endpointPushValido(endpoint) {
+  try {
+    const u = new URL(String(endpoint));
+    return u.protocol === 'https:' && HOSTS_PUSH.some((re) => re.test(u.hostname));
+  } catch {
+    return false;
+  }
+}
+
 exports.pushSubscribe = async (req, res) => {
   try {
     const { isConfigured } = require('../utils/push');
@@ -640,6 +714,12 @@ exports.pushSubscribe = async (req, res) => {
       return res.status(400).json({
         erro: 'Subscrição inválida: falta o objeto subscription com endpoint.',
       });
+    }
+
+    // SEGURANÇA (SSRF): o servidor faz POST ao endpoint da subscrição; só
+    // aceita https e serviços de push conhecidos.
+    if (!endpointPushValido(subscription.endpoint)) {
+      return res.status(400).json({ erro: 'Endpoint de push não permitido.' });
     }
 
     // Guarda a subscrição no utilizador logado.

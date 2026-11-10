@@ -25,6 +25,9 @@ import {
   Eye,
   EyeOff,
   Lock,
+  AlertTriangle,
+  Download,
+  ShieldX,
 } from "lucide-react";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -65,8 +68,11 @@ import {
   type Role,
 } from "@/lib/api";
 import { PaginationBar } from "@/components/admin/pagination-bar";
+import { ApagarDadosDialog } from "@/components/rgpd/apagar-dados-dialog";
+import { descarregarFicheiro } from "@/lib/descarregar";
+import { lerUtilizador } from "@/lib/auth";
 import { Switch } from "@/components/ui/switch";
-import { formatarDataSegura, parsearDataSegura } from "@/lib/utils";
+import { parsearDataSegura, tarefasPorAtribuir, textoRedistribuicao, type RedistribuicaoDTO, plural } from "@/lib/utils";
 
 /**
  * Página de Equipa — Painel de Administração.
@@ -92,8 +98,9 @@ import { formatarDataSegura, parsearDataSegura } from "@/lib/utils";
 const ROLE_LABEL: Record<Role, string> = {
   admin: "Admin",
   gestor: "Gestor",
-  staff: "Staff",
-  parceiro: "Parceiro",
+  staff: "Equipa",
+  parceiro: "Proprietário",
+  fornecedor: "Lavandaria",
 };
 
 const ROLE_VARIANT: Record<Role, "default" | "secondary" | "outline"> = {
@@ -101,6 +108,7 @@ const ROLE_VARIANT: Record<Role, "default" | "secondary" | "outline"> = {
   gestor: "secondary",
   staff: "outline",
   parceiro: "outline",
+  fornecedor: "outline",
 };
 
 const DIAS_SEMANA = [
@@ -112,49 +120,6 @@ const DIAS_SEMANA = [
   { valor: 5, label: "Sex" },
   { valor: 6, label: "Sáb" },
 ];
-
-/* ------------------------------------------------------------------ */
-/* Constantes & tipos — Aprovações                                     */
-/* ------------------------------------------------------------------ */
-
-interface AusenciaDTO {
-  _id: string;
-  utilizador_id: string;
-  utilizador: {
-    _id: string;
-    nome: string;
-    email: string;
-    role: Role;
-  } | null;
-  data_inicio: string;
-  data_fim: string;
-  tipo: string;
-  estado: string;
-  justificacao?: string;
-  notas?: string;
-  createdAt: string;
-}
-
-const TIPO_LABEL: Record<string, string> = {
-  ferias: "Férias",
-  doenca: "Doença",
-  outro: "Outro",
-};
-
-const TIPO_VARIANT: Record<string, "default" | "secondary" | "outline"> = {
-  ferias: "default",
-  doenca: "secondary",
-  outro: "outline",
-};
-
-/** Formata uma data ISO (yyyy-MM-dd) para "d MMM yyyy" em PT. */
-function formatarData(iso: string): string {
-  return formatarDataSegura(
-    iso,
-    (d) => format(d, "d MMM yyyy", { locale: pt }),
-    iso
-  );
-}
 
 /* ------------------------------------------------------------------ */
 /* Sub-componente — Folgas Semanais                                    */
@@ -280,6 +245,9 @@ function EquipaPage() {
     // FIX (toggle exclusivo) — Se true, este staff SÓ é elegível para tarefas
     // de propriedades onde consta na equipa_preferencial.
     exclusivo_preferenciais: false,
+    // FIX (atribuição bidirecional fornecedor) — Propriedades atribuídas a
+    // este fornecedor (lavandaria). Só se aplica se role === 'fornecedor'.
+    propriedades_atribuidas: [] as string[],
   });
   const [submitting, setSubmitting] = useState(false);
   const [formErro, setFormErro] = useState<string | null>(null);
@@ -302,6 +270,9 @@ function EquipaPage() {
     // FIX (toggle exclusivo) — Se true, este staff SÓ é elegível para tarefas
     // de propriedades onde consta na equipa_preferencial.
     exclusivo_preferenciais: false,
+    // FIX (atribuição bidirecional fornecedor) — Propriedades atribuídas a
+    // este fornecedor (lavandaria). Só se aplica se role === 'fornecedor'.
+    propriedades_atribuidas: [] as string[],
   });
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editErro, setEditErro] = useState<string | null>(null);
@@ -313,6 +284,21 @@ function EquipaPage() {
 
   // Modal de confirmação de eliminação
   const [eliminando, setEliminando] = useState<UtilizadorDTO | null>(null);
+  // RGPD: exportar / apagar os dados pessoais de uma pessoa (ações separadas das restantes).
+  const [apagarDados, setApagarDados] = useState<UtilizadorDTO | null>(null);
+  const [exportandoId, setExportandoId] = useState<string | null>(null);
+  const [rgpdMsg, setRgpdMsg] = useState<{ tipo: "ok" | "erro"; texto: string } | null>(null);
+  const [eu, setEu] = useState<{ id: string; role: string } | null>(null);
+  useEffect(() => {
+    let cancelado = false;
+    (async () => {
+      const u = await lerUtilizador();
+      if (!cancelado && u) setEu({ id: u.id, role: u.role });
+    })();
+    return () => {
+      cancelado = true;
+    };
+  }, []);
   const [elimSubmitting, setElimSubmitting] = useState(false);
 
   // Modal de falta súbita
@@ -322,9 +308,119 @@ function EquipaPage() {
 
   // Modal de baixa prolongada
   const [baixaModal, setBaixaModal] = useState<UtilizadorDTO | null>(null);
-  const [baixaForm, setBaixaForm] = useState({ data_inicio: "", data_fim: "" });
+  const [baixaForm, setBaixaForm] = useState({ data_inicio: "", data_fim: "", tipo: "ferias" });
   const [baixaSubmitting, setBaixaSubmitting] = useState(false);
   const [baixaResultado, setBaixaResultado] = useState<string | null>(null);
+  // Nº de tarefas que SOBRARAM por atribuir depois da reatribuição automática
+  // (>0 mostra o botão de nova tentativa).
+  const [faltaPorAtribuir, setFaltaPorAtribuir] = useState(0);
+  const [baixaPorAtribuir, setBaixaPorAtribuir] = useState(0);
+  // Aviso de limpezas em curso que continuam com a pessoa (não são desatribuídas).
+  const [faltaAviso, setFaltaAviso] = useState<string | null>(null);
+  const [baixaAviso, setBaixaAviso] = useState<string | null>(null);
+  // Nova tentativa de reatribuição (com clique), para as tarefas que sobraram por atribuir.
+  const [autoAtribuindo, setAutoAtribuindo] = useState(false);
+  const [autoTentou, setAutoTentou] = useState(false);
+  const [autoErro, setAutoErro] = useState<string | null>(null);
+
+  /**
+   * Nova tentativa: reatribui automaticamente TODAS as tarefas por atribuir a partir de hoje.
+   * O resultado inicial do diálogo é SUBSTITUÍDO pelo novo (sem mensagens contraditórias) e,
+   * se ainda sobrarem tarefas, o botão mantém-se como "Tentar de novo".
+   */
+  async function handleReatribuirAuto(fluxo: "falta" | "baixa") {
+    const prefixo = fluxo === "falta" ? "Falta registada." : "Baixa registada.";
+    const setResultado = fluxo === "falta" ? setFaltaResultado : setBaixaResultado;
+    const setPorAtribuir = fluxo === "falta" ? setFaltaPorAtribuir : setBaixaPorAtribuir;
+    setAutoAtribuindo(true);
+    setAutoErro(null);
+    try {
+      const res = await adminPost<{
+        sucesso: boolean;
+        processadas: number;
+        reatribuidas: number;
+        orfas: number;
+        mensagem?: string;
+      }>("/api/gestor/tarefas/auto-atribuir", {});
+      setAutoTentou(true);
+      setPorAtribuir(res.orfas ?? 0);
+      setResultado(
+        `${prefixo} ` +
+          (res.processadas === 0
+            ? res.mensagem ?? "Não há tarefas por atribuir a partir de hoje."
+            : `Foram reatribuídas ${plural(res.reatribuidas, "tarefa")}. ` +
+              (res.orfas > 0
+                ? `${res.orfas} continuam por atribuir (sem staff disponível).`
+                : "Nenhuma ficou por atribuir."))
+      );
+      await carregar();
+    } catch (e) {
+      // Mantém o botão (porAtribuir não muda) para nova tentativa.
+      setAutoErro(
+        e instanceof Error
+          ? `Reatribuição falhou: ${e.message}`
+          : "Erro ao reatribuir tarefas."
+      );
+    } finally {
+      setAutoAtribuindo(false);
+    }
+  }
+
+  /** Aviso bem visível: limpezas em curso continuam com a pessoa ausente. */
+  function avisoEmCurso(texto: string) {
+    return (
+      <div
+        role="alert"
+        className="flex items-start gap-2 rounded-md border border-amber-500/60 bg-amber-50 p-3 text-sm font-medium text-amber-900 dark:bg-amber-950/30 dark:text-amber-100"
+      >
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+        <span>{texto}</span>
+      </div>
+    );
+  }
+
+  /**
+   * Bloco de nova tentativa (falta súbita e baixa). A reatribuição já correu
+   * sozinha; este bloco só aparece se SOBRARAM tarefas por atribuir.
+   */
+  function renderReatribuir(porAtribuir: number, fluxo: "falta" | "baixa") {
+    if (porAtribuir <= 0) return null;
+    return (
+      <div className="space-y-2 rounded-md border p-3">
+        {(
+          <>
+            <p className="text-xs text-muted-foreground">
+              Sobraram {plural(porAtribuir, "tarefa")} por atribuir (ninguém estava
+              disponível ou a reatribuição falhou). Pode tentar de novo: o
+              sistema distribui por colegas disponíveis TODAS as tarefas por
+              atribuir a partir de hoje (não só as desta pessoa). Quem está
+              ausente não recebe tarefas.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => handleReatribuirAuto(fluxo)}
+                disabled={autoAtribuindo}
+              >
+                {autoAtribuindo ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    A reatribuir…
+                  </>
+                ) : autoTentou || autoErro ? (
+                  "Tentar de novo"
+                ) : (
+                  "Reatribuir automaticamente"
+                )}
+              </Button>
+            </div>
+          </>
+        )}
+        {autoErro && <p className="text-sm text-red-600">{autoErro}</p>}
+      </div>
+    );
+  }
 
   // Utilizadores que podem ser responsáveis (só gestor — admin não aparece).
   const responsaveisPossiveis = utilizadores.filter(
@@ -407,11 +503,11 @@ function EquipaPage() {
     setFormErro(null);
 
     if (!form.nome.trim() || !form.email.trim() || !form.password) {
-      setFormErro("Nome, Email e Password são obrigatórios.");
+      setFormErro("Nome, email e palavra-passe são obrigatórios.");
       return;
     }
-    if (form.password.length < 6) {
-      setFormErro("A password deve ter pelo menos 6 caracteres.");
+    if (form.password.length < 10) {
+      setFormErro("A password deve ter pelo menos 10 caracteres.");
       return;
     }
 
@@ -430,8 +526,13 @@ function EquipaPage() {
         propriedades_alocadas: form.propriedades_alocadas,
         // FIX (toggle exclusivo) — Envia o estado do toggle de exclusividade.
         exclusivo_preferenciais: form.exclusivo_preferenciais,
+        // FIX (atribuição bidirecional fornecedor) — Propriedades atribuídas
+        // ao fornecedor (só aplicável se role === 'fornecedor').
+        ...(form.role === "fornecedor"
+          ? { propriedades_atribuidas: form.propriedades_atribuidas }
+          : {}),
       });
-      setForm({ nome: "", email: "", password: "", role: "staff", responsavel_id: "", dias_folga: [], telefone: "", propriedades_alocadas: [], exclusivo_preferenciais: false });
+      setForm({ nome: "", email: "", password: "", role: "staff", responsavel_id: "", dias_folga: [], telefone: "", propriedades_alocadas: [], exclusivo_preferenciais: false, propriedades_atribuidas: [] });
       setMostrarForm(false);
       await carregar();
     } catch (e) {
@@ -470,6 +571,11 @@ function EquipaPage() {
         : [],
       // FIX (toggle exclusivo) — Carrega o estado de exclusividade do staff.
       exclusivo_preferenciais: Boolean(u.exclusivo_preferenciais),
+      // FIX (atribuição bidirecional fornecedor) — Carrega as propriedades
+      // atribuídas ao fornecedor (injetadas pelo backend no getEquipa).
+      propriedades_atribuidas: Array.isArray(u.propriedades_atribuidas)
+        ? [...u.propriedades_atribuidas]
+        : [],
     });
     setNovaFolga({ data: "", motivo: "" });
     setEditErro(null);
@@ -518,8 +624,8 @@ function EquipaPage() {
       setEditErro("Nome e Email são obrigatórios.");
       return;
     }
-    if (editForm.password && editForm.password.length < 6) {
-      setEditErro("A nova password deve ter pelo menos 6 caracteres.");
+    if (editForm.password && editForm.password.length < 10) {
+      setEditErro("A nova password deve ter pelo menos 10 caracteres.");
       return;
     }
 
@@ -543,6 +649,11 @@ function EquipaPage() {
         propriedades_alocadas: editForm.propriedades_alocadas,
         // FIX (toggle exclusivo) — Envia o estado do toggle de exclusividade.
         exclusivo_preferenciais: editForm.exclusivo_preferenciais,
+        // FIX (atribuição bidirecional fornecedor) — Propriedades atribuídas
+        // ao fornecedor (só aplicável se role === 'fornecedor').
+        ...(editForm.role === "fornecedor"
+          ? { propriedades_atribuidas: editForm.propriedades_atribuidas }
+          : {}),
       };
       if (editForm.password) body.password = editForm.password;
 
@@ -588,18 +699,38 @@ function EquipaPage() {
     }
   }
 
+  /** RGPD: descarrega o JSON com os dados pessoais de uma pessoa da equipa. */
+  async function handleExportarDados(u: UtilizadorDTO) {
+    setExportandoId(u._id);
+    setRgpdMsg(null);
+    try {
+      await descarregarFicheiro(`/api/gestor/equipa/${u._id}/exportar-dados`, `dados-pessoais-${u._id}.json`);
+      setRgpdMsg({ tipo: "ok", texto: `Dados de ${u.nome} descarregados.` });
+    } catch (e) {
+      setRgpdMsg({ tipo: "erro", texto: e instanceof Error ? e.message : "Não foi possível exportar os dados." });
+    } finally {
+      setExportandoId(null);
+    }
+  }
+
   /** Reporta falta súbita (POST) e mostra resultado. */
   async function handleFaltaSubita() {
     if (!faltaSubita) return;
     setFaltaSubmitting(true);
     setFaltaResultado(null);
+    setFaltaPorAtribuir(0);
+    setFaltaAviso(null);
+    setAutoTentou(false);
+    setAutoErro(null);
     try {
-      const res = await adminPost<{ reatribuidas: number; orfas: number; total: number }>(
+      const res = await adminPost<RedistribuicaoDTO>(
         `/api/gestor/equipa/${faltaSubita._id}/falta-subita`,
         {}
       );
+      setFaltaPorAtribuir(tarefasPorAtribuir(res));
+      setFaltaAviso(res.aviso ?? null);
       setFaltaResultado(
-        `${res.reatribuidas} tarefa(s) reatribuída(s) aos colegas, ${res.orfas} tarefa(s) ficou(aram) por atribuir.`
+        textoRedistribuicao("Falta registada.", res, "Não havia tarefas para hoje.")
       );
       await carregar();
     } catch (e) {
@@ -610,119 +741,6 @@ function EquipaPage() {
       setFaltaSubmitting(false);
     }
   }
-
-  // ===== Estado — Aprovações (prefix apr_) =====
-  const [aprPendentes, setAprPendentes] = useState<AusenciaDTO[]>([]);
-  const [aprLoading, setAprLoading] = useState(true);
-  const [aprErro, setAprErro] = useState<string | null>(null);
-  const [aprToast, setAprToast] = useState<{
-    tipo: "sucesso" | "erro";
-    msg: string;
-  } | null>(null);
-  const [aprProcessando, setAprProcessando] = useState<string | null>(null);
-  // v1.62.0 (Prompt 85) — Alvo do dialog de eliminação de ausência.
-  const [aprEliminarAlvo, setAprEliminarAlvo] = useState<AusenciaDTO | null>(null);
-
-  /** Carrega as ausências pendentes da empresa. */
-  const aprCarregar = useCallback(async () => {
-    setAprLoading(true);
-    setAprErro(null);
-    try {
-      const res = await adminGet<{ ausencias: AusenciaDTO[] }>(
-        "/api/gestor/ausencias?estado=pendente,pendente_emergencia"
-      );
-      setAprPendentes(res.ausencias ?? []);
-    } catch (e) {
-      setAprErro(e instanceof Error ? e.message : "Erro ao carregar pedidos.");
-    } finally {
-      setAprLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    aprCarregar();
-  }, [aprCarregar]);
-
-  /** Aprova um pedido e mostra toast com o resultado da redistribuição. */
-  async function aprAprovar(a: AusenciaDTO) {
-    setAprProcessando(`aprovar-${a._id}`);
-    setAprErro(null);
-    try {
-      const res = await adminPatch<{
-        mensagem: string;
-        redistribuicao: { total: number; reatribuidas: number; orfas: number } | null;
-      }>(`/api/gestor/ausencias/${a._id}/estado`, { estado: "aprovada" });
-
-      const r = res.redistribuicao;
-      const msg =
-        r && r.total > 0
-          ? `Férias aprovadas. As tarefas deste funcionário foram redistribuídas com sucesso! (${r.reatribuidas} reatribuída(s)${r.orfas > 0 ? `, ${r.orfas} órfã(s)` : ""})`
-          : "Férias aprovadas. Sem tarefas para redistribuir no período.";
-      setAprToast({ tipo: "sucesso", msg });
-
-      // Remove da lista de pendentes (já foi decidido).
-      setAprPendentes((prev) => prev.filter((p) => p._id !== a._id));
-    } catch (e) {
-      setAprToast({
-        tipo: "erro",
-        msg: e instanceof Error ? `Erro ao aprovar: ${e.message}` : "Erro ao aprovar pedido.",
-      });
-    } finally {
-      setAprProcessando(null);
-    }
-  }
-
-  /** Rejeita um pedido. */
-  async function aprRejeitar(a: AusenciaDTO) {
-    setAprProcessando(`rejeitar-${a._id}`);
-    setAprErro(null);
-    try {
-      await adminPatch(`/api/gestor/ausencias/${a._id}/estado`, {
-        estado: "rejeitada",
-      });
-      setAprToast({ tipo: "sucesso", msg: "Pedido rejeitado." });
-      setAprPendentes((prev) => prev.filter((p) => p._id !== a._id));
-    } catch (e) {
-      setAprToast({
-        tipo: "erro",
-        msg: e instanceof Error ? `Erro ao rejeitar: ${e.message}` : "Erro ao rejeitar pedido.",
-      });
-    } finally {
-      setAprProcessando(null);
-    }
-  }
-
-  /**
-   * v1.62.0 (Prompt 85) — Elimina definitivamente uma ausência.
-   * Chamado após confirmação no Dialog. Faz DELETE /api/gestor/ausencias/:id.
-   */
-  async function aprEliminar() {
-    if (!aprEliminarAlvo) return;
-    const alvo = aprEliminarAlvo;
-    setAprProcessando(`eliminar-${alvo._id}`);
-    setAprErro(null);
-    try {
-      await adminDelete(`/api/gestor/ausencias/${alvo._id}`);
-      setAprToast({ tipo: "sucesso", msg: "Ausência eliminada com sucesso." });
-      // Remove da lista de pendentes.
-      setAprPendentes((prev) => prev.filter((p) => p._id !== alvo._id));
-      setAprEliminarAlvo(null);
-    } catch (e) {
-      setAprToast({
-        tipo: "erro",
-        msg: e instanceof Error ? `Erro ao eliminar: ${e.message}` : "Erro ao eliminar ausência.",
-      });
-    } finally {
-      setAprProcessando(null);
-    }
-  }
-
-  // Auto-esconde o toast após 6s.
-  useEffect(() => {
-    if (!aprToast) return;
-    const t = setTimeout(() => setAprToast(null), 6000);
-    return () => clearTimeout(t);
-  }, [aprToast]);
 
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
@@ -752,7 +770,7 @@ function EquipaPage() {
             </Button>
             <Button onClick={() => setMostrarForm((v) => !v)}>
               <Plus className="h-4 w-4" />
-              Adicionar Funcionário
+              Adicionar funcionário
             </Button>
           </div>
 
@@ -764,7 +782,7 @@ function EquipaPage() {
                 setFiltroEstado(e.target.value as "todos" | "ativos" | "inativos");
                 setPagina(1);
               }}
-              className="h-9 rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
+              className="h-11 md:h-9 rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
               aria-label="Filtrar por estado"
             >
               <option value="todos">Estado: Todos</option>
@@ -777,13 +795,13 @@ function EquipaPage() {
                 setFiltroRole(e.target.value as "todos" | "staff" | "gestor" | "parceiro");
                 setPagina(1);
               }}
-              className="h-9 rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
+              className="h-11 md:h-9 rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
               aria-label="Filtrar por role"
             >
               <option value="todos">Função: Todas</option>
-              <option value="staff">Função: Staff</option>
+              <option value="staff">Função: Equipa</option>
               <option value="gestor">Função: Gestor</option>
-              <option value="parceiro">Função: Parceiro</option>
+              <option value="parceiro">Função: Proprietário</option>
             </select>
           </div>
 
@@ -792,8 +810,8 @@ function EquipaPage() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-base">
-                  <Users className="h-5 w-5 text-primary" />
-                  Novo Funcionário
+                  <Users className="h-5 w-5 text-brand-text" />
+                  Novo funcionário
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -830,7 +848,7 @@ function EquipaPage() {
                     </div>
                     <div className="space-y-1.5">
                       <label htmlFor="password" className="text-sm font-medium">
-                        Password
+                        Palavra-passe
                       </label>
                       <div className="relative">
                         <Input
@@ -848,7 +866,7 @@ function EquipaPage() {
                           type="button"
                           onClick={() => setShowFormPassword((v) => !v)}
                           className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                          aria-label={showFormPassword ? "Ocultar password" : "Mostrar password"}
+                          aria-label={showFormPassword ? "Ocultar palavra-passe" : "Mostrar palavra-passe"}
                         >
                           {showFormPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                         </button>
@@ -865,7 +883,7 @@ function EquipaPage() {
                         onChange={(e) =>
                           setForm((f) => ({ ...f, telefone: e.target.value }))
                         }
-                        placeholder="+351 912 345 678"
+                        placeholder="900 000 000"
                       />
                     </div>
                     <div className="space-y-1.5">
@@ -878,15 +896,16 @@ function EquipaPage() {
                         onChange={(e) =>
                           setForm((f) => ({ ...f, role: e.target.value as Role }))
                         }
-                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        className="flex h-11 md:h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                       >
-                        <option value="staff">Staff (funcionário de limpezas)</option>
+                        <option value="staff">Equipa (limpezas)</option>
                         <option value="gestor">Responsável (gere a equipa)</option>
-                        <option value="parceiro">Parceiro (B2B externo — cria reservas)</option>
+                        <option value="parceiro">Proprietário (B2B externo — cria reservas)</option>
+                        <option value="fornecedor">Lavandaria (gestão de roupa)</option>
                       </select>
                       {form.role === "parceiro" && (
                         <p className="text-xs text-muted-foreground">
-                          Parceiros são externos: não têm folgas semanais nem responsável hierárquico.
+                          Os proprietários são externos: não têm folgas semanais nem responsável hierárquico.
                           Acedem ao portal B2B para criar reservas manuais nas suas propriedades.
                         </p>
                       )}
@@ -905,7 +924,7 @@ function EquipaPage() {
                           onChange={(e) =>
                             setForm((f) => ({ ...f, responsavel_id: e.target.value }))
                           }
-                          className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                          className="flex h-11 md:h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                         >
                           <option value="">— Sem responsável —</option>
                           {responsaveisPossiveis.map((r) => (
@@ -974,7 +993,7 @@ function EquipaPage() {
                                 key={p._id}
                                 className={`flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm transition-colors ${
                                   checked
-                                    ? "border-primary bg-primary/10 text-primary"
+                                    ? "border-primary bg-primary/10 text-brand-text"
                                     : "border-input text-muted-foreground hover:bg-muted/50"
                                 }`}
                               >
@@ -995,7 +1014,7 @@ function EquipaPage() {
                                 />
                                 <span className="flex-1 truncate" title={p.nome}>{p.nome}</span>
                                 {!p.ativo && (
-                                  <Badge variant="outline" className="text-[10px]">
+                                  <Badge variant="outline" className="text-xs">
                                     inativa
                                   </Badge>
                                 )}
@@ -1024,9 +1043,66 @@ function EquipaPage() {
                   <Switch
                     checked={form.exclusivo_preferenciais}
                     onCheckedChange={(v) => setForm((f) => ({ ...f, exclusivo_preferenciais: v }))}
-                    aria-label="Staff exclusivo"
+                    aria-label="Equipa exclusiva"
                   />
                 </div>
+
+                  {/* FIX (atribuição bidirecional fornecedor) — Multi-select de
+                      propriedades atribuídas, só visível se role === 'fornecedor'. */}
+                  {form.role === "fornecedor" && (
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium leading-none">
+                        Propriedades Atribuídas (Lavandaria)
+                      </label>
+                      <p className="text-xs text-muted-foreground">
+                        Seleciona as propriedades que esta lavandaria irá servir.
+                        O fornecedor só vê as tarefas das propriedades atribuídas.
+                      </p>
+                      {propriedades.length === 0 ? (
+                        <p className="text-xs italic text-muted-foreground">
+                          Sem propriedades disponíveis.
+                        </p>
+                      ) : (
+                        <div className="grid max-h-48 gap-1.5 overflow-y-auto rounded-md border border-input p-2 sm:grid-cols-2">
+                          {propriedades
+                            .filter((p) => p.ativo || form.propriedades_atribuidas.includes(p._id))
+                            .map((p) => {
+                            const checked = form.propriedades_atribuidas.includes(p._id);
+                            return (
+                              <label
+                                key={p._id}
+                                className={`flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm transition-colors ${
+                                  checked
+                                    ? "border-primary bg-primary/10 text-brand-text"
+                                    : "border-input text-muted-foreground hover:bg-muted/50"
+                                }`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={(e) => {
+                                    setForm((f) => ({
+                                      ...f,
+                                      propriedades_atribuidas: e.target.checked
+                                        ? [...f.propriedades_atribuidas, p._id]
+                                        : f.propriedades_atribuidas.filter((id) => id !== p._id),
+                                    }));
+                                  }}
+                                  className="h-3.5 w-3.5"
+                                />
+                                <span className="flex-1 truncate" title={p.nome}>{p.nome}</span>
+                                {!p.ativo && (
+                                  <Badge variant="outline" className="text-xs">
+                                    inativa
+                                  </Badge>
+                                )}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {formErro && (
                     <p className="flex items-center gap-2 text-sm text-destructive">
@@ -1043,7 +1119,7 @@ function EquipaPage() {
                           A guardar…
                         </>
                       ) : (
-                        "Guardar Funcionário"
+                        "Guardar elemento da equipa"
                       )}
                     </Button>
                     <Button
@@ -1052,7 +1128,7 @@ function EquipaPage() {
                       onClick={() => {
                         setMostrarForm(false);
                         setFormErro(null);
-                        setForm({ nome: "", email: "", password: "", role: "staff", responsavel_id: "", dias_folga: [], telefone: "", propriedades_alocadas: [], exclusivo_preferenciais: false });
+                        setForm({ nome: "", email: "", password: "", role: "staff", responsavel_id: "", dias_folga: [], telefone: "", propriedades_alocadas: [], exclusivo_preferenciais: false, propriedades_atribuidas: [] });
                       }}
                       disabled={submitting}
                     >
@@ -1080,6 +1156,20 @@ function EquipaPage() {
             </Card>
           )}
 
+          {rgpdMsg && (
+            <Card className={rgpdMsg.tipo === "ok" ? "border-emerald-500/50" : "border-destructive/50"}>
+              <CardContent
+                role="status"
+                className={`flex items-center justify-between gap-3 p-3 text-sm ${rgpdMsg.tipo === "ok" ? "text-emerald-600 dark:text-emerald-400" : "text-destructive"}`}
+              >
+                <span className="min-w-0 break-words">{rgpdMsg.texto}</span>
+                <Button variant="ghost" size="sm" onClick={() => setRgpdMsg(null)}>
+                  Fechar
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Tabela de utilizadores */}
           <Card>
             <CardContent className="p-0">
@@ -1098,7 +1188,7 @@ function EquipaPage() {
                 </div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
+                  <table className="rt w-full text-sm">
                     <thead>
                       <tr className="border-b bg-muted/40 text-left">
                         <th className="px-4 py-3 font-medium">Nome</th>
@@ -1125,27 +1215,27 @@ function EquipaPage() {
                               {u.exclusivo_preferenciais && (
                                 <Badge
                                   variant="outline"
-                                  className="gap-1 text-[10px]"
-                                  title="Staff exclusivo — só recebe tarefas de propriedades onde está na equipa preferencial"
+                                  className="gap-1 text-xs"
+                                  title="Equipa exclusiva — só recebe tarefas de propriedades onde está na equipa preferencial"
                                 >
                                   <Lock className="h-3 w-3" />
                                   Exclusivo
                                 </Badge>
                               )}
                               {ausenteTipo === "ferias" && (
-                                <Badge variant="destructive" className="text-[10px]">
-                                  De Férias
+                                <Badge variant="destructive" className="text-xs">
+                                  De férias
                                 </Badge>
                               )}
                               {ausenteTipo === "doenca" && (
-                                <Badge variant="destructive" className="text-[10px]">
+                                <Badge variant="destructive" className="text-xs">
                                   Doente
                                 </Badge>
                               )}
                               {ausenteTipo &&
                                 ausenteTipo !== "ferias" &&
                                 ausenteTipo !== "doenca" && (
-                                  <Badge variant="destructive" className="text-[10px]">
+                                  <Badge variant="destructive" className="text-xs">
                                     Ausente
                                   </Badge>
                                 )}
@@ -1189,18 +1279,20 @@ function EquipaPage() {
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  className="h-8 w-8"
+                                  className="h-11 w-11 md:h-8 md:w-8"
                                   onClick={() => abrirEdicao(u)}
                                   aria-label={`Editar ${u.nome}`}
                                   title="Editar"
                                 >
                                   <Pencil className="h-4 w-4" />
                                 </Button>
+                                {/* Separador (só telemóvel): afasta as ações de desativar, falta e baixa das de edição */}
+                                <span className="ml-3 h-6 w-px shrink-0 bg-border md:hidden" aria-hidden="true" />
                                 {/* Ativar/Desativar */}
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  className="h-8 w-8"
+                                  className="h-11 w-11 md:h-8 md:w-8"
                                   onClick={() => handleToggleAtivo(u)}
                                   aria-label={u.ativo ? "Desativar" : "Ativar"}
                                   title={u.ativo ? "Desativar" : "Ativar"}
@@ -1217,7 +1309,7 @@ function EquipaPage() {
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  className="h-8 w-8 text-amber-500 hover:text-amber-600"
+                                  className="h-11 w-11 md:h-8 md:w-8 text-amber-500 hover:text-amber-600"
                                   onClick={() => {
                                     setFaltaSubita(u);
                                     setFaltaResultado(null);
@@ -1231,10 +1323,10 @@ function EquipaPage() {
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  className="h-8 w-8 text-blue-500 hover:text-blue-600"
+                                  className="h-11 w-11 md:h-8 md:w-8 text-blue-500 hover:text-blue-600"
                                   onClick={() => {
                                     setBaixaModal(u);
-                                    setBaixaForm({ data_inicio: "", data_fim: "" });
+                                    setBaixaForm({ data_inicio: "", data_fim: "", tipo: "ferias" });
                                     setBaixaResultado(null);
                                   }}
                                   aria-label={`Registar baixa ou férias de ${u.nome}`}
@@ -1242,6 +1334,32 @@ function EquipaPage() {
                                 >
                                   <CalendarOff className="h-4 w-4" />
                                 </Button>
+                                {/* RGPD — separado das outras ações */}
+                                <span className="ml-3 h-6 w-px shrink-0 bg-border" aria-hidden="true" />
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-11 w-11 md:h-8 md:w-8"
+                                  onClick={() => handleExportarDados(u)}
+                                  disabled={exportandoId === u._id}
+                                  aria-label={`Exportar dados de ${u.nome}`}
+                                  title="Exportar dados"
+                                >
+                                  {exportandoId === u._id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                                </Button>
+                                {/* Só quem pode: nunca a própria conta; gestores só pelo administrador */}
+                                {eu && eu.id !== u._id && (u.role !== "gestor" || eu.role === "admin") && (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-11 w-11 text-destructive hover:text-destructive md:h-8 md:w-8"
+                                    onClick={() => setApagarDados(u)}
+                                    aria-label={`Apagar dados pessoais de ${u.nome}`}
+                                    title="Apagar dados pessoais"
+                                  >
+                                    <ShieldX className="h-4 w-4" />
+                                  </Button>
+                                )}
                               </div>
                             )}
                           </td>
@@ -1277,9 +1395,9 @@ function EquipaPage() {
           >
             <DialogHeader>
               <div>
-                <DialogTitle>Editar Utilizador</DialogTitle>
+                <DialogTitle>Editar utilizador</DialogTitle>
                 <DialogDescription>
-                  Atualiza os dados do funcionário. Deixa a password vazia para
+                  Atualiza os dados do funcionário. Deixa a palavra-passe vazia para
                   manter a atual.
                 </DialogDescription>
               </div>
@@ -1325,7 +1443,7 @@ function EquipaPage() {
                     onChange={(e) =>
                       setEditForm((f) => ({ ...f, telefone: e.target.value }))
                     }
-                    placeholder="+351 912 345 678"
+                    placeholder="900 000 000"
                   />
                 </div>
                 <div className="space-y-1.5">
@@ -1338,15 +1456,16 @@ function EquipaPage() {
                     onChange={(e) =>
                       setEditForm((f) => ({ ...f, role: e.target.value as Role }))
                     }
-                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    className="flex h-11 md:h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                   >
-                    <option value="staff">Staff (funcionário de limpezas)</option>
+                    <option value="staff">Equipa (limpezas)</option>
                     <option value="gestor">Responsável (gere a equipa)</option>
-                    <option value="parceiro">Parceiro (B2B externo — cria reservas)</option>
+                    <option value="parceiro">Proprietário (B2B externo — cria reservas)</option>
+                    <option value="fornecedor">Lavandaria (gestão de roupa)</option>
                   </select>
                   {editForm.role === "parceiro" && (
                     <p className="text-xs text-muted-foreground">
-                      Parceiros são externos: não têm folgas semanais nem responsável hierárquico.
+                      Os proprietários são externos: não têm folgas semanais nem responsável hierárquico.
                       Acedem ao portal B2B para criar reservas manuais nas suas propriedades.
                     </p>
                   )}
@@ -1368,7 +1487,7 @@ function EquipaPage() {
                           responsavel_id: e.target.value,
                         }))
                       }
-                      className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      className="flex h-11 md:h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                     >
                       <option value="">— Sem responsável —</option>
                       {responsaveisPossiveis
@@ -1383,7 +1502,7 @@ function EquipaPage() {
                 )}
                 <div className="space-y-1.5">
                   <label htmlFor="edit-password" className="text-sm font-medium">
-                    Nova Password{" "}
+                    Nova palavra-passe{" "}
                     <span className="font-normal text-muted-foreground">
                       (opcional)
                     </span>
@@ -1403,13 +1522,13 @@ function EquipaPage() {
                       type="button"
                       onClick={() => setShowEditPassword((v) => !v)}
                       className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                      aria-label={showEditPassword ? "Ocultar password" : "Mostrar password"}
+                      aria-label={showEditPassword ? "Ocultar palavra-passe" : "Mostrar palavra-passe"}
                     >
                       {showEditPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Útil para redefinir a password se o funcionário se esquecer.
+                    Útil para redefinir a palavra-passe se o funcionário se esquecer.
                   </p>
                 </div>
 
@@ -1427,7 +1546,7 @@ function EquipaPage() {
                 {editForm.role !== "parceiro" && (
                 <div className="space-y-3 rounded-md border p-3">
                   <div className="flex items-center gap-2">
-                    <Calendar className="h-4 w-4 text-primary" />
+                    <Calendar className="h-4 w-4 text-brand-text" />
                     <h4 className="text-sm font-medium leading-none">
                       Folgas Específicas / Rotativas
                     </h4>
@@ -1451,7 +1570,7 @@ function EquipaPage() {
                         onChange={(e) =>
                           setNovaFolga((nf) => ({ ...nf, data: e.target.value }))
                         }
-                        className="h-9"
+                        className="h-11 md:h-9"
                       />
                     </div>
                     <div className="flex-[2] space-y-1">
@@ -1466,7 +1585,7 @@ function EquipaPage() {
                         onChange={(e) =>
                           setNovaFolga((nf) => ({ ...nf, motivo: e.target.value }))
                         }
-                        className="h-9"
+                        className="h-11 md:h-9"
                         maxLength={200}
                       />
                     </div>
@@ -1474,7 +1593,7 @@ function EquipaPage() {
                       type="button"
                       variant="outline"
                       size="sm"
-                      className="h-9"
+                      className="h-11 md:h-9"
                       onClick={adicionarFolgaRotativa}
                       disabled={!novaFolga.data}
                     >
@@ -1586,7 +1705,7 @@ function EquipaPage() {
                               key={p._id}
                               className={`flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm transition-colors ${
                                 checked
-                                  ? "border-primary bg-primary/10 text-primary"
+                                  ? "border-primary bg-primary/10 text-brand-text"
                                   : "border-input text-muted-foreground hover:bg-muted/50"
                               }`}
                             >
@@ -1607,7 +1726,7 @@ function EquipaPage() {
                               />
                               <span className="flex-1 truncate" title={p.nome}>{p.nome}</span>
                               {!p.ativo && (
-                                <Badge variant="outline" className="text-[10px]">
+                                <Badge variant="outline" className="text-xs">
                                   inativa
                                 </Badge>
                               )}
@@ -1634,9 +1753,66 @@ function EquipaPage() {
                   <Switch
                     checked={editForm.exclusivo_preferenciais}
                     onCheckedChange={(v) => setEditForm((f) => ({ ...f, exclusivo_preferenciais: v }))}
-                    aria-label="Staff exclusivo"
+                    aria-label="Equipa exclusiva"
                   />
                 </div>
+
+                {/* FIX (atribuição bidirecional fornecedor) — Multi-select de
+                    propriedades atribuídas (edição), só se role === 'fornecedor'. */}
+                {editForm.role === "fornecedor" && (
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium leading-none">
+                      Propriedades Atribuídas (Lavandaria)
+                    </label>
+                    <p className="text-xs text-muted-foreground">
+                      Seleciona as propriedades que esta lavandaria irá servir.
+                      O fornecedor só vê as tarefas das propriedades atribuídas.
+                    </p>
+                    {propriedades.length === 0 ? (
+                      <p className="text-xs italic text-muted-foreground">
+                        Sem propriedades disponíveis.
+                      </p>
+                    ) : (
+                      <div className="grid max-h-48 gap-1.5 overflow-y-auto rounded-md border border-input p-2 sm:grid-cols-2">
+                        {propriedades
+                          .filter((p) => p.ativo || editForm.propriedades_atribuidas.includes(p._id))
+                          .map((p) => {
+                          const checked = editForm.propriedades_atribuidas.includes(p._id);
+                          return (
+                            <label
+                              key={p._id}
+                              className={`flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm transition-colors ${
+                                checked
+                                  ? "border-primary bg-primary/10 text-brand-text"
+                                  : "border-input text-muted-foreground hover:bg-muted/50"
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(e) => {
+                                  setEditForm((f) => ({
+                                    ...f,
+                                    propriedades_atribuidas: e.target.checked
+                                      ? [...f.propriedades_atribuidas, p._id]
+                                      : f.propriedades_atribuidas.filter((id) => id !== p._id),
+                                  }));
+                                }}
+                                className="h-3.5 w-3.5"
+                              />
+                              <span className="flex-1 truncate" title={p.nome}>{p.nome}</span>
+                              {!p.ativo && (
+                                <Badge variant="outline" className="text-xs">
+                                  inativa
+                                </Badge>
+                              )}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {editErro && (
                   <p className="flex items-center gap-2 text-sm text-destructive">
@@ -1669,13 +1845,23 @@ function EquipaPage() {
           </Dialog>
 
           {/* Modal de Confirmação de Eliminação */}
+          <ApagarDadosDialog
+            pessoa={apagarDados}
+            onFechar={() => setApagarDados(null)}
+            onConcluido={(texto) => {
+              setApagarDados(null);
+              setRgpdMsg({ tipo: "ok", texto });
+              void carregar();
+            }}
+          />
+
           <Dialog
             open={eliminando !== null}
             onOpenChange={(o) => !o && setEliminando(null)}
           >
             <DialogHeader>
               <div>
-                <DialogTitle>Eliminar Utilizador</DialogTitle>
+                <DialogTitle>Eliminar utilizador</DialogTitle>
                 <DialogDescription>
                   Esta ação é permanente e não pode ser desfeita.
                 </DialogDescription>
@@ -1723,7 +1909,7 @@ function EquipaPage() {
                 ) : (
                   <>
                     <Trash2 className="h-4 w-4" />
-                    Eliminar Definitivamente
+                    Eliminar definitivamente
                   </>
                 )}
               </Button>
@@ -1739,10 +1925,10 @@ function EquipaPage() {
               <div>
                 <DialogTitle className="flex items-center gap-2">
                   <Siren className="h-5 w-5 text-amber-500" />
-                  Reportar Falta Súbita
+                  Reportar falta súbita
                 </DialogTitle>
                 <DialogDescription>
-                  As tarefas de hoje serão redistribuídas pelos colegas disponíveis.
+                  As tarefas de hoje são reatribuídas automaticamente a colegas disponíveis.
                 </DialogDescription>
               </div>
               <DialogClose onClick={() => setFaltaSubita(null)} />
@@ -1753,15 +1939,18 @@ function EquipaPage() {
                 <span className="font-semibold">{faltaSubita?.nome}</span>?
               </p>
               <p className="text-xs text-muted-foreground">
-                As tarefas de hoje deste funcionário serão redistribuídas pelos
-                colegas disponíveis, usando o sistema de load balancing com
-                tempo de viagem. Tarefas sem ninguém disponível ficarão por atribuir.
+                As tarefas de hoje deste funcionário são reatribuídas logo aos
+                colegas disponíveis. As que ninguém puder fazer ficam por
+                atribuir e os gestores são avisados.
               </p>
               {faltaResultado && (
                 <div className="rounded-md bg-amber-50 dark:bg-amber-950/20 p-3 text-sm text-amber-800 dark:text-amber-200">
                   {faltaResultado}
                 </div>
               )}
+              {faltaResultado && faltaAviso && avisoEmCurso(faltaAviso)}
+              {faltaResultado &&
+                renderReatribuir(faltaPorAtribuir, "falta")}
             </DialogContent>
             <DialogFooter>
               <Button
@@ -1775,7 +1964,7 @@ function EquipaPage() {
               {!faltaResultado && (
                 <Button
                   type="button"
-                  className="bg-amber-500 text-white hover:bg-amber-600"
+                  className="bg-status-porat text-status-foreground hover:bg-status-porat/90"
                   onClick={handleFaltaSubita}
                   disabled={faltaSubmitting}
                 >
@@ -1787,7 +1976,7 @@ function EquipaPage() {
                   ) : (
                     <>
                       <Siren className="h-4 w-4" />
-                      Confirmar Falta
+                      Confirmar falta
                     </>
                   )}
                 </Button>
@@ -1807,7 +1996,7 @@ function EquipaPage() {
                   Registar Baixa ou Férias
                 </DialogTitle>
                 <DialogDescription>
-                  As tarefas futuras serão redistribuídas pelos colegas disponíveis.
+                  As tarefas do período são reatribuídas automaticamente a colegas disponíveis.
                 </DialogDescription>
               </div>
               <DialogClose onClick={() => setBaixaModal(null)} />
@@ -1819,6 +2008,22 @@ function EquipaPage() {
                     Registar baixa para{" "}
                     <span className="font-semibold">{baixaModal?.nome}</span>?
                   </p>
+                  <div className="space-y-1.5">
+                    <label htmlFor="baixa-tipo" className="text-sm font-medium">
+                      Tipo
+                    </label>
+                    <select
+                      id="baixa-tipo"
+                      value={baixaForm.tipo}
+                      onChange={(e) => setBaixaForm((f) => ({ ...f, tipo: e.target.value }))}
+                      className="flex h-11 md:h-10 w-full rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                    >
+                      <option value="ferias">Férias</option>
+                      <option value="doenca">Baixa (doença)</option>
+                      <option value="falta">Falta</option>
+                      <option value="outro">Outro</option>
+                    </select>
+                  </div>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1.5">
                       <label htmlFor="baixa-inicio" className="text-sm font-medium">
@@ -1848,15 +2053,19 @@ function EquipaPage() {
                     </div>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Todas as tarefas atribuídas a este funcionário no período serão
-                    reatribuídas usando o sistema de load balancing. As que não
-                    tiverem ninguém disponível ficarão por atribuir.
+                    As tarefas atribuídas a este funcionário no período são
+                    reatribuídas logo aos colegas disponíveis. As que ninguém
+                    puder fazer ficam por atribuir e os gestores são avisados.
                   </p>
                 </>
               ) : (
-                <div className="rounded-md bg-blue-50 dark:bg-blue-950/20 p-3 text-sm text-blue-800 dark:text-blue-200">
-                  {baixaResultado}
-                </div>
+                <>
+                  <div className="rounded-md bg-blue-50 dark:bg-blue-950/20 p-3 text-sm text-blue-800 dark:text-blue-200">
+                    {baixaResultado}
+                  </div>
+                  {baixaAviso && avisoEmCurso(baixaAviso)}
+                  {renderReatribuir(baixaPorAtribuir, "baixa")}
+                </>
               )}
             </DialogContent>
             <DialogFooter>
@@ -1871,7 +2080,7 @@ function EquipaPage() {
               {!baixaResultado && (
                 <Button
                   type="button"
-                  className="bg-blue-500 text-white hover:bg-blue-600"
+                  className="bg-status-atrib text-status-foreground hover:bg-status-atrib/90"
                   disabled={
                     !baixaForm.data_inicio ||
                     !baixaForm.data_fim ||
@@ -1880,18 +2089,20 @@ function EquipaPage() {
                   onClick={async () => {
                     if (!baixaModal) return;
                     setBaixaSubmitting(true);
+                    setBaixaPorAtribuir(0);
+                    setBaixaAviso(null);
+                    setAutoTentou(false);
+                    setAutoErro(null);
                     try {
-                      const res = await adminPost<{
-                        reatribuidas: number;
-                        orfas: number;
-                        total: number;
-                      }>(`/api/gestor/equipa/${baixaModal._id}/baixa`, {
+                      const res = await adminPost<RedistribuicaoDTO>(`/api/gestor/equipa/${baixaModal._id}/baixa`, {
                         data_inicio: baixaForm.data_inicio,
                         data_fim: baixaForm.data_fim,
-                        tipo: "ferias",
+                        tipo: baixaForm.tipo,
                       });
+                      setBaixaPorAtribuir(tarefasPorAtribuir(res));
+                      setBaixaAviso(res.aviso ?? null);
                       setBaixaResultado(
-                        `Baixa registada. ${res.reatribuidas} tarefa(s) reatribuída(s) aos colegas, ${res.orfas} ficou(aram) por atribuir.`
+                        textoRedistribuicao("Baixa registada.", res, "Não havia tarefas no período.")
                       );
                       await carregar();
                     } catch (e) {
@@ -1911,7 +2122,7 @@ function EquipaPage() {
                   ) : (
                     <>
                       <CalendarOff className="h-4 w-4" />
-                      Confirmar Ausência
+                      Confirmar ausência
                     </>
                   )}
                 </Button>
@@ -1920,80 +2131,6 @@ function EquipaPage() {
           </Dialog>
         </div>
       </div>
-
-      {/* Dialog de confirmação de eliminação de ausência (mantido para o
-          botão de eliminar da lista de staff, se aplicável) */}
-      <Dialog
-        open={aprEliminarAlvo !== null}
-        onOpenChange={(o) => !o && setAprEliminarAlvo(null)}
-      >
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Trash2 className="h-5 w-5 text-destructive" />
-            Eliminar Ausência
-          </DialogTitle>
-          <DialogDescription>
-            Tens a certeza que queres eliminar esta ausência? Esta ação é
-            definitiva e não pode ser desfeita.
-          </DialogDescription>
-          <DialogClose onClick={() => setAprEliminarAlvo(null)} />
-        </DialogHeader>
-        <DialogContent className="space-y-3">
-          {aprEliminarAlvo && (
-            <div className="rounded-lg border bg-muted/30 p-4 space-y-2 text-sm">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-muted-foreground">Funcionário</span>
-                <span className="font-medium">
-                  {aprEliminarAlvo.utilizador?.nome ?? "—"}
-                </span>
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-muted-foreground">Tipo</span>
-                <span className="font-medium">
-                  {TIPO_LABEL[aprEliminarAlvo.tipo] ?? aprEliminarAlvo.tipo}
-                </span>
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-muted-foreground">Período</span>
-                <span className="font-medium tabular-nums">
-                  {formatarData(aprEliminarAlvo.data_inicio)}
-                  {aprEliminarAlvo.data_inicio !== aprEliminarAlvo.data_fim && (
-                    <> → {formatarData(aprEliminarAlvo.data_fim)}</>
-                  )}
-                </span>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setAprEliminarAlvo(null)}
-            disabled={aprProcessando !== null}
-          >
-            Cancelar
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            onClick={aprEliminar}
-            disabled={aprProcessando !== null}
-          >
-            {aprProcessando !== null ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                A eliminar…
-              </>
-            ) : (
-              <>
-                <Trash2 className="mr-2 h-4 w-4" />
-                Eliminar Definitivamente
-              </>
-            )}
-          </Button>
-        </DialogFooter>
-      </Dialog>
     </div>
   );
 }

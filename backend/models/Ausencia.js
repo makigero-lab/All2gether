@@ -55,7 +55,8 @@ const ausenciaSchema = new mongoose.Schema(
     // (tem data_inicio e data_fim, requer aprovação, bloqueia calendário).
     tipo: {
       type: String,
-      enum: ['ferias', 'doenca', 'folga_rotativa', 'outro'],
+      // 'falta' = falta sem motivo declarado (NUNCA se infere doença de uma falta: RGPD, dado de saúde).
+      enum: ['ferias', 'doenca', 'folga_rotativa', 'falta', 'outro'],
       default: 'ferias',
       required: true,
     },

@@ -178,7 +178,7 @@ function LoginConteudo() {
 
               <div className="space-y-1.5">
                 <label htmlFor="password" className="text-sm font-medium">
-                  Password
+                  Palavra-passe
                 </label>
                 <div className="relative">
                   <Input
@@ -196,7 +196,7 @@ function LoginConteudo() {
                     type="button"
                     onClick={() => setShowPassword((v) => !v)}
                     className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                    aria-label={showPassword ? "Ocultar password" : "Mostrar password"}
+                    aria-label={showPassword ? "Ocultar palavra-passe" : "Mostrar palavra-passe"}
                   >
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>

@@ -12,7 +12,7 @@
  * o diagnóstico nos logs da Vercel.
  *
  * Variável de ambiente esperada (ver `.env.example`):
- *   NEXT_PUBLIC_API_URL=https://all2gether-backend.onrender.com
+ *   NEXT_PUBLIC_API_URL=https://all2gether.onrender.com
  * (com protocolo, SEM barra final)
  */
 

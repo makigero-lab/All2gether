@@ -44,16 +44,17 @@ export function paraIsoMeiaNoiteLocal(dataYYYYMMDD: string): string {
  * No calendário, as primeiras devem aparecer como "todo o dia" (all-day)
  * para não ficarem abaixo do slotMinTime 08:00 (invisíveis).
  *
- * Heurística: se a hora local for anterior a 8 (ou seja, 00:00, 01:00 de
- * dados antigos em UTC midnight, etc.), consideramos que não tem hora real
- * de trabalho → render all-day.
+ * Regra: só é "sem hora" a tarefa exatamente à meia-noite (00:00 UTC, o
+ * marcador de data sem hora, ou 00:00 locais). Qualquer outra hora é real e
+ * mostra-se sempre, mesmo que seja errada: nunca se esconde um erro.
  */
 export function temHoraReal(dataISO: string): boolean {
   try {
     const d = parsearDataSegura(dataISO);
     if (!d) return true;
-    // Hora LOCAL (o browser está em Lisboa).
-    return d.getHours() >= 8;
+    const meiaNoiteUTC = d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && d.getUTCSeconds() === 0;
+    const meiaNoiteLocal = d.getHours() === 0 && d.getMinutes() === 0 && d.getSeconds() === 0;
+    return !(meiaNoiteUTC || meiaNoiteLocal);
   } catch {
     return true;
   }
@@ -222,4 +223,139 @@ export function googleMapsUrl(
   const morada = String(input).trim();
   if (!morada) return null;
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(morada)}`;
+}
+
+/**
+ * Escapa um valor para o inserir de forma segura em HTML construído por
+ * concatenação (ex.: janela de impressão com document.write).
+ * Aceita qualquer valor; null/undefined viram texto vazio.
+ */
+export function escaparHtml(valor: unknown): string {
+  return String(valor ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/** Resposta de redistribuição devolvida ao aprovar/confirmar uma ausência. */
+export type RedistribuicaoDTO = {
+  total: number;
+  desatribuidas: number;
+  reatribuicao?: {
+    total?: number;
+    reatribuidas?: number;
+    orfas?: number;
+    /** Limpezas que continuam com equipa incompleta (falta pelo menos 1 pessoa). */
+    parciais?: number;
+    faltam?: { propriedade?: string; faltam?: number }[];
+    erro?: string;
+  } | null;
+  aviso?: string;
+};
+
+/** Resultado da reatribuição só é fiável se não houve erro e os números existem. */
+function reatribuicaoFiavel(
+  r: RedistribuicaoDTO | null | undefined
+): { reatribuidas: number; orfas: number; vagasTarefas: number; vagas: number } | null {
+  const re = r?.reatribuicao;
+  if (re && !re.erro && typeof re.reatribuidas === "number" && typeof re.orfas === "number") {
+    const lista = Array.isArray(re.faltam) ? re.faltam : [];
+    const vagas = lista.reduce((acc, f) => acc + (Number(f?.faltam) || 0), 0);
+    const vagasTarefas = Math.max(Number(re.parciais) || 0, lista.length);
+    return { reatribuidas: re.reatribuidas, orfas: re.orfas, vagasTarefas, vagas: vagas || vagasTarefas };
+  }
+  return null;
+}
+
+/**
+ * Quantas tarefas ficaram por atribuir depois da ausência. Com reatribuição
+ * fiável são as órfãs reais (podem incluir tarefas que já estavam por atribuir
+ * no período); se a reatribuição falhou, são as que acabaram de ser desatribuídas.
+ */
+export function tarefasPorAtribuir(r: RedistribuicaoDTO | null | undefined): number {
+  const re = reatribuicaoFiavel(r);
+  // Inclui as limpezas com equipa incompleta: também precisam de "Reatribuir automaticamente".
+  if (re) return re.orfas + re.vagasTarefas;
+  return Math.max(0, r?.desatribuidas ?? 0);
+}
+
+/**
+ * Texto verdadeiro sobre o que aconteceu às tarefas depois de uma ausência:
+ * reatribuídas automaticamente vs. por atribuir.
+ *
+ * A reatribuição processa TODAS as tarefas por atribuir da empresa no período,
+ * não só as da pessoa ausente: por isso usa os números reais (`reatribuidas` e
+ * `orfas`) e avisa quando excedem as desatribuídas. Se a reatribuição falhou
+ * (`erro`) ou não veio na resposta, diz que ficaram por atribuir.
+ */
+export function textoRedistribuicao(
+  prefixo: string,
+  r: RedistribuicaoDTO | null | undefined,
+  semTarefas: string
+): string {
+  const desatribuidas = r?.desatribuidas ?? 0;
+  const re = reatribuicaoFiavel(r);
+  if (re) {
+    const partes: string[] = [];
+    if (re.reatribuidas > 0) partes.push(`${plural(re.reatribuidas, "tarefa reatribuída", "tarefas reatribuídas")} automaticamente`);
+    if (re.orfas > 0) partes.push(`${re.orfas} por atribuir (ninguém disponível)`);
+    if (re.vagasTarefas > 0) {
+      partes.push(
+        re.vagasTarefas === 1
+          ? `1 limpeza ficou a faltar ${re.vagas} ${re.vagas === 1 ? "pessoa" : "pessoas"}`
+          : `${re.vagasTarefas} limpezas ficaram a faltar pessoas (${re.vagas} vagas)`
+      );
+    }
+    if (partes.length === 0) return `${prefixo} ${semTarefas}`;
+    const extra =
+      re.reatribuidas + re.orfas > desatribuidas + re.vagasTarefas
+        ? " Inclui outras tarefas do período que já estavam por atribuir."
+        : "";
+    return `${prefixo} ${partes.join("; ")}.${extra}`;
+  }
+  if (r?.reatribuicao?.erro) {
+    return desatribuidas > 0
+      ? `${prefixo} Não foi possível reatribuir automaticamente: ${plural(desatribuidas, "tarefa", "tarefas")} por atribuir.`
+      : `${prefixo} Não foi possível reatribuir automaticamente.`;
+  }
+  if (!(desatribuidas > 0)) return `${prefixo} ${semTarefas}`;
+  return `${prefixo} ${plural(desatribuidas, "tarefa")} por atribuir.`;
+}
+
+/**
+ * «1 tarefa» / «2 tarefas»: singular e plural reais (nunca «tarefa(s)»).
+ * O plural regular acrescenta «s»; para outros passa-se a forma do plural.
+ */
+export function plural(n: number | string | null | undefined, singular: string, pluralForma?: string): string {
+  // parseFloat aceita «1 reserva» (encadeado: plural(plural(1, "reserva"), "criada") => «1 reserva criada»)
+  const num = typeof n === "string" ? parseFloat(n) : Number(n);
+  return `${n ?? 0} ${num === 1 ? singular : pluralForma ?? `${singular}s`}`;
+}
+
+/**
+ * Checklist que o staff vê: a da PRÓPRIA tarefa (do tipo de limpeza) e, só se vier vazia
+ * (tarefas antigas), a da casa.
+ */
+export function checklistDaTarefa(
+  tarefa: { checklist?: unknown; propriedade_id?: { checklist?: unknown } | null } | null | undefined
+): string[] {
+  const dela = Array.isArray(tarefa?.checklist) ? (tarefa!.checklist as string[]) : [];
+  if (dela.length > 0) return dela;
+  const dacasa = tarefa?.propriedade_id?.checklist;
+  return Array.isArray(dacasa) ? (dacasa as string[]) : [];
+}
+
+/** Data por extenso igual nos três portais: «Sexta-feira, 6 de novembro». */
+export function dataPorExtenso(d: Date): string {
+  const partes = new Intl.DateTimeFormat("pt-PT", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    timeZone: "Europe/Lisbon",
+  }).formatToParts(d);
+  const p = (t: string) => partes.find((x) => x.type === t)?.value ?? "";
+  const semana = p("weekday");
+  return `${semana.charAt(0).toUpperCase()}${semana.slice(1)}, ${p("day")} de ${p("month")}`;
 }

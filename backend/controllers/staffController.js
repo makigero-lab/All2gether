@@ -14,7 +14,10 @@ const Ausencia = require('../models/Ausencia');
 const Utilizador = require('../models/Utilizador');
 const Tarefa = require('../models/Tarefa');
 const Propriedade = require('../models/Propriedade');
-const { notificarUtilizador } = require('../utils/notificar');
+const { notificarUtilizador, avisarGestores } = require('../utils/notificar');
+const { preencherVagaTarefa, preencherVagasAposAusencia } = require('../utils/atribuicaoAutomatica');
+const { comMembro, retirarMembroDoc } = require('../utils/equipaTarefa');
+const { aoConcluirTarefa } = require('../utils/cicloTarefa');
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -102,9 +105,9 @@ exports.criarAusencia = async (req, res) => {
 
     // Valida tipo.
     const tipoFinal = tipo || 'ferias';
-    if (!['ferias', 'doenca', 'outro'].includes(tipoFinal)) {
+    if (!['ferias', 'doenca', 'falta', 'outro'].includes(tipoFinal)) {
       return res.status(400).json({
-        erro: 'tipo inválido. Valores permitidos: ferias, doenca, outro.',
+        erro: 'tipo inválido. Valores permitidos: ferias, doenca, falta, outro.',
       });
     }
 
@@ -231,9 +234,16 @@ exports.cancelarAusenciaSoft = async (req, res) => {
       `(estado anterior: ${estadoAnterior}).`
     );
 
+    // Se bloqueava a pessoa, preenche já as vagas do período (best-effort).
+    let preenchimento = null;
+    if (['aprovada', 'pendente_emergencia'].includes(estadoAnterior)) {
+      preenchimento = await preencherVagasAposAusencia(ausencia);
+    }
+
     return res.status(200).json({
       mensagem: 'Ausência cancelada com sucesso.',
       ausencia,
+      preenchimento,
     });
   } catch (err) {
     console.error('❌ cancelarAusenciaSoft:', err.message);
@@ -278,9 +288,16 @@ exports.cancelarAusencia = async (req, res) => {
 
     await Ausencia.deleteOne({ _id: id });
 
+    // 'pendente_emergencia' bloqueava a pessoa: preenche já as vagas (best-effort, depois de apagar).
+    let preenchimento = null;
+    if (ausencia.estado === 'pendente_emergencia') {
+      preenchimento = await preencherVagasAposAusencia(ausencia);
+    }
+
     return res.status(200).json({
       mensagem: 'Pedido cancelado com sucesso.',
       ausencia_id: id,
+      preenchimento,
     });
   } catch (err) {
     console.error('❌ cancelarAusencia:', err.message);
@@ -291,9 +308,11 @@ exports.cancelarAusencia = async (req, res) => {
 /**
  * POST /api/staff/falta-hoje
  *
- * Cria um pedido de falta de emergência para o dia atual (doença súbita).
- * O pedido fica com estado 'pendente_emergencia' — o admin é notificado e,
- * ao aprovar, dispara a redistribuição imediata das tarefas do dia.
+ * Cria um pedido de falta de emergência para o dia atual (tipo 'falta', sem presumir o motivo).
+ * O pedido fica com estado 'pendente_emergencia' — o admin é notificado. As
+ * tarefas de hoje da pessoa são desatribuídas e reatribuídas logo (sem esperar
+ * pela aprovação); sem ninguém disponível ficam por atribuir e os gestores
+ * são avisados.
  *
  * Body: { justificacao?: string }
  *
@@ -321,7 +340,7 @@ exports.faltaHoje = async (req, res) => {
       utilizador_id: utilizadorId,
       data_inicio: { $lte: hoje },
       data_fim: { $gte: hoje },
-      estado: { $ne: 'rejeitada' },
+      estado: { $in: ['pendente', 'pendente_emergencia', 'aprovada'] },
     });
     if (sobreposta) {
       console.log(`[faltaHoje] Conflito detetado: ausência ${sobreposta._id} estado=${sobreposta.estado}`);
@@ -350,7 +369,7 @@ exports.faltaHoje = async (req, res) => {
       empresa_id: empresaId,
       data_inicio: hoje,
       data_fim: hoje,
-      tipo: 'doenca',
+      tipo: 'falta', // uma falta não é uma doença: não se infere saúde (RGPD)
       estado: 'pendente_emergencia',
       justificacao: justificacao ? String(justificacao).trim() : '',
     });
@@ -388,7 +407,27 @@ exports.faltaHoje = async (req, res) => {
       console.error('⚠️  notificar gestores (faltaHoje):', e.message);
     }
 
-    return res.status(201).json({ ausencia: nova });
+    // O faltoso fica logo indisponível: desatribui as tarefas de hoje e
+    // reatribui-as de imediato a quem estiver disponível (sem clique do
+    // gestor). A ausência 'pendente_emergencia' já conta como indisponível no
+    // load balancer, e a pessoa é excluída do pool explicitamente.
+    // Limpezas 'em_curso' ficam com a pessoa e os gestores são avisados.
+    let redistribuicao = null;
+    try {
+      const { desatribuirTarefasPeriodo, textoEmCurso, avisarGestoresEmCurso, reatribuirAutomaticamente } = require('./ausenciaController');
+      redistribuicao = await desatribuirTarefasPeriodo(utilizadorId, hoje, hoje);
+      if (redistribuicao.em_curso_mantidas > 0) {
+        const alvo = await Utilizador.findById(utilizadorId).select('nome').lean();
+        await avisarGestoresEmCurso(empresaId, alvo?.nome, redistribuicao);
+        redistribuicao.aviso = textoEmCurso(redistribuicao, alvo?.nome);
+      }
+      // Best-effort: nunca lança; se falhar, `reatribuicao.erro` vem preenchido.
+      redistribuicao.reatribuicao = await reatribuirAutomaticamente(empresaId, utilizadorId, hoje, hoje);
+    } catch (e) {
+      console.error('⚠️  redistribuir tarefas (faltaHoje):', e.message);
+    }
+
+    return res.status(201).json({ ausencia: nova, redistribuicao });
   } catch (err) {
     console.error('❌ faltaHoje:', err.message);
     // Prompt 131 — Tratamento do erro 11000 (índice único antigo).
@@ -409,7 +448,7 @@ exports.faltaHoje = async (req, res) => {
           empresa_id: req.user.empresa_id,
           data_inicio: new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate())),
           data_fim: new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate())),
-          tipo: 'doenca',
+          tipo: 'falta',
           estado: 'pendente_emergencia',
           justificacao: (req.body && req.body.justificacao) ? String(req.body.justificacao).trim() : '',
         });
@@ -463,10 +502,7 @@ exports.concluirTarefa = async (req, res) => {
     }
 
     // Verifica se a tarefa pertence ao utilizador logado.
-    const tarefa = await Tarefa.findOne({
-      _id: id,
-      utilizador_id: utilizadorId,
-    });
+    const tarefa = await Tarefa.findOne(comMembro({ _id: id }, utilizadorId));
 
     if (!tarefa) {
       return res.status(404).json({
@@ -502,24 +538,43 @@ exports.concluirTarefa = async (req, res) => {
     }
 
     // Atualiza estado + timestamps + observações do staff + fotos.
+    // Atómico: com dois membros a concluir ao mesmo tempo só o primeiro grava;
+    // o segundo recebe 400 "já concluída" (e não 500 por VersionError).
     const agora = new Date();
-    tarefa.estado = 'concluida';
-    tarefa.concluida_em = agora;
-    tarefa.hora_conclusao = agora;
-    tarefa.data_conclusao = agora; // HF19 — para o cron job de limpeza
-    tarefa.fotos_conclusao = fotosNormalizadas; // HF19 — fotos da conclusão
+    const set = {
+      estado: 'concluida',
+      concluida_em: agora,
+      hora_conclusao: agora,
+      data_conclusao: agora, // HF19 — para o cron job de limpeza
+      fotos_conclusao: fotosNormalizadas, // HF19 — fotos da conclusão
+    };
 
     if (req.body?.observacoes_staff !== undefined) {
-      tarefa.observacoes_staff = String(req.body.observacoes_staff || '');
+      set.observacoes_staff = String(req.body.observacoes_staff || '');
     }
     // Retrocompatibilidade: também aceita "observacoes" (campo legacy).
     if (req.body?.observacoes !== undefined) {
-      tarefa.observacoes = String(req.body.observacoes || '');
+      set.observacoes = String(req.body.observacoes || '');
+    }
+    // FIX (portal lavandaria) — Sacos de roupa suja recolhidos pelo staff.
+    if (req.body?.sacos_roupa_suja !== undefined) {
+      const n = Number(req.body.sacos_roupa_suja);
+      set.sacos_roupa_suja = Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
     }
 
-    await tarefa.save();
+    const atualizada = await Tarefa.findOneAndUpdate(
+      comMembro({ _id: id, estado: { $nin: ['concluida', 'cancelada'] } }, utilizadorId),
+      { $set: set },
+      { new: true }
+    );
+    if (!atualizada) {
+      return res.status(400).json({ erro: 'Tarefa já concluída (ou entretanto cancelada).' });
+    }
 
-    return res.status(200).json({ tarefa });
+    // Avaria resolvida (manutenção) e aviso ao parceiro; best-effort, nunca falha a conclusão.
+    await aoConcluirTarefa(atualizada);
+
+    return res.status(200).json({ tarefa: atualizada });
   } catch (err) {
     console.error('❌ concluirTarefa:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
@@ -574,10 +629,7 @@ exports.reportarAvaria = async (req, res) => {
         .map((f) => f.trim());
     }
 
-    const tarefa = await Tarefa.findOne({
-      _id: id,
-      utilizador_id: utilizadorId,
-    });
+    const tarefa = await Tarefa.findOne(comMembro({ _id: id }, utilizadorId));
 
     if (!tarefa) {
       return res.status(404).json({
@@ -601,13 +653,16 @@ exports.reportarAvaria = async (req, res) => {
       data_registo: new Date(),
     });
     await tarefa.save();
+    // Item acabado de registar (liga a manutenção a esta avaria).
+    const itemAvaria = tarefa.avarias[tarefa.avarias.length - 1];
 
     // Cria uma NOVA tarefa de manutenção para a mesma propriedade,
     // para o gestor atribuir a alguém (ex: reparador).
     // Prompt 125 — usa meia-noite LOCAL (00:00 no fuso do servidor) e não
     // UTC midnight, que em Lisboa (UTC+1) apareceria como 01:00.
     const hoje = new Date();
-    const hojeMeiaNoite = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
+    // 10:00 UTC do dia (antes 00:00 local: placeholder que contaminava o scheduler).
+    const hojeMeiaNoite = new Date(Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth(), hoje.getUTCDate(), 10));
 
     const novaTarefaManutencao = await Tarefa.create({
       empresa_id: tarefa.empresa_id,
@@ -618,6 +673,9 @@ exports.reportarAvaria = async (req, res) => {
       tipo: 'manutencao',
       estado: 'por_atribuir',
       observacoes: `Avaria reportada por staff: ${String(descricao).trim()}`,
+      // Ciclo fechado: ao concluir esta manutenção, a avaria fica resolvida.
+      avaria_origem_id: tarefa._id,
+      avaria_origem_item_id: itemAvaria && itemAvaria._id ? itemAvaria._id : null,
     });
 
     console.log(
@@ -723,10 +781,7 @@ exports.reportarAtraso = async (req, res) => {
     // --- Validação de pertença (Prompt 77, ponto 3) ---
     // A tarefa tem de pertencer ao req.user.id.findOne com utilizador_id
     // garante que staff só mexe nas suas tarefas (404 se não for dele).
-    const tarefa = await Tarefa.findOne({
-      _id: id,
-      utilizador_id: utilizadorId,
-    });
+    const tarefa = await Tarefa.findOne(comMembro({ _id: id }, utilizadorId));
     if (!tarefa) {
       return res.status(404).json({
         erro: 'Tarefa não encontrada (ou não te está atribuída).',
@@ -750,11 +805,10 @@ exports.reportarAtraso = async (req, res) => {
     );
     const fimDia = new Date(inicioDia.getTime() + 24 * 60 * 60 * 1000);
 
-    const tarefasDoDia = await Tarefa.find({
-      utilizador_id: utilizadorId,
+    const tarefasDoDia = await Tarefa.find(comMembro({
       data: { $gte: inicioDia, $lt: fimDia },
       estado: { $nin: ['cancelada', 'concluida'] },
-    }).lean();
+    }, utilizadorId)).lean();
 
     const cargaTotal = tarefasDoDia.reduce(
       (acc, t) => acc + t.tempo_limpeza_minutos,
@@ -766,19 +820,44 @@ exports.reportarAtraso = async (req, res) => {
     let tarefaDesatribuidaId = null;
 
     if (cargaTotal > CAPACIDADE_ATRASO_MINUTOS) {
-      const ultimaTarefa = await Tarefa.findOne({
-        utilizador_id: utilizadorId,
+      // Só 'atribuida' (nunca 'em_curso') e só sai quem atrasou: os restantes
+      // membros da equipa ficam na tarefa.
+      const ultimaTarefa = await Tarefa.findOne(comMembro({
         data: { $gte: inicioDia, $lt: fimDia },
-        estado: { $nin: ['cancelada', 'concluida'] },
+        estado: 'atribuida',
         _id: { $ne: tarefa._id },
-      }).sort({ createdAt: -1 });
+      }, utilizadorId)).sort({ createdAt: -1 });
 
       if (ultimaTarefa) {
-        ultimaTarefa.utilizador_id = null;
-        ultimaTarefa.estado = 'por_atribuir';
+        const ficouSemEquipa = retirarMembroDoc(ultimaTarefa, utilizadorId);
         await ultimaTarefa.save();
         cascataDesatribuida = true;
         tarefaDesatribuidaId = String(ultimaTarefa._id);
+
+        // Avisa o gestor e (se a equipa não ficou vazia) procura substituto só para a vaga.
+        try {
+          const prop = await Propriedade.findById(ultimaTarefa.propriedade_id)
+            .select('nome coordenadas staff_necessario')
+            .lean();
+          const nomeProp = prop?.nome ?? 'uma propriedade';
+          let texto;
+          if (ficouSemEquipa) {
+            texto = `${req.user.nome || 'Um membro da equipa'} reportou atraso e saiu da limpeza de ${nomeProp}, que ficou por atribuir.`;
+          } else {
+            const v = prop
+              ? await preencherVagaTarefa({ empresaId, tarefa: ultimaTarefa.toObject(), propriedade: prop, excluirExtra: [String(utilizadorId)] })
+              : { novos: [], faltam: 1 };
+            for (const id of v.novos) {
+              notificarUtilizador(String(id), '🧹 Nova Limpeza Atribuída', `Foste escalado para ${nomeProp}.`, '/staff');
+            }
+            texto = v.novos.length > 0 && v.faltam === 0
+              ? `Um membro reportou atraso e saiu da limpeza de ${nomeProp}; já foi substituído automaticamente.`
+              : `Um membro reportou atraso e saiu da limpeza de ${nomeProp}; sem substituto disponível, falta ${v.faltam} ${v.faltam === 1 ? 'pessoa' : 'pessoas'}.`;
+          }
+          await avisarGestores(empresaId, '⚠️ Equipa incompleta por atraso', texto, '/gestor/tarefas');
+        } catch (errAviso) {
+          console.error('⚠️  reportarAtraso: aviso/substituto:', errAviso.message);
+        }
       }
     }
 
@@ -832,10 +911,7 @@ exports.toggleChecklistItem = async (req, res) => {
     }
 
     // Busca a tarefa — só do próprio utilizador.
-    const tarefa = await Tarefa.findOne({
-      _id: id,
-      utilizador_id: utilizadorId,
-    });
+    const tarefa = await Tarefa.findOne(comMembro({ _id: id }, utilizadorId));
 
     if (!tarefa) {
       return res.status(404).json({ erro: 'Tarefa não encontrada.' });
@@ -862,6 +938,8 @@ exports.toggleChecklistItem = async (req, res) => {
 
     // Atualiza diretamente no array (positional operator).
     tarefa.checklist_dinamica[secIdx].items[itemIdx].concluido = novoValor;
+    // Primeiro item marcado: prova de que o trabalho começou (relatório de tempo real).
+    if (novoValor && !tarefa.primeiro_item_checklist_em) tarefa.primeiro_item_checklist_em = new Date();
     await tarefa.save();
 
     console.log(

@@ -41,6 +41,7 @@
  *     anti-abuso que o rate limiter proporciona noutros endpoints.
  */
 
+const crypto = require('crypto');
 const express = require('express');
 const WebhookLog = require('../models/WebhookLog');
 const Propriedade = require('../models/Propriedade');
@@ -48,6 +49,15 @@ const Empresa = require('../models/Empresa');
 const { extrairDadosReserva } = require('../controllers/smoobuController');
 
 const router = express.Router();
+// Aviso de webhook sem autenticação: uma vez por arranque.
+let avisoAuthDesativada = false;
+
+// Comparação de chaves em tempo constante (evita timing attacks).
+function chavesIguais(a, b) {
+  const ba = Buffer.from(String(a));
+  const bb = Buffer.from(String(b));
+  return ba.length === bb.length && crypto.timingSafeEqual(ba, bb);
+}
 
 // Fallback (retrocompatibilidade / dev). Lida UMA VEZ no arranque.
 const SMOOBU_API_KEY_ENV = process.env.SMOOBU_API_KEY;
@@ -86,6 +96,11 @@ function extrairApiKey(req) {
     const valor = req.get(header);
     if (valor && valor.trim()) return valor.trim();
   }
+
+  // Query string: o Smoobu não permite headers custom, mas deixa configurar o
+  // URL do webhook. Ex.: https://api.../api/smoobu/webhook?key=<SMOOBU_API_KEY>
+  const qk = req.query && (req.query.key || req.query.secret);
+  if (typeof qk === 'string' && qk.trim()) return qk.trim();
 
   // Authorization: Bearer <key> (standard).
   const auth = req.get('Authorization');
@@ -158,13 +173,13 @@ async function validarChaveSmoobu(chaveRecebida) {
   }
 
   // 2. Fallback: env var global (retrocompatibilidade / dev).
-  if (SMOOBU_API_KEY_ENV && chaveRecebida && chaveRecebida === SMOOBU_API_KEY_ENV) {
+  if (SMOOBU_API_KEY_ENV && chaveRecebida && chavesIguais(chaveRecebida, SMOOBU_API_KEY_ENV)) {
     return { empresaId: null, origem: 'env' };
   }
 
   // 3. Modo dev: sem env var E sem empresas com chave → aceita sem auth.
   //    Isto só acontece quando o sistema ainda não foi configurado.
-  if (!SMOOBU_API_KEY_ENV) {
+  if (!SMOOBU_API_KEY_ENV && process.env.NODE_ENV !== 'production') {
     try {
       const algumaEmpresaComChave = await Empresa.exists({
         ativa: true,
@@ -261,9 +276,13 @@ router.post('/webhook', async (req, res) => {
   }
 
   if (auth.origem === 'auth_desativada') {
-    console.warn(
-      '⚠️  [Smoobu Webhook] auth DESATIVADA via SMOOBU_WEBHOOK_AUTH_DISABLED=true — a aceitar sem autenticação (garante allowlist de IP no reverse proxy).'
-    );
+    // Avisa só uma vez por arranque (antes repetia em cada webhook e enchia os logs).
+    if (!avisoAuthDesativada) {
+      avisoAuthDesativada = true;
+      console.warn(
+        '⚠️  [Smoobu Webhook] auth DESATIVADA via SMOOBU_WEBHOOK_AUTH_DISABLED=true — a aceitar sem autenticação (garante allowlist de IP no reverse proxy).'
+      );
+    }
   } else if (auth.origem === 'dev') {
     console.warn(
       '⚠️  [Smoobu Webhook] sem auth configurada (nem empresas com chave nem SMOOBU_API_KEY) — modo dev, a aceitar sem autenticação.'
@@ -351,7 +370,13 @@ router.post('/webhook', async (req, res) => {
       // permitir que o controller use os modelos já carregados.
       const { processarWebhookSmoobu } = require('../controllers/smoobuController');
       try {
-        await processarWebhookSmoobu(payloadRecebido, webhookLogId, empresaId);
+        await processarWebhookSmoobu(
+          payloadRecebido,
+          webhookLogId,
+          empresaId,
+          // SEGURANÇA: só restringe quando a chave identificou a empresa.
+          auth.empresaId || null
+        );
       } catch (err) {
         // Captura de segurança extra — processarWebhookSmoobu já tem o seu
         // próprio try/catch, mas isto garante que NUNCA há unhandledRejection.

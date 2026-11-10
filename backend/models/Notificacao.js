@@ -63,6 +63,13 @@ const NotificacaoSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+    // Chave de idempotência (ex.: `resumo18:2026-11-06`). Com a mesma chave, o mesmo
+    // utilizador só recebe a notificação UMA vez (índice único parcial abaixo).
+    chave: {
+      type: String,
+      default: undefined,
+      maxlength: 120,
+    },
     lida: {
       type: Boolean,
       default: false,
@@ -76,6 +83,12 @@ const NotificacaoSchema = new mongoose.Schema(
   {
     timestamps: true, // createdAt + updatedAt
   }
+);
+
+// Notificações com chave: no máximo uma por (utilizador, chave). Parcial: as antigas não têm chave.
+NotificacaoSchema.index(
+  { utilizador_id: 1, chave: 1 },
+  { unique: true, partialFilterExpression: { chave: { $type: 'string' } } }
 );
 
 // Índice composto para a query frequente: "não-lidas de um utilizador".

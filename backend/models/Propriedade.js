@@ -68,6 +68,19 @@ const propriedadeSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
+    // Tipos de limpeza — tempo (minutos) por tipo nesta casa. Sem valor (null) usa
+    // `tempo_limpeza_minutos`. «Normal» usa sempre `tempo_limpeza_minutos`.
+    tempos_limpeza_por_tipo: {
+      intermedia: { type: Number, default: null, min: 1, max: 480 },
+      profunda: { type: Number, default: null, min: 1, max: 480 },
+      preparacao: { type: Number, default: null, min: 1, max: 480 },
+    },
+    // Tipos de limpeza — checklist própria por tipo. Vazia = usa a checklist da casa.
+    checklists_por_tipo: {
+      intermedia: { type: [String], default: [] },
+      profunda: { type: [String], default: [] },
+      preparacao: { type: [String], default: [] },
+    },
     // Prompt 133 — Referência ao ModeloChecklist (template dinâmico).
     // Se definido, as novas tarefas de limpeza copiam as secções/items
     // deste modelo para checklist_dinamica na Tarefa (snapshot).
@@ -150,6 +163,15 @@ const propriedadeSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+    // FIX (restrição lavandaria) — Fornecedor (lavandaria) atribuído a esta
+    // propriedade. O fornecedor só vê as tarefas das propriedades que lhe
+    // estão atribuídas (isolamento por propriedade, não global).
+    fornecedor_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Utilizador',
+      default: null,
+      index: true,
+    },
     // HF21 — Número de staff necessário para limpar esta propriedade.
     // Se > 1, o load balancer atribui uma equipa (Top N) em vez de 1 pessoa.
     // Default: 1 (comportamento original — 1 staff por tarefa).
@@ -158,6 +180,13 @@ const propriedadeSchema = new mongoose.Schema(
       default: 1,
       min: 1,
     },
+    // true = nº de pessoas posto à mão pelo gestor (a regra por defeito não lhe mexe).
+    // Sem valor (casas antigas): conta como manual se staff_necessario for diferente de 1.
+    staff_necessario_manual: { type: Boolean, default: undefined },
+    // Tipologia: nº de quartos (0 = T0, 2 = T2...). null = desconhecida. Nas casas do Smoobu vem do nº de quartos.
+    tipologia: { type: Number, default: null, min: 0, max: 20 },
+    // Casa de um cliente particular (não alojamento local). Particular ou T2+ = 2 pessoas por defeito.
+    cliente_particular: { type: Boolean, default: false },
     // HF22 — Dias fixos de limpeza semanal (rotinas automáticas).
     // Array de números (0=Dom, 1=Seg, ..., 6=Sáb — standard JS getDay()).
     // O cron job geradorRotinas corre diariamente e, para cada propriedade

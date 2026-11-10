@@ -18,7 +18,8 @@ const rateLimit = require('express-rate-limit');
 const router = express.Router();
 
 const { auth } = require('../middleware/auth');
-const { login, ssoLogin, me, meuCalendario, minhasTarefas, minhaTarefaDetalhe, concluirMinhaTarefa } = require('../controllers/authController');
+const rgpd = require('../controllers/rgpdController');
+const { login, ssoLogin, me, atualizarMe, meuCalendario, minhasTarefas, minhaTarefaDetalhe, concluirMinhaTarefa } = require('../controllers/authController');
 const {
   listarNotificacoes,
   contagemNotificacoes,
@@ -42,21 +43,49 @@ const {
  *   - 15 minutos é um equilíbrio: não penaliza demasiado o utilizador
  *     legítimo, mas atrasa significativamente um ataque.
  */
+// Em testes o limitador fica desligado, salvo se o teste o ativar de propósito.
+const limitadorDesligado = () =>
+  process.env.NODE_ENV === 'test' && !process.env.TEST_LOGIN_LIMIT;
+
+// Limite por IP: só conta tentativas FALHADAS (logins com sucesso não gastam
+// quota). Atrás da Vercel o IP visto é o do proxy (os proxies Next não
+// reencaminham o IP do cliente), partilhado por toda a equipa: com um valor
+// baixo, 20 falhas de qualquer pessoa bloqueavam o login de todos. Por isso é
+// só uma rede de segurança larga (200 falhas / 15 min por IP, contra
+// pulverização de contas e acesso direto ao backend); a defesa principal contra
+// força bruta é o limite por CONTA, abaixo, que se mantém em 10.
+// O login está FORA do limite global (ver utils/limiteGlobal.js).
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 5, // máximo 5 tentativas por IP por janela
-  standardHeaders: true, // envia headers RateLimit-Limit, RateLimit-Remaining, RateLimit-Reset
-  legacyHeaders: false, // não envia headers X-RateLimit-* antigos
-  // Em ambiente de teste, desativa o limitador (os testes fazem muitos logins
-  // seguidos para validar os fluxos de auth). Não afeta produção.
-  skip: () => process.env.NODE_ENV === 'test',
+  max: 200,
+  skipSuccessfulRequests: true,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: limitadorDesligado,
   message: {
     erro: 'Muitas tentativas de login. Tente novamente mais tarde.',
   },
 });
 
+// Limite por CONTA (email): trava força bruta sobre uma password específica,
+// independentemente do IP. 10 falhas / 15 min por email; sucessos não contam.
+const loginAccountLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  skipSuccessfulRequests: true,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: limitadorDesligado,
+  keyGenerator: (req) =>
+    `conta:${String((req.body && req.body.email) || '').toLowerCase().trim()}`,
+  validate: { keyGeneratorIpFallback: false },
+  message: {
+    erro: 'Muitas tentativas para esta conta. Tente novamente mais tarde.',
+  },
+});
+
 // Login — público, mas com rate limiting anti-força bruta.
-router.post('/login', loginLimiter, login);
+router.post('/login', loginLimiter, loginAccountLimiter, login);
 
 // Single Sign-On (SSO) com o portal Autocell — público.
 // Recebe um JWT externo na query string (?token=...), valida-o com
@@ -68,6 +97,11 @@ router.get('/sso', ssoLogin);
 
 // Dados do utilizador autenticado — requer JWT.
 router.get('/me', auth, me);
+// O utilizador atualiza o seu próprio telemóvel.
+router.patch('/me', auth, atualizarMe);
+
+// RGPD: o próprio descarrega os seus dados pessoais (JSON).
+router.get('/me/exportar-dados', auth, rgpd.exportarMeusDados);
 
 // Calendário pessoal do utilizador — requer JWT.
 router.get('/me/calendario', auth, meuCalendario);

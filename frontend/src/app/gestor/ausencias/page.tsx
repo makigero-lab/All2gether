@@ -44,7 +44,8 @@ import {
   type AusenciaDTO,
   type UtilizadorDTO,
 } from "@/lib/api";
-import { parsearDataSegura } from "@/lib/utils";
+import { parsearDataSegura, textoRedistribuicao, type RedistribuicaoDTO, plural } from "@/lib/utils";
+import { mensagemErro } from "@/lib/rascunho-staff";
 
 /**
  * /gestor/ausencias — Ecrã de Férias/Ausências (Prompt 95 / Fase 1.5).
@@ -60,7 +61,7 @@ import { parsearDataSegura } from "@/lib/utils";
 
 // Alargamento local do TipoAusencia (o backend usa mais valores que o tipo
 // estrito do api.ts: ferias, doenca, folga, outro).
-type TipoAusenciaAmp = "ferias" | "doenca" | "folga_rotativa" | "folga" | "outro";
+type TipoAusenciaAmp = "ferias" | "doenca" | "folga_rotativa" | "folga" | "falta" | "outro";
 
 interface AusenciaAmp extends Omit<AusenciaDTO, "tipo"> {
   tipo: TipoAusenciaAmp;
@@ -73,6 +74,7 @@ const TIPO_LABEL: Record<TipoAusenciaAmp, string> = {
   doenca: "Doença",
   folga_rotativa: "Folga Rotativa",
   folga: "Folga",
+  falta: "Falta",
   outro: "Outro",
 };
 
@@ -81,6 +83,7 @@ const TIPO_ICON: Record<TipoAusenciaAmp, React.ComponentType<{ className?: strin
   doenca: Stethoscope,
   folga_rotativa: CalendarX,
   folga: CalendarX,
+  falta: CalendarX,
   outro: CircleDot,
 };
 
@@ -155,6 +158,8 @@ export default function AusenciasPage() {
   const [ausencias, setAusencias] = useState<AusenciaAmp[]>([]);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
+  // Resultado de aprovar/rejeitar (texto da redistribuição + aviso de limpezas em curso).
+  const [resultado, setResultado] = useState<{ texto: string; aviso: string | null } | null>(null);
 
   // FIX (filtros) — Filtros de Estado e Mês (aplicados client-side).
   const [filtroEstado, setFiltroEstado] = useState<string>("todos");
@@ -295,18 +300,39 @@ export default function AusenciasPage() {
     }
   }
 
+  // O resultado fica visível 20 s (30 s se houver aviso de limpeza em curso) ou até ser fechado.
+  useEffect(() => {
+    if (!resultado) return;
+    const t = setTimeout(() => setResultado(null), resultado.aviso ? 30000 : 20000);
+    return () => clearTimeout(t);
+  }, [resultado]);
+
   /** Aprovar / Rejeitar ausência pendente (PATCH .../estado). */
   async function handleMudarEstado(a: AusenciaAmp, novoEstado: "aprovada" | "rejeitada") {
     // Otimismo: atualiza a UI imediatamente.
     setAusencias((prev) =>
       prev.map((x) => (x._id === a._id ? { ...x, estado: novoEstado } : x))
     );
+    setErro(null);
+    setResultado(null);
     try {
-      await adminPatch(`/api/gestor/ausencias/${a._id}/estado`, { estado: novoEstado });
+      const res = await adminPatch<{ redistribuicao?: RedistribuicaoDTO | null }>(
+        `/api/gestor/ausencias/${a._id}/estado`,
+        { estado: novoEstado }
+      );
+      if (novoEstado === "aprovada") {
+        const rd = res?.redistribuicao ?? null;
+        setResultado({
+          texto: textoRedistribuicao("Ausência aprovada.", rd, "Sem tarefas para desatribuir no período."),
+          aviso: rd?.aviso ?? null,
+        });
+      } else {
+        setResultado({ texto: "Pedido rejeitado.", aviso: null });
+      }
     } catch (e) {
       // Reverte em caso de erro.
       await carregar();
-      setErro(e instanceof Error ? e.message : `Erro ao ${novoEstado === "aprovada" ? "aprovar" : "rejeitar"} ausência.`);
+      setErro(mensagemErro(e, `Erro ao ${novoEstado === "aprovada" ? "aprovar" : "rejeitar"} ausência.`));
     }
   }
 
@@ -368,7 +394,7 @@ export default function AusenciasPage() {
   /** HF20 — Submete a nova ausência (intervalo de datas). */
   async function handleCriarAusencia() {
     if (!form.utilizador_id || !form.data_inicio || !form.data_fim) {
-      setFormErro("Funcionário, Data de Início e Data de Fim são obrigatórios.");
+      setFormErro("Elemento da equipa, Data de Início e Data de Fim são obrigatórios.");
       return;
     }
     if (form.data_fim < form.data_inicio) {
@@ -394,13 +420,73 @@ export default function AusenciasPage() {
     }
   }
 
+  /** Ações da ausência (iguais na tabela e nos cartões; `tam` ajusta o alvo de toque). */
+  function acoesAusencia(a: AusenciaAmp, jaPassada: boolean, tam: string) {
+    return (
+      <>
+{/* Aprovar / Rejeitar (só para pendentes não passadas) */}
+                            {(a.estado === "pendente" || a.estado === "pendente_emergencia") && !jaPassada && (
+                              <>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className={`${tam} text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50`}
+                                  onClick={() => handleMudarEstado(a, "aprovada")}
+                                  aria-label="Aprovar"
+                                  title="Aprovar"
+                                >
+                                  <Check className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className={`${tam} text-destructive hover:text-destructive hover:bg-destructive/10`}
+                                  onClick={() => handleMudarEstado(a, "rejeitada")}
+                                  aria-label="Rejeitar"
+                                  title="Rejeitar"
+                                >
+                                  <X className="h-4 w-4" />
+                                </Button>
+                              </>
+                            )}
+                            {/* Prompt 131b — Cancelar (soft cancel).
+                                Só para pendentes ou aprovadas (não rejeitadas/canceladas).
+                                Usa X icon com cor âmbar para distinguir do Rejeitar (vermelho). */}
+                            {(a.estado === "pendente" || a.estado === "aprovada") && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className={`${tam} text-amber-600 hover:text-amber-700 hover:bg-amber-50`}
+                                onClick={() => setACancelar(a)}
+                                aria-label="Cancelar ausência"
+                                title="Cancelar (mantém no histórico)"
+                              >
+                                <X className="h-4 w-4" />
+                              </Button>
+                            )}
+                            {/* Eliminar (hard delete) */}
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className={`${tam} text-destructive hover:text-destructive`}
+                              onClick={() => setAEliminar(a)}
+                              aria-label="Eliminar ausência"
+                              title="Eliminar (apaga definitivamente)"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          
+      </>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
       {/* Cabeçalho */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-col gap-1">
           <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-            <CalendarOff className="h-6 w-6 text-primary" />
+            <CalendarOff className="h-6 w-6 text-brand-text" />
             Ausências / Férias
           </h1>
           <p className="text-sm text-muted-foreground">
@@ -410,7 +496,7 @@ export default function AusenciasPage() {
         <div className="flex items-center gap-2">
           <Button onClick={abrirFormCriacao}>
             <Plus className="h-4 w-4" />
-            Nova Ausência
+            Nova ausência
           </Button>
           <Button
             variant="outline"
@@ -423,6 +509,30 @@ export default function AusenciasPage() {
           </Button>
         </div>
       </div>
+
+      {resultado && (
+        <div className="flex flex-col gap-2" role="status">
+          <div className="flex items-start gap-2 rounded-md border border-emerald-600/40 bg-emerald-50 p-3 text-sm font-medium text-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-100">
+            <span className="flex-1">{resultado.texto}</span>
+            <button
+              type="button"
+              onClick={() => setResultado(null)}
+              className="shrink-0 underline underline-offset-2"
+            >
+              Fechar
+            </button>
+          </div>
+          {resultado.aviso && (
+            <div
+              role="alert"
+              className="flex items-start gap-2 rounded-md border border-amber-500/60 bg-amber-50 p-3 text-sm font-medium text-amber-900 dark:bg-amber-950/30 dark:text-amber-100"
+            >
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>{resultado.aviso}</span>
+            </div>
+          )}
+        </div>
+      )}
 
       {erro && (
         <Card className="border-destructive/50">
@@ -443,7 +553,7 @@ export default function AusenciasPage() {
           <select
             value={filtroEstado}
             onChange={(e) => setFiltroEstado(e.target.value)}
-            className="h-9 rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
+            className="h-11 rounded-md border border-input bg-background px-3 text-sm md:h-9 ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
             aria-label="Filtrar por estado"
           >
             <option value="todos">Estado: Todos</option>
@@ -457,7 +567,7 @@ export default function AusenciasPage() {
             type="month"
             value={filtroMes}
             onChange={(e) => setFiltroMes(e.target.value)}
-            className="h-9 w-[180px]"
+            className="h-11 w-[180px] md:h-9"
             aria-label="Filtrar por mês"
           />
           {(filtroEstado !== "todos" || filtroMes) && (
@@ -473,7 +583,7 @@ export default function AusenciasPage() {
             </Button>
           )}
           <span className="ml-auto text-xs text-muted-foreground">
-            {ausenciasFiltradas.length} de {ausencias.length} ausência(s)
+            {ausenciasFiltradas.length} de {plural(ausencias.length, "ausência")}
           </span>
         </CardContent>
       </Card>
@@ -482,7 +592,7 @@ export default function AusenciasPage() {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base flex items-center gap-2">
-            <CalendarOff className="h-4 w-4 text-primary" />
+            <CalendarOff className="h-4 w-4 text-brand-text" />
             Ausências Registadas ({ausenciasFiltradas.length})
           </CardTitle>
         </CardHeader>
@@ -501,11 +611,48 @@ export default function AusenciasPage() {
               </p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+            <>
+            {/* Telemóvel: cartões (sem scroll horizontal) */}
+            <ul className="divide-y md:hidden" aria-label="Ausências">
+              {ausenciasFiltradas.map((a) => {
+                const TipoIcon = TIPO_ICON[a.tipo] ?? CircleDot;
+                const estadoExibido = resolverEstadoExibido(a);
+                const hoje = new Date();
+                hoje.setHours(0, 0, 0, 0);
+                const fim = parsearDataSegura(a.data_fim);
+                const jaPassada = fim ? fim.getTime() < hoje.getTime() : false;
+                return (
+                  <li key={a._id} className="space-y-2 py-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="min-w-0 break-words font-medium">{a.utilizador?.nome ?? "—"}</p>
+                      <div className="shrink-0">
+                        <Badge
+                          variant={
+                            (estadoExibido.variant as "default" | "secondary" | "success" | "warning" | "destructive" | "outline") ?? "secondary"
+                          }
+                        >
+                          {estadoExibido.label}
+                        </Badge>
+                        {jaPassada && a.estado === "aprovada" && (
+                          <span className="ml-1 text-xs text-muted-foreground">(terminou)</span>
+                        )}
+                      </div>
+                    </div>
+                    <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                      <TipoIcon className="h-4 w-4 shrink-0" />
+                      {TIPO_LABEL[a.tipo] ?? a.tipo} · {formatarPeriodo(a.data_inicio, a.data_fim)}
+                    </p>
+                    {a.notas && <p className="break-words text-sm text-muted-foreground">{a.notas}</p>}
+                    <div className="flex items-center justify-end gap-1">{acoesAusencia(a, jaPassada, "h-11 w-11")}</div>
+                  </li>
+                );
+              })}
+            </ul>
+            <div className="hidden overflow-x-auto md:block">
+              <table className="rt w-full text-sm">
                 <thead>
                   <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
-                    <th className="px-4 py-3 font-medium">Funcionário</th>
+                    <th className="px-4 py-3 font-medium">Equipa</th>
                     <th className="px-4 py-3 font-medium">Tipo</th>
                     <th className="px-4 py-3 font-medium">Período</th>
                     <th className="px-4 py-3 font-medium">Estado</th>
@@ -545,7 +692,7 @@ export default function AusenciasPage() {
                             {estadoExibido.label}
                           </Badge>
                           {jaPassada && a.estado === "aprovada" && (
-                            <span className="ml-1 text-[10px] text-muted-foreground">
+                            <span className="ml-1 text-xs text-muted-foreground">
                               (terminou)
                             </span>
                           )}
@@ -559,63 +706,11 @@ export default function AusenciasPage() {
                               {a.notas}
                             </span>
                           ) : (
-                            <span className="text-muted-foreground/50">—</span>
+                            <span className="text-muted-foreground">—</span>
                           )}
                         </td>
                         <td className="px-4 py-3">
-                          <div className="flex items-center justify-end gap-1">
-                            {/* Aprovar / Rejeitar (só para pendentes não passadas) */}
-                            {(a.estado === "pendente" || a.estado === "pendente_emergencia") && !jaPassada && (
-                              <>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"
-                                  onClick={() => handleMudarEstado(a, "aprovada")}
-                                  aria-label="Aprovar"
-                                  title="Aprovar"
-                                >
-                                  <Check className="h-4 w-4" />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
-                                  onClick={() => handleMudarEstado(a, "rejeitada")}
-                                  aria-label="Rejeitar"
-                                  title="Rejeitar"
-                                >
-                                  <X className="h-4 w-4" />
-                                </Button>
-                              </>
-                            )}
-                            {/* Prompt 131b — Cancelar (soft cancel).
-                                Só para pendentes ou aprovadas (não rejeitadas/canceladas).
-                                Usa X icon com cor âmbar para distinguir do Rejeitar (vermelho). */}
-                            {(a.estado === "pendente" || a.estado === "aprovada") && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 text-amber-600 hover:text-amber-700 hover:bg-amber-50"
-                                onClick={() => setACancelar(a)}
-                                aria-label="Cancelar ausência"
-                                title="Cancelar (mantém no histórico)"
-                              >
-                                <X className="h-4 w-4" />
-                              </Button>
-                            )}
-                            {/* Eliminar (hard delete) */}
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-destructive hover:text-destructive"
-                              onClick={() => setAEliminar(a)}
-                              aria-label="Eliminar ausência"
-                              title="Eliminar (apaga definitivamente)"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
+                          <div className="flex items-center justify-end gap-1">{acoesAusencia(a, jaPassada, "h-8 w-8")}</div>
                         </td>
                       </tr>
                     );
@@ -623,6 +718,7 @@ export default function AusenciasPage() {
                 </tbody>
               </table>
             </div>
+            </>
           )}
         </CardContent>
       </Card>
@@ -631,7 +727,7 @@ export default function AusenciasPage() {
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base">
-            <CalendarX className="h-5 w-5 text-primary" />
+            <CalendarX className="h-5 w-5 text-brand-text" />
             Folgas Fixas da Equipa
           </CardTitle>
         </CardHeader>
@@ -639,7 +735,7 @@ export default function AusenciasPage() {
           <p className="text-sm text-muted-foreground mb-4">
             Funcionários ativos (staff) e os respetivos dias de folga fixos
             semanais. Para editar, vai à página{" "}
-            <a href="/gestor/equipa" className="text-primary underline">
+            <a href="/gestor/equipa" className="text-brand-text underline">
               Equipa
             </a>
             .
@@ -659,7 +755,7 @@ export default function AusenciasPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="rt w-full text-sm">
                 <thead>
                   <tr className="border-b bg-muted/40 text-left">
                     <th className="px-4 py-3 font-medium">Nome</th>
@@ -676,7 +772,7 @@ export default function AusenciasPage() {
                         <td className="px-4 py-3 font-medium">
                           <Link
                             href={`/gestor/equipa?editar=${staff._id}`}
-                            className="text-primary underline-offset-2 hover:underline"
+                            className="text-brand-text underline-offset-2 hover:underline"
                             title={`Editar ${staff.nome}`}
                           >
                             {staff.nome}
@@ -717,7 +813,7 @@ export default function AusenciasPage() {
           <div>
             <DialogTitle className="flex items-center gap-2">
               <Trash2 className="h-5 w-5 text-destructive" />
-              Eliminar Ausência
+              Eliminar ausência
             </DialogTitle>
             <DialogDescription>
               Tens a certeza que queres eliminar esta ausência? Esta ação é
@@ -730,7 +826,7 @@ export default function AusenciasPage() {
           {aEliminar && (
             <div className="rounded-md bg-muted/50 p-3 text-sm">
               <p>
-                <strong>Funcionário:</strong>{" "}
+                <strong>Equipa:</strong>{" "}
                 {aEliminar.utilizador?.nome ?? "—"}
               </p>
               <p>
@@ -788,13 +884,13 @@ export default function AusenciasPage() {
           <div>
             <DialogTitle className="flex items-center gap-2">
               <X className="h-5 w-5 text-amber-600" />
-              Cancelar Ausência
+              Cancelar ausência
             </DialogTitle>
             <DialogDescription>
               Vais cancelar esta ausência. O registo fica marcado como
               <strong> cancelada</strong> (mantém-se no histórico para
-              auditoria). Se a ausência estava aprovada, as tarefas
-              desatribuídas terão de ser reatribuídas manualmente.
+              auditoria). Se a ausência estava aprovada, as vagas que ficaram
+              por preencher (de hoje em diante) são preenchidas automaticamente.
             </DialogDescription>
           </div>
           <DialogClose onClick={() => !cancelando && setACancelar(null)} />
@@ -803,7 +899,7 @@ export default function AusenciasPage() {
           {aCancelar && (
             <div className="rounded-md bg-muted/50 p-3 text-sm">
               <p>
-                <strong>Funcionário:</strong>{" "}
+                <strong>Equipa:</strong>{" "}
                 {aCancelar.utilizador?.nome ?? "—"}
               </p>
               <p>
@@ -851,7 +947,7 @@ export default function AusenciasPage() {
             ) : (
               <>
                 <X className="mr-2 h-4 w-4" />
-                Cancelar Ausência
+                Cancelar ausência
               </>
             )}
           </Button>
@@ -866,8 +962,8 @@ export default function AusenciasPage() {
         <DialogHeader>
           <div>
             <DialogTitle className="flex items-center gap-2">
-              <Plus className="h-5 w-5 text-primary" />
-              Nova Ausência
+              <Plus className="h-5 w-5 text-brand-text" />
+              Nova ausência
             </DialogTitle>
             <DialogDescription>
               Regista um período de férias, doença ou outra ausência para um
@@ -879,13 +975,13 @@ export default function AusenciasPage() {
         <DialogContent className="space-y-4">
           {/* Funcionário */}
           <div className="space-y-1.5">
-            <label className="text-sm font-medium">Funcionário</label>
+            <label className="text-sm font-medium">Equipa</label>
             <select
               value={form.utilizador_id}
               onChange={(e) =>
                 setForm((f) => ({ ...f, utilizador_id: e.target.value }))
               }
-              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
+              className="flex h-11 md:h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
             >
               <option value="">Selecionar funcionário…</option>
               {equipa.map((u) => (
@@ -931,11 +1027,12 @@ export default function AusenciasPage() {
                   tipo: e.target.value as TipoAusenciaAmp,
                 }))
               }
-              className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
+              className="flex h-11 md:h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
             >
               <option value="ferias">Férias</option>
               <option value="doenca">Doença</option>
               <option value="folga_rotativa">Folga Rotativa</option>
+              <option value="falta">Falta</option>
               <option value="outro">Outro</option>
             </select>
           </div>
@@ -983,7 +1080,7 @@ export default function AusenciasPage() {
             ) : (
               <>
                 <Plus className="mr-2 h-4 w-4" />
-                Criar Ausência
+                Criar ausência
               </>
             )}
           </Button>

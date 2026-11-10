@@ -29,14 +29,15 @@ interface StaffHeaderProps {
 
 export function StaffHeader({ title, showBack = false, userName }: StaffHeaderProps) {
   return (
-    <header className="sticky top-0 z-10 border-b bg-background/95 px-5 pb-4 pt-6 backdrop-blur">
+    <header className="sticky top-0 z-20 border-b bg-background/95 px-5 pb-4 pt-6 backdrop-blur">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           {showBack && (
             <Link
               href="/staff"
               prefetch
-              className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+              aria-label="Voltar"
+              className="-m-2.5 inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 p-2.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
             >
               <ArrowLeft className="h-4 w-4" />
               <span className="hidden sm:inline">Voltar</span>
@@ -62,7 +63,7 @@ export function StaffHeader({ title, showBack = false, userName }: StaffHeaderPr
           <Button
             variant="ghost"
             size="icon"
-            className="text-muted-foreground hover:text-destructive"
+            className="h-11 w-11 sm:h-9 sm:w-9 text-muted-foreground hover:text-destructive"
             onClick={() => fazerLogout()}
             aria-label="Terminar sessão"
             title="Terminar sessão"

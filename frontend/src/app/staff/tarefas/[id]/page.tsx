@@ -2,7 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { notFound } from "next/navigation";
-import { Loader2 } from "lucide-react";
+import { Loader2, WifiOff } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import { MSG_SEM_LIGACAO } from "@/lib/rascunho-staff";
+import { checklistDaTarefa } from "@/lib/utils";
 
 import { DetalheTarefaClient } from "@/components/staff/detalhe-tarefa-client";
 
@@ -21,30 +25,55 @@ export default function DetalheTarefaPage({
 }) {
   const [tarefa, setTarefa] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  // true quando falhou a rede / servidor (distinto de "tarefa não existe").
+  const [semRede, setSemRede] = useState(false);
+  const [tentativa, setTentativa] = useState(0);
 
   useEffect(() => {
+    let cancelado = false;
+    setLoading(true);
+    setSemRede(false);
     (async () => {
       try {
         const res = await fetch(`/api/auth/me/tarefas/${params.id}`, {
           credentials: "include",
           cache: "no-store",
         });
+        if (cancelado) return;
         if (res.ok) {
           const data = await res.json();
           setTarefa(data.tarefa);
+        } else if (res.status >= 500) {
+          setSemRede(true);
         }
+        // 404/403/401: tarefa inexistente ou sem acesso -> notFound abaixo.
       } catch {
-        // silencioso
+        if (!cancelado) setSemRede(true);
       } finally {
-        setLoading(false);
+        if (!cancelado) setLoading(false);
       }
     })();
-  }, [params.id]);
+    return () => {
+      cancelado = true;
+    };
+  }, [params.id, tentativa]);
 
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (!tarefa && semRede) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 p-6 text-center">
+        <WifiOff className="h-8 w-8 text-muted-foreground" />
+        <p className="text-sm text-muted-foreground">{MSG_SEM_LIGACAO}</p>
+        <Button size="touch" onClick={() => setTentativa((t) => t + 1)}>
+          Tentar de novo
+        </Button>
       </div>
     );
   }
@@ -59,6 +88,8 @@ export default function DetalheTarefaPage({
     propriedade_nome: tarefa.propriedade_id?.nome ?? "Propriedade",
     hora_limite: "",
     tempo_estimado_minutos: tarefa.tempo_limpeza_minutos,
+    tipo_limpeza: tarefa.tipo_limpeza ?? null,
+    checklist_do_tipo: tarefa.checklist_do_tipo === true,
     estado: tarefa.estado,
     tipo: tarefa.tipo,
     endereco: tarefa.propriedade_id?.morada,
@@ -77,12 +108,22 @@ export default function DetalheTarefaPage({
       : undefined,
     // Prompt 138 (136 V2) — Tempo de viagem (para mostrar no detalhe).
     tempo_viagem_minutos: tarefa.tempo_viagem_minutos ?? null,
+    equipa_nomes: tarefa.equipa_nomes ?? null,
+    observacoes_staff: tarefa.observacoes_staff ?? null,
+    iniciada_em: tarefa.iniciada_em ?? null,
+    inicio_origem: tarefa.inicio_origem ?? null,
+    nao_consegui_comecar: tarefa.nao_consegui_comecar ?? null,
+    tem_lavandaria: !!tarefa.propriedade_id?.fornecedor_id,
+    roupa_entregue: tarefa.roupa_entregue === true,
+    avarias_abertas_casa: tarefa.avarias_abertas_casa ?? null,
   };
 
   // Usa a checklist real da propriedade (vinda do populate do backend).
   // Se a propriedade não tiver checklist definida, usa uma vazia (o botão
   // de concluir fica sempre ativo quando não há itens).
-  const checklist: string[] = tarefa.propriedade_id?.checklist ?? [];
+  // B1: a checklist da própria tarefa (do tipo de limpeza) tem prioridade; a da
+  // casa só entra se a da tarefa vier vazia (tarefas antigas).
+  const checklist: string[] = checklistDaTarefa(tarefa);
 
   return (
     <DetalheTarefaClient

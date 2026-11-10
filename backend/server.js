@@ -22,6 +22,7 @@
 require('dotenv').config();
 
 const express = require('express');
+const { criarLimiteGlobal } = require('./utils/limiteGlobal');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
@@ -34,13 +35,20 @@ const relatorioRoutes = require('./routes/relatorioRoutes');
 const staffRoutes = require('./routes/staffRoutes');
 const smoobuRoutes = require('./routes/smoobuRoutes');
 const parceiroRoutes = require('./routes/parceiroRoutes');
+// FIX (portal lavandaria) — Rotas do portal do fornecedor (lavandaria).
+const fornecedorRoutes = require('./routes/fornecedorRoutes');
 const { iniciarDailyBriefing } = require('./jobs/dailyBriefing');
 const { iniciarAgendaAmanha } = require('./jobs/agendaAmanha');
 const { iniciarCaoGuarda } = require('./jobs/caoGuarda');
 const { iniciarArquivista } = require('./jobs/arquivista');
+const { iniciarRetencao } = require('./jobs/retencao');
+const { iniciarEliminacaoEmpresas } = require('./jobs/eliminacaoEmpresas');
+const { iniciarOfertasVagas } = require('./jobs/ofertaVagas');
 const { iniciarSincronizacaoSmoobu } = require('./jobs/sincronizacaoSmoobu');
 const { iniciarLimpezaFotos } = require('./jobs/limpezaFotos');
 const { iniciarGeradorRotinas } = require('./jobs/geradorRotinas');
+const { iniciarInicioLimpeza } = require('./jobs/inicioLimpeza');
+const { iniciarResumoGestor } = require('./jobs/resumoGestor');
 const { configurarWebPush } = require('./utils/push');
 
 const app = express();
@@ -67,24 +75,36 @@ app.use(
   })
 );
 
-// Permite receber e enviar JSON no corpo dos pedidos.
-app.use(express.json());
+// Webhook do Smoobu (aberto de propósito, sem autenticação): corpo pequeno. Um evento real tem
+// poucos KB; 256 KB chega com folga e impede encher a BD/memória com corpos de 10 MB.
+// Tem de vir ANTES do parser geral (que salta pedidos já lidos).
+app.use('/api/smoobu', express.json({ limit: process.env.SMOOBU_WEBHOOK_MAX_BODY || '256kb' }));
 
-// Rate limiting global: 100 pedidos por IP a cada 15 minutos.
-// Em ambiente de teste (Jest) o limite é desativado para não bloquear
-// os testes de integração que fazem centenas de pedidos seguidos.
-// EXCEÇÃO: /api/smoobu — webhooks M2M do Smoobu chegam de um IP único e
-// podem burstar (várias reservas em poucos minutos). A autenticação via
-// SMOOBU_API_KEY substitui a proteção anti-abuso do rate limiter nessa rota.
-const globalLimiter = rateLimit({
+// Permite receber e enviar JSON no corpo dos pedidos.
+// Limite de 10mb: as fotos da limpeza (até 5, ~2 MB cada) seguem em base64 no JSON.
+app.use(express.json({ limit: '10mb' }));
+
+// Rate limiting global de /api/ (ver utils/limiteGlobal.js):
+//   - pedidos com JWT VÁLIDO contam por utilizador (1000 / 15 min);
+//   - pedidos sem JWT válido contam por IP (100 / 15 min).
+// Os proxies Next da Vercel não reencaminham o IP do cliente, por isso o IP
+// sozinho seria partilhado por todos os utilizadores.
+// Em ambiente de teste (Jest) o limite é desativado (salvo `forcar` nos testes).
+// EXCEÇÕES: /api/smoobu (webhooks M2M, com limitador e autenticação próprios)
+// e POST /api/auth/login (tem loginLimiter e loginAccountLimiter próprios).
+const globalLimiter = criarLimiteGlobal();
+app.use('/api/', globalLimiter);
+
+// Rate-limit generoso só para o webhook Smoobu (anti-flood/DoS de armazenamento
+// do WebhookLog, sem prejudicar bursts legítimos de reservas).
+const smoobuWebhookLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: process.env.NODE_ENV === 'test' ? Infinity : 100,
+  max: process.env.NODE_ENV === 'test' ? Infinity : 600,
   standardHeaders: true,
   legacyHeaders: false,
   message: { erro: 'Muitos pedidos. Tente novamente mais tarde.' },
-  skip: (req) => req.path.startsWith('/api/smoobu'),
 });
-app.use('/api/', globalLimiter);
+app.use('/api/smoobu', smoobuWebhookLimiter);
 
 /* ------------------------------------------------------------------ */
 /* Rotas                                                               */
@@ -135,47 +155,10 @@ app.use('/api/smoobu', smoobuRoutes);
 // Protegido por auth + isParceiro.
 app.use('/api/parceiro', parceiroRoutes);
 
-// TEMPORÁRIO — Rota de limpeza final (GET /api/cleanup-final).
-// Procura a empresa-sistema "All2gether (Sistema)" (NIF 'SISTEMA', criada pelo
-// seed-admin.js) e renomeia-a para "All2gether". Isto reflete o modelo de
-// negócio clarificado: o Super Admin (role 'admin') tem `empresa_id` que aponta
-// para a empresa operacional única (single-tenant), pelo que as queries
-// `req.user.empresa_id` passam a devolver dados reais sem necessidade de
-// impersonação (o AutoImpersonarEmpresa foi removido do layout do gestor).
-// ⚠️ ROTA TEMPORÁRIA — remover após execução em produção.
-app.get('/api/cleanup-final', async (req, res) => {
-  try {
-    const Empresa = require('./models/Empresa');
-    const NOME_ANTIGO = 'All2gether (Sistema)';
-    const NOME_NOVO = 'All2gether';
-
-    console.log(`🔧 [cleanup-final] A procurar empresa "${NOME_ANTIGO}"...`);
-    const empresa = await Empresa.findOne({ nome: NOME_ANTIGO });
-    if (!empresa) {
-      console.warn(`⚠️  [cleanup-final] Empresa "${NOME_ANTIGO}" não encontrada.`);
-      return res.status(404).json({
-        sucesso: false,
-        erro: `Empresa "${NOME_ANTIGO}" não encontrada. Já foi renomeada?`,
-      });
-    }
-
-    const nomeAntes = empresa.nome;
-    empresa.nome = NOME_NOVO;
-    await empresa.save();
-    console.log(`✅ [cleanup-final] Empresa renomeada: "${nomeAntes}" → "${empresa.nome}" (${empresa._id})`);
-
-    return res.json({
-      sucesso: true,
-      mensagem: 'Empresa renomeada com sucesso.',
-      empresa_id: String(empresa._id),
-      nome_antigo: nomeAntes,
-      nome_novo: empresa.nome,
-    });
-  } catch (err) {
-    console.error('❌ [cleanup-final] Erro:', err.message);
-    return res.status(500).json({ sucesso: false, erro: err.message });
-  }
-});
+// FIX (portal lavandaria) — Portal do Fornecedor (lavandaria).
+// Protegido por auth + isFornecedor. Vê tarefas dos próximos 7 dias e marca
+// roupa_entregue.
+app.use('/api/fornecedor', fornecedorRoutes);
 
 /* ------------------------------------------------------------------ */
 /* Middleware global de tratamento de erros                            */
@@ -185,13 +168,31 @@ app.get('/api/cleanup-final', async (req, res) => {
 // padrão sem vazar a stack trace para o cliente (segurança).
 // Deve ser o ÚLTIMO middleware registado (depois de todas as rotas).
 app.use((err, req, res, next) => {
-  console.error('❌ Erro não tratado:', err.message);
+  // Corpo grande e JSON inválido são erros do cliente: aviso curto, não «erro não tratado».
+  if (err.status === 413 || err.type === 'entity.too.large' || err.type === 'entity.parse.failed') {
+    console.warn(`⚠️  Pedido recusado (${err.type || err.status}) em ${req.method} ${req.path}`);
+  } else {
+    console.error('❌ Erro não tratado:', err.message);
+  }
   // Log completo no servidor (para debug), mas NÃO enviar ao cliente.
   if (process.env.NODE_ENV !== 'production') {
     console.error(err.stack);
   }
-  return res.status(err.status || 500).json({
-    erro: err.status ? err.message : 'Erro interno do servidor.',
+  // Corpo demasiado grande (express.json: 10 MB, por causa das fotos em base64; 256 KB no webhook Smoobu).
+  if (err.status === 413 || err.type === 'entity.too.large') {
+    return res.status(413).json({
+      erro: req.originalUrl && req.originalUrl.startsWith('/api/smoobu')
+        ? 'Corpo do webhook demasiado grande (máximo 256 KB).'
+        : 'O pedido é demasiado grande. Tenta com menos dados.',
+    });
+  }
+  if (err.type === 'entity.parse.failed') {
+    return res.status(400).json({ erro: 'Pedido inválido.' });
+  }
+  // Só mensagens pensadas para o cliente (err.expose, 4xx); o resto fica no log.
+  const status = err.status || 500;
+  return res.status(status).json({
+    erro: err.status && err.expose === true ? err.message : (status >= 500 ? 'Erro interno do servidor.' : 'Pedido inválido.'),
   });
 });
 
@@ -208,6 +209,30 @@ if (require.main === module) {
     .connect(process.env.MONGODB_URI)
     .then(async () => {
       console.log('✅ Ligado ao MongoDB com sucesso.');
+      // Retenção RGPD dos logs de webhooks (idempotente).
+      try {
+        const r = await require('./models/WebhookLog').migrarRetencao();
+        console.log(`🧹 Retenção de WebhookLog: índice antigo removido=${r.indiceAntigoRemovido}, logs atualizados=${r.atualizados}.`);
+      } catch (e) {
+        console.error('⚠️  Falha na migração de retenção do WebhookLog (não bloqueia):', e.message);
+      }
+
+      // Retenção RGPD do email/telefone dos hóspedes: 90 -> 30 dias após o check-out (idempotente).
+      try {
+        const r = await require('./models/ContactoHospede').migrarRetencao();
+        console.log(`🧹 Retenção de ContactoHospede: contactos atualizados=${r.atualizados}.`);
+      } catch (e) {
+        console.error('⚠️  Falha na migração de retenção do ContactoHospede (não bloqueia):', e.message);
+      }
+
+      // Índice único parcial {utilizador_id, chave} das notificações (idempotência dos avisos).
+      // O autoIndex do mongoose está ativo por omissão; isto garante-o de forma explícita e
+      // nunca impede o arranque se falhar.
+      try {
+        await require('./models/Notificacao').createIndexes();
+      } catch (e) {
+        console.error('⚠️  Falha ao criar índices de Notificacao (não bloqueia):', e.message);
+      }
 
       // Prompt 131 — Remove o índice único antigo { utilizador_id, data_inicio }
       // da coleção Ausencia. Este índice foi removido do schema Mongoose no
@@ -273,14 +298,22 @@ if (require.main === module) {
       // move tarefas concluídas/canceladas com mais de 3 meses para o arquivo.
       iniciarArquivista();
 
-      // HF8 — Cron job "Sincronização Smoobu" DESATIVADO.
-      // O sistema é 100% reativo a webhooks (o Smoobu envia eventos que são
-      // processados automaticamente). A sincronização ativa (pull da REST API
-      // do Smoobu) foi removida do fluxo de produção porque causava 502s e não
-      // faz parte do fluxo original. A função `iniciarSincronizacaoSmoobu`
-      // mantém-se exportada para uso manual via API direta se necessário no
-      // futuro, mas NÃO é agendada.
-      // iniciarSincronizacaoSmoobu();
+      // Retenção RGPD: anonimiza nomes/notas de hóspedes após 90 dias e apaga ausências antigas.
+      iniciarRetencao();
+
+      // RGPD: apaga as empresas cujo período de segurança de eliminação já passou (04:10).
+      iniciarEliminacaoEmpresas();
+
+      // Vagas livres: oferece à equipa as limpezas sem ninguém disponível (aceita quem chegar primeiro)
+      // e expira as ofertas que chegaram ao prazo.
+      iniciarOfertasVagas();
+
+      // Reconciliação Smoobu (rede de segurança dos webhooks) + retoma de webhooks presos.
+      // HF8 tinha desligado a sincronização por causar 502 (pedidos em massa a pedido do
+      // utilizador). Agora é opt-in por empresa (`rotinas.sincronizacao_automatica`, desligado
+      // por defeito), com intervalo mínimo de 1 hora, sem sobreposição, só reservas futuras e
+      // pedidos espaçados; nunca reativa tarefas canceladas. Ver docs/BACKEND.md.
+      iniciarSincronizacaoSmoobu();
 
       // HF19 — Cron job "Limpeza de Fotos": todos os dias às 03:00,
       // esvazia fotos_conclusao e avarias[*].fotos de tarefas concluídas
@@ -291,6 +324,13 @@ if (require.main === module) {
       // cria tarefas automáticas para propriedades com dias_fixos_limpeza
       // configurados para o dia de amanhã. Submete ao Load Balancer.
       iniciarGeradorRotinas();
+
+      // Início da limpeza: passa 'atribuida' a 'em_curso' à hora marcada se ninguém carregou
+      // em «Comecei» (de minuto a minuto + recuperação ao arrancar).
+      iniciarInicioLimpeza();
+
+      // Resumo das 18:05 para o gestor (só se houver novidades; uma vez por dia).
+      iniciarResumoGestor();
     })
     .catch((err) => {
       console.error('❌ Erro ao ligar ao MongoDB:', err.message);

@@ -88,7 +88,7 @@ const utilizadorSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ['admin', 'gestor', 'staff', 'parceiro'],
+      enum: ['admin', 'gestor', 'staff', 'parceiro', 'fornecedor'],
       default: 'staff',
       required: true,
     },
@@ -122,7 +122,7 @@ const utilizadorSchema = new mongoose.Schema(
     // Cada entrada é { data: Date, motivo: String }.
     // O webhook (criarTarefaPorReserva) verifica se o staff exclusivo da
     // propriedade tem folga rotativa no dia do check-out. Se sim, a tarefa é
-    // criada com estado 'por_atribuir' + alerta 'Staff exclusivo de folga'.
+    // criada com estado 'por_atribuir' + alerta 'Equipa exclusiva de folga'.
     folgas_rotativas: {
       type: [
         {

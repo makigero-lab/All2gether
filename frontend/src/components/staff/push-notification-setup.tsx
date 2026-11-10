@@ -127,7 +127,7 @@ export function PushNotificationSetup() {
       {sucesso ? (
         <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
       ) : (
-        <Bell className="h-4 w-4 shrink-0 text-primary" />
+        <Bell className="h-4 w-4 shrink-0 text-brand-text" />
       )}
       <span className={`flex-1 ${sucesso ? "text-emerald-700 dark:text-emerald-300" : "text-muted-foreground"}`}>
         {sucesso
@@ -140,7 +140,7 @@ export function PushNotificationSetup() {
       {!sucesso && (
         <>
           <Button
-            size="sm"
+            size="touch"
             onClick={handleAtivar}
             disabled={ativando}
             className="shrink-0"

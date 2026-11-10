@@ -62,6 +62,13 @@ const isAdmin = requireRole('admin');
  */
 const isParceiro = requireRole('parceiro');
 
+/**
+ * isFornecedor — só fornecedor (lavandaria).
+ * FIX (portal lavandaria) — Portal do Fornecedor para gestão de roupa.
+ * Vê tarefas dos próximos 7 dias e marca roupa_entregue.
+ */
+const isFornecedor = requireRole('fornecedor');
+
 // Atalhos legacy (compatibilidade — requireManager = isGestor).
 const requireManager = isGestor;
 const requireAdmin = isAdmin;
@@ -72,6 +79,7 @@ module.exports = {
   isGestor,
   isAdmin,
   isParceiro,
+  isFornecedor,
   // Legacy (não quebrar código existente)
   requireManager,
   requireAdmin,

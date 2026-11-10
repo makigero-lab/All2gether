@@ -279,7 +279,7 @@ export default function ChecklistsPage() {
       setApagarNome("");
       await carregar();
     } catch (e) {
-      setErro(e instanceof Error ? e.message : "Erro ao apagar modelo.");
+      setErro(e instanceof Error ? e.message : "Erro ao eliminar modelo.");
     } finally {
       setApagando(false);
     }
@@ -299,7 +299,7 @@ export default function ChecklistsPage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex flex-col gap-1">
           <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
-            <ListChecks className="h-6 w-6 text-primary" />
+            <ListChecks className="h-6 w-6 text-brand-text" />
             Modelos de Checklist
           </h1>
           <p className="text-sm text-muted-foreground">
@@ -320,7 +320,7 @@ export default function ChecklistsPage() {
           </Button>
           <Button onClick={abrirNovo}>
             <Plus className="h-4 w-4" />
-            Novo Modelo
+            Novo modelo
           </Button>
         </div>
       </div>
@@ -374,7 +374,7 @@ export default function ChecklistsPage() {
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
                       <CardTitle className="flex items-center gap-2 text-base">
-                        <FileText className="h-4 w-4 shrink-0 text-primary" />
+                        <FileText className="h-4 w-4 shrink-0 text-brand-text" />
                         <span className="truncate">{m.nome}</span>
                       </CardTitle>
                       {m.descricao && (
@@ -385,10 +385,10 @@ export default function ChecklistsPage() {
                     </div>
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                    <Badge variant="secondary" className="text-[10px]">
+                    <Badge variant="secondary" className="text-xs">
                       {totalSecoes} secç{totalSecoes === 1 ? "ão" : "ões"}
                     </Badge>
-                    <Badge variant="outline" className="text-[10px]">
+                    <Badge variant="outline" className="text-xs">
                       {totalItens} item{totalItens === 1 ? "" : "ns"}
                     </Badge>
                   </div>
@@ -402,13 +402,13 @@ export default function ChecklistsPage() {
                       <p className="text-xs font-semibold text-foreground">
                         {s.nome}
                       </p>
-                      <p className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">
+                      <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
                         {(s.items ?? []).join(" · ")}
                       </p>
                     </div>
                   ))}
                   {(m.seccoes?.length ?? 0) > 3 && (
-                    <p className="text-[11px] text-muted-foreground">
+                    <p className="text-xs text-muted-foreground">
                       +{(m.seccoes?.length ?? 0) - 3} secç
                       {((m.seccoes?.length ?? 0) - 3) === 1 ? "ão" : "ões"}…
                     </p>
@@ -428,7 +428,7 @@ export default function ChecklistsPage() {
                       variant="ghost"
                       size="sm"
                       onClick={() => abrirApagar(m)}
-                      className="h-8 gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      className="h-8 gap-1.5 text-red-700 hover:bg-red-100 hover:text-red-800 dark:text-red-300 dark:hover:bg-red-950 dark:hover:text-red-200"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                       Apagar
@@ -455,7 +455,7 @@ export default function ChecklistsPage() {
         <DialogHeader>
           <div>
             <DialogTitle className="flex items-center gap-2">
-              <ListChecks className="h-5 w-5 text-primary" />
+              <ListChecks className="h-5 w-5 text-brand-text" />
               {editandoId ? "Editar Modelo de Checklist" : "Novo Modelo de Checklist"}
             </DialogTitle>
             <DialogDescription>
@@ -506,7 +506,7 @@ export default function ChecklistsPage() {
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium">Secções</span>
-                <Badge variant="outline" className="text-[10px]">
+                <Badge variant="outline" className="text-xs">
                   {form.seccoes.length} secç{form.seccoes.length === 1 ? "ão" : "ões"}
                 </Badge>
               </div>
@@ -574,7 +574,7 @@ export default function ChecklistsPage() {
                       className="h-7 gap-1 text-xs"
                     >
                       <Plus className="h-3 w-3" />
-                      Adicionar Item
+                      Adicionar item
                     </Button>
                   </div>
                 </div>
@@ -588,7 +588,7 @@ export default function ChecklistsPage() {
                 className="gap-1.5"
               >
                 <Plus className="h-4 w-4" />
-                Adicionar Secção
+                Adicionar secção
               </Button>
             </div>
 
@@ -639,10 +639,10 @@ export default function ChecklistsPage() {
           <div>
             <DialogTitle className="flex items-center gap-2">
               <AlertCircle className="h-5 w-5 text-destructive" />
-              Apagar Modelo
+              Eliminar modelo
             </DialogTitle>
             <DialogDescription>
-              Tens a certeza que queres apagar o modelo{" "}
+              Tens a certeza que queres eliminar o modelo{" "}
               <strong>&quot;{apagarNome}&quot;</strong>?
               <br />
               Esta ação não pode ser desfeita. As propriedades associadas ficam
@@ -682,12 +682,12 @@ export default function ChecklistsPage() {
             {apagando ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
-                A apagar…
+                A eliminar…
               </>
             ) : (
               <>
                 <Trash2 className="h-4 w-4" />
-                Apagar Modelo
+                Eliminar modelo
               </>
             )}
           </Button>

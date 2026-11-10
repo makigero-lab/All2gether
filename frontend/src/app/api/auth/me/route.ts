@@ -58,3 +58,28 @@ export async function GET() {
     );
   }
 }
+
+/** PATCH /api/auth/me — o utilizador atualiza o seu próprio telemóvel. */
+export async function PATCH(req: Request) {
+  try {
+    const cookieStore = await cookies();
+    const token = cookieStore.get(COOKIE_NAME)?.value;
+    if (!token) {
+      return NextResponse.json({ erro: "Não autenticado." }, { status: 401 });
+    }
+    const meUrl = buildBackendUrl("/api/auth/me");
+    if (!meUrl) {
+      return NextResponse.json({ erro: ERRO_BACKEND_NAO_CONFIGURADO }, { status: 502 });
+    }
+    const res = await fetch(meUrl, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: await req.text(),
+      cache: "no-store",
+    });
+    const data = await res.json();
+    return NextResponse.json(data, { status: res.status });
+  } catch {
+    return NextResponse.json({ erro: "Erro ao comunicar com o backend." }, { status: 502 });
+  }
+}

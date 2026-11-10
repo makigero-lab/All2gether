@@ -183,7 +183,7 @@ export function AutoImpersonarEmpresa() {
   if (estado === "a-impersonar") {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-muted/30 px-4">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <Loader2 className="h-8 w-8 animate-spin text-brand-text" />
         <p className="text-sm font-medium text-foreground">
           A preparar o acesso ao programa operacional…
         </p>
