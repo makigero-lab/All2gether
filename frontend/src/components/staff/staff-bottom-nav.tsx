@@ -25,7 +25,7 @@ export function StaffBottomNav() {
       aria-label="Navegação principal da equipa"
       className="fixed inset-x-0 bottom-0 z-20 border-t bg-background/95 backdrop-blur"
     >
-      <ul className="mx-auto flex w-full max-w-md items-stretch justify-around pb-[env(safe-area-inset-bottom)]">
+      <ul className="mx-auto flex w-full max-w-md items-stretch md:max-w-2xl justify-around pb-[env(safe-area-inset-bottom)]">
         {ITENS.map(({ href, label, icon: Icon, ...resto }) => {
           const ativo =
             "exato" in resto && resto.exato

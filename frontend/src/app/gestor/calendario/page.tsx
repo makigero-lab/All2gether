@@ -39,6 +39,10 @@ import timeGridPlugin from "@fullcalendar/timegrid";
 import interactionPlugin from "@fullcalendar/interaction";
 import ptLocale from "@fullcalendar/core/locales/pt";
 import type { DatesSetArg, DayCellContentArg, EventClickArg, EventContentArg, EventInput } from "@fullcalendar/core";
+
+type EventoOrdem = { title?: string; start?: Date | string | number | null; extendedProps?: { tipo?: string } };
+/** Ausências e folgas ficam sempre na faixa de cima das células do Mês. */
+const ESPECIAIS_ORDEM = ["ausencia", "ausencia_pendente", "folga_fixa"];
 import type { DateClickArg } from "@fullcalendar/interaction";
 
 import { Button } from "@/components/ui/button";
@@ -439,6 +443,15 @@ export default function CalendarioOperacionalPage() {
   // Prompt 137 — Se a tarefa tem tempo_viagem_minutos > 0, cria DOIS eventos:
   //   Evento A (Viagem): cinzento/tracejado, início = hora_tarefa - viagem, fim = hora_tarefa.
   //   Evento B (Limpeza): a tarefa normal com a cor da propriedade/estado.
+  // O FullCalendar passa objetos simples (título, início e extendedProps) a esta função.
+  const ordemEventos = useCallback((x: unknown, y: unknown) => {
+    const a = x as EventoOrdem;
+    const b = y as EventoOrdem;
+    const especial = (e: EventoOrdem) => (ESPECIAIS_ORDEM.includes(e.extendedProps?.tipo ?? "") ? 0 : 1);
+    const ini = (e: EventoOrdem) => (e.start ? new Date(e.start as Date).getTime() : 0);
+    return especial(a) - especial(b) || ini(a) - ini(b) || String(a.title ?? "").localeCompare(String(b.title ?? ""));
+  }, []);
+
   const eventos = useMemo<EventInput[]>(() => {
     return tarefas.flatMap((t) => {
       // Ausência aprovada (férias/doença) — banner horizontal contínuo
@@ -777,6 +790,20 @@ export default function CalendarioOperacionalPage() {
       : isPorAtribuir
         ? "fc-evt-block fc-evt-block--alert"
         : "fc-evt-block";
+    // Cartões curtos (até 30 min = até 2 linhas de 15 min) não têm altura para hora, casa e
+    // pessoa em linhas separadas: vão numa só linha (hora de início + casa) e o resto no título.
+    const minutos = arg.event.end && arg.event.start ? (arg.event.end.getTime() - arg.event.start.getTime()) / 60000 : 60;
+    if (minutos <= 30) {
+      const quem = t.alerta_orfao ? "Órfã" : staff ? (equipaTexto ?? primeiroNome(staff)) : rotuloEstado;
+      return (
+        <div className={`${blockClass} fc-evt-block--curto${riscada}`} title={`${arg.timeText} · ${titulo} · ${quem}`}>
+          {pontoTipo}
+          {glifo && <span className="fc-evt-glifo" aria-hidden="true">{glifo}</span>}
+          <span className="fc-evt-block__time">{arg.timeText.split(" - ")[0]}</span>
+          <span className="fc-evt-block__title">{titulo}</span>
+        </div>
+      );
+    }
     return (
       <div className={`${blockClass}${riscada}${duo ? " fc-evt-block--duo" : ""}`}>
         <div className="fc-evt-block__header">
@@ -958,7 +985,9 @@ export default function CalendarioOperacionalPage() {
   // Conteúdo da célula do Mês no telemóvel: nº do dia + pontos (forma = tipo, cor = estado) + contador.
   const conteudoDia = useCallback(
     (arg: DayCellContentArg) => {
-      if (!estreito || arg.view.type !== "dayGridMonth") return undefined;
+      // Fora do telemóvel mostra o nº do dia. Devolver undefined deixava a célula sem número
+      // (o FullCalendar não repõe o conteúdo por omissão) e a 1.ª linha do mês parecia vazia.
+      if (!estreito || arg.view.type !== "dayGridMonth") return <>{arg.dayNumberText}</>;
       const itens = (porDia.get(format(arg.date, "yyyy-MM-dd")) ?? []).filter((t) => !ESPECIAIS.includes(t.tipo));
       if (itens.length === 0) return <>{arg.dayNumberText}</>;
       const urgencia = (e: string) => (e === "nao_atribuida" ? 0 : e === "por_atribuir" ? 1 : e === "em_curso" ? 2 : e === "atribuida" ? 3 : 4);
@@ -1770,6 +1799,9 @@ export default function CalendarioOperacionalPage() {
               // FIX (calendário compacto) — Limita a 2 o nº de eventos allDay
               // visíveis por dia; o excesso fica escondido num botão "+X mais".
               dayMaxEvents={2}
+              // Ausências e folgas primeiro (faixa de cima); depois por hora. Sem isto, no Mês as
+              // barras de vários dias ficavam na mesma faixa das limpezas e eram tapadas por elas.
+              eventOrder={ordemEventos}
               // Semana: no máximo 2 colunas lado a lado; o resto fica em «+N mais» (popover que fecha ao clicar fora ou Esc).
               slotEventOverlap={false}
               eventMaxStack={vista === "semana" ? cartoesPorHora : 2}
