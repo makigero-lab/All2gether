@@ -32,7 +32,7 @@
  * Robustez (anti-crash, herdada do original):
  *   - Toda a lógica de domínio corre dentro de try/catch no processarReservaSmoobu.
  *   - Falhas no load balancer → tarefa criada como 'por_atribuir'.
- *   - Falhas no scheduler → hora default 10:00 UTC (= 11:00 local UTC+1).
+ *   - Falhas no scheduler → hora default 10:00 de Lisboa (segue a hora de verão).
  *   - Falhas no enriquecimento → fallback para arrival.
  *   - Falhas na notificação → silenciadas (fire-and-forget).
  */
@@ -57,7 +57,7 @@ const {
   calcularInicioTarefaUtilizador,
   calcularInicioEquipa,
 } = require('../utils/scheduler');
-const { minutosLocais } = require('../utils/horario');
+const { minutosLocais, horaPadraoDoDia } = require('../utils/horario');
 const { avisarGestores } = require('../utils/notificar');
 const { inicioAutomaticoSemToque } = require('../utils/cicloTarefa');
 
@@ -488,7 +488,7 @@ function ehDuplicadoReserva(err) {
  *   3. Valida propriedade ativa + empresa ativa.
  *   4. Calcula tempo de limpeza (payload > propriedade > default 45).
  *   5. Load balancer (VIP + SLA 480min + Haversine) — best-effort.
- *   6. Scheduler sequencial (hora de início) — best-effort, fallback 10:00 UTC.
+ *   6. Scheduler sequencial (hora de início) — best-effort, fallback 10:00 de Lisboa.
  *   7. Snapshot de checklist_dinamica do ModeloChecklist.
  *   8. Cria Tarefa com estado 'atribuida' | 'nao_atribuida' | 'por_atribuir'.
  *   9. Notifica o staff atribuído (fire-and-forget).
@@ -901,21 +901,18 @@ async function criarTarefaPorReserva(
         equipaCompleta = [];
         tentouLoadBalancer = true;
         alertaTarefa = motivoSemHorario;
-        dataAgendada = new Date(range.start);
-        dataAgendada.setUTCHours(10, 0, 0, 0);
+        dataAgendada = horaPadraoDoDia(range.start);
       } else {
         dataAgendada = resultadoScheduler.data;
         tempoViagemScheduler = Number(resultadoScheduler.tempoViagem) || 0;
       }
     } catch (err) {
-      // Fallback: 10:00 UTC (= 11:00 local UTC+1, Portugal inverno).
-      dataAgendada = new Date(range.start);
-      dataAgendada.setUTCHours(10, 0, 0, 0);
+      // Fallback: 10:00 de Lisboa.
+      dataAgendada = horaPadraoDoDia(range.start);
     }
   } else {
-    // Sem staff atribuído: 10:00 UTC default.
-    dataAgendada = new Date(range.start);
-    dataAgendada.setUTCHours(10, 0, 0, 0);
+    // Sem staff atribuído: 10:00 de Lisboa por defeito.
+    dataAgendada = horaPadraoDoDia(range.start);
   }
 
   // Tempo de viagem final: prioridade do scheduler (se calculou), senão do LB.
@@ -1185,9 +1182,8 @@ async function atualizarTarefaPorReserva(
       novoRange = null;
     } else if (novoRange && diaAtual && diaAtual.start.getTime() !== novoRange.start.getTime()) {
       // Só muda se o DIA mudou (antes qualquer update repunha a hora a 00:00).
-      // Mantém a hora 10:00 UTC por defeito; o load balancer/scheduler recalcula se houver reatribuição.
-      const novaData = new Date(novoRange.start);
-      novaData.setUTCHours(10, 0, 0, 0);
+      // Mantém a hora 10:00 de Lisboa por defeito; o load balancer/scheduler recalcula se houver reatribuição.
+      const novaData = horaPadraoDoDia(novoRange.start);
       tarefa.data = novaData;
       mudou = true;
       mudouData = true;
@@ -1300,7 +1296,7 @@ async function atualizarTarefaPorReserva(
         tarefa.motivo_nao_atribuicao = rh.motivo;
       }
     } catch (errHora) {
-      console.warn('⚠️ [Smoobu sync] hora do dia novo não calculada (mantém 10:00 UTC):', errHora.message);
+      console.warn('⚠️ [Smoobu sync] hora do dia novo não calculada (mantém 10:00 de Lisboa):', errHora.message);
     }
   }
 
@@ -2469,7 +2465,7 @@ async function executarSincronizacaoCore(empresaId, credSmoobu, opcoes = {}) {
           tipo: tipoRM, check_in: rm.check_in, check_out: rm.check_out, data_gravada: rm.data_limpeza, ajustada: !!rm.data_limpeza_ajustada,
         });
         const diaRM = rdRM.erro ? new Date(rm.check_out).toISOString().slice(0, 10) : rdRM.dia;
-        const dataTarefaRM = new Date(`${diaRM}T10:00:00Z`);
+        const dataTarefaRM = horaPadraoDoDia(diaRM);
         const chaveRM = `${rm.propriedade_id}|${diaRM}|${tipoRM}`;
         if (recriadas.has(chaveRM)) {
           await ReservaManual.updateOne({ _id: rm._id }, { $set: { tarefa_gerada_id: recriadas.get(chaveRM) } });

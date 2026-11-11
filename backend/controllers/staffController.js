@@ -18,6 +18,7 @@ const { notificarUtilizador, avisarGestores } = require('../utils/notificar');
 const { preencherVagaTarefa, preencherVagasAposAusencia } = require('../utils/atribuicaoAutomatica');
 const { comMembro, retirarMembroDoc } = require('../utils/equipaTarefa');
 const { aoConcluirTarefa } = require('../utils/cicloTarefa');
+const { horaPadraoDoDia } = require('../utils/horario');
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -661,8 +662,8 @@ exports.reportarAvaria = async (req, res) => {
     // Prompt 125 — usa meia-noite LOCAL (00:00 no fuso do servidor) e não
     // UTC midnight, que em Lisboa (UTC+1) apareceria como 01:00.
     const hoje = new Date();
-    // 10:00 UTC do dia (antes 00:00 local: placeholder que contaminava o scheduler).
-    const hojeMeiaNoite = new Date(Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth(), hoje.getUTCDate(), 10));
+    // 10:00 de Lisboa do dia (antes 00:00 local: placeholder que contaminava o scheduler).
+    const hojeMeiaNoite = horaPadraoDoDia(hoje);
 
     const novaTarefaManutencao = await Tarefa.create({
       empresa_id: tarefa.empresa_id,

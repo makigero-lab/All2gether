@@ -106,8 +106,7 @@ async function planearAtribuicao({ empresaId, propriedade, dia, tempoLimpeza }) 
   const staffNecessario = Math.max(1, Number(propriedade.staff_necessario) || 1);
   const tempo = Number(tempoLimpeza) || propriedade.tempo_limpeza_minutos || 45;
 
-  const dataPadrao = new Date(range.start);
-  dataPadrao.setUTCHours(10, 0, 0, 0); // 10:00 UTC por defeito
+  const dataPadrao = H.horaPadraoDoDia(range.start); // 10:00 de Lisboa por defeito
 
   const plano = {
     utilizador_id: null,

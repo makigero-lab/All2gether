@@ -28,7 +28,7 @@ const HORARIO = Object.freeze({
   ALMOCO_DURACAO: 60,
   ALMOCO_JANELA_INICIO: MIN(12, 0), // o almoço nunca começa antes
   ALMOCO_INICIO_MAXIMO: MIN(14, 0), // nem depois (limite do INÍCIO do almoço)
-  HORA_PADRAO_SEM_ATRIBUICAO_UTC: 10, // placeholder de tarefas ainda sem pessoa
+  HORA_PADRAO_SEM_ATRIBUICAO: MIN(10, 0), // placeholder (hora de Lisboa) de tarefas ainda sem pessoa
 });
 
 /** Janela do dia (09:00-18:00) em minutos. */
@@ -83,6 +83,15 @@ function utcDeMinutosLocais(diaISO, min) {
   // Segunda passagem: perto das mudanças de hora o desfasamento muda.
   t = base - offsetLisboaMin(new Date(t)) * 60000;
   return new Date(t);
+}
+
+/**
+ * Hora de arranque provisória (10:00 de Lisboa) de uma tarefa ainda sem pessoa, para o dia
+ * (Date ou 'aaaa-mm-dd'). Segue a hora de verão: nunca um desfasamento fixo em UTC.
+ */
+function horaPadraoDoDia(dia) {
+  const diaISO = typeof dia === 'string' ? dia.slice(0, 10) : diaUTC(dia);
+  return utcDeMinutosLocais(diaISO, HORARIO.HORA_PADRAO_SEM_ATRIBUICAO);
 }
 
 /**
@@ -256,6 +265,7 @@ module.exports = {
   minutosLocais,
   diaUTC,
   utcDeMinutosLocais,
+  horaPadraoDoDia,
   temHoraReal,
   dentroDaJanela,
   duracaoCabeNoHorario,

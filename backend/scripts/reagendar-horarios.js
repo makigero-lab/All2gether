@@ -171,8 +171,7 @@ async function reagendarHorarios({ aplicar = false, avisar = false, agora = new 
         resultado: 'passada a outra pessoa',
       });
     } else {
-      const padrao = new Date(obterRangeDia(diaISO).start);
-      padrao.setUTCHours(H.HORARIO.HORA_PADRAO_SEM_ATRIBUICAO_UTC, 0, 0, 0);
+      const padrao = H.horaPadraoDoDia(diaISO);
       if (aplicar) {
         await Tarefa.updateOne(
           { _id: t._id },
