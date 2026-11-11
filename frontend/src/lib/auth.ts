@@ -59,7 +59,20 @@ interface CacheEntry {
 }
 
 let cache: CacheEntry | null = null;
-let inFlight: Promise<UtilizadorAuth | null> | null = null;
+let inFlight: Promise<ResultadoSessao> | null = null;
+
+/**
+ * Estado da sessão:
+ *  - "ok": utilizador autenticado;
+ *  - "sem_sessao": o backend disse que não há sessão (401/404): é caso de login;
+ *  - "erro": não foi possível saber (5xx, 429, falha de rede, servidor a acordar).
+ *    NÃO é fim de sessão: o cliente mantém tudo e tenta outra vez.
+ */
+export type EstadoSessao = "ok" | "sem_sessao" | "erro";
+export interface ResultadoSessao {
+  estado: EstadoSessao;
+  user: UtilizadorAuth | null;
+}
 
 const TTL_POSITIVO_MS = 60_000; // 60s — user válido
 const TTL_NEGATIVO_MS = 3_000; // 3s — 401 (curto para não bloquear login)
@@ -88,65 +101,65 @@ function cacheValido(): CacheEntry | null {
 }
 
 /**
- * Consulta o backend (via proxy /api/auth/me) para saber se o utilizador
- * está autenticado e qual o seu role. O token é lido do cookie httpOnly
- * no servidor — o browser nunca o vê.
- *
- * Devolve null se não estiver autenticado (sem cookie, token inválido, etc.).
+ * Consulta o backend (via proxy /api/auth/me) e distingue "sem sessão" (401/404)
+ * de "erro temporário" (5xx, 429, rede). O token é lido do cookie httpOnly no
+ * servidor — o browser nunca o vê. Só "sem_sessao" justifica ir para o login.
  *
  * Cache:
- *   - Se houver um resultado em cache válido (dentro do TTL), devolve-o
- *     SEM ir ao backend.
- *   - Se já houver um pedido em curso (in-flight), partilha a mesma
- *     Promise (dedup de chamadas concorrentes).
- *   - O resultado é colocado em cache com TTL diferente consoante seja
- *     positivo (user) ou negativo (null).
+ *   - Resultado "ok": 60s. Resultado "sem_sessao": 3s (evita burst de 401s).
+ *   - "erro" nunca é guardado em cache (pode ser temporário).
+ *   - Pedidos concorrentes partilham a mesma Promise.
  *
- * NÃO redireciona. A responsabilidade de redirecionar pertence ao caller
- * (RouteGuard ou a própria página).
+ * NÃO redireciona. A responsabilidade de redirecionar pertence ao caller.
  */
-export async function lerUtilizador(): Promise<UtilizadorAuth | null> {
-  // 1. Cache temporal — se válido, devolve sem ir ao backend.
+export async function lerSessao(): Promise<ResultadoSessao> {
   const cached = cacheValido();
-  if (cached) return cached.user;
+  if (cached) return { estado: cached.user ? "ok" : "sem_sessao", user: cached.user };
 
-  // 2. Cache in-flight — se um pedido já está a decorrer, partilha.
   if (inFlight) return inFlight;
 
-  // 3. Novo pedido.
-  inFlight = (async () => {
+  inFlight = (async (): Promise<ResultadoSessao> => {
     try {
       const res = await fetch("/api/auth/me", {
         cache: "no-store",
         credentials: "include",
       });
 
-      if (!res.ok) {
-        // 401 = sem sessão. Cache negativo curto (3s) para evitar burst
-        // de 401s durante redirects, mas não bloquear login.
+      if (res.status === 401 || res.status === 403 || res.status === 404) {
         cache = { user: null, expiraEm: Date.now() + TTL_NEGATIVO_MS };
-        return null;
+        return { estado: "sem_sessao", user: null };
+      }
+      if (!res.ok) {
+        // 5xx / 429 / gateway: o servidor pode estar a acordar. Não é fim de sessão.
+        return { estado: "erro", user: null };
       }
 
       const data = await res.json();
       if (!data?.utilizador) {
-        cache = { user: null, expiraEm: Date.now() + TTL_NEGATIVO_MS };
-        return null;
+        // Resposta 200 sem utilizador: não sabemos quem é. Trata como erro, não como logout.
+        return { estado: "erro", user: null };
       }
 
       const user = data.utilizador as UtilizadorAuth;
-      // Cache positivo longo (60s) — reduz fetches durante navegação.
       cache = { user, expiraEm: Date.now() + TTL_POSITIVO_MS };
-      return user;
+      return { estado: "ok", user };
     } catch {
-      // Erro de rede — não cacheamos (pode ser temporário).
-      return null;
+      // Erro de rede / resposta ilegível — não cacheamos (pode ser temporário).
+      return { estado: "erro", user: null };
     } finally {
       inFlight = null;
     }
   })();
 
   return inFlight;
+}
+
+/**
+ * Utilizador autenticado, ou null se não houver sessão OU se não foi possível
+ * saber (erro temporário). Quem precisa de distinguir usa `lerSessao()`.
+ */
+export async function lerUtilizador(): Promise<UtilizadorAuth | null> {
+  return (await lerSessao()).user;
 }
 
 /** True se o utilizador estiver autenticado (verifica via /api/auth/me). */
@@ -164,7 +177,7 @@ export async function estaAutenticado(): Promise<boolean> {
  * o estado do cliente é totalmente limpo (sem cache de dados do utilizador
  * anterior). Também limpa o cache temporal de auth.
  */
-export async function fazerLogout(opcoes: { sessaoExpirada?: boolean } = {}): Promise<void> {
+export async function fazerLogout(opcoes: { sessaoExpirada?: boolean; acessosMudaram?: boolean } = {}): Promise<void> {
   if (!opcoes.sessaoExpirada) {
     // Saída explícita: avisa se há alterações por gravar, que se perdem ao sair
     // (os rascunhos têm nomes e notas de hóspedes e não ficam em aparelho partilhado).
@@ -183,7 +196,7 @@ export async function fazerLogout(opcoes: { sessaoExpirada?: boolean } = {}): Pr
     // Mesmo que o fetch falhe, tentamos redirecionar (o middleware vai
     // bloquear o acesso às páginas privadas sem cookie).
   }
-  window.location.href = "/login";
+  window.location.href = opcoes.acessosMudaram ? "/login?aviso=acessos" : "/login";
 }
 
 /**

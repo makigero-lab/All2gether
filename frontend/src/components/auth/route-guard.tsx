@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Loader2, WifiOff } from "lucide-react";
 
-import { fazerLogout, lerUtilizador, limparCacheAuth, type Role } from "@/lib/auth";
+import { Button } from "@/components/ui/button";
+import { fazerLogout, lerSessao, limparCacheAuth, type Role } from "@/lib/auth";
+import { CHAVE_REDIRECIONAMENTO, decidirRoleErrado, lerMarca } from "@/lib/guarda-role";
 
 interface RouteGuardProps {
   /** Role exigida para esta área ("admin" | "gestor" | "staff" | "parceiro"). */
@@ -11,85 +13,126 @@ interface RouteGuardProps {
   children: React.ReactNode;
 }
 
+/** Esperas (ms) entre tentativas automáticas quando o servidor não responde (arranque a frio ~30-60 s). */
+const ESPERAS_RETRY_MS = [2000, 3000, 5000, 5000, 8000, 8000, 10000, 10000];
+
+function armazemSessao(): Storage | null {
+  try {
+    return typeof sessionStorage === "undefined" ? null : sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * RouteGuard — camada de proteção client-side para áreas privadas.
  *
- * O `middleware.ts` já bloqueia o acesso no servidor (redireciona para /login
- * sem token, e redireciona para o painel certo se o role não bate com a rota).
- * Este componente é uma **segunda camada** que valida a sessão via
- * `lerUtilizador()` (fetch a /api/auth/me com cache temporal).
+ * O `middleware.ts` já bloqueia o acesso no servidor. Este componente é uma
+ * **segunda camada** que valida a sessão via `lerSessao()` (fetch a /api/auth/me
+ * com cache temporal).
  *
- * Prompt 115 — Resolução DEFINITIVA do Loop 401:
- *   Antes, o guard chamava `lerUtilizador()` e, se devolvesse null, fazia
- *   `router.replace("/login")` (soft redirect). O problema: o `router.replace`
- *   é client-side — a página alvo podia voltar a montar e chamar o guard
- *   outra vez, gerando outro 401, num ciclo sem fim.
- *
- *   Agora, se `lerUtilizador()` devolver null (401):
- *     1. Limpa o cache de auth (`limparCacheAuth`).
- *     2. Faz **logout imediato** (`fazerLogout` → POST /api/auth/logout que
- *        limpa o cookie httpOnly + `window.location.href = "/login"`).
- *     3. O redirect é **HARD** (`window.location.href`, não `router.replace`)
- *        — o estado do cliente é totalmente reiniciado, não há re-mount do
- *        guard nem cache obsoleto. Isto quebra o loop definitivamente.
- *
- *   Sem retry: em caso de 401, o guard NÃO volta a tentar o fetch. Vai
- *   direto para /login.
- *
- *   Usa `lerUtilizador()` (em vez de fetch cru) para popular o cache temporal
- *   — assim as páginas que também chamam `lerUtilizador()` acertam no cache
- *   (1 fetch total, não 2).
+ *  - 401 / sem sessão: logout imediato + redirect HARD para /login (sem retry).
+ *  - Erro temporário (5xx, 429, rede, Render a acordar): NÃO faz logout. Mostra
+ *    "Sem ligação ao servidor" e repete sozinho (e com botão). A sessão mantém-se.
+ *  - Role diferente do esperado: confia no /me (BD). Redireciona para o painel
+ *    certo; se o middleware (JWT antigo) devolver ao mesmo sítio, faz logout limpo
+ *    com aviso em vez de ficar em ciclo.
  */
 export function RouteGuard({ role, children }: RouteGuardProps) {
-  const [ok, setOk] = useState(false);
+  const [estado, setEstado] = useState<"verificando" | "ok" | "sem_ligacao">("verificando");
+  const [tentativa, setTentativa] = useState(0);
+  // Quantas falhas seguidas (decide a espera) e se ainda repete sozinho.
+  const falhas = useRef(0);
+  const [aTentar, setATentar] = useState(true);
 
   useEffect(() => {
     let cancelado = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
 
     (async () => {
-      const user = await lerUtilizador();
+      const { estado: sessao, user } = await lerSessao();
       if (cancelado) return;
 
-      // 401 / sem sessão → logout imediato + redirect HARD para /login.
-      // Sem retry. O fazerLogout limpa o cookie e faz window.location.href.
-      if (!user) {
+      if (sessao === "erro") {
+        setEstado("sem_ligacao");
+        const espera = ESPERAS_RETRY_MS[falhas.current];
+        falhas.current += 1;
+        setATentar(espera !== undefined);
+        if (espera !== undefined) timer = setTimeout(() => !cancelado && setTentativa((t) => t + 1), espera);
+        return;
+      }
+
+      if (sessao === "sem_sessao" || !user) {
         limparCacheAuth();
         await fazerLogout({ sessaoExpirada: true });
         return;
       }
 
-      // Rebrand SSO (satélite single-tenant): o Super Admin (role 'admin')
-      // tem acesso ao programa operacional /gestor — alinha com o backend,
-      // onde isGestor = requireRole('admin', 'gestor'). O guard aceita
-      // admin quando o role exigido é 'gestor'. A auto-impersonação da
-      // empresa principal é tratada pelo <AutoImpersonarEmpresa/> no layout.
+      // O Super Admin (role 'admin') tem acesso ao programa operacional /gestor.
       const roleAutorizado =
         user.role === role || (role === "gestor" && user.role === "admin");
 
-      // Role errado → redirect HARD para o painel certo desse role.
       if (!roleAutorizado) {
-        // HF27 — Parceiros (B2B) têm portal próprio em /parceiro.
         const destino =
           user.role === "admin" || user.role === "gestor"
             ? "/gestor"
             : user.role === "parceiro"
               ? "/parceiro"
-              : "/staff";
+              : user.role === "fornecedor"
+                ? "/fornecedor"
+                : "/staff";
+        const armazem = armazemSessao();
+        if (decidirRoleErrado(destino, lerMarca(armazem)) === "logout") {
+          // Ciclo: o JWT está desatualizado em relação ao role atual. Sessão nova.
+          try { armazem?.removeItem(CHAVE_REDIRECIONAMENTO); } catch { /* ignora */ }
+          limparCacheAuth();
+          await fazerLogout({ sessaoExpirada: true, acessosMudaram: true });
+          return;
+        }
+        try { armazem?.setItem(CHAVE_REDIRECIONAMENTO, JSON.stringify({ para: destino, ts: Date.now() })); } catch { /* ignora */ }
         window.location.href = destino;
         return;
       }
 
-      // Tudo OK → renderiza children.
-      setOk(true);
+      falhas.current = 0;
+      try { armazemSessao()?.removeItem(CHAVE_REDIRECIONAMENTO); } catch { /* ignora */ }
+      setEstado("ok");
     })();
 
     return () => {
       cancelado = true;
+      if (timer) clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [role]);
+  }, [role, tentativa]);
 
-  if (!ok) {
+  if (estado === "sem_ligacao") {
+    return (
+      <div role="status" className="flex min-h-[60vh] flex-col items-center justify-center gap-3 p-6 text-center">
+        <WifiOff className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
+        <p className="font-medium">Sem ligação ao servidor.</p>
+        <p className="max-w-xs text-sm text-muted-foreground">
+          A tua sessão continua ativa e o que escreveste está guardado.{" "}
+          {aTentar ? "A tentar outra vez…" : "Carrega em tentar outra vez."}
+        </p>
+        <Button
+          variant="outline"
+          className="min-h-[44px]"
+          onClick={() => {
+            limparCacheAuth();
+            falhas.current = 0;
+            setATentar(true);
+            setEstado("verificando");
+            setTentativa((t) => t + 1);
+          }}
+        >
+          Tentar outra vez
+        </Button>
+      </div>
+    );
+  }
+
+  if (estado !== "ok") {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />

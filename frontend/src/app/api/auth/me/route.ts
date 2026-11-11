@@ -15,6 +15,8 @@ import {
 } from "@/lib/backend";
 
 const COOKIE_NAME = "all2gether_token";
+/** Tempo máximo à espera do backend em /me (o cliente repete se passar). */
+const TEMPO_MAX_BACKEND_MS = 20_000;
 
 export async function GET() {
   try {
@@ -36,25 +38,37 @@ export async function GET() {
       );
     }
 
+    // Se o backend não responde (arranque a frio do Render demora 30-60 s), não ficamos
+    // à espera até a plataforma cortar: devolvemos 504 e o cliente tenta outra vez.
     const res = await fetch(meUrl, {
       headers: { Authorization: `Bearer ${token}` },
       cache: "no-store",
+      signal: AbortSignal.timeout(TEMPO_MAX_BACKEND_MS),
     });
 
-    const data = await res.json();
+    // Corpo ilegível (ex.: página HTML de um 502 do Render a acordar) = erro temporário.
+    const data = await res.json().catch(() => null);
 
     if (!res.ok) {
-      // Token inválido/expirado — limpa o cookie.
-      const response = NextResponse.json(data, { status: res.status });
-      response.cookies.delete(COOKIE_NAME);
+      const response = NextResponse.json(
+        data ?? { erro: "O servidor não respondeu. Tenta outra vez." },
+        { status: res.status }
+      );
+      // Só apaga o cookie quando o backend diz que NÃO há sessão (401) ou que o utilizador
+      // já não existe (404). 5xx, 429 e falhas de rede são temporários: o cookie fica.
+      if (res.status === 401 || res.status === 404) response.cookies.delete(COOKIE_NAME);
       return response;
     }
 
+    if (!data) {
+      return NextResponse.json({ erro: "Resposta inválida do servidor." }, { status: 502 });
+    }
     return NextResponse.json(data);
-  } catch {
+  } catch (e) {
+    const expirou = e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError");
     return NextResponse.json(
-      { erro: "Erro ao comunicar com o backend." },
-      { status: 502 }
+      { erro: expirou ? "O servidor está a acordar. Tenta outra vez." : "Erro ao comunicar com o backend." },
+      { status: expirou ? 504 : 502 }
     );
   }
 }
