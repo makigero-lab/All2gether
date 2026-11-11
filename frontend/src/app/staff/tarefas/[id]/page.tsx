@@ -5,7 +5,8 @@ import { notFound } from "next/navigation";
 import { Loader2, WifiOff } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { MSG_SEM_LIGACAO } from "@/lib/rascunho-staff";
+import { lerUtilizador } from "@/lib/auth";
+import { donoRascunho, MSG_SEM_LIGACAO } from "@/lib/rascunho-staff";
 import { checklistDaTarefa, temHoraReal } from "@/lib/utils";
 
 import { DetalheTarefaClient } from "@/components/staff/detalhe-tarefa-client";
@@ -24,6 +25,8 @@ export default function DetalheTarefaPage({
   params: { id: string };
 }) {
   const [tarefa, setTarefa] = useState<any>(null);
+  // Dono dos rascunhos (empresa + utilizador): o rascunho de uma pessoa nunca aparece a outra.
+  const [dono, setDono] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   // true quando falhou a rede / servidor (distinto de "tarefa não existe").
   const [semRede, setSemRede] = useState(false);
@@ -42,6 +45,14 @@ export default function DetalheTarefaPage({
         if (cancelado) return;
         if (res.ok) {
           const data = await res.json();
+          const u = await lerUtilizador();
+          if (cancelado) return;
+          if (!u) {
+            // Sem saber quem é não se lê nem se guarda rascunho: trata como falta de ligação.
+            setSemRede(true);
+            return;
+          }
+          setDono(donoRascunho(u));
           setTarefa(data.tarefa);
         } else if (res.status >= 500) {
           setSemRede(true);
@@ -143,6 +154,7 @@ export default function DetalheTarefaPage({
 
   return (
     <DetalheTarefaClient
+      dono={dono ?? ""}
       tarefa={tarefaAdaptada}
       checklist={checklist}
     />
