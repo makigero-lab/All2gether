@@ -25,6 +25,7 @@ const mongoose = require('mongoose');
 const Propriedade = require('../models/Propriedade');
 const Tarefa = require('../models/Tarefa');
 const { obterRangeDia } = require('../utils/scheduler');
+const { horaPadraoDoDia } = require('../utils/horario');
 const { planearAtribuicao } = require('../utils/atribuicaoAutomatica');
 
 const DIAS_SEMANA = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
@@ -96,9 +97,8 @@ async function executarGeradorRotinas() {
       const tempoLimpeza = propriedade.tempo_limpeza_minutos || 45;
       const staffNecessario = Number(propriedade.staff_necessario) || 1;
 
-      // Data padrão: 10:00 UTC (11:00 local).
-      const dataTarefa = new Date(rangeAmanha.start);
-      dataTarefa.setUTCHours(10, 0, 0, 0);
+      // Data padrão: 10:00 de Lisboa.
+      const dataTarefa = horaPadraoDoDia(rangeAmanha.start);
 
       const novaTarefa = await Tarefa.create({
         empresa_id: empresaId,
