@@ -45,12 +45,14 @@ import {
   adminDelete,
   type PropriedadeDTO,
 } from "@/lib/api";
-import { lerUtilizador } from "@/lib/auth";
+import { lerSessao } from "@/lib/auth";
 import { eErroDeRede, mensagemErro } from "@/lib/rascunho-staff";
 import {
   CAMPOS,
   aplicarCampo,
   chaveRascunho,
+  LIMITES_CAMPO,
+  rascunhosIguais,
   anularEliminar,
   contarPendentes,
   marcarEliminar,
@@ -290,6 +292,20 @@ const ROTULO_CAMPO: Record<Campo, string> = {
   tipo_limpeza: "Tipo de limpeza",
 };
 
+/** Contador junto do limite: só aparece a partir de 90% e fica a vermelho no limite (nunca corta em silêncio). */
+function ContadorLimite({ tamanho, max, className = "" }: { tamanho: number; max: number; className?: string }) {
+  if (tamanho < max * 0.9) return null;
+  const noLimite = tamanho >= max;
+  return (
+    <span
+      role="status"
+      className={`block text-[11px] leading-tight ${noLimite ? "font-medium text-destructive" : "text-amber-700"} ${className}`}
+    >
+      {tamanho}/{max}{noLimite ? " (limite atingido)" : ""}
+    </span>
+  );
+}
+
 /**
  * Célula editável estilo Excel: mostra sempre um input discreto. Sair da célula
  * (blur) ou Enter guarda SÓ no rascunho local; Esc repõe o valor anterior.
@@ -305,6 +321,7 @@ function Celula({
   align,
   min,
   max,
+  maxLength,
   rotulo,
   cartao,
   pendente,
@@ -321,6 +338,8 @@ function Celula({
   /** Limites de um campo de data (AAAA-MM-DD). */
   min?: string;
   max?: string;
+  /** Máximo de caracteres (o mesmo do servidor), com contador perto do limite. */
+  maxLength?: number;
   /** Nome acessível da célula (aria-label), ex.: "Check-in, Casa Azul". */
   rotulo: string;
   /** Aspeto de cartão (telemóvel): campo com contorno. */
@@ -378,11 +397,13 @@ function Celula({
     );
   }
   return (
+    <>
     <input
       {...comum}
       type={type}
       min={type === "number" ? 0 : min}
       max={max}
+      maxLength={maxLength}
       placeholder={placeholder}
       value={v}
       onChange={(e) => setV(e.target.value)}
@@ -402,6 +423,8 @@ function Celula({
         }
       }}
     />
+    {maxLength ? <ContadorLimite tamanho={v.length} max={maxLength} className="px-2" /> : null}
+    </>
   );
 }
 
@@ -472,34 +495,43 @@ function CelulaNotas({
     }
   };
 
+  const maxNotas = LIMITES_CAMPO.observacoes ?? 2000;
   if (cartao) {
     return (
-      <textarea
-        ref={ref}
-        value={v}
-        rows={3}
-        disabled={disabled}
-        aria-label={nomeAcessivel}
-        onChange={(e) => setV(e.target.value)}
-        onBlur={fechar}
-        onKeyDown={teclas}
-        className={`${CELULA_NOTAS_CARTAO} ${pendente ? PENDENTE_CARTAO : ""}`}
-      />
+      <>
+        <textarea
+          ref={ref}
+          value={v}
+          rows={3}
+          maxLength={maxNotas}
+          disabled={disabled}
+          aria-label={nomeAcessivel}
+          onChange={(e) => setV(e.target.value)}
+          onBlur={fechar}
+          onKeyDown={teclas}
+          className={`${CELULA_NOTAS_CARTAO} ${pendente ? PENDENTE_CARTAO : ""}`}
+        />
+        <ContadorLimite tamanho={v.length} max={maxNotas} />
+      </>
     );
   }
   if (aberto) {
     return (
-      <textarea
-        ref={ref}
-        value={v}
-        rows={3}
-        disabled={disabled}
-        aria-label={nomeAcessivel}
-        onChange={(e) => setV(e.target.value)}
-        onBlur={fechar}
-        onKeyDown={teclas}
-        className={`block w-full resize-y bg-primary/5 px-2 py-1.5 text-sm outline-none ring-2 ring-inset ring-primary ${pendente ? PENDENTE_TABELA : ""}`}
-      />
+      <>
+        <textarea
+          ref={ref}
+          value={v}
+          rows={3}
+          maxLength={maxNotas}
+          disabled={disabled}
+          aria-label={nomeAcessivel}
+          onChange={(e) => setV(e.target.value)}
+          onBlur={fechar}
+          onKeyDown={teclas}
+          className={`block w-full resize-y bg-primary/5 px-2 py-1.5 text-sm outline-none ring-2 ring-inset ring-primary ${pendente ? PENDENTE_TABELA : ""}`}
+        />
+        <ContadorLimite tamanho={v.length} max={maxNotas} className="px-2" />
+      </>
     );
   }
   return (
@@ -602,6 +634,13 @@ export default function ParceiroReservasPage() {
   };
   const [rascunho, setRascunho] = useState<Rascunho>({ edicoes: {}, novas: [], eliminar: {} });
   const [rascunhoPronto, setRascunhoPronto] = useState(false);
+  /** Não foi possível saber quem és (rede/servidor): sem isso o rascunho não se lê nem se guarda. */
+  const [semIdentidade, setSemIdentidade] = useState(false);
+  const [tentativaIdentidade, setTentativaIdentidade] = useState(0);
+  /** O localStorage recusou guardar (sem espaço, navegação privada): as alterações não ficam no aparelho. */
+  const [semEspaco, setSemEspaco] = useState(false);
+  /** Rascunho gravado por outro separador (ou lido tarde): a pessoa escolhe qual fica. */
+  const [outroRascunho, setOutroRascunho] = useState<Rascunho | null>(null);
   const [conflitos, setConflitos] = useState<Record<string, Campo[]>>({});
   /** Reservas marcadas para eliminar que mudaram no sistema: a pessoa confirma ou anula. */
   const [elimAlteradas, setElimAlteradas] = useState<string[]>([]);
@@ -686,36 +725,86 @@ export default function ParceiroReservasPage() {
   // Rascunho por utilizador/empresa: lê no arranque.
   useEffect(() => {
     let vivo = true;
-    lerUtilizador().then((u) => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    lerSessao().then(({ estado, user: u }) => {
       if (!vivo) return;
+      if (estado === "erro") {
+        // Sem ligação: não sabemos de quem é o rascunho. Avisa e repete; não bloqueia o ecrã.
+        setSemIdentidade(true);
+        setRascunhoPronto(true);
+        if (tentativaIdentidade < 10) timer = setTimeout(() => vivo && setTentativaIdentidade((t) => t + 1), 5000);
+        return;
+      }
+      setSemIdentidade(false);
       if (u) {
         const k = chaveRascunho(u.id, u.empresa_id);
+        const guardado = lerRascunhoReservas(k, window.localStorage);
+        const emMemoria = rascunhoRef.current;
+        if (contarPendentes(emMemoria) > 0 && !rascunhosIguais(guardado, emMemoria)) {
+          // Já houve edições antes de sabermos quem eras: nada se sobrescreve às cegas.
+          if (contarPendentes(guardado) > 0) setOutroRascunho(guardado);
+        } else {
+          setRascunho(guardado);
+        }
         setChave(k);
-        setRascunho(lerRascunhoReservas(k, window.localStorage));
       }
       setRascunhoPronto(true);
     });
     return () => {
       vivo = false;
+      if (timer) clearTimeout(timer);
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tentativaIdentidade]);
 
-  // Telemóvel: com a barra «Gravar» fixa em baixo, o campo focado não pode ficar tapado.
+  // Telemóvel: com a barra «Gravar» fixa em baixo (também com só a linha nova pronta),
+  // o campo focado não pode ficar tapado.
   useEffect(() => {
-    if (pendentes === 0) return;
+    if (!podeGravar) return;
     const el = document.documentElement;
     const antes = el.style.scrollPaddingBottom;
     el.style.scrollPaddingBottom = "6rem"; // altura da barra (≈68 px) + folga
     return () => {
       el.style.scrollPaddingBottom = antes;
     };
-  }, [pendentes]);
+  }, [podeGravar]);
 
-  // Guarda o rascunho sempre que muda (nunca antes de o ter lido).
+  // Guarda o rascunho sempre que muda (nunca antes de o ter lido). Enquanto a pessoa não decide
+  // entre a versão deste separador e a de outro, não escreve (não apaga a do outro).
   useEffect(() => {
-    if (!rascunhoPronto || !chave) return;
-    guardarRascunhoReservas(chave, rascunho, window.localStorage);
-  }, [rascunho, chave, rascunhoPronto]);
+    if (!rascunhoPronto || !chave || outroRascunho) return;
+    const ok = guardarRascunhoReservas(chave, rascunho, window.localStorage);
+    setSemEspaco(!ok);
+  }, [rascunho, chave, rascunhoPronto, outroRascunho]);
+
+  // Outro separador alterou o rascunho: avisa e deixa escolher (sem perder edições em silêncio).
+  useEffect(() => {
+    if (!chave) return;
+    const k = chave;
+    const aoMudarArmazem = (e: StorageEvent) => {
+      if (e.storageArea !== window.localStorage || e.key !== k) return;
+      const deles = lerRascunhoReservas(k, window.localStorage);
+      if (rascunhosIguais(deles, rascunhoRef.current)) return;
+      setOutroRascunho(deles);
+    };
+    window.addEventListener("storage", aoMudarArmazem);
+    return () => window.removeEventListener("storage", aoMudarArmazem);
+  }, [chave]);
+
+  function usarRascunhoDoOutroSeparador() {
+    if (!outroRascunho) return;
+    setRascunho(outroRascunho);
+    setOutroRascunho(null);
+    setConflitos({});
+    setErrosLinha({});
+    reconciliarNoProximo.current = true;
+    void carregar(true);
+  }
+
+  function manterRascunhoDesteSeparador() {
+    // O próximo guardar substitui a versão do outro separador (escolha explícita).
+    setOutroRascunho(null);
+  }
 
   // Depois de cada carregamento, compara o rascunho com o servidor (sem sobrescrever às cegas).
   useEffect(() => {
@@ -1310,6 +1399,55 @@ export default function ParceiroReservasPage() {
         </Card>
       )}
 
+      {outroRascunho && (
+        <Card className="border-amber-500/60 bg-background" role="alert">
+          <CardContent className="flex flex-col gap-3 p-4 text-sm">
+            <div className="flex items-start gap-2">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+              <span className="flex-1">
+                Este rascunho foi alterado noutro separador ({textoPendentes(contarPendentes(outroRascunho))} lá,{" "}
+                {textoPendentes(pendentes)} aqui). Escolhe qual versão fica: a outra substitui esta ou esta substitui a outra.
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" className="min-h-[44px] flex-1" onClick={usarRascunhoDoOutroSeparador}>
+                Usar o do outro separador
+              </Button>
+              <Button variant="outline" className="min-h-[44px] flex-1" onClick={manterRascunhoDesteSeparador}>
+                Manter o deste separador
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {semIdentidade && (
+        <Card className="border-amber-500/50 bg-background" role="status">
+          <CardContent className="flex items-start gap-2 p-4 text-sm">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+            <span className="flex-1">
+              Sem ligação ao servidor para confirmar quem és: as alterações ainda não ficam guardadas neste aparelho.
+              Vou tentar outra vez; até lá, não feches a página.
+            </span>
+            <Button variant="outline" className="min-h-[44px]" onClick={() => setTentativaIdentidade((t) => t + 1)}>
+              Tentar outra vez
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {semEspaco && (
+        <Card className="border-destructive/60 bg-background" role="alert">
+          <CardContent className="flex items-start gap-2 p-4 text-sm text-destructive">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span className="flex-1">
+              Não foi possível guardar as alterações neste aparelho (sem espaço ou navegação privada). Carrega em Gravar
+              antes de sair: se fechares a página, perdem-se.
+            </span>
+          </CardContent>
+        </Card>
+      )}
+
       {aviso && (
         <Card className="border-amber-500/50 bg-background" role="status">
           <CardContent className="flex items-start gap-2 p-4 text-sm">
@@ -1418,7 +1556,7 @@ export default function ParceiroReservasPage() {
                       onChange={(e) => setNova((n) => ({ ...n, check_in: e.target.value, check_out: n.check_out || e.target.value }))} />
                   </td>
                   <td className="hidden p-0 min-[1600px]:table-cell">
-                    <input value={nova.hora_checkin} onChange={(e) => setN("hora_checkin")(e.target.value)} placeholder="18:00" className={CELULA} disabled={gravando} aria-label="Nova reserva: hora de check-in" />
+                    <input value={nova.hora_checkin} maxLength={LIMITES_CAMPO.hora_checkin} onChange={(e) => setN("hora_checkin")(e.target.value)} placeholder="18:00" className={CELULA} disabled={gravando} aria-label="Nova reserva: hora de check-in" />
                   </td>
                   <td className="p-0">
                     <input type="date" value={nova.check_out} onChange={(e) => setN("check_out")(e.target.value)} className={CELULA} disabled={gravando} aria-label="Nova reserva: check-out" />
@@ -1428,7 +1566,7 @@ export default function ParceiroReservasPage() {
                     <input type="number" min={0} value={nova.hospedes} onChange={(e) => setN("hospedes")(e.target.value)} className={`${CELULA} text-right`} disabled={gravando} aria-label="Nova reserva: hóspedes" />
                   </td>
                   <td className="p-0">
-                    <input value={nova.nome_hospede} onChange={(e) => setN("nome_hospede")(e.target.value)} className={CELULA} disabled={gravando} aria-label="Nova reserva: nome do hóspede" />
+                    <input value={nova.nome_hospede} maxLength={LIMITES_CAMPO.nome_hospede} onChange={(e) => setN("nome_hospede")(e.target.value)} className={CELULA} disabled={gravando} aria-label="Nova reserva: nome do hóspede" />
                   </td>
                   <td className="p-0">
                     <select value={nova.plataforma} onChange={(e) => setN("plataforma")(e.target.value)} className={CELULA} disabled={gravando} aria-label="Nova reserva: plataforma">
@@ -1442,10 +1580,11 @@ export default function ParceiroReservasPage() {
                     </select>
                   </td>
                   <td className="hidden p-0 min-[1366px]:table-cell">
-                    <input value={nova.horario_preferido} onChange={(e) => setN("horario_preferido")(e.target.value)} placeholder="11h - 14h" className={CELULA} disabled={gravando} aria-label="Nova reserva: horário preferido de limpeza" />
+                    <input value={nova.horario_preferido} maxLength={LIMITES_CAMPO.horario_preferido} onChange={(e) => setN("horario_preferido")(e.target.value)} placeholder="11h - 14h" className={CELULA} disabled={gravando} aria-label="Nova reserva: horário preferido de limpeza" />
                   </td>
                   <td className="p-0">
-                    <textarea value={nova.observacoes} onChange={(e) => { setN("observacoes")(e.target.value); e.currentTarget.style.height = "auto"; e.currentTarget.style.height = `${e.currentTarget.scrollHeight + 2}px`; }} onKeyDown={(e) => { if (e.key === "Enter") e.stopPropagation(); }} rows={3} className={`${CELULA} h-auto min-h-[4.75rem] resize-y py-1.5`} disabled={gravando} aria-label="Nova reserva: notas" />
+                    <textarea value={nova.observacoes} maxLength={LIMITES_CAMPO.observacoes} onChange={(e) => { setN("observacoes")(e.target.value); e.currentTarget.style.height = "auto"; e.currentTarget.style.height = `${e.currentTarget.scrollHeight + 2}px`; }} onKeyDown={(e) => { if (e.key === "Enter") e.stopPropagation(); }} rows={3} className={`${CELULA} h-auto min-h-[4.75rem] resize-y py-1.5`} disabled={gravando} aria-label="Nova reserva: notas" />
+                    <ContadorLimite tamanho={nova.observacoes.length} max={LIMITES_CAMPO.observacoes ?? 2000} className="px-2" />
                   </td>
                   <td className={`${FIXO_ESTADO} bg-background bg-gradient-to-r from-primary/5 to-primary/5 px-2 text-xs text-muted-foreground`}>nova</td>
                   <td className={`${FIXO_ACOES} bg-background bg-gradient-to-r from-primary/5 to-primary/5 px-1 text-right`}>
@@ -1475,7 +1614,7 @@ export default function ParceiroReservasPage() {
                           <Celula type="date" value={ci} pendente={p("check_in")} rotulo={`Check-in, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "check_in", v)} />
                         </td>
                         <td className="hidden p-0 min-[1600px]:table-cell">
-                          <Celula value={l.valores.hora_checkin} pendente={p("hora_checkin")} rotulo={`Hora de check-in, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "hora_checkin", v)} />
+                          <Celula value={l.valores.hora_checkin} maxLength={LIMITES_CAMPO.hora_checkin} pendente={p("hora_checkin")} rotulo={`Hora de check-in, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "hora_checkin", v)} />
                         </td>
                         <td className="p-0">
                           <Celula type="date" value={co} pendente={p("check_out")} rotulo={`Check-out, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "check_out", v)} />
@@ -1487,7 +1626,7 @@ export default function ParceiroReservasPage() {
                           <Celula type="number" align="right" value={l.valores.hospedes} pendente={p("hospedes")} rotulo={`Hóspedes, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "hospedes", v)} />
                         </td>
                         <td className="p-0">
-                          <Celula value={l.valores.nome_hospede} pendente={p("nome_hospede")} rotulo={`Nome do hóspede, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "nome_hospede", v)} />
+                          <Celula value={l.valores.nome_hospede} maxLength={LIMITES_CAMPO.nome_hospede} pendente={p("nome_hospede")} rotulo={`Nome do hóspede, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "nome_hospede", v)} />
                         </td>
                         <td className="p-0">
                           <Celula type="select" options={PLATAFORMAS} pendente={p("plataforma")} rotulo={`Plataforma, ${nome}`} value={l.valores.plataforma} disabled={l.semEdicao} onCommit={(v) => alterar(l, "plataforma", v)} />
@@ -1496,7 +1635,7 @@ export default function ParceiroReservasPage() {
                           <Celula type="select" opcoes={OPCOES_TIPO} pendente={p("tipo_limpeza")} rotulo={`Tipo de limpeza, ${nome}`} value={tipoOuNormal(l.valores.tipo_limpeza)} disabled={l.semEdicao} onCommit={(v) => alterar(l, "tipo_limpeza", v)} />
                         </td>
                         <td className="hidden p-0 min-[1366px]:table-cell">
-                          <Celula value={l.valores.horario_preferido} pendente={p("horario_preferido")} rotulo={`Horário preferido, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "horario_preferido", v)} />
+                          <Celula value={l.valores.horario_preferido} maxLength={LIMITES_CAMPO.horario_preferido} pendente={p("horario_preferido")} rotulo={`Horário preferido, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "horario_preferido", v)} />
                         </td>
                         <td className="p-0">
                           <CelulaNotas value={l.valores.observacoes} pendente={p("observacoes")} rotulo={`Observações, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "observacoes", v)} />
@@ -1589,14 +1728,14 @@ export default function ParceiroReservasPage() {
                   <input type="date" value={nova.check_out} onChange={(e) => setN("check_out")(e.target.value)} className={CELULA_CARTAO} disabled={gravando} aria-label="Nova reserva: check-out" />
                 </Campo>
                 <Campo texto="Hora de check-in">
-                  <input value={nova.hora_checkin} onChange={(e) => setN("hora_checkin")(e.target.value)} placeholder="18:00" className={CELULA_CARTAO} disabled={gravando} aria-label="Nova reserva: hora de check-in" />
+                  <input value={nova.hora_checkin} maxLength={LIMITES_CAMPO.hora_checkin} onChange={(e) => setN("hora_checkin")(e.target.value)} placeholder="18:00" className={CELULA_CARTAO} disabled={gravando} aria-label="Nova reserva: hora de check-in" />
                 </Campo>
                 <Campo texto="Hóspedes">
                   <input type="number" inputMode="numeric" min={0} value={nova.hospedes} onChange={(e) => setN("hospedes")(e.target.value)} className={CELULA_CARTAO} disabled={gravando} aria-label="Nova reserva: hóspedes" />
                 </Campo>
               </div>
               <Campo texto="Nome do hóspede">
-                <input value={nova.nome_hospede} onChange={(e) => setN("nome_hospede")(e.target.value)} className={CELULA_CARTAO} disabled={gravando} aria-label="Nova reserva: nome do hóspede" />
+                <input value={nova.nome_hospede} maxLength={LIMITES_CAMPO.nome_hospede} onChange={(e) => setN("nome_hospede")(e.target.value)} className={CELULA_CARTAO} disabled={gravando} aria-label="Nova reserva: nome do hóspede" />
               </Campo>
               <Campo texto="Plataforma">
                 <select value={nova.plataforma} onChange={(e) => setN("plataforma")(e.target.value)} className={CELULA_CARTAO} disabled={gravando} aria-label="Nova reserva: plataforma">
@@ -1610,10 +1749,11 @@ export default function ParceiroReservasPage() {
                 </select>
               </Campo>
               <Campo texto="Horário preferido de limpeza">
-                <input value={nova.horario_preferido} onChange={(e) => setN("horario_preferido")(e.target.value)} placeholder="11h - 14h" className={CELULA_CARTAO} disabled={gravando} aria-label="Nova reserva: horário preferido de limpeza" />
+                <input value={nova.horario_preferido} maxLength={LIMITES_CAMPO.horario_preferido} onChange={(e) => setN("horario_preferido")(e.target.value)} placeholder="11h - 14h" className={CELULA_CARTAO} disabled={gravando} aria-label="Nova reserva: horário preferido de limpeza" />
               </Campo>
               <Campo texto="Notas">
-                <textarea value={nova.observacoes} onChange={(e) => setN("observacoes")(e.target.value)} onInput={cresce} rows={3} className={CELULA_NOTAS_CARTAO} disabled={gravando} aria-label="Nova reserva: notas" />
+                <textarea value={nova.observacoes} maxLength={LIMITES_CAMPO.observacoes} onChange={(e) => setN("observacoes")(e.target.value)} onInput={cresce} rows={3} className={CELULA_NOTAS_CARTAO} disabled={gravando} aria-label="Nova reserva: notas" />
+                <ContadorLimite tamanho={nova.observacoes.length} max={LIMITES_CAMPO.observacoes ?? 2000} className="px-2" />
               </Campo>
               {novaErro && <p role="alert" className="text-sm text-destructive">{novaErro}</p>}
               <Button size="touch" variant="outline" className="w-full" onClick={acrescentarNova} disabled={gravando} aria-label="Acrescentar reserva por gravar">
@@ -1721,7 +1861,7 @@ export default function ParceiroReservasPage() {
                       <Celula cartao type="date" value={co} pendente={p("check_out")} rotulo={`Check-out, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "check_out", v)} />
                     </Campo>
                     <Campo texto="Hora de check-in">
-                      <Celula cartao value={l.valores.hora_checkin} pendente={p("hora_checkin")} rotulo={`Hora de check-in, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "hora_checkin", v)} />
+                      <Celula cartao value={l.valores.hora_checkin} maxLength={LIMITES_CAMPO.hora_checkin} pendente={p("hora_checkin")} rotulo={`Hora de check-in, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "hora_checkin", v)} />
                     </Campo>
                     <Campo texto="Noites">
                       <Celula cartao type="number" value={String(noites(ci, co))} pendente={p("check_out")} rotulo={`Noites, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "noites", v)} />
@@ -1734,13 +1874,13 @@ export default function ParceiroReservasPage() {
                     </Campo>
                   </div>
                   <Campo texto="Nome do hóspede">
-                    <Celula cartao value={l.valores.nome_hospede} pendente={p("nome_hospede")} rotulo={`Nome do hóspede, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "nome_hospede", v)} />
+                    <Celula cartao value={l.valores.nome_hospede} maxLength={LIMITES_CAMPO.nome_hospede} pendente={p("nome_hospede")} rotulo={`Nome do hóspede, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "nome_hospede", v)} />
                   </Campo>
                   <Campo texto="Tipo de limpeza">
                     <Celula cartao type="select" opcoes={OPCOES_TIPO} value={tipoOuNormal(l.valores.tipo_limpeza)} pendente={p("tipo_limpeza")} rotulo={`Tipo de limpeza, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "tipo_limpeza", v)} />
                   </Campo>
                   <Campo texto="Horário preferido de limpeza">
-                    <Celula cartao value={l.valores.horario_preferido} pendente={p("horario_preferido")} rotulo={`Horário preferido, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "horario_preferido", v)} />
+                    <Celula cartao value={l.valores.horario_preferido} maxLength={LIMITES_CAMPO.horario_preferido} pendente={p("horario_preferido")} rotulo={`Horário preferido, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "horario_preferido", v)} />
                   </Campo>
                   <Campo texto="Notas">
                     <CelulaNotas cartao value={l.valores.observacoes} pendente={p("observacoes")} rotulo={`Observações, ${nome}`} disabled={l.semEdicao} onCommit={(v) => alterar(l, "observacoes", v)} />

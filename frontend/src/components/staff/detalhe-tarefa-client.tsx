@@ -44,6 +44,7 @@ import {
   lerRascunho,
   lerRascunhoAvaria,
   limparRascunho,
+  limparRascunhosObsoletos,
   mensagemErro,
 } from "@/lib/rascunho-staff";
 import { Button } from "@/components/ui/button";
@@ -107,9 +108,12 @@ function formatarMinutos(min: number) {
  *  checkboxes estiverem marcadas (ou seja, `todasMarcadas === false`).
  */
 export function DetalheTarefaClient({
+  dono,
   tarefa,
   checklist,
 }: {
+  /** Empresa + utilizador: chave dos rascunhos (vazio = sem rascunhos). */
+  dono: string;
   tarefa: TarefaMock;
   checklist: string[];
 }) {
@@ -154,7 +158,7 @@ export function DetalheTarefaClient({
   const [rascunhoInicial] = useState(() =>
     jaConcluida || typeof window === "undefined"
       ? null
-      : lerRascunho(String(tarefa.id), checklist.length)
+      : lerRascunho(dono, String(tarefa.id), checklist.length)
   );
   const [itensMarcados, setItensMarcados] = useState<boolean[]>(
     // Se já estiver concluída, pré-marca todos os itens (reflete o final).
@@ -186,7 +190,7 @@ export function DetalheTarefaClient({
   // Modal de reportar avaria (v1.38.0 / HF13 enriquecido com fotos)
   const [mostrarAvaria, setMostrarAvaria] = useState(false);
   const [avariaDesc, setAvariaDesc] = useState(() =>
-    typeof window === "undefined" ? "" : lerRascunhoAvaria(String(tarefa.id))
+    typeof window === "undefined" ? "" : lerRascunhoAvaria(dono, String(tarefa.id))
   );
   const [avariaErro, setAvariaErro] = useState<string | null>(null);
   // HF13 — fotos em base64 (upload simplificado, sem object storage).
@@ -215,14 +219,19 @@ export function DetalheTarefaClient({
 
   // O texto da avaria sobrevive a fechar/reabrir e a recarregar (fotos não: RGPD).
   useEffect(() => {
-    guardarRascunhoAvaria(String(tarefa.id), avariaDesc);
-  }, [tarefa.id, avariaDesc]);
+    guardarRascunhoAvaria(dono, String(tarefa.id), avariaDesc);
+  }, [dono, tarefa.id, avariaDesc]);
 
   // Guarda o rascunho sempre que muda (nunca fotos nem dados do hóspede).
   useEffect(() => {
     if (concluida) return;
-    guardarRascunho(String(tarefa.id), { observacoes, itens: itensMarcados });
-  }, [tarefa.id, observacoes, itensMarcados, concluida]);
+    guardarRascunho(dono, String(tarefa.id), { observacoes, itens: itensMarcados });
+  }, [dono, tarefa.id, observacoes, itensMarcados, concluida]);
+
+  // Apaga rascunhos antigos (formato anterior, sem utilizador) e os que já passaram de 7 dias.
+  useEffect(() => {
+    limparRascunhosObsoletos();
+  }, []);
 
   // Se o envio falhou por falta de rede e o diálogo continua aberto, volta a
   // tentar sozinho quando a rede regressa (o botão "Tentar de novo" também serve).
@@ -350,7 +359,7 @@ export function DetalheTarefaClient({
       const data = await res.json();
       if (!res.ok) throw new Error(data?.erro || `Erro ${res.status}`);
       setConcluida(true);
-      limparRascunho(String(tarefa.id));
+      limparRascunho(dono, String(tarefa.id));
       setMostrarConcluir(false);
       // Mostra a mensagem verde durante 1.2s antes de redirecionar.
       setTimeout(() => router.push("/staff"), 1200);
@@ -411,7 +420,7 @@ export function DetalheTarefaClient({
       setAvariaResultado("Avaria reportada com sucesso. O gestor será notificado.");
       setAvariaDesc("");
       setAvariaFotos([]);
-      guardarRascunhoAvaria(String(tarefa.id), "");
+      guardarRascunhoAvaria(dono, String(tarefa.id), "");
       // Fecha o dialog após 1.5s.
       setTimeout(() => {
         setMostrarAvaria(false);

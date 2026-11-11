@@ -62,7 +62,9 @@ function LoginConteudo() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [erro, setErro] = useState<string | null>(null);
+  const [erro, setErro] = useState<string | null>(
+    searchParams.get("aviso") === "acessos" ? "Os teus acessos mudaram. Entra outra vez." : null
+  );
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
