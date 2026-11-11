@@ -8,7 +8,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "node --test src/lib/rascunho-reservas.test.mjs src/lib/ordenacao-reservas.test.mjs src/lib/equipa.test.mjs src/lib/utils.test.mjs src/lib/dialogo-portal.test.mjs src/lib/rgpd.test.mjs"
+    "test": "node --test src/lib/rascunho-reservas.test.mjs src/lib/ordenacao-reservas.test.mjs src/lib/equipa.test.mjs src/lib/utils.test.mjs src/lib/dialogo-portal.test.mjs src/lib/rgpd.test.mjs src/lib/rascunho-staff.test.mjs src/lib/guarda-role.test.mjs src/lib/auth-sessao.test.mjs"
   },
   "dependencies": {
     "@ducanh2912/next-pwa": "^10.2.9",

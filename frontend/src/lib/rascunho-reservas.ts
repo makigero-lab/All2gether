@@ -49,6 +49,32 @@ export function tipoOuNormal(v: string | null | undefined): TipoLimpeza {
 export type Campo = (typeof CAMPOS)[number];
 export type Valores = Record<Campo, string>;
 
+/**
+ * Limites de texto por campo: os mesmos do servidor (parceiroController / ReservaManual).
+ * O ecrã usa-os em `maxLength` e no contador, para nunca haver cortes silenciosos.
+ */
+export const LIMITES_CAMPO: Partial<Record<Campo, number>> = {
+  nome_hospede: 120,
+  plataforma: 40,
+  hora_checkin: 60,
+  horario_preferido: 60,
+  observacoes: 2000,
+};
+
+const NOME_LIMITE: Partial<Record<Campo, string>> = {
+  nome_hospede: "Nome do hóspede",
+  plataforma: "Plataforma",
+  hora_checkin: "Hora de check-in",
+  horario_preferido: "Horário preferido",
+  observacoes: "Observações",
+};
+
+/** Corta o texto ao limite do campo (usado só ao ler dados de fora: localStorage). */
+function limitar(campo: Campo, texto: string): string {
+  const max = LIMITES_CAMPO[campo];
+  return max ? texto.slice(0, max) : texto.slice(0, 2000);
+}
+
 /** Edição pendente de uma reserva já gravada: o que mudou e o valor que havia ANTES. */
 export interface Edicao {
   campos: Partial<Valores>;
@@ -96,8 +122,8 @@ export function lerRascunhoReservas(chave: string, armazem: ArmazemMinimo, agora
     const bruto = armazem.getItem(chave);
     if (!bruto) return vazio();
     const r = JSON.parse(bruto);
-    // Rascunho expirado (ou sem data, de versões antigas e sem prazo): apaga.
-    if (typeof r?.guardado_em === "number" && agora - r.guardado_em > VALIDADE_RASCUNHO_MS) {
+    // Rascunho expirado, ou sem data válida (versões antigas, sem prazo): apaga.
+    if (typeof r?.guardado_em !== "number" || agora - r.guardado_em > VALIDADE_RASCUNHO_MS) {
       try { armazem.removeItem(chave); } catch { /* ignora */ }
       return vazio();
     }
@@ -110,7 +136,7 @@ export function lerRascunhoReservas(chave: string, armazem: ArmazemMinimo, agora
       for (const c of CAMPOS) {
         const vc = e?.campos?.[c];
         if (eTexto(vc)) {
-          campos[c] = vc.slice(0, 2000);
+          campos[c] = limitar(c, vc);
           const va = e?.antes?.[c];
           antes[c] = eTexto(va) ? va : "";
         }
@@ -121,7 +147,7 @@ export function lerRascunhoReservas(chave: string, armazem: ArmazemMinimo, agora
     for (const n of Array.isArray(r?.novas) ? r.novas : []) {
       if (!n || !eTexto(n.tmp) || !eTexto(n.propriedade_id)) continue;
       const nova = { tmp: n.tmp, propriedade_id: n.propriedade_id } as NovaReserva;
-      for (const c of CAMPOS) nova[c] = eTexto(n[c]) ? n[c].slice(0, 2000) : "";
+      for (const c of CAMPOS) nova[c] = eTexto(n[c]) ? limitar(c, n[c]) : "";
       novas.push(nova);
     }
     const eliminar: Record<string, Valores> = {};
@@ -129,7 +155,7 @@ export function lerRascunhoReservas(chave: string, armazem: ArmazemMinimo, agora
       r?.eliminar && typeof r.eliminar === "object" ? r.eliminar : {}
     )) {
       const snap = {} as Valores;
-      for (const c of CAMPOS) snap[c] = eTexto(v?.[c]) ? (v[c] as string).slice(0, 2000) : "";
+      for (const c of CAMPOS) snap[c] = eTexto(v?.[c]) ? limitar(c, v[c] as string) : "";
       eliminar[id] = snap;
     }
     return { edicoes, novas, eliminar };
@@ -138,17 +164,26 @@ export function lerRascunhoReservas(chave: string, armazem: ArmazemMinimo, agora
   }
 }
 
-/** Guarda (ou apaga, se vazio) o rascunho. Falhas de quota/modo privado são ignoradas. */
-export function guardarRascunhoReservas(chave: string, r: Rascunho, armazem: ArmazemMinimo, agora: number = Date.now()): void {
+/**
+ * Guarda (ou apaga, se vazio) o rascunho. Devolve false se não conseguiu guardar
+ * (quota cheia, modo privado): o ecrã avisa que as alterações não ficam neste aparelho.
+ */
+export function guardarRascunhoReservas(chave: string, r: Rascunho, armazem: ArmazemMinimo, agora: number = Date.now()): boolean {
   try {
     if (Object.keys(r.edicoes).length === 0 && r.novas.length === 0 && Object.keys(r.eliminar ?? {}).length === 0) {
       armazem.removeItem(chave);
-      return;
+      return true;
     }
     armazem.setItem(chave, JSON.stringify({ ...r, guardado_em: agora }));
+    return true;
   } catch {
-    // ignora
+    return false;
   }
+}
+
+/** Dois rascunhos têm o mesmo conteúdo (ignora a data de gravação)? */
+export function rascunhosIguais(a: Rascunho, b: Rascunho): boolean {
+  return JSON.stringify({ e: a.edicoes, n: a.novas, x: a.eliminar ?? {} }) === JSON.stringify({ e: b.edicoes, n: b.novas, x: b.eliminar ?? {} });
 }
 
 /**
@@ -263,6 +298,9 @@ export function validarReserva(v: Valores, propriedade?: string): string | null 
   }
   if (v.hospedes !== "" && !/^\d{1,3}$/.test(v.hospedes.trim())) {
     return "Número de hóspedes inválido.";
+  }
+  for (const [campo, max] of Object.entries(LIMITES_CAMPO) as [Campo, number][]) {
+    if ((v[campo] ?? "").trim().length > max) return `${NOME_LIMITE[campo] ?? campo}: máximo de ${max} caracteres.`;
   }
   return null;
 }

@@ -298,6 +298,18 @@ function lerCamposExtra(body) {
   return out;
 }
 
+/** Limite das observações da reserva (o ecrã do parceiro usa o mesmo valor). */
+const MAX_OBSERVACOES_RESERVA = 2000;
+
+/** Erro (pt-PT) se as observações passam o limite; nunca corta em silêncio. */
+function erroObservacoes(valor) {
+  if (valor === undefined || valor === null) return null;
+  if (String(valor).trim().length > MAX_OBSERVACOES_RESERVA) {
+    return `As observações podem ter no máximo ${MAX_OBSERVACOES_RESERVA} caracteres.`;
+  }
+  return null;
+}
+
 /** Campos da reserva que se refletem em tarefa.detalhes_reserva. */
 function detalhesDaReserva(extras) {
   const d = {};
@@ -580,6 +592,8 @@ async function criarReserva(req, res) {
 
     const { propriedade_id, check_in, check_out, hospedes, observacoes } = req.body || {};
     const extras = lerCamposExtra(req.body);
+    const erroObs = erroObservacoes(observacoes);
+    if (erroObs) return res.status(400).json({ erro: erroObs });
 
     if (!propriedade_id || !mongoose.isValidObjectId(propriedade_id)) {
       return res.status(400).json({ erro: 'propriedade_id é obrigatório.' });
@@ -785,6 +799,8 @@ async function atualizarReserva(req, res) {
 
     const body = req.body || {};
     const extras = lerCamposExtra(body);
+    const erroObs = erroObservacoes(body.observacoes);
+    if (erroObs) return res.status(400).json({ erro: erroObs });
     const novoCheckIn = body.check_in ?? reserva.check_in;
     const novoCheckOut = body.check_out ?? reserva.check_out;
     // Reservas antigas: os limites só se verificam se as datas mudarem (editar notas não bloqueia).

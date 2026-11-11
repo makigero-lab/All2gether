@@ -82,6 +82,21 @@ describe('Reservas do parceiro', () => {
     expect(t.detalhes_reserva.hora_checkin).toBe('18:00');
   });
 
+  it('observações: aceita 2000 caracteres e recusa 2001 (criar e editar), sem cortar em silêncio', async () => {
+    const ok = await criar({ check_in: '2030-09-01', check_out: '2030-09-03', observacoes: 'a'.repeat(2000) });
+    expect(ok.status).toBe(201);
+    expect(ok.body.reserva.observacoes.length).toBe(2000);
+    expect((await criar({ check_in: '2030-09-10', check_out: '2030-09-12', observacoes: 'a'.repeat(2001) })).status).toBe(400);
+    const put = await request(app)
+      .put(`/api/parceiro/reservas/${ok.body.reserva._id}`)
+      .set(auth(token))
+      .send({ observacoes: 'b'.repeat(2001) });
+    expect(put.status).toBe(400);
+    expect(put.body.erro).toMatch(/2000/);
+    const depois = await ReservaManual.findById(ok.body.reserva._id).lean();
+    expect(depois.observacoes.length).toBe(2000);
+  });
+
   it('rejeita check-out anterior ao check-in e datas inválidas', async () => {
     expect((await criar({ check_in: '2030-06-10', check_out: '2030-06-08' })).status).toBe(400);
     expect((await criar({ check_in: 'xx', check_out: 'yy' })).status).toBe(400);

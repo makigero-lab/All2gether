@@ -218,3 +218,55 @@ test("rascunho: o tipo guarda-se, a data da limpeza de rascunhos antigos é desc
   assert.equal(lido.tipo_limpeza, "");
   assert.equal(L.validarReserva(lido, "p1"), null);
 });
+
+test("N11a: rascunho sem guardado_em é tratado como expirado e apagado", () => {
+  const a = new Armazem();
+  a.setItem("k", JSON.stringify({ edicoes: { r1: { campos: { hospedes: "3" }, antes: { hospedes: "2" } } }, novas: [], eliminar: {} }));
+  assert.equal(L.contarPendentes(L.lerRascunhoReservas("k", a)), 0);
+  assert.equal(a.getItem("k"), null);
+  a.setItem("k", JSON.stringify({ edicoes: {}, novas: [], eliminar: { r1: servidor }, guardado_em: "ontem" }));
+  assert.equal(L.contarPendentes(L.lerRascunhoReservas("k", a)), 0);
+});
+
+test("N11d: guardar devolve false quando o armazém recusa (quota) e true quando guarda", () => {
+  const cheio = { getItem: () => null, removeItem() {}, setItem() { throw new Error("QuotaExceededError"); } };
+  const r = L.marcarEliminar({ edicoes: {}, novas: [], eliminar: {} }, "r1", servidor);
+  assert.equal(L.guardarRascunhoReservas("k", r, cheio), false);
+  const a = new Armazem();
+  assert.equal(L.guardarRascunhoReservas("k", r, a), true);
+  assert.equal(L.guardarRascunhoReservas("k", { edicoes: {}, novas: [], eliminar: {} }, a), true);
+  assert.equal(a.getItem("k"), null);
+});
+
+test("N7: limites iguais aos do servidor; validarReserva recusa texto acima do limite e aceita no limite", () => {
+  assert.deepEqual(
+    { n: L.LIMITES_CAMPO.nome_hospede, p: L.LIMITES_CAMPO.plataforma, o: L.LIMITES_CAMPO.observacoes, h: L.LIMITES_CAMPO.horario_preferido, c: L.LIMITES_CAMPO.hora_checkin },
+    { n: 120, p: 40, o: 2000, h: 60, c: 60 }
+  );
+  assert.equal(L.validarReserva({ ...servidor, observacoes: "a".repeat(2000) }), null);
+  assert.match(L.validarReserva({ ...servidor, observacoes: "a".repeat(2001) }), /Observações.*2000/);
+  assert.match(L.validarReserva({ ...servidor, nome_hospede: "n".repeat(121) }), /Nome do hóspede.*120/);
+  assert.match(L.validarReserva({ ...servidor, plataforma: "p".repeat(41) }), /Plataforma.*40/);
+  assert.equal(L.validarReserva({ ...servidor, nome_hospede: "n".repeat(120), plataforma: "p".repeat(40) }), null);
+});
+
+test("N7: ao ler, cada campo é cortado ao seu limite (e não a 2000 para todos)", () => {
+  const a = new Armazem();
+  a.setItem("k", JSON.stringify({
+    edicoes: { r1: { campos: { nome_hospede: "n".repeat(500), observacoes: "o".repeat(5000) }, antes: {} } },
+    novas: [], eliminar: {}, guardado_em: Date.now(),
+  }));
+  const lido = L.lerRascunhoReservas("k", a);
+  assert.equal(lido.edicoes.r1.campos.nome_hospede.length, 120);
+  assert.equal(lido.edicoes.r1.campos.observacoes.length, 2000);
+});
+
+test("N8: rascunhosIguais ignora a data de gravação e distingue conteúdo", () => {
+  const a = new Armazem();
+  const r = L.marcarEliminar({ edicoes: {}, novas: [], eliminar: {} }, "r1", servidor);
+  L.guardarRascunhoReservas("k", r, a, 1000);
+  const lido1 = L.lerRascunhoReservas("k", a, 1000);
+  L.guardarRascunhoReservas("k", r, a, 5000);
+  assert.equal(L.rascunhosIguais(lido1, L.lerRascunhoReservas("k", a, 5000)), true);
+  assert.equal(L.rascunhosIguais(lido1, { edicoes: {}, novas: [], eliminar: {} }), false);
+});
