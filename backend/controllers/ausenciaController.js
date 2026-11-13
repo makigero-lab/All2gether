@@ -810,7 +810,7 @@ async function reatribuirTarefasPeriodo(empresaId, utilizadorId, inicio, fim) {
       { estado: 'atribuida', pessoas_em_falta: { $gt: 0 } },
     ],
   })
-    .populate({ path: 'propriedade_id', select: 'nome coordenadas staff_necessario' })
+    .populate({ path: 'propriedade_id', select: 'nome coordenadas staff_necessario ativo parceiro_id' })
     .lean();
 
   if (tarefas.length === 0) {
@@ -831,8 +831,11 @@ async function reatribuirTarefasPeriodo(empresaId, utilizadorId, inicio, fim) {
   // Vagas em que havia candidatos mas todos com a agenda ocupada à hora da tarefa.
   const conflitosAgenda = [];
 
+  const { casaInativa } = require('../utils/casaAtiva');
   for (const tarefa of tarefas) {
     try {
+      // Casa inativa (ou de proprietário inativo): não recebe pessoas.
+      if (await casaInativa(tarefa.propriedade_id)) continue;
       const d = new Date(tarefa.data);
       const start = new Date(
         Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())

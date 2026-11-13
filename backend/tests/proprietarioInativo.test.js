@@ -185,6 +185,20 @@ describe('casas inativas não geram limpezas', () => {
     expect(await abrirOferta(t._id)).toMatchObject({ aberta: false, motivo: 'casa_inativa' });
   });
 
+  test('preenchimento de vagas depois de uma ausência também ignora a casa inativa (e continua a atribuir as ativas)', async () => {
+    const c = await cenario();
+    const inativa = await c.casa(c.dono, { ativo: false });
+    const ativa = await c.casa(null);
+    const d = futuro(6);
+    const t1 = await c.tarefa(inativa, d);
+    const t2 = await c.tarefa(ativa, d);
+    const { reatribuirTarefasPeriodo } = require('../controllers/ausenciaController');
+    await reatribuirTarefasPeriodo(c.e._id, c.bia._id, d, d);
+    expect((await Tarefa.findById(t1._id)).utilizador_id).toBeNull();
+    expect((await Tarefa.findById(t1._id)).estado).toBe('por_atribuir');
+    expect((await Tarefa.findById(t2._id)).estado).toBe('atribuida');
+  });
+
   test('reservas do parceiro: casa inativa não aceita reservas novas', async () => {
     const c = await cenario();
     const A = await c.casa(c.dono);
