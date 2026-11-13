@@ -25,7 +25,7 @@ const Rv = require('./reservas');
 const resp = (status, body) => ({ status, body });
 const MAX_LOTE = 200;
 /** Tempo máximo de um pedido de lote: o que não couber fica para o pedido seguinte (nunca chega ao limite do proxy). */
-const ORCAMENTO_LOTE_MS = 20000;
+const ORCAMENTO_LOTE_MS = 15000;
 
 /** Estado simples de uma fonte para a interface (e o texto de erro em linguagem simples). */
 function celula(f, semAcordo) {

@@ -38,7 +38,7 @@ function ReservasDoGestor() {
   };
 
   return (
-    <main className="flex flex-col gap-4 p-4 sm:p-6 lg:p-8">
+    <div className="flex flex-col gap-4 p-4 sm:p-6 lg:p-8">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="space-y-1">
           <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
@@ -82,7 +82,7 @@ function ReservasDoGestor() {
           />
         </div>
       )}
-    </main>
+    </div>
   );
 }
 

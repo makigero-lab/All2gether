@@ -31,6 +31,9 @@ import {
 // FIX (bug status smoobu) — Força a rota a ser sempre dinâmica (nunca cached).
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+// Os lotes de confirmações podem demorar: o servidor do lote pára aos 15 s e devolve o que falta (o ecrã continua);
+// 60 s dão folga para um arranque a frio do Render. (Só tem efeito na Vercel.)
+export const maxDuration = 60;
 
 const COOKIE_NAME = "all2gether_token";
 
