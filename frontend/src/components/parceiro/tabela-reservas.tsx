@@ -33,7 +33,7 @@ import { EstadoTarefaBadge } from "@/components/ui/estado-tarefa-badge";
 import { LimpezaConcluida } from "@/components/parceiro/limpeza-concluida";
 import { EtiquetasReserva } from "@/components/parceiro/etiquetas-reserva";
 import { ReservasPorConfirmar } from "@/components/parceiro/reservas-por-confirmar";
-import { CartoesLimpezasGestao, LinhasLimpezasGestao, type LimpezaGestaoDTO } from "@/components/parceiro/limpezas-da-gestao";
+import { CartoesReservasExternas, LinhasReservasExternas, type ReservaExternaDTO as ReservaSmoobuDTO } from "@/components/parceiro/reservas-externas";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
@@ -634,7 +634,7 @@ export function TabelaReservas({
 }: TabelaReservasProps = {}) {
   const [reservas, setReservas] = useState<ReservaDTO[]>([]);
   // Limpezas criadas pela All2gether / vindas do Smoobu nas casas dele: só de leitura.
-  const [limpezasGestao, setLimpezasGestao] = useState<LimpezaGestaoDTO[]>([]);
+  const [reservasExternas, setReservasExternas] = useState<ReservaSmoobuDTO[]>([]);
   const [propriedades, setPropriedades] = useState<PropriedadeDTO[]>([]);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
@@ -742,12 +742,12 @@ export function TabelaReservas({
     setErro(null);
     try {
       const [resReservas, resProps] = await Promise.all([
-        adminGet<{ reservas: ReservaDTO[]; limpezas_gestao?: LimpezaGestaoDTO[] }>(`${apiBase}/reservas`),
+        adminGet<{ reservas: ReservaDTO[]; reservas_externas?: ReservaSmoobuDTO[] }>(`${apiBase}/reservas`),
         adminGet<{ propriedades: PropriedadeDTO[] }>(`${apiBase}/propriedades`),
       ]);
       reconciliarNoProximo.current = true;
       setReservas(resReservas.reservas ?? []);
-      setLimpezasGestao(resReservas.limpezas_gestao ?? []);
+      setReservasExternas(resReservas.reservas_externas ?? []);
       const props = resProps.propriedades ?? [];
       setPropriedades(props);
       // Com uma só propriedade, a linha nova já vem preenchida.
@@ -1756,7 +1756,7 @@ export function TabelaReservas({
                   );
                 })}
                 {/* Limpezas da All2gether e do Smoobu: só de leitura */}
-                <LinhasLimpezasGestao limpezas={limpezasGestao} classeEstado={FIXO_ESTADO} classeAcoes={FIXO_ACOES} />
+                <LinhasReservasExternas reservas={reservasExternas} classeEstado={FIXO_ESTADO} classeAcoes={FIXO_ACOES} />
               </tbody>
             </table>
           </div>
@@ -1961,7 +1961,7 @@ export function TabelaReservas({
             );
           })}
 
-          <CartoesLimpezasGestao limpezas={limpezasGestao} />
+          <CartoesReservasExternas reservas={reservasExternas} />
         </div>
         </>
       )}

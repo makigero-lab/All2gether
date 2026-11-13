@@ -1,7 +1,8 @@
 /**
- * O proprietário vê (só de leitura) as limpezas criadas pela All2gether e as do Smoobu nas casas dele;
+ * A tabela de Reservas do proprietário mostra SÓ reservas: as dele e as do Smoobu nas casas dele (só de leitura,
+ * uma linha por reserva); nunca limpezas avulsas do gestor nem manutenções;
  * recebe aviso quando o Smoobu as cancela/altera; o gestor recebe aviso quando o proprietário mexe em
- * limpezas das próximas 48 h; o Smoobu grava a origem e há um script de migração.
+ * limpezas que começam nas próximas 48 h exatas; o Smoobu grava a origem e há um script de migração.
  */
 const mongoose = require('mongoose');
 const { MongoMemoryServer } = require('mongodb-memory-server');
@@ -19,7 +20,7 @@ const Notificacao = require('../models/Notificacao');
 const ReservaManual = require('../models/ReservaManual');
 const { processarReservaSmoobu } = require('../controllers/smoobuController');
 const { migrarOrigemSmoobu } = require('../scripts/migrar-origem-smoobu');
-const { dentroDas48h } = require('../utils/avisoGestorReserva');
+const { dentroDas48h, avisarGestorReserva } = require('../utils/avisoGestorReserva');
 
 let mongod;
 let n = 0;
@@ -46,14 +47,16 @@ const msgs = (u, re) => Notificacao.countDocuments({ utilizador_id: u._id, mensa
 beforeAll(async () => { mongod = await MongoMemoryServer.create(); await mongoose.connect(mongod.getUri()); await Tarefa.init(); });
 afterAll(async () => { await mongoose.disconnect(); await mongod.stop(); });
 
-describe('tabela de Reservas do proprietário: limpezas da gestão (só leitura)', () => {
-  test('mostra a limpeza criada pelo gestor e a do Smoobu, com origem, datas, tipo e estado; sem duplicar a que vem de uma reserva dele; sem dados do hóspede', async () => {
+describe('tabela de Reservas do proprietário: só reservas (as dele e as do Smoobu, só leitura)', () => {
+  test('mostra a reserva do Smoobu (uma linha, com datas, hóspedes e estado) e a dele; NÃO mostra a limpeza avulsa do gestor nem manutenções; sem duplicar nem dados do hóspede', async () => {
     const c = await cenario();
-    // 1) «Nova limpeza» do gestor
+    // 1) «Nova limpeza» avulsa do gestor (não é reserva)
     const nova = await request(app).post('/api/gestor/tarefas').set(auth(c.tokG)).send({ propriedade_id: String(c.p._id), data: dia(20), tipo: 'limpeza', nome_hospede: 'Ninguém Deve Ver' });
     expect(nova.status).toBe(201);
-    // 2) Smoobu
-    await processarReservaSmoobu(reservaSmoobu(9100 + n, c.p), c.e._id, c.e._id);
+    // 2) Smoobu (futuro)
+    const dSmoobu = dia(10);
+    const dSmoobu2 = dia(13);
+    await processarReservaSmoobu(reservaSmoobu(9100 + n, c.p, { arrival: dSmoobu, departure: dSmoobu2, adults: 2, children: 1 }), c.e._id, c.e._id);
     // 3) reserva do próprio proprietário
     const dd = await request(app).post('/api/parceiro/reservas').set(auth(c.tokP)).send({ propriedade_id: String(c.p._id), check_in: dia(30), check_out: dia(33), hospedes: 2 });
     expect(dd.status).toBe(201);
@@ -64,33 +67,50 @@ describe('tabela de Reservas do proprietário: limpezas da gestão (só leitura)
 
     const r = await request(app).get('/api/parceiro/reservas').set(auth(c.tokP));
     expect(r.status).toBe(200);
+    expect(r.body.limpezas_gestao).toBeUndefined();
     expect(r.body.reservas).toHaveLength(1);
-    const l = r.body.limpezas_gestao;
-    expect(l).toHaveLength(2);
-    const porOrigem = Object.fromEntries(l.map((x) => [x.origem, x]));
-    expect(porOrigem.all2gether.origem_texto).toBe('Criada pela All2gether');
-    expect(porOrigem.smoobu.origem_texto).toBe('Smoobu');
-    for (const x of l) {
-      expect(x.somente_leitura).toBe(true);
-      expect(x.tipo_limpeza).toBe('normal');
-      expect(['por_atribuir', 'nao_atribuida', 'atribuida']).toContain(x.estado);
-      expect(x.data).toBeTruthy();
-      expect(x.propriedade.nome).toBe(c.p.nome);
-    }
-    // datas da reserva Smoobu
-    expect(porOrigem.smoobu.check_in).toBe('2031-06-01');
-    expect(porOrigem.smoobu.check_out).toBe('2031-06-03');
+    const l = r.body.reservas_externas;
+    expect(l).toHaveLength(1); // só a do Smoobu: a limpeza avulsa do gestor NÃO aparece
+    const smoobu = l[0];
+    expect(smoobu.origem).toBe('smoobu');
+    expect(smoobu.origem_texto).toBe('Smoobu');
+    expect(smoobu.somente_leitura).toBe(true);
+    expect(smoobu.tipo_limpeza).toBe('normal');
+    expect(['por_atribuir', 'nao_atribuida', 'atribuida']).toContain(smoobu.estado);
+    expect(smoobu.propriedade.nome).toBe(c.p.nome);
+    expect(smoobu.check_in).toBe(dSmoobu);
+    expect(smoobu.check_out).toBe(dSmoobu2);
+    expect(smoobu.hospedes).toBe(3);
     // a limpeza gerada pela reserva dele não está duplicada
     expect(l.map((x) => x._id)).not.toContain(String(dd.body.tarefa._id));
     // nada de dados dos hóspedes nem de equipa
-    expect(JSON.stringify(r.body.limpezas_gestao)).not.toMatch(/Nome Secreto|Ninguém Deve Ver|utilizador_id|equipa/);
+    expect(JSON.stringify(r.body.reservas_externas)).not.toMatch(/Nome Secreto|Ninguém Deve Ver|utilizador_id|equipa/);
     // o outro proprietário só vê as dele
     const ro = await request(app).get('/api/parceiro/reservas').set(auth(c.tokO));
-    expect(ro.body.limpezas_gestao).toHaveLength(1);
-    expect(ro.body.limpezas_gestao[0].propriedade.nome).toBe(c.alheia.nome);
+    expect(ro.body.reservas_externas).toHaveLength(1);
+    expect(ro.body.reservas_externas[0].propriedade.nome).toBe(c.alheia.nome);
   });
 
-  test('editar ou apagar uma limpeza da gestão é recusado com 403; um id inexistente continua 404', async () => {
+  test('uma reserva Smoobu com várias tarefas aparece UMA vez; reservas com check-out há mais de 30 dias não aparecem', async () => {
+    const c = await cenario();
+    const base = { empresa_id: c.e._id, propriedade_id: c.p._id, tipo: 'limpeza', estado: 'por_atribuir', tempo_limpeza_minutos: 60, origem: 'smoobu' };
+    const d = (off) => new Date(Date.now() + off * 86400000);
+    // O índice único impede dois ids Smoobu iguais; o agrupamento cobre também as tarefas sem id (mesma casa e mesmas datas).
+    await Tarefa.create({ ...base, data: d(5), detalhes_reserva: { checkin: dia(2), checkout: dia(5), pax: 4 } });
+    await Tarefa.create({ ...base, data: d(6), estado: 'cancelada', detalhes_reserva: { checkin: dia(2), checkout: dia(5) } });
+    await Tarefa.create({ ...base, smoobu_reserva_id: 'PASSADA-' + n, data: d(-45), detalhes_reserva: { checkin: dia(-48), checkout: dia(-45), pax: 2 } });
+    await Tarefa.create({ ...base, smoobu_reserva_id: 'RECENTE-' + n, data: d(-10), estado: 'concluida', detalhes_reserva: { checkin: dia(-13), checkout: dia(-10), pax: 2 } });
+    const r = await request(app).get('/api/parceiro/reservas').set(auth(c.tokP));
+    const l = r.body.reservas_externas;
+    expect(l).toHaveLength(2);
+    const multi = l.find((x) => x.estado !== 'concluida');
+    expect(multi.estado).toBe('por_atribuir'); // a tarefa cancelada não esconde a viva
+    expect(multi.hospedes).toBe(4);
+    expect(multi.check_in).toBe(dia(2));
+    expect(l.find((x) => x.estado === 'concluida')).toBeTruthy();
+  });
+
+  test('editar ou apagar uma linha que não é dele (limpeza da gestão / Smoobu) é recusado com 403; um id inexistente continua 404', async () => {
     const c = await cenario();
     const t = await Tarefa.create({ empresa_id: c.e._id, propriedade_id: c.p._id, data: new Date(Date.now() + 5 * 86400000), tipo: 'limpeza', estado: 'por_atribuir', tempo_limpeza_minutos: 60, origem: 'manual' });
     const put = await request(app).put(`/api/parceiro/reservas/${t._id}`).set(auth(c.tokP)).send({ observacoes: 'x' });
@@ -174,11 +194,28 @@ describe('avisos ao gestor quando o proprietário mexe em reservas (só limpezas
   const reservar = (c, ci, co, extra = {}) => request(app).post('/api/parceiro/reservas').set(auth(c.tokP)).send({ propriedade_id: String(c.p._id), check_in: dia(ci), check_out: dia(co), hospedes: 2, ...extra });
   const sino = (c) => Notificacao.countDocuments({ utilizador_id: c.g._id, mensagem: /O proprietário/ });
 
-  test('a janela: hoje e amanhã contam, daqui a 4 dias não', () => {
-    expect(dentroDas48h(new Date())).toBe(true);
-    expect(dentroDas48h(new Date(Date.now() + 86400000))).toBe(true);
-    expect(dentroDas48h(new Date(Date.now() + 4 * 86400000))).toBe(false);
+  test('a janela são 48 h exatas a partir de agora: amanhã conta, daqui a 4 dias não, o passado não', () => {
+    const agora = new Date('2031-05-10T09:20:00Z');
+    const mais = (h) => new Date(agora.getTime() + h * 3600000);
+    expect(dentroDas48h(mais(0), agora)).toBe(true);
+    expect(dentroDas48h(mais(24), agora)).toBe(true);
+    expect(dentroDas48h(mais(96), agora)).toBe(false);
+    expect(dentroDas48h(mais(-1), agora)).toBe(false);
     expect(dentroDas48h(null)).toBe(false);
+  });
+
+  test('limite: às 09:20, uma limpeza a +2 dias às 10:00 NÃO avisa; a +2 dias às 09:00 avisa', async () => {
+    const agora = new Date('2031-05-10T09:20:00Z');
+    expect(dentroDas48h(new Date('2031-05-12T10:00:00Z'), agora)).toBe(false);
+    expect(dentroDas48h(new Date('2031-05-12T09:00:00Z'), agora)).toBe(true);
+    expect(dentroDas48h(new Date('2031-05-12T09:20:00Z'), agora)).toBe(true); // limite exato incluído
+    expect(dentroDas48h(new Date('2031-05-12T09:20:00.001Z'), agora)).toBe(false);
+    const c = await cenario();
+    const antes = await sino(c);
+    expect(await avisarGestorReserva({ empresaId: c.e._id, propriedadeId: c.p._id, acao: 'criou', datas: [new Date('2031-05-12T10:00:00Z')], agora })).toBe(false);
+    expect(await sino(c)).toBe(antes);
+    expect(await avisarGestorReserva({ empresaId: c.e._id, propriedadeId: c.p._id, acao: 'criou', datas: [new Date('2031-05-12T09:00:00Z')], agora })).toBe(true);
+    expect(await sino(c)).toBe(antes + 1);
   });
 
   test('criar: avisa se a limpeza cai nas próximas 48 h; não avisa se é mais longe', async () => {
@@ -233,5 +270,34 @@ describe('avisos ao gestor quando o proprietário mexe em reservas (só limpezas
     const nova = await ReservaManual.findById(rm._id);
     expect((await Tarefa.findById(nova.tarefa_gerada_id)).estado).not.toBe('cancelada');
     expect(await msgs(c.g, /limpeza que cancelaste foi reaberta/)).toBe(1);
+  });
+});
+
+describe('Excel do proprietário: só reservas, com coluna Origem', () => {
+  test('inclui as reservas dele e as do Smoobu com Origem; sem limpezas avulsas do gestor, sem dados de hóspedes nem casas alheias', async () => {
+    const ExcelJS = require('exceljs');
+    const c = await cenario();
+    await request(app).post('/api/gestor/tarefas').set(auth(c.tokG)).send({ propriedade_id: String(c.p._id), data: dia(20), tipo: 'limpeza', nome_hospede: 'Ninguém Deve Ver' });
+    await processarReservaSmoobu(reservaSmoobu(9700 + n, c.p, { arrival: dia(10), departure: dia(13), adults: 2, children: 0 }), c.e._id, c.e._id);
+    expect((await request(app).post('/api/parceiro/reservas').set(auth(c.tokP)).send({ propriedade_id: String(c.p._id), check_in: dia(30), check_out: dia(33), hospedes: 2 })).status).toBe(201);
+    await processarReservaSmoobu(reservaSmoobu(9800 + n, c.alheia), c.e._id, c.e._id);
+
+    const res = await request(app).get('/api/parceiro/reservas/exportar-excel').set(auth(c.tokP)).buffer(true)
+      .parse((r, cb) => { const ch = []; r.on('data', (d) => ch.push(d)); r.on('end', () => cb(null, Buffer.concat(ch))); });
+    expect(res.status).toBe(200);
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(res.body);
+    const ws = wb.worksheets[0];
+    const cab = ws.getRow(1).values.map((v) => String(v || ''));
+    expect(cab).toContain('Origem');
+    const iO = cab.indexOf('Origem');
+    const iP = cab.indexOf('Propriedade');
+    const iH = cab.indexOf('Hóspedes');
+    const linhas = [];
+    ws.eachRow((row, i) => { if (i > 1) linhas.push(row.values); });
+    expect(linhas.map((l) => String(l[iO])).sort()).toEqual(['Reserva do proprietário', 'Smoobu']);
+    expect(linhas.every((l) => String(l[iP]) === c.p.nome)).toBe(true);
+    expect(Number(linhas.find((l) => String(l[iO]) === 'Smoobu')[iH])).toBe(2);
+    expect(JSON.stringify(linhas)).not.toMatch(/Nome Secreto|Ninguém Deve Ver/);
   });
 });

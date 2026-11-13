@@ -19,7 +19,8 @@ const { idsEquipa } = require('./equipaTarefa');
 const { agregarNotificacao } = require('./notificarAgregado');
 const { avisarGestores, notificarSino } = require('./notificar');
 const { avisarGestorReserva } = require('./avisoGestorReserva');
-const { listarLimpezasDaGestao, limpezaDaGestaoDoParceiro, MSG_LIMPEZA_DA_GESTAO } = require('./limpezasDaGestao');
+const { limpezaDaGestaoDoParceiro, MSG_LIMPEZA_DA_GESTAO } = require('./limpezasDaGestao');
+const { listarReservasExternas } = require('./reservasExternas');
 const { temProgresso, planearAtribuicao: planearMotor, cabeNaAgendaNaHora } = require('./atribuicaoAutomatica');
 const {
   normalizarTipo, tipoDe, eSaida, tempoDoTipo, checklistDoTipo, temChecklistPropria, resolverDiaLimpeza, ROTULOS_TIPO,
@@ -564,10 +565,11 @@ async function listarReservasServico(parceiroId) {
       .sort({ check_out: -1 })
       .lean();
 
-    // Limpezas criadas pela All2gether ou vindas do Smoobu nas casas dele: só de leitura.
-    const limpezas_gestao = await listarLimpezasDaGestao(parceiroId, reservas);
+    // Reservas das casas dele que vêm de fora (Smoobu): só de leitura. As do iCal e as marcadas pelo
+    // gestor são ReservaManual e já estão em `reservas` (aparecem uma só vez).
+    const reservas_externas = await listarReservasExternas(parceiroId);
 
-    return resp(200, { reservas, limpezas_gestao });
+    return resp(200, { reservas, reservas_externas });
   } catch (err) {
     console.error('❌ reservasParceiro.listarReservas:', err.message);
     return resp(500, { erro: 'Erro interno.' });

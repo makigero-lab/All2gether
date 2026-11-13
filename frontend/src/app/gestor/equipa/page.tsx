@@ -67,6 +67,7 @@ import {
   type PropriedadeDTO,
   type Role,
 } from "@/lib/api";
+import { MudarEstadoProprietarioDialog } from "@/components/gestor/mudar-estado-proprietario";
 import { PaginationBar } from "@/components/admin/pagination-bar";
 import { ApagarDadosDialog } from "@/components/rgpd/apagar-dados-dialog";
 import { descarregarFicheiro } from "@/lib/descarregar";
@@ -290,6 +291,8 @@ function EquipaPage() {
   // RGPD: exportar / apagar os dados pessoais de uma pessoa (ações separadas das restantes).
   const [apagarDados, setApagarDados] = useState<UtilizadorDTO | null>(null);
   const [exportandoId, setExportandoId] = useState<string | null>(null);
+  // Proprietário (role parceiro) a desativar/reativar: passa pelo diálogo com os números.
+  const [mudarEstadoParceiro, setMudarEstadoParceiro] = useState<UtilizadorDTO | null>(null);
   const [rgpdMsg, setRgpdMsg] = useState<{ tipo: "ok" | "erro"; texto: string } | null>(null);
   const [eu, setEu] = useState<{ id: string; role: string } | null>(null);
   useEffect(() => {
@@ -678,6 +681,12 @@ function EquipaPage() {
 
   /** Alterna ativo/desativo (PATCH). */
   async function handleToggleAtivo(u: UtilizadorDTO) {
+    // Proprietário: desativar mexe nas casas e limpezas dele, por isso pede confirmação com números.
+    if (u.role === "parceiro") {
+      setRgpdMsg(null);
+      setMudarEstadoParceiro(u);
+      return;
+    }
     // Otimismo: atualiza UI imediatamente; reverte se falhar.
     setUtilizadores((prev) =>
       prev.map((x) => (x._id === u._id ? { ...x, ativo: !x.ativo } : x))
@@ -1164,6 +1173,12 @@ function EquipaPage() {
               </CardContent>
             </Card>
           )}
+
+          <MudarEstadoProprietarioDialog
+            pessoa={mudarEstadoParceiro}
+            onFechar={() => setMudarEstadoParceiro(null)}
+            onConcluido={async (texto) => { setRgpdMsg({ tipo: "ok", texto }); await carregar(); }}
+          />
 
           {rgpdMsg && (
             <Card className={rgpdMsg.tipo === "ok" ? "border-emerald-500/50" : "border-destructive/50"}>

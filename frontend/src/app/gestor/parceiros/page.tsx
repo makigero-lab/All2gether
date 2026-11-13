@@ -31,25 +31,15 @@ import {
   DialogContent,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { MudarEstadoProprietarioDialog } from "@/components/gestor/mudar-estado-proprietario";
 import {
   adminGet,
   adminPost,
   adminPut,
-  adminPatch,
   type UtilizadorDTO,
 } from "@/lib/api";
 
-/** Resposta do PATCH de estado de um proprietário (casas e limpezas afetadas). */
-interface RespostaEstado {
-  casas_desativadas?: number;
-  limpezas_canceladas?: number;
-  pessoas_avisadas?: number;
-  casas_reativadas?: number;
-}
-
 type FiltroEstado = "ativos" | "inativos" | "todos";
-
-const plural = (n: number, um: string, varios: string) => `${n} ${n === 1 ? um : varios}`;
 
 /**
  * Página de Gestão de Parceiros B2B — /gestor/parceiros
@@ -103,14 +93,8 @@ export default function ParceirosPage() {
   const [filtroEstado, setFiltroEstado] = useState<FiltroEstado>("ativos");
   const [aviso, setAviso] = useState<string | null>(null);
 
-  // Confirmação de desativar/reativar: explica o que acontece ANTES, com os números.
-  const [mudarEstado, setMudarEstado] = useState<{
-    p: UtilizadorDTO;
-    impacto: { casas: number; limpezas: number } | null;
-    aCalcular: boolean;
-    aGravar: boolean;
-    erro: string | null;
-  } | null>(null);
+  // Confirmação de desativar/reativar (diálogo partilhado com a Equipa).
+  const [mudarEstado, setMudarEstado] = useState<UtilizadorDTO | null>(null);
 
   const carregar = useCallback(async () => {
     setLoading(true);
@@ -206,49 +190,6 @@ export default function ParceirosPage() {
       setEditErro(e instanceof Error ? e.message : "Erro ao editar proprietário.");
     } finally {
       setEditSubmitting(false);
-    }
-  }
-
-  /** Abre a confirmação. Ao desativar, pede ao servidor os números (casas e limpezas) ANTES de confirmar. */
-  async function pedirMudancaEstado(p: UtilizadorDTO) {
-    setAviso(null);
-    setMudarEstado({ p, impacto: null, aCalcular: p.ativo, aGravar: false, erro: null });
-    if (!p.ativo) return;
-    try {
-      const impacto = await adminGet<{ casas: number; limpezas: number }>(
-        `/api/gestor/equipa/${p._id}/impacto-desativar`
-      );
-      setMudarEstado((m) => (m && m.p._id === p._id ? { ...m, impacto, aCalcular: false } : m));
-    } catch {
-      // Sem os números a explicação continua a ser mostrada (sem contagens).
-      setMudarEstado((m) => (m && m.p._id === p._id ? { ...m, aCalcular: false } : m));
-    }
-  }
-
-  async function confirmarMudancaEstado() {
-    if (!mudarEstado) return;
-    const { p } = mudarEstado;
-    setMudarEstado((m) => (m ? { ...m, aGravar: true, erro: null } : m));
-    try {
-      const r = await adminPatch<RespostaEstado>(`/api/gestor/equipa/${p._id}/estado`, { ativo: !p.ativo });
-      setMudarEstado(null);
-      if (p.ativo) {
-        const casas = r.casas_desativadas ?? 0;
-        const limpezas = r.limpezas_canceladas ?? 0;
-        setAviso(
-          `${p.nome} foi desativado: ${plural(casas, "casa desativada", "casas desativadas")} e ${plural(limpezas, "limpeza cancelada", "limpezas canceladas")}.`
-        );
-      } else {
-        const casas = r.casas_reativadas ?? 0;
-        setAviso(
-          `${p.nome} foi reativado: ${plural(casas, "casa reativada", "casas reativadas")}. As limpezas canceladas não foram recriadas.`
-        );
-      }
-      await carregar();
-    } catch (e) {
-      setMudarEstado((m) =>
-        m ? { ...m, aGravar: false, erro: e instanceof Error ? e.message : "Erro ao alterar estado." } : m
-      );
     }
   }
 
@@ -395,7 +336,7 @@ export default function ParceirosPage() {
                             variant="ghost"
                             size="icon"
                             className="h-8 w-8"
-                            onClick={() => pedirMudancaEstado(p)}
+                            onClick={() => { setAviso(null); setMudarEstado(p); }}
                             aria-label={p.ativo ? "Desativar" : "Ativar"}
                             title={p.ativo ? "Desativar" : "Ativar"}
                           >
@@ -413,84 +354,11 @@ export default function ParceirosPage() {
       </Card>
 
       {/* Confirmação de desativar / reativar */}
-      <Dialog open={!!mudarEstado} onOpenChange={(o) => { if (!o && !mudarEstado?.aGravar) setMudarEstado(null); }}>
-        {mudarEstado && (
-          <>
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <Power className="h-5 w-5 text-brand-text" />
-                {mudarEstado.p.ativo ? `Desativar ${mudarEstado.p.nome}?` : `Reativar ${mudarEstado.p.nome}?`}
-              </DialogTitle>
-              <DialogDescription>
-                {mudarEstado.p.ativo
-                  ? "Confirma só depois de ler o que vai acontecer."
-                  : "As casas que foram desativadas com este proprietário voltam a ficar ativas."}
-              </DialogDescription>
-              <DialogClose onClick={() => { if (!mudarEstado.aGravar) setMudarEstado(null); }} />
-            </DialogHeader>
-            <DialogContent className="space-y-3 text-sm">
-              {mudarEstado.p.ativo ? (
-                <>
-                  {mudarEstado.aCalcular ? (
-                    <p className="flex items-center gap-2 text-muted-foreground">
-                      <Loader2 className="h-4 w-4 animate-spin" />A calcular o que vai ser afetado…
-                    </p>
-                  ) : mudarEstado.impacto ? (
-                    <p className="rounded-md border border-amber-300 bg-amber-50 p-3 font-medium text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100">
-                      Vão ser afetadas {plural(mudarEstado.impacto.casas, "casa", "casas")} e{" "}
-                      {plural(mudarEstado.impacto.limpezas, "limpeza futura", "limpezas futuras")}.
-                    </p>
-                  ) : (
-                    <p className="text-muted-foreground">Não foi possível calcular quantas casas e limpezas serão afetadas.</p>
-                  )}
-                  <ul className="list-disc space-y-1.5 pl-5">
-                    <li>
-                      <strong>Todas as casas dele ficam inativas</strong>: deixam de receber limpezas, atribuições,
-                      ofertas à equipa e reservas.
-                    </li>
-                    <li>
-                      <strong>As limpezas futuras ainda não iniciadas dessas casas são canceladas</strong> e as pessoas da
-                      equipa que as tinham são avisadas. As limpezas em curso ou concluídas não mudam.
-                    </li>
-                    <li>
-                      O proprietário deixa de poder entrar no portal.
-                    </li>
-                    <li>
-                      Se o reativares, as casas voltam a ficar ativas, mas <strong>as limpezas canceladas não são recriadas</strong>.
-                    </li>
-                  </ul>
-                </>
-              ) : (
-                <p>
-                  As limpezas que foram canceladas ao desativá-lo <strong>não são recriadas</strong>: terás de as criar de
-                  novo (ou o proprietário cria novas reservas).
-                </p>
-              )}
-              {mudarEstado.erro && (
-                <p className="flex items-center gap-2 text-destructive" role="alert">
-                  <AlertCircle className="h-4 w-4" />
-                  {mudarEstado.erro}
-                </p>
-              )}
-            </DialogContent>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setMudarEstado(null)} disabled={mudarEstado.aGravar}>
-                Cancelar
-              </Button>
-              <Button
-                type="button"
-                variant={mudarEstado.p.ativo ? "destructive" : "default"}
-                onClick={confirmarMudancaEstado}
-                disabled={mudarEstado.aGravar || mudarEstado.aCalcular}
-              >
-                {mudarEstado.aGravar ? (
-                  <><Loader2 className="mr-2 h-4 w-4 animate-spin" />A gravar…</>
-                ) : mudarEstado.p.ativo ? "Desativar proprietário" : "Reativar proprietário"}
-              </Button>
-            </DialogFooter>
-          </>
-        )}
-      </Dialog>
+      <MudarEstadoProprietarioDialog
+        pessoa={mudarEstado}
+        onFechar={() => setMudarEstado(null)}
+        onConcluido={async (msg) => { setAviso(msg); await carregar(); }}
+      />
 
       {/* Dialog de Criação */}
       <Dialog open={criarOpen} onOpenChange={setCriarOpen}>

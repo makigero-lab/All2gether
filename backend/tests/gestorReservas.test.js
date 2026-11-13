@@ -17,6 +17,7 @@ const Utilizador = require('../models/Utilizador');
 const Notificacao = require('../models/Notificacao');
 const ReservaManual = require('../models/ReservaManual');
 const { processarReservaSmoobu } = require('../controllers/smoobuController');
+const R = require('../utils/reservasParceiro');
 
 let mongod;
 let n = 0;
@@ -142,8 +143,8 @@ describe('gestor marca reservas em nome do proprietário', () => {
     const smoobu = await Propriedade.create({ nome: 'CasaS' + ++n, empresa_id: c.e._id, smoobu_id: String(8000 + n), ativo: true, capacidade_hospedes: 4, tempo_limpeza_minutos: 60, parceiro_id: c.dono._id });
     await processarReservaSmoobu({ action: 'newReservation', data: { id: 7000 + n, type: 'reservation', arrival: dia(40), departure: dia(43), apartment: { id: Number(smoobu.smoobu_id) }, 'guest-name': 'Secreto', adults: 2, children: 0 } }, c.e._id, c.e._id);
     const lst = await request(app).get(`/api/gestor/parceiros/${c.dono._id}/reservas`).set(auth(c.tokG));
-    expect(lst.body.limpezas_gestao).toHaveLength(1);
-    expect(lst.body.limpezas_gestao[0].origem).toBe('smoobu');
+    expect(lst.body.reservas_externas).toHaveLength(1);
+    expect(lst.body.reservas_externas[0].origem).toBe('smoobu');
     // o gestor marca uma reserva no mesmo dia, na mesma casa do Smoobu: cria a reserva mas avisa a dupla limpeza
     const r = await request(app).post(`/api/gestor/parceiros/${c.dono._id}/reservas`).set(auth(c.tokG))
       .send({ propriedade_id: String(smoobu._id), check_in: dia(40), check_out: dia(43) });
@@ -155,5 +156,28 @@ describe('gestor marca reservas em nome do proprietário', () => {
     expect(dup.body.associada_a_existente).toBe(true);
     const limpezas = await Tarefa.countDocuments({ propriedade_id: smoobu._id, tipo: 'limpeza', estado: { $ne: 'cancelada' }, origem_parceiro: true });
     expect(limpezas).toBe(1);
+  });
+
+  test('a lista do proprietário e a do gestor são a mesma: reservas dele, do gestor, do iCal e do Smoobu; sem limpezas avulsas, manutenções nem duplicados', async () => {
+    const c = await empresaCom();
+    const smoobu = await Propriedade.create({ nome: 'CasaS' + ++n, empresa_id: c.e._id, smoobu_id: String(9000 + n), ativo: true, capacidade_hospedes: 4, tempo_limpeza_minutos: 60, parceiro_id: c.dono._id });
+    const post = (tok, url, b) => request(app).post(url).set(auth(tok)).send(b);
+    await post(c.tokP, '/api/parceiro/reservas', { propriedade_id: String(c.casa._id), check_in: dia(20), check_out: dia(22) });
+    await post(c.tokG, `/api/gestor/parceiros/${c.dono._id}/reservas`, { propriedade_id: String(c.casa._id), check_in: dia(30), check_out: dia(32) });
+    // reserva iCal confirmada = ReservaManual origem ical (uma só linha)
+    const ical = await R.criarReservaComLimpeza({ parceiroId: c.dono._id, empresaId: c.e._id, ator: { tipo: 'ical' }, camposReserva: { origem: 'ical', sincronizada: true, plataforma: 'Airbnb' }, body: { propriedade_id: String(c.casa._id), check_in: dia(40), check_out: dia(42) } });
+    expect(ical.status).toBe(201);
+    await processarReservaSmoobu({ action: 'newReservation', data: { id: 7500 + n, type: 'reservation', arrival: dia(50), departure: dia(53), apartment: { id: Number(smoobu.smoobu_id) }, 'guest-name': 'X', adults: 2, children: 0 } }, c.e._id, c.e._id);
+    await post(c.tokG, '/api/gestor/tarefas', { propriedade_id: String(c.casa._id), data: dia(60), tipo: 'limpeza' }); // limpeza avulsa do gestor
+    await Tarefa.create({ empresa_id: c.e._id, propriedade_id: c.casa._id, data: new Date(Date.now() + 86400000), tipo: 'manutencao', estado: 'por_atribuir', tempo_limpeza_minutos: 30 });
+    const p = (await request(app).get('/api/parceiro/reservas').set(auth(c.tokP))).body;
+    const g = (await request(app).get(`/api/gestor/parceiros/${c.dono._id}/reservas`).set(auth(c.tokG))).body;
+    expect(p.reservas).toHaveLength(3);
+    expect(p.reservas.filter((r) => r.origem === 'ical')).toHaveLength(1);
+    expect(p.reservas.filter((r) => r.criada_pelo_gestor)).toHaveLength(1);
+    expect(p.reservas_externas).toHaveLength(1);
+    expect(p.reservas_externas[0].origem).toBe('smoobu');
+    expect(g.reservas.map((r) => r._id).sort()).toEqual(p.reservas.map((r) => r._id).sort());
+    expect(g.reservas_externas.map((r) => r._id)).toEqual(p.reservas_externas.map((r) => r._id));
   });
 });
