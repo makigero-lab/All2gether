@@ -26,22 +26,23 @@ const fmt = (data) => {
   return `${d}/${m}`;
 };
 
-const frase = (acao, casa, dias) => ({
-  criou: `O proprietário criou uma reserva em ${casa}: limpeza a ${dias} (próximas 48 h).`,
-  alterou: `O proprietário alterou uma reserva em ${casa}: limpeza a ${dias} (próximas 48 h).`,
-  apagou: `O proprietário apagou uma reserva em ${casa}: a limpeza a ${dias} foi cancelada (próximas 48 h).`,
-  reabriu: `O proprietário alterou uma reserva em ${casa} e a limpeza que cancelaste foi reaberta para ${dias} (próximas 48 h).`,
-}[acao] || `O proprietário mexeu numa reserva em ${casa}: limpeza a ${dias} (próximas 48 h).`);
+const frase = (acao, casa, dias, quem = 'O proprietário') => ({
+  criou: `${quem} criou uma reserva em ${casa}: limpeza a ${dias} (próximas 48 h).`,
+  alterou: `${quem} alterou uma reserva em ${casa}: limpeza a ${dias} (próximas 48 h).`,
+  apagou: `${quem} apagou uma reserva em ${casa}: a limpeza a ${dias} foi cancelada (próximas 48 h).`,
+  reabriu: `${quem} alterou uma reserva em ${casa} e a limpeza que cancelaste foi reaberta para ${dias} (próximas 48 h).`,
+}[acao] || `${quem} mexeu numa reserva em ${casa}: limpeza a ${dias} (próximas 48 h).`);
 
 /**
  * @param {object} p
  * @param {*} p.empresaId
  * @param {*} p.propriedadeId
  * @param {'criou'|'alterou'|'apagou'|'reabriu'} p.acao
+ * @param {string} [p.quem] quem mexeu (por omissão «O proprietário»; o calendário externo usa o nome do canal)
  * @param {Array<Date|string>} p.datas datas das limpezas mexidas (a antiga e/ou a nova)
  * @returns {Promise<boolean>} true se avisou
  */
-async function avisarGestorReserva({ empresaId, propriedadeId, acao, datas, agora = new Date() }) {
+async function avisarGestorReserva({ empresaId, propriedadeId, acao, datas, agora = new Date(), quem = 'O proprietário' }) {
   try {
     const afetadas = (datas || []).filter((d) => dentroDas48h(d, agora));
     if (afetadas.length === 0) return false;
@@ -50,8 +51,8 @@ async function avisarGestorReserva({ empresaId, propriedadeId, acao, datas, agor
     const dias = [...new Set(afetadas.map(fmt))].join(' e ');
     await avisarGestores(
       empresaId,
-      'Proprietário mexeu numa reserva',
-      frase(acao, casa, dias),
+      quem === 'O proprietário' ? 'Proprietário mexeu numa reserva' : 'Reserva mexida pelo calendário',
+      frase(acao, casa, dias, quem),
       '/gestor/calendario'
     );
     return true;

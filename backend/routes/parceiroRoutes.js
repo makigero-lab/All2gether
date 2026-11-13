@@ -45,4 +45,20 @@ router.delete('/reservas/:id', auth, isParceiro, eliminarReserva);
 // FIX (excel parceiro) — Rotas de importação/exportação de Excel (parceiro).
 router.get('/reservas/exportar-excel', auth, isParceiro, exportarExcelParceiro);
 
+// Calendários externos (Airbnb, Booking...) das casas do proprietário e períodos por confirmar.
+const cal = require('../controllers/calendarioController').parceiro;
+router.get('/calendarios', auth, isParceiro, cal.listar);
+router.post('/calendarios/testar', auth, isParceiro, cal.testar);
+router.post('/calendarios', auth, isParceiro, cal.criar);
+router.put('/calendarios/:id', auth, isParceiro, cal.substituir);
+router.post('/calendarios/:id/atualizar', auth, isParceiro, cal.atualizar);
+router.post('/calendarios/:id/reativar', auth, isParceiro, cal.reativar);
+router.get('/calendarios/:id/impacto-remocao', auth, isParceiro, cal.impacto);
+router.delete('/calendarios/:id', auth, isParceiro, cal.remover);
+router.get('/calendarios/:id/leituras', auth, isParceiro, cal.leituras);
+router.get('/reservas-externas', auth, isParceiro, cal.listarExternas);
+router.post('/reservas-externas/:id/confirmar', auth, isParceiro, cal.confirmar);
+router.post('/reservas-externas/:id/bloqueio', auth, isParceiro, cal.bloqueio);
+router.post('/reservas-externas/:id/reabrir', auth, isParceiro, cal.reabrir);
+
 module.exports = router;

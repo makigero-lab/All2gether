@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { User, LogOut, ChevronDown } from "lucide-react";
+import { User, LogOut, ChevronDown, CalendarDays } from "lucide-react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { lerUtilizador, fazerLogout, type Role } from "@/lib/auth";
@@ -112,6 +112,22 @@ export function UserMenu() {
             <User className="h-4 w-4" />
             Perfil
           </button>
+
+          {/* Calendários externos (Airbnb, Booking...): só no portal do proprietário. */}
+          {user?.role === "parceiro" && (
+            <button
+              type="button"
+              onClick={() => {
+                setAberto(false);
+                router.push("/parceiro/calendarios");
+              }}
+              className="flex min-h-11 w-full cursor-pointer items-center gap-2 rounded-sm px-3 py-2 text-sm transition-colors hover:bg-accent"
+              role="menuitem"
+            >
+              <CalendarDays className="h-4 w-4" />
+              Calendários (Airbnb, Booking)
+            </button>
+          )}
 
           {/* Terminar Sessão */}
           <button

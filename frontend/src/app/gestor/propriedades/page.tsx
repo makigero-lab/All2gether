@@ -2,7 +2,8 @@
 
 import { EditarPropriedadeDialog, TIPOLOGIAS, comRegraPessoas, type EditarPropriedadeForm } from "@/components/gestor/editar-propriedade-dialog";
 import { useCallback, useEffect, useState } from "react";
-import { Plus, Building2, Loader2, AlertCircle, RefreshCw, Power, Pencil, Trash2, CheckCircle2, ListChecks, Navigation } from "lucide-react";
+import { Plus, Building2, Loader2, AlertCircle, RefreshCw, Power, Pencil, Trash2, CheckCircle2, ListChecks, Navigation, CalendarDays } from "lucide-react";
+import { CalendariosCasas } from "@/components/parceiro/calendarios-casa";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -303,6 +304,8 @@ export default function PropriedadesPage() {
 
   // Estado do modal de edição
   const [editando, setEditando] = useState<PropriedadeDTO | null>(null);
+  /** Casa cujos calendários externos (Airbnb, Booking...) se estão a gerir. */
+  const [calendarioDe, setCalendarioDe] = useState<PropriedadeDTO | null>(null);
 
   // HF18 — Estado do modal de "Adicionar Propriedade Manual"
   // (fluxo simplificado: nome + morada + tempo de limpeza; origem: 'manual')
@@ -1239,6 +1242,16 @@ export default function PropriedadesPage() {
                             variant="ghost"
                             size="icon"
                             className="h-8 w-8"
+                            onClick={() => setCalendarioDe(p)}
+                            aria-label={`Calendários externos de ${p.nome}`}
+                            title="Calendários externos (Airbnb, Booking...)"
+                          >
+                            <CalendarDays className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
                             onClick={() => handleToggleAtivo(p)}
                             aria-label={p.ativo ? "Desativar" : "Ativar"}
                             title={p.ativo ? "Desativar" : "Ativar"}
@@ -1697,6 +1710,27 @@ export default function PropriedadesPage() {
             )}
           </Button>
         </DialogFooter>
+      </Dialog>
+
+      {/* Calendários externos da casa (Airbnb, Booking...): o gestor pode ligar, testar, pausar e remover. */}
+      <Dialog open={calendarioDe !== null} onOpenChange={(o) => { if (!o) setCalendarioDe(null); }} ecraInteiroNoTelemovel>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <CalendarDays className="h-5 w-5 text-brand-text" />
+            Calendários externos{calendarioDe ? ` · ${calendarioDe.nome}` : ""}
+          </DialogTitle>
+          <DialogDescription>
+            As reservas do Airbnb e da Booking.com entram sozinhas e geram as limpezas. O link pode ser colado por ti ou pelo proprietário.
+          </DialogDescription>
+          <DialogClose onClick={() => setCalendarioDe(null)} />
+        </DialogHeader>
+        <DialogContent>
+          {calendarioDe && !calendarioDe.parceiro_id ? (
+            <p className="text-sm text-muted-foreground">Esta casa não tem proprietário. Associa primeiro um proprietário (Editar &gt; Essencial) para ligar calendários.</p>
+          ) : calendarioDe ? (
+            <CalendariosCasas apiBase="/api/gestor" gestor casas={[{ _id: calendarioDe._id, nome: calendarioDe.nome, smoobu_id: calendarioDe.smoobu_id || null }]} />
+          ) : null}
+        </DialogContent>
       </Dialog>
     </div>
   );
