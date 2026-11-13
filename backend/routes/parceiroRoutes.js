@@ -56,6 +56,8 @@ router.post('/calendarios/:id/reativar', auth, isParceiro, cal.reativar);
 router.get('/calendarios/:id/impacto-remocao', auth, isParceiro, cal.impacto);
 router.delete('/calendarios/:id', auth, isParceiro, cal.remover);
 router.get('/calendarios/:id/leituras', auth, isParceiro, cal.leituras);
+router.get('/acordo-dados', auth, isParceiro, cal.acordo);
+router.post('/acordo-dados/aceitar', auth, isParceiro, cal.aceitarAcordo);
 router.get('/reservas-externas', auth, isParceiro, cal.listarExternas);
 router.post('/reservas-externas/:id/confirmar', auth, isParceiro, cal.confirmar);
 router.post('/reservas-externas/:id/bloqueio', auth, isParceiro, cal.bloqueio);

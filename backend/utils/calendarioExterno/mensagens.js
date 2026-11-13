@@ -20,10 +20,16 @@ const MENSAGENS_ESTADO = {
   empresa_inativa: 'Em pausa: a empresa está inativa.',
   casa_ligada_smoobu: 'Desligado: esta casa recebe as reservas pelo Smoobu.',
   erros_persistentes: 'Desligado: o calendário falhou durante muito tempo. Volta a testar a ligação para o reativar.',
+  acordo_por_aceitar: 'Em pausa: o proprietário ainda não aceitou o Acordo de Tratamento de Dados.',
   pelo_gestor: 'Em pausa, a pedido do gestor.',
   pelo_parceiro: 'Em pausa, a teu pedido.',
 };
 
+/** Leitura suspeita por trazer reservas novas a mais de uma vez: nada foi CRIADO (não cancelado). */
+const textoMuitosNovos = (n, paraGestor) => (paraGestor
+  ? `Encontrámos ${n} reservas novas de uma vez. Por segurança, não criámos nenhuma. Confirma que o calendário está certo e carrega em Aceitar.`
+  : 'A All2gether está a validar este calendário.');
+
 const mensagemErro = (codigo) => MENSAGENS_ERRO[codigo] || MENSAGENS_ERRO.outro;
 
-module.exports = { MENSAGENS_ERRO, MENSAGENS_ESTADO, mensagemErro };
+module.exports = { MENSAGENS_ERRO, MENSAGENS_ESTADO, mensagemErro, textoMuitosNovos };

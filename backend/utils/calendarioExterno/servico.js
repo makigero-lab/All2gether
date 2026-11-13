@@ -13,6 +13,7 @@ const LeituraCalendario = require('../../models/LeituraCalendario');
 const Propriedade = require('../../models/Propriedade');
 const H = require('../horario');
 const { estadoDaCasa } = require('../casaAtiva');
+const { acordoPermiteLigar, MSG_POR_ACEITAR } = require('../acordoRgpd');
 const { registarAuditoria } = require('../auditoria');
 const { chavesConfiguradas, cifrar, decifrar, hmac, semUrl } = require('./cifra');
 const { analisarUrl, normalizarUrl, mascara, modoTesteAtivo } = require('./seguranca');
@@ -20,7 +21,8 @@ const { buscarFeed, pedir } = require('./buscar');
 const { analisarIcal } = require('./parser');
 const { sincronizarFonte, configDoAmbiente } = require('./sincronizar');
 const { removerFonte, contarImpactoRemocao } = require('./decisoes');
-const { MENSAGENS_ESTADO, mensagemErro } = require('./mensagens');
+const { MENSAGENS_ESTADO, mensagemErro, textoMuitosNovos } = require('./mensagens');
+const { avisarParceiro } = require('./avisos');
 const Rv = require('./reservas');
 
 const resp = (status, body) => ({ status, body });
@@ -41,7 +43,7 @@ const limparLimiteTestar = () => testes.clear();
 const MESES_ERRO_DIAS = 14;
 
 /** Forma pública de uma fonte (sem link). */
-function fonteParaApi(f, extra = {}) {
+function fonteParaApi(f, extra = {}, { paraGestor = false } = {}) {
   const erro = f.ultimo_erro && f.ultimo_erro.codigo
     ? { em: f.ultimo_erro.em, codigo: f.ultimo_erro.codigo, http_status: f.ultimo_erro.http_status, mensagem: semUrl(mensagemErro(f.ultimo_erro.codigo)) }
     : null;
@@ -59,8 +61,19 @@ function fonteParaApi(f, extra = {}) {
     proxima_leitura_em: f.proxima_leitura_em || null,
     erros_consecutivos: f.erros_consecutivos || 0, suspeitas_consecutivas: f.suspeitas_consecutivas || 0,
     ultimo_erro: erro, createdAt: f.createdAt,
+    em_validacao: !!f.aviso_muitos_novos_em,
+    aviso_validacao: f.aviso_muitos_novos_em ? textoMuitosNovos(f.ultimo_n_futuros || 0, paraGestor) : null,
     ...extra,
   };
+}
+
+/** Ids de proprietários que ainda não aceitaram o acordo (vazio se o acordo não for exigido). */
+async function parceirosSemAcordo(ids) {
+  const { acordoObrigatorio, aceitacoesVigentes } = require('../acordoRgpd');
+  if (!acordoObrigatorio()) return new Set();
+  const unicos = [...new Set(ids)];
+  const aceites = await aceitacoesVigentes(unicos);
+  return new Set(unicos.filter((i) => !aceites.has(i)));
 }
 
 /** Casa do pedido, dentro do escopo. Devolve { casa } ou { erro: resp }. */
@@ -83,6 +96,7 @@ async function validarPedido({ propriedadeId, url, escopo, rotulo }) {
   if (c.casa.smoobu_id) return { erro: resp(400, { erro: 'Esta casa já recebe as reservas pelo Smoobu. Só pode haver uma ligação automática por casa.', codigo: 'CASA_SMOOBU' }) };
   const est = await estadoDaCasa(c.casa);
   if (est.inativa) return { erro: resp(409, { erro: est.mensagem, codigo: 'CASA_INATIVA' }) };
+  if (!(await acordoPermiteLigar(c.casa.parceiro_id))) return { erro: resp(409, { erro: MSG_POR_ACEITAR, codigo: 'ACORDO_POR_ACEITAR' }) };
   const analise = analisarUrl(url);
   if (!analise.ok) return { erro: resp(400, { erro: analise.erro, codigo: analise.codigo }) };
   return { casa: c.casa, analise };
@@ -95,7 +109,7 @@ async function testarLigacao({ propriedadeId, url, escopo, transporte = pedir })
   const { casa, analise } = v;
   const hash = hmac(normalizarUrl(analise.url, analise.canal));
   const outra = await FonteCalendario.findOne({ url_hash: hash, removida: false }).select('propriedade_id').lean();
-  if (outra && String(outra.propriedade_id) !== String(casa._id)) return resp(409, { erro: 'Este link já está a ser usado noutra casa.' });
+  if (outra && String(outra.propriedade_id) !== String(casa._id)) return resp(409, { erro: 'Este link já está a ser usado noutra casa.', codigo: 'LINK_USADO' });
   const existente = await FonteCalendario.findOne({ propriedade_id: casa._id, canal_chave: analise.canal_chave, removida: false }).select('_id').lean();
   let feed; let parsed;
   try {
@@ -112,6 +126,7 @@ async function testarLigacao({ propriedadeId, url, escopo, transporte = pedir })
   return resp(200, {
     ok: true, canal: analise.canal, canal_texto: analise.rotulo, host: analise.host, prodid_ok: prodidOk,
     reservas: c.reserva, bloqueios: c.bloqueio, por_confirmar: c.incerto,
+    periodo: parsed.eventos.length ? { de: parsed.eventos.reduce((m, e) => (e.ci < m ? e.ci : m), parsed.eventos[0].ci), ate: parsed.eventos.reduce((m, e) => (e.co > m ? e.co : m), parsed.eventos[0].co) } : null,
     amostra: parsed.eventos.slice(0, 5).map((e) => ({ check_in: e.ci, check_out: e.co, tipo: e.classe })),
     ja_existiam: coincidem, ja_ligada: !!existente,
   });
@@ -157,6 +172,9 @@ async function criarLigacao({ propriedadeId, url, rotulo, escopo, ator, transpor
     throw e;
   }
   registarAuditoria({ utilizador_id: ator.id, utilizador_nome: ator.nome || '', empresa_id: escopo.empresaId, acao: 'criar', recurso: 'calendario_externo', recurso_id: String(_id), descricao: `Calendário ${analise.rotulo} ligado à casa ${casa.nome} (${fonte.url_mascara})` });
+  if (ator.tipo === 'gestor') {
+    avisarParceiro(casa.parceiro_id, escopo.empresaId, `O gestor ligou o calendário ${analise.rotulo} da casa ${casa.nome}. Se não pediste isto, fala com a All2gether.`);
+  }
   let leitura = null;
   try { leitura = await sincronizarFonte(_id, { origem: 'agendada', transporte }); } catch (e) { console.error('⚠️  primeira leitura do calendário:', semUrl(e.message)); }
   const atual = await FonteCalendario.findById(_id).lean();
@@ -178,6 +196,7 @@ async function substituirLigacao({ id, url, escopo, ator, transporte = pedir }) 
   if (!chavesConfiguradas()) return resp(503, { erro: MSG_DESLIGADA, codigo: 'DESLIGADA' });
   const fonte = await fonteDoEscopo(id, escopo);
   if (!fonte) return resp(404, { erro: 'Calendário não encontrado.' });
+  if (!(await acordoPermiteLigar(fonte.parceiro_id))) return resp(409, { erro: MSG_POR_ACEITAR, codigo: 'ACORDO_POR_ACEITAR' });
   if (typeof url !== 'string') return resp(400, { erro: 'O link tem de ser um texto.' });
   const analise = analisarUrl(url);
   if (!analise.ok) return resp(400, { erro: analise.erro, codigo: analise.codigo });
@@ -215,6 +234,7 @@ async function reativarLigacao({ id, escopo, transporte = pedir }) {
   const fonte = await FonteCalendario.findOne({ _id: mongoose.isValidObjectId(id) ? id : null, removida: false, empresa_id: escopo.empresaId, ...(escopo.parceiroId ? { parceiro_id: escopo.parceiroId } : {}) }).select('+url_cifrada');
   if (!fonte) return resp(404, { erro: 'Calendário não encontrado.' });
   if (fonte.motivo_estado === 'casa_ligada_smoobu') return resp(400, { erro: 'Esta casa recebe as reservas pelo Smoobu: não pode ter calendários externos.' });
+  if (!(await acordoPermiteLigar(fonte.parceiro_id))) return resp(409, { erro: MSG_POR_ACEITAR, codigo: 'ACORDO_POR_ACEITAR' });
   try {
     const feed = await buscarFeed(decifrar(fonte.url_cifrada, String(fonte._id)), { transporte });
     analisarIcal(feed.texto, { canal: fonte.canal, hmac: (t) => hmac(t) });
@@ -249,12 +269,14 @@ async function listarLigacoes({ escopo, propriedadeId = null, estado = null }) {
   const fontes = await FonteCalendario.find(filtro).populate('propriedade_id', 'nome').sort({ createdAt: 1 }).lean();
   const out = [];
   const hoje = Rv.dataDe(H.hojeLisboa());
+  const semAcordo = await parceirosSemAcordo(fontes.map((f) => String(f.parceiro_id)));
   for (const f of fontes) {
+    if (semAcordo.has(String(f.parceiro_id)) && f.estado === 'ativa') Object.assign(f, { estado: 'pausada', motivo_estado: 'acordo_por_aceitar' });
     const [reservas, por_confirmar] = await Promise.all([
       ReservaExterna.countDocuments({ propriedade_id: f.propriedade_id._id, canal_chave: f.canal_chave, estado: 'confirmada', check_out: { $gte: hoje } }),
       ReservaExterna.countDocuments({ propriedade_id: f.propriedade_id._id, canal_chave: f.canal_chave, estado: 'por_confirmar', check_out: { $gte: hoje } }),
     ]);
-    out.push(fonteParaApi(f, { n_reservas: reservas, n_por_confirmar: por_confirmar }));
+    out.push(fonteParaApi(f, { n_reservas: reservas, n_por_confirmar: por_confirmar }, { paraGestor: !escopo.parceiroId }));
   }
   return resp(200, { fontes: out, ligado: chavesConfiguradas(), modo_teste: modoTesteAtivo() });
 }
@@ -293,11 +315,12 @@ async function listarReservasExternas({ escopo, estado = 'por_confirmar', parcei
   if (estado === 'conflito') filtro.conflito = { $in: ['limpeza_em_curso', 'limpeza_concluida'] };
   else if (['por_confirmar', 'bloqueio'].includes(estado)) filtro.estado = estado;
   else return resp(400, { erro: 'Estado inválido.' });
-  const lista = await ReservaExterna.find(filtro).populate('propriedade_id', 'nome').sort({ check_in: 1 }).limit(500)
+  const lista = await ReservaExterna.find(filtro).populate('propriedade_id', 'nome').populate('parceiro_id', 'nome').sort({ check_in: 1 }).limit(500)
     .select('propriedade_id canal canal_chave check_in check_out noites classe estado motivo conflito decidido_por').lean();
   return resp(200, {
     reservas_externas: lista.map((x) => ({
       _id: String(x._id), propriedade: { _id: String(x.propriedade_id._id), nome: x.propriedade_id.nome },
+      parceiro: x.parceiro_id ? { _id: String(x.parceiro_id._id), nome: x.parceiro_id.nome } : null,
       canal: x.canal, canal_texto: ({ airbnb: 'Airbnb', booking: 'Booking.com', vrbo: 'Vrbo' })[x.canal] || 'Outro canal',
       check_in: Rv.iso(x.check_in), check_out: Rv.iso(x.check_out), noites: x.noites, motivo: x.motivo, estado: x.estado, conflito: x.conflito, decidido_por: x.decidido_por,
     })),
@@ -306,5 +329,5 @@ async function listarReservasExternas({ escopo, estado = 'por_confirmar', parcei
 
 module.exports = {
   fonteParaApi, testarLigacao, criarLigacao, substituirLigacao, atualizarAgora, reativarLigacao, impactoRemocao, removerLigacao,
-  listarLigacoes, listarLeituras, mudarEstado, listarReservasExternas, limiteTestar, limparLimiteTestar, MESES_ERRO_DIAS,
+  parceirosSemAcordo, listarLigacoes, listarLeituras, mudarEstado, listarReservasExternas, limiteTestar, limparLimiteTestar, MESES_ERRO_DIAS,
 };

@@ -26,7 +26,7 @@ const fonteSchema = new mongoose.Schema(
     estado: { type: String, enum: ['ativa', 'erro', 'pausada', 'suspensa'], default: 'ativa' },
     motivo_estado: {
       type: String,
-      enum: ['casa_inativa', 'parceiro_inativo', 'empresa_inativa', 'casa_ligada_smoobu', 'erros_persistentes', 'pelo_gestor', 'pelo_parceiro', null],
+      enum: ['casa_inativa', 'parceiro_inativo', 'empresa_inativa', 'casa_ligada_smoobu', 'erros_persistentes', 'acordo_por_aceitar', 'pelo_gestor', 'pelo_parceiro', null],
       default: null,
     },
     pausada_em: Date,

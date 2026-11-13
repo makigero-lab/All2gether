@@ -125,7 +125,7 @@ export function UserMenu() {
               role="menuitem"
             >
               <CalendarDays className="h-4 w-4" />
-              Calendários (Airbnb, Booking)
+              Estado dos calendários
             </button>
           )}
 
