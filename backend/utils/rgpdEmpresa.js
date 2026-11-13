@@ -26,6 +26,9 @@ require('../models/ContactoHospede');
 require('../models/WebhookLog');
 require('../models/Auditoria');
 require('../models/ModeloChecklist');
+require('../models/FonteCalendario');
+require('../models/ReservaExterna');
+require('../models/LeituraCalendario');
 const Auditoria = require('../models/Auditoria');
 const { obterLock, libertarLock, LockEmpresa } = require('./lockEmpresa');
 

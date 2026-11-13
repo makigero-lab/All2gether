@@ -15,6 +15,9 @@ const TarefaArquivo = require('../models/TarefaArquivo');
 const Ausencia = require('../models/Ausencia');
 const Notificacao = require('../models/Notificacao');
 const ReservaManual = require('../models/ReservaManual');
+const FonteCalendario = require('../models/FonteCalendario');
+const ReservaExterna = require('../models/ReservaExterna');
+const LeituraCalendario = require('../models/LeituraCalendario');
 const Auditoria = require('../models/Auditoria');
 const { filtroMembro } = require('./equipaTarefa');
 
@@ -84,6 +87,11 @@ async function exportarDadosPessoa(u, { limitarAuditoriaAEmpresa = false } = {})
       .sort({ check_in: -1 }).limit(LIMITE).lean()
     : [];
 
+  // Calendários externos ligados: só a máscara (nunca o link), o canal e o estado.
+  const calendarios = u.role === 'parceiro'
+    ? (await FonteCalendario.find({ parceiro_id: id, empresa_id: empresaId, removida: false }).select('canal rotulo url_mascara estado ultimo_sucesso_em createdAt -_id').lean())
+    : [];
+
   const nomesProp = new Map();
   const todosIds = [...tarefasB, ...arquivoB, ...propriasB, ...reservasB].map((t) => String(t.propriedade_id));
   for (const p of await Propriedade.find({ _id: { $in: [...new Set(todosIds)] } }).select('nome').lean()) nomesProp.set(String(p._id), p.nome);
@@ -138,6 +146,7 @@ async function exportarDadosPessoa(u, { limitarAuditoriaAEmpresa = false } = {})
     ausencias,
     notificacoes,
     reservas_manuais: reservasManuais,
+    calendarios_externos: calendarios,
     auditoria: { acoes_realizadas: feitas, registos_sobre_a_pessoa: sobre },
   };
 }
@@ -212,6 +221,12 @@ async function apagarDadosPessoa(utilizador) {
   await Propriedade.updateMany({ empresa_id: empresaId, parceiro_id: id }, { $set: { parceiro_id: null, nome_responsavel: '', contacto: '' } });
   await Utilizador.collection.updateMany({ empresa_id: empresaId, responsavel_id: id }, { $set: { responsavel_id: null } });
   await ReservaManual.collection.updateMany({ parceiro_id: id, empresa_id: empresaId }, { $set: { observacoes: '' } });
+  // Calendários externos: o link é uma credencial do proprietário (apaga-se com o registo de leituras); das
+  // reservas externas ficam só datas, sem o pseudónimo do código da reserva.
+  const fontesIds = await FonteCalendario.distinct('_id', { parceiro_id: id, empresa_id: empresaId });
+  out.calendarios_apagados = (await FonteCalendario.deleteMany({ parceiro_id: id, empresa_id: empresaId })).deletedCount || 0;
+  if (fontesIds.length) await LeituraCalendario.deleteMany({ fonte_id: { $in: fontesIds } });
+  await ReservaExterna.collection.updateMany({ parceiro_id: id, empresa_id: empresaId }, { $set: { codigo_ref_hash: null } });
 
   // 4) Tarefas futuras não concluídas: saem dela e voltam a por_atribuir pelo fluxo normal.
   const { desatribuirTarefasPeriodo, reatribuirAutomaticamente } = require('../controllers/ausenciaController');

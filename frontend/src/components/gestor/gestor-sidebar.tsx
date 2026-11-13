@@ -20,6 +20,7 @@ import {
   Settings,
   Handshake,
   UserRound,
+  CalendarCheck,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -64,6 +65,7 @@ const gestorNavItems: NavItem[] = [
   { label: "Propriedades", href: "/gestor/propriedades", icon: Building2 },
   { label: "Equipa", href: "/gestor/equipa", icon: Users },
   { label: "Proprietários", href: "/gestor/parceiros", icon: Handshake },
+  { label: "Reservas", href: "/gestor/reservas", icon: CalendarCheck },
   { label: "Ausências / Férias", href: "/gestor/ausencias", icon: CalendarOff },
   { label: "Relatórios", href: "/gestor/relatorios", icon: BarChart3 },
   { label: "Notificações", href: "/gestor/notificacoes", icon: Bell },
