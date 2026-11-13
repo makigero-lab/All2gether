@@ -27,7 +27,8 @@ const { idsEquipa } = require('../utils/equipaTarefa');
 const { agregarNotificacao } = require('../utils/notificarAgregado');
 const { avisarGestores } = require('../utils/notificar');
 const { avisarGestorReserva } = require('../utils/avisoGestorReserva');
-const { listarLimpezasDaGestao, limpezaDaGestaoDoParceiro, MSG_LIMPEZA_DA_GESTAO } = require('../utils/limpezasDaGestao');
+const { limpezaDaGestaoDoParceiro, MSG_LIMPEZA_DA_GESTAO } = require('../utils/limpezasDaGestao');
+const { listarReservasExternas } = require('../utils/reservasExternas');
 const { temProgresso, planearAtribuicao: planearMotor, cabeNaAgendaNaHora } = require('../utils/atribuicaoAutomatica');
 const {
   normalizarTipo, tipoDe, eSaida, tempoDoTipo, checklistDoTipo, temChecklistPropria, resolverDiaLimpeza, ROTULOS_TIPO,
@@ -767,10 +768,10 @@ async function listarReservas(req, res) {
       .sort({ check_out: -1 })
       .lean();
 
-    // Limpezas criadas pela All2gether ou vindas do Smoobu nas casas dele: só de leitura.
-    const limpezas_gestao = await listarLimpezasDaGestao(parceiroId, reservas);
+    // Reservas das casas dele que vêm de fora (Smoobu; iCal e gestor chegam depois): só de leitura.
+    const reservas_externas = await listarReservasExternas(parceiroId);
 
-    return res.status(200).json({ reservas, limpezas_gestao });
+    return res.status(200).json({ reservas, reservas_externas });
   } catch (err) {
     console.error('❌ parceiroController.listarReservas:', err.message);
     return res.status(500).json({ erro: 'Erro interno.' });

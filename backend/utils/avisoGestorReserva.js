@@ -1,7 +1,7 @@
 /**
  * Aviso ao gestor (sino) quando um proprietário cria, altera ou apaga uma reserva — SÓ se isso
- * mexer em limpezas das próximas 48 h (hoje e amanhã, dia de Lisboa, até ao dia em que caem
- * 48 h a contar de agora). Fora dessa janela o gestor não é incomodado: as limpezas aparecem
+ * mexer em limpezas que começam nas próximas 48 h EXATAS (entre agora e agora + 48 h, à hora, não
+ * por dias de calendário). Fora dessa janela o gestor não é incomodado: as limpezas aparecem
  * no calendário como sempre.
  *
  * Best-effort: nunca lança.
@@ -12,12 +12,13 @@ const { avisarGestores } = require('./notificar');
 
 const HORAS_JANELA = 48;
 
-/** O dia da limpeza (data da tarefa) cai nas próximas 48 h? */
+/** O início da limpeza cai entre agora e agora + 48 h? (limites incluídos) */
 function dentroDas48h(data, agora = new Date()) {
   if (!data) return false;
-  const dia = H.diaUTC(data);
-  const ultimo = H.hojeLisboa(new Date(agora.getTime() + HORAS_JANELA * 3600 * 1000));
-  return dia >= H.hojeLisboa(agora) && dia <= ultimo;
+  const t = new Date(data).getTime();
+  if (!Number.isFinite(t)) return false;
+  const a = agora.getTime();
+  return t >= a && t <= a + HORAS_JANELA * 3600 * 1000;
 }
 
 const fmt = (data) => {
