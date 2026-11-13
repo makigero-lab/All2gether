@@ -59,7 +59,7 @@ test("D5/D6: erro passageiro dá «Tentar agora» (não «Corrigir»); «Atualiz
   assert.match(matriz, /Tentar agora/);
   assert.match(matriz, /Corrigir link/);
   assert.match(matriz, /erro && erro !== c\.erro\?\.mensagem/);
-  assert.match(vista, /temporario \? "Ver" : "Corrigir"/);
+  assert.match(vista, /e\.temporario \|\| e\.codigo === "muitos_novos" \? "Ver" : "Corrigir"/);
 });
 
 test("D8: o lote usa blocos, mostra progresso, não perde o erro e deixa o resultado num aviso fixo", () => {
