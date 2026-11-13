@@ -112,7 +112,10 @@ export function middleware(req: NextRequest) {
       const url = req.nextUrl.clone();
       url.pathname = rotaEsperada;
       url.search = "";
-      return NextResponse.redirect(url);
+      const resposta = NextResponse.redirect(url);
+      // Aviso amigável (lido e apagado pelo ecrã de destino): em vez de redirecionar sem dizer nada.
+      if (isGestor && role === "parceiro") resposta.cookies.set("a2g_aviso", "outra-area", { path: "/", maxAge: 30, sameSite: "lax" });
+      return resposta;
     }
 
     return NextResponse.next();

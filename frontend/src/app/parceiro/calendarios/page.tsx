@@ -26,13 +26,14 @@ function EstadoDaFonte({ f }: { f: Fonte }) {
 export default function ParceiroCalendariosPage() {
   const [casas, setCasas] = useState<Casa[] | null>(null);
   const [fontes, setFontes] = useState<Fonte[]>([]);
+  const [contacto, setContacto] = useState<{ nome: string | null; telefone: string | null; email: string | null } | null>(null);
   const [erro, setErro] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([
       adminGet<{ propriedades: Casa[] }>("/api/parceiro/propriedades"),
-      adminGet<{ fontes: Fonte[] }>("/api/parceiro/calendarios"),
-    ]).then(([c, f]) => { setCasas(c.propriedades ?? []); setFontes(f.fontes ?? []); })
+      adminGet<{ fontes: Fonte[]; contacto?: { nome: string | null; telefone: string | null; email: string | null } | null }>("/api/parceiro/calendarios"),
+    ]).then(([c, f]) => { setCasas(c.propriedades ?? []); setFontes(f.fontes ?? []); setContacto(f.contacto ?? null); })
       .catch(() => setErro("Não foi possível carregar as tuas casas."));
   }, []);
 
@@ -41,7 +42,13 @@ export default function ParceiroCalendariosPage() {
       <div className="space-y-1">
         <Link href="/parceiro/reservas" className="inline-flex min-h-11 items-center gap-1 text-sm text-brand-text hover:underline sm:min-h-9"><ArrowLeft className="h-4 w-4" /> Voltar às reservas</Link>
         <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight"><CalendarDays className="h-6 w-6 text-brand-text" /> Calendários (Airbnb, Booking.com)</h1>
-        <p className="text-sm text-muted-foreground">Aqui vês se o calendário de cada casa está ligado. Para ligar ou mudar, fala com a All2gether.</p>
+        <p className="text-sm text-muted-foreground">Aqui vês se o calendário de cada casa está ligado. Para ligar ou mudar, fala com a All2gether.
+          {contacto && (
+            <span> Contacto: {contacto.telefone && <a href={`tel:${contacto.telefone.replace(/\s+/g, "")}`} className="underline">{contacto.telefone}</a>}
+              {contacto.telefone && contacto.email && " · "}
+              {contacto.email && <a href={`mailto:${contacto.email}`} className="underline">{contacto.email}</a>}.</span>
+          )}
+        </p>
         <p className="text-sm"><Link href="/parceiro/acordo" className="inline-flex min-h-11 items-center text-brand-text underline sm:min-h-9">Acordo de tratamento de dados</Link></p>
       </div>
       {erro && <p role="alert" className="flex items-center gap-2 text-sm text-destructive"><AlertCircle className="h-4 w-4" /> {erro}</p>}
