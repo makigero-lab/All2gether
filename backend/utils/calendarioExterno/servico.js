@@ -335,9 +335,10 @@ async function mudarEstado({ id, acao, escopo, ator = null, transporte = pedir }
   } else return resp(400, { erro: 'Ação inválida.' });
   await fonte.save();
   // «Aceitar» dá resposta imediata: lê já o calendário (sem esperar pela próxima leitura agendada) e cria as limpezas.
+  // (Só para o gestor: o proprietário não dispara leituras à rede com este botão; a leitura agendada apanha-o logo a seguir.)
   let leitura = null;
-  if (acao === 'aceitar_calendario') {
-    try { leitura = await sincronizarFonte(fonte._id, { origem: ator && ator.tipo === 'parceiro' ? 'manual_parceiro' : 'manual_gestor', transporte, esperaLockMs: 3000 }); } catch (e) { console.error('⚠️  leitura após aceitar:', semUrl(e.message)); }
+  if (acao === 'aceitar_calendario' && !escopo.parceiroId) {
+    try { leitura = await sincronizarFonte(fonte._id, { origem: 'manual_gestor', transporte, esperaLockMs: 3000 }); } catch (e) { console.error('⚠️  leitura após aceitar:', semUrl(e.message)); }
     return resp(200, { fonte: fonteParaApi(await FonteCalendario.findById(fonte._id).lean(), {}, { paraGestor: !escopo.parceiroId }), leitura: resumoLeitura(leitura) });
   }
   return resp(200, { fonte: fonteParaApi(fonte.toObject(), {}, { paraGestor: !escopo.parceiroId }) });
