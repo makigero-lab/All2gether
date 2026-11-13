@@ -126,6 +126,7 @@ async function testarLigacao({ propriedadeId, url, escopo, transporte = pedir })
   return resp(200, {
     ok: true, canal: analise.canal, canal_texto: analise.rotulo, host: analise.host, prodid_ok: prodidOk,
     reservas: c.reserva, bloqueios: c.bloqueio, por_confirmar: c.incerto,
+    periodo: parsed.eventos.length ? { de: parsed.eventos.reduce((m, e) => (e.ci < m ? e.ci : m), parsed.eventos[0].ci), ate: parsed.eventos.reduce((m, e) => (e.co > m ? e.co : m), parsed.eventos[0].co) } : null,
     amostra: parsed.eventos.slice(0, 5).map((e) => ({ check_in: e.ci, check_out: e.co, tipo: e.classe })),
     ja_existiam: coincidem, ja_ligada: !!existente,
   });
