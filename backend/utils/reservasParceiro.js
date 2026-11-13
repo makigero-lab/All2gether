@@ -103,6 +103,24 @@ function erroObservacoes(valor) {
   return null;
 }
 
+/** Limites do número de hóspedes e do nome do hóspede (reservas manuais e vindas dos calendários). */
+const MAX_HOSPEDES_RESERVA = 50;
+const MAX_NOME_HOSPEDE = 120;
+
+/** Erro (pt-PT) se o n.º de hóspedes ou o nome estão fora dos limites; nunca corta em silêncio. Vazio é válido. */
+function erroHospedesENome(corpo) {
+  const b = corpo || {};
+  if (b.hospedes !== undefined && b.hospedes !== null && b.hospedes !== '') {
+    const n = typeof b.hospedes === 'number' || typeof b.hospedes === 'string' ? Number(b.hospedes) : NaN;
+    if (!Number.isInteger(n) || n < 0 || n > MAX_HOSPEDES_RESERVA) return `O número de hóspedes tem de ser um número inteiro entre 1 e ${MAX_HOSPEDES_RESERVA}.`;
+  }
+  if (b.nome_hospede !== undefined && b.nome_hospede !== null) {
+    if (typeof b.nome_hospede !== 'string') return 'O nome do hóspede é inválido.';
+    if (b.nome_hospede.trim().length > MAX_NOME_HOSPEDE) return `O nome do hóspede pode ter no máximo ${MAX_NOME_HOSPEDE} caracteres.`;
+  }
+  return null;
+}
+
 /** Campos da reserva que se refletem em tarefa.detalhes_reserva. */
 function detalhesDaReserva(extras) {
   const d = {};
@@ -385,6 +403,8 @@ async function criarReservaComLimpeza({ parceiroId, empresaId, body: corpo = {},
     const extras = lerCamposExtra(corpo);
     const erroObs = erroObservacoes(observacoes);
     if (erroObs) return resp(400, { erro: erroObs });
+    const erroHN = erroHospedesENome(corpo);
+    if (erroHN) return resp(400, { erro: erroHN });
 
     if (!propriedade_id || !mongoose.isValidObjectId(propriedade_id)) {
       return resp(400, { erro: 'propriedade_id é obrigatório.' });
@@ -621,6 +641,8 @@ async function atualizarReservaServico({ parceiroId, id, body: corpo = {}, ator 
     const extras = lerCamposExtra(body);
     const erroObs = erroObservacoes(body.observacoes);
     if (erroObs) return resp(400, { erro: erroObs });
+    const erroHN = erroHospedesENome(body);
+    if (erroHN) return resp(400, { erro: erroHN });
     const novoCheckIn = body.check_in ?? reserva.check_in;
     const novoCheckOut = body.check_out ?? reserva.check_out;
     // Reservas antigas: os limites só se verificam se as datas mudarem (editar notas não bloqueia).
@@ -853,6 +875,7 @@ async function eliminarReservaServico({ parceiroId, id, ator = ATOR_PARCEIRO }) 
 }
 
 module.exports = {
+  erroHospedesENome,
   limpezasDoDia,
   textoDuplicada,
   validarDatas,
