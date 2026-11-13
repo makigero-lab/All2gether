@@ -29,5 +29,8 @@ const schema = new mongoose.Schema(
 );
 schema.index({ parceiro_id: 1, versao: 1, aceite_em: -1 });
 schema.index({ empresa_id: 1, parceiro_id: 1 });
+// Uma só aceitação em vigor por proprietário, versão e texto: dois pedidos em corrida não gravam dois registos.
+// (Os registos revogados ficam como prova e não contam.)
+schema.index({ parceiro_id: 1, versao: 1, hash_texto: 1 }, { unique: true, partialFilterExpression: { revogado_em: null }, name: 'uniq_aceitacao_em_vigor' });
 
 module.exports = mongoose.models.AceitacaoAcordo || mongoose.model('AceitacaoAcordo', schema);

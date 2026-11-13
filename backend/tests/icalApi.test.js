@@ -189,9 +189,13 @@ describe('API: acesso e o link nunca aparece', () => {
     const e = await request(app).post('/api/gestor/calendarios/testar').set(auth(c.tokG)).send({ propriedade_id: String(c.casa._id), url: urlAirbnb() });
     expect(e.body.ok).toBe(false);
     expect(e.body.erro).toMatch(/deixou de funcionar/);
-    // 10 por hora (já gastámos 2)
-    for (let i = 0; i < 8; i++) expect((await request(app).post('/api/gestor/calendarios/testar').set(auth(c.tokG)).send({ propriedade_id: String(c.casa._id), url: urlAirbnb() })).status).toBe(200);
-    expect((await request(app).post('/api/gestor/calendarios/testar').set(auth(c.tokG)).send({ propriedade_id: String(c.casa._id), url: urlAirbnb() })).status).toBe(429);
+    // limite por hora configurável (ICAL_TESTES_POR_HORA; por omissão 60): com 5, já gastámos 2
+    process.env.ICAL_TESTES_POR_HORA = '5';
+    for (let i = 0; i < 3; i++) expect((await request(app).post('/api/gestor/calendarios/testar').set(auth(c.tokG)).send({ propriedade_id: String(c.casa._id), url: urlAirbnb() })).status).toBe(200);
+    const sexto = await request(app).post('/api/gestor/calendarios/testar').set(auth(c.tokG)).send({ propriedade_id: String(c.casa._id), url: urlAirbnb() });
+    delete process.env.ICAL_TESTES_POR_HORA;
+    expect(sexto.status).toBe(429);
+    expect(sexto.body.erro).toMatch(/às \d{2}:\d{2}/);
   });
 });
 

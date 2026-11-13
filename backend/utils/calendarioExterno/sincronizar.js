@@ -21,7 +21,7 @@ const { buscarFeed, ErroFeed, pedir } = require('./buscar');
 const { analisarIcal, hashNormalizado, amostraRedigida } = require('./parser');
 const { reconciliar } = require('./reconciliar');
 const { enviarAvisosDaLeitura, avisarParceiro, avisarGestor } = require('./avisos');
-const { mensagemErro } = require('./mensagens');
+const { mensagemErro, canalTexto } = require('./mensagens');
 const { removerFonte } = require('./decisoes');
 const Rv = require('./reservas');
 
@@ -173,7 +173,7 @@ async function tratarErro({ fonte, err, agora, origem, iniciada, cfg }) {
   const erros = (fonte.erros_consecutivos || 0) + 1;
   const set = {
     ultima_leitura_em: agora, erros_consecutivos: erros,
-    ultimo_erro: { em: agora, codigo, http_status: err.http_status, mensagem: semUrl(mensagemErro(codigo)).slice(0, 300) },
+    ultimo_erro: { em: agora, codigo, http_status: err.http_status, mensagem: semUrl(mensagemErro(codigo, { canal: canalTexto(fonte.canal, fonte.rotulo) })).slice(0, 300) },
   };
   if (erros >= 3 && fonte.estado === 'ativa') set.estado = 'erro';
   fonte.erros_consecutivos = erros;
@@ -186,11 +186,11 @@ async function tratarErro({ fonte, err, agora, origem, iniciada, cfg }) {
   if (horas >= 24 && !fonte.aviso_falha_enviado_em) {
     await FonteCalendario.updateOne({ _id: fonte._id }, { $set: { aviso_falha_enviado_em: agora } });
     const p = await Propriedade.findById(fonte.propriedade_id).select('nome').lean();
-    const txt = `O calendário ${fonte.rotulo || Rv.plataformaDe(fonte.canal)} de ${(p && p.nome) || 'uma casa'} não responde há mais de 24 horas. ${mensagemErro(codigo)} As limpezas já marcadas continuam.`;
+    const txt = `O calendário ${fonte.rotulo || Rv.plataformaDe(fonte.canal)} de ${(p && p.nome) || 'uma casa'} não responde há mais de 24 horas. ${mensagemErro(codigo, { canal: canalTexto(fonte.canal, fonte.rotulo) })} As limpezas já marcadas continuam.`;
     await avisarParceiro(fonte.parceiro_id, fonte.empresa_id, txt);
     await avisarGestor(fonte.empresa_id, 'Calendário externo com erro', txt);
   }
-  return { resultado: 'erro', codigo, mensagem: mensagemErro(codigo) };
+  return { resultado: 'erro', codigo, mensagem: mensagemErro(codigo, { canal: canalTexto(fonte.canal, fonte.rotulo) }) };
 }
 
 /**

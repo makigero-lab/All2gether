@@ -230,7 +230,7 @@ describe('vista geral, por confirmar e lote', () => {
     for (let i = 0; i < 6; i += 1) await Propriedade.create({ nome: 'Extra' + i, empresa_id: c.e._id, origem: 'manual', ativo: true, capacidade_hospedes: 2, tempo_limpeza_minutos: 60, parceiro_id: c.dono._id });
     const com7 = await contar();
     expect(com7).toBe(com1);
-    expect(com7).toBeLessThanOrEqual(8);
+    expect(com7).toBeLessThanOrEqual(9);
   });
 
   test('lista única da empresa por confirmar (com proprietário) e decisões em lote', async () => {

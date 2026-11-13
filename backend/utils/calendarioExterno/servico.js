@@ -21,7 +21,10 @@ const { buscarFeed, pedir } = require('./buscar');
 const { analisarIcal } = require('./parser');
 const { sincronizarFonte, configDoAmbiente } = require('./sincronizar');
 const { removerFonte, contarImpactoRemocao } = require('./decisoes');
-const { MENSAGENS_ESTADO, mensagemErro, textoMuitosNovos } = require('./mensagens');
+const { MENSAGENS_ESTADO, mensagemErro, textoMuitosNovos, eErroTemporario, canalTexto } = require('./mensagens');
+const { tentarTeste, limparLimiteTestes } = require('./limiteTestes');
+const Empresa = require('../../models/Empresa');
+const Utilizador = require('../../models/Utilizador');
 const { avisarParceiro } = require('./avisos');
 const Rv = require('./reservas');
 
@@ -29,23 +32,19 @@ const resp = (status, body) => ({ status, body });
 const MSG_DESLIGADA = 'A ligação a calendários externos ainda não está configurada. Fala com o gestor.';
 const INTERVALO_MANUAL_MS = 10 * 60000;
 
-/** Limite em memória «Testar»: 10 por hora por utilizador. */
-const testes = new Map();
-function limiteTestar(userId, { agora = Date.now(), max = 10, janelaMs = 3600000 } = {}) {
-  const k = String(userId);
-  const lista = (testes.get(k) || []).filter((t) => agora - t < janelaMs);
-  if (lista.length >= max) { testes.set(k, lista); return false; }
-  lista.push(agora); testes.set(k, lista);
-  return true;
-}
-const limparLimiteTestar = () => testes.clear();
+const limparLimiteTestar = limparLimiteTestes;
 
 const MESES_ERRO_DIAS = 14;
 
 /** Forma pública de uma fonte (sem link). */
 function fonteParaApi(f, extra = {}, { paraGestor = false } = {}) {
+  const nomeCanal = canalTexto(f.canal, f.rotulo);
   const erro = f.ultimo_erro && f.ultimo_erro.codigo
-    ? { em: f.ultimo_erro.em, codigo: f.ultimo_erro.codigo, http_status: f.ultimo_erro.http_status, mensagem: semUrl(mensagemErro(f.ultimo_erro.codigo)) }
+    ? {
+      em: f.ultimo_erro.em, codigo: f.ultimo_erro.codigo, http_status: f.ultimo_erro.http_status,
+      temporario: eErroTemporario(f.ultimo_erro.codigo),
+      mensagem: semUrl(mensagemErro(f.ultimo_erro.codigo, { canal: nomeCanal, paraGestor })),
+    }
     : null;
   return {
     _id: String(f._id),
@@ -53,7 +52,7 @@ function fonteParaApi(f, extra = {}, { paraGestor = false } = {}) {
     propriedade_nome: f.propriedade_id && f.propriedade_id.nome ? f.propriedade_id.nome : undefined,
     parceiro_id: String(f.parceiro_id),
     canal: f.canal, rotulo: f.rotulo || null,
-    canal_texto: f.canal === 'outro' ? (f.rotulo || 'Outro canal') : ({ airbnb: 'Airbnb', booking: 'Booking.com', vrbo: 'Vrbo' })[f.canal],
+    canal_texto: nomeCanal,
     url_mascara: f.url_mascara, url_host: f.url_host,
     estado: f.estado, motivo_estado: f.motivo_estado || null,
     estado_texto: f.motivo_estado ? MENSAGENS_ESTADO[f.motivo_estado] || null : null,
@@ -102,21 +101,41 @@ async function validarPedido({ propriedadeId, url, escopo, rotulo }) {
   return { casa: c.casa, analise };
 }
 
+/**
+ * Corpo do erro «link já usado»: diz em que casa (e de que proprietário) está, mas só se for da MESMA empresa;
+ * um link de outra empresa nunca revela nada (nem nomes, nem que casa é).
+ */
+async function corpoLinkUsado(outra, empresaId, codigo) {
+  if (String(outra.empresa_id) !== String(empresaId)) return { erro: 'Este link já está a ser usado noutro sítio. Confirma que copiaste o da casa certa.', codigo };
+  const [casa, dono] = await Promise.all([
+    Propriedade.findById(outra.propriedade_id).select('nome').lean(),
+    Utilizador.findById(outra.parceiro_id).select('nome').lean(),
+  ]);
+  const onde = casa && casa.nome ? `a casa ${casa.nome}${dono && dono.nome ? `, de ${dono.nome}` : ''}` : 'outra casa';
+  return {
+    erro: `Este link já está a ser usado em ${onde}. Confirma que copiaste o da casa certa.`, codigo,
+    ...(casa ? { casa: { nome: casa.nome }, proprietario: dono ? { nome: dono.nome } : null } : {}),
+  };
+}
+
 /** «Testar ligação»: lê e analisa SEM gravar nada. */
-async function testarLigacao({ propriedadeId, url, escopo, transporte = pedir }) {
+async function testarLigacao({ propriedadeId, url, escopo, utilizadorId = null, transporte = pedir, agora = Date.now() }) {
   const v = await validarPedido({ propriedadeId, url, escopo });
   if (v.erro) return v.erro;
   const { casa, analise } = v;
   const hash = hmac(normalizarUrl(analise.url, analise.canal));
-  const outra = await FonteCalendario.findOne({ url_hash: hash, removida: false }).select('propriedade_id').lean();
-  if (outra && String(outra.propriedade_id) !== String(casa._id)) return resp(409, { erro: 'Este link já está a ser usado noutra casa.', codigo: 'LINK_USADO' });
+  const outra = await FonteCalendario.findOne({ url_hash: hash, removida: false }).select('propriedade_id parceiro_id empresa_id').lean();
+  if (outra && String(outra.propriedade_id) !== String(casa._id)) return resp(409, await corpoLinkUsado(outra, escopo.empresaId, 'LINK_USADO'));
+  // Os travões só contam testes que chegam à rede: links inválidos ou repetidos já foram recusados acima.
+  const limite = tentarTeste({ utilizadorId, empresaId: escopo.empresaId, host: analise.host, linkHash: hash, agora });
+  if (!limite.ok) return resp(429, { erro: limite.mensagem, codigo: 'LIMITE_TESTES', motivo: limite.motivo, ate: limite.ate });
   const existente = await FonteCalendario.findOne({ propriedade_id: casa._id, canal_chave: analise.canal_chave, removida: false }).select('_id').lean();
   let feed; let parsed;
   try {
     feed = await buscarFeed(url.trim(), { transporte });
     parsed = analisarIcal(feed.texto, { canal: analise.canal, hmac: (t) => hmac(t) });
   } catch (e) {
-    return resp(200, { ok: false, canal: analise.canal, canal_texto: analise.rotulo, erro: mensagemErro(e.codigo || 'outro'), codigo: e.codigo || 'outro' });
+    return resp(200, { ok: false, canal: analise.canal, canal_texto: analise.rotulo, erro: mensagemErro(e.codigo || 'outro', { canal: analise.rotulo }), codigo: e.codigo || 'outro', temporario: eErroTemporario(e.codigo || 'outro') });
   }
   const p = String(parsed.prodid || '');
   const prodidOk = analise.canal === 'airbnb' ? /airbnb/i.test(p) : analise.canal === 'booking' ? /booking\.com/i.test(p) : true;
@@ -153,7 +172,11 @@ async function criarLigacao({ propriedadeId, url, rotulo, escopo, ator, transpor
   const limite = await contarLimites(casa, escopo, cfg);
   if (limite) return resp(400, { erro: limite, codigo: 'LIMITE' });
   const hash = hmac(normalizarUrl(analise.url, analise.canal));
-  if (await FonteCalendario.exists({ url_hash: hash, removida: false })) return resp(409, { erro: 'Este link já está a ser usado (nesta ou noutra casa).', codigo: 'LINK_REPETIDO' });
+  const repetida = await FonteCalendario.findOne({ url_hash: hash, removida: false }).select('propriedade_id parceiro_id empresa_id').lean();
+  if (repetida) {
+    if (String(repetida.propriedade_id) === String(casa._id)) return resp(409, { erro: 'Este link já está a ser usado nesta casa.', codigo: 'LINK_REPETIDO' });
+    return resp(409, await corpoLinkUsado(repetida, escopo.empresaId, 'LINK_REPETIDO'));
+  }
   if (await FonteCalendario.exists({ propriedade_id: casa._id, canal_chave: analise.canal_chave, removida: false })) {
     return resp(409, { erro: `Esta casa já tem um calendário ${analise.rotulo}. Remove-o ou substitui o link.`, codigo: 'CANAL_REPETIDO' });
   }
@@ -173,12 +196,12 @@ async function criarLigacao({ propriedadeId, url, rotulo, escopo, ator, transpor
   }
   registarAuditoria({ utilizador_id: ator.id, utilizador_nome: ator.nome || '', empresa_id: escopo.empresaId, acao: 'criar', recurso: 'calendario_externo', recurso_id: String(_id), descricao: `Calendário ${analise.rotulo} ligado à casa ${casa.nome} (${fonte.url_mascara})` });
   if (ator.tipo === 'gestor') {
-    avisarParceiro(casa.parceiro_id, escopo.empresaId, `O gestor ligou o calendário ${analise.rotulo} da casa ${casa.nome}. Se não pediste isto, fala com a All2gether.`);
+    avisarParceiro(casa.parceiro_id, escopo.empresaId, `O gestor ligou o calendário ${analise.rotulo} da casa ${casa.nome}.`);
   }
   let leitura = null;
   try { leitura = await sincronizarFonte(_id, { origem: 'agendada', transporte }); } catch (e) { console.error('⚠️  primeira leitura do calendário:', semUrl(e.message)); }
   const atual = await FonteCalendario.findById(_id).lean();
-  return resp(201, { fonte: fonteParaApi(atual), leitura: resumoLeitura(leitura) });
+  return resp(201, { fonte: fonteParaApi(atual, {}, { paraGestor: !escopo.parceiroId }), leitura: resumoLeitura(leitura) });
 }
 
 function resumoLeitura(l) {
@@ -202,7 +225,8 @@ async function substituirLigacao({ id, url, escopo, ator, transporte = pedir }) 
   if (!analise.ok) return resp(400, { erro: analise.erro, codigo: analise.codigo });
   if (analise.canal_chave !== fonte.canal_chave) return resp(400, { erro: 'O novo link tem de ser do mesmo canal.' });
   const hash = hmac(normalizarUrl(analise.url, analise.canal));
-  if (await FonteCalendario.exists({ url_hash: hash, removida: false, _id: { $ne: fonte._id } })) return resp(409, { erro: 'Este link já está a ser usado noutra ligação.', codigo: 'LINK_REPETIDO' });
+  const usada = await FonteCalendario.findOne({ url_hash: hash, removida: false, _id: { $ne: fonte._id } }).select('propriedade_id parceiro_id empresa_id').lean();
+  if (usada) return resp(409, await corpoLinkUsado(usada, escopo.empresaId, 'LINK_REPETIDO'));
   fonte.url_cifrada = cifrar(analise.url.href, String(fonte._id)); fonte.url_hash = hash; fonte.url_mascara = mascara(analise.url); fonte.url_host = analise.host.slice(0, 120);
   fonte.estado = 'ativa'; fonte.motivo_estado = null; fonte.erros_consecutivos = 0; fonte.etag = undefined; fonte.last_modified = undefined; fonte.ultimo_erro = undefined; fonte.aviso_falha_enviado_em = undefined;
   fonte.proxima_leitura_em = new Date();
@@ -210,7 +234,7 @@ async function substituirLigacao({ id, url, escopo, ator, transporte = pedir }) 
   registarAuditoria({ utilizador_id: ator.id, utilizador_nome: ator.nome || '', empresa_id: escopo.empresaId, acao: 'atualizar', recurso: 'calendario_externo', recurso_id: String(fonte._id), descricao: `Link do calendário substituído (${fonte.url_mascara})` });
   let leitura = null;
   try { leitura = await sincronizarFonte(fonte._id, { origem: 'agendada', transporte }); } catch (e) { console.error('⚠️  leitura após substituir:', semUrl(e.message)); }
-  return resp(200, { fonte: fonteParaApi(await FonteCalendario.findById(fonte._id).lean()), leitura: resumoLeitura(leitura) });
+  return resp(200, { fonte: fonteParaApi(await FonteCalendario.findById(fonte._id).lean(), {}, { paraGestor: !escopo.parceiroId }), leitura: resumoLeitura(leitura) });
 }
 
 /** «Atualizar agora»: 1 vez a cada 10 minutos por fonte. */
@@ -225,7 +249,7 @@ async function atualizarAgora({ id, escopo, ator, transporte = pedir, agora = ne
   await FonteCalendario.updateOne({ _id: fonte._id }, { $set: { pedido_manual_em: agora } });
   const l = await sincronizarFonte(fonte._id, { origem: ator.tipo === 'gestor' ? 'manual_gestor' : 'manual_parceiro', transporte, agora, esperaLockMs: 3000 });
   if (l.resultado === 'ocupado') return resp(409, { erro: 'Já estamos a ler este calendário. Espera um momento.', codigo: 'OCUPADO' });
-  return resp(200, { fonte: fonteParaApi(await FonteCalendario.findById(fonte._id).lean()), leitura: resumoLeitura(l) });
+  return resp(200, { fonte: fonteParaApi(await FonteCalendario.findById(fonte._id).lean(), {}, { paraGestor: !escopo.parceiroId }), leitura: resumoLeitura(l) });
 }
 
 /** Reativar uma fonte em erro/suspensa depois de testar a ligação (não serve para casas com Smoobu). */
@@ -239,11 +263,11 @@ async function reativarLigacao({ id, escopo, transporte = pedir }) {
     const feed = await buscarFeed(decifrar(fonte.url_cifrada, String(fonte._id)), { transporte });
     analisarIcal(feed.texto, { canal: fonte.canal, hmac: (t) => hmac(t) });
   } catch (e) {
-    return resp(200, { ok: false, erro: mensagemErro(e.codigo || 'outro'), codigo: e.codigo || 'outro' });
+    return resp(200, { ok: false, erro: mensagemErro(e.codigo || 'outro', { canal: canalTexto(fonte.canal, fonte.rotulo) }), codigo: e.codigo || 'outro', temporario: eErroTemporario(e.codigo || 'outro') });
   }
   await FonteCalendario.updateOne({ _id: fonte._id }, { $set: { estado: 'ativa', motivo_estado: null, erros_consecutivos: 0, proxima_leitura_em: new Date() }, $unset: { ultimo_erro: 1, pausada_em: 1 } });
   const l = await sincronizarFonte(fonte._id, { origem: 'retoma', transporte, esperaLockMs: 3000 });
-  return resp(200, { ok: true, fonte: fonteParaApi(await FonteCalendario.findById(fonte._id).lean()), leitura: resumoLeitura(l) });
+  return resp(200, { ok: true, fonte: fonteParaApi(await FonteCalendario.findById(fonte._id).lean(), {}, { paraGestor: !escopo.parceiroId }), leitura: resumoLeitura(l) });
 }
 
 async function impactoRemocao({ id, escopo }) {
@@ -278,7 +302,13 @@ async function listarLigacoes({ escopo, propriedadeId = null, estado = null }) {
     ]);
     out.push(fonteParaApi(f, { n_reservas: reservas, n_por_confirmar: por_confirmar }, { paraGestor: !escopo.parceiroId }));
   }
-  return resp(200, { fontes: out, ligado: chavesConfiguradas(), modo_teste: modoTesteAtivo() });
+  // O proprietário não corrige links: se algo falha, contacta a empresa (se tiver contacto no perfil).
+  let contacto = null;
+  if (escopo.parceiroId) {
+    const emp = await Empresa.findById(escopo.empresaId).select('nome telefone email').lean();
+    if (emp && (emp.telefone || emp.email)) contacto = { nome: emp.nome || null, telefone: emp.telefone || null, email: emp.email || null };
+  }
+  return resp(200, { fontes: out, ligado: chavesConfiguradas(), modo_teste: modoTesteAtivo(), ...(escopo.parceiroId ? { contacto } : {}) });
 }
 
 /** Últimas leituras. `completo` (gestor) inclui UID/datas e a amostra; o proprietário só o resumo. */
@@ -288,11 +318,11 @@ async function listarLeituras({ id, escopo, limite = 10, completo = false }) {
   const lim = Math.min(50, Math.max(1, parseInt(limite, 10) || 10));
   const campos = 'iniciada_em ultima_em repetidas resultado http_status n_eventos hash_normalizado prodid erro motivo_suspeita origem duracao_ms' + (completo ? ' eventos eventos_truncados amostra_redigida' : '');
   const leituras = await LeituraCalendario.find({ fonte_id: fonte._id }).sort({ iniciada_em: -1 }).limit(lim).select(campos).lean();
-  return resp(200, { leituras: leituras.map((l) => ({ ...l, erro: l.erro ? { codigo: l.erro.codigo, mensagem: semUrl(mensagemErro(l.erro.codigo)) } : undefined })) });
+  return resp(200, { leituras: leituras.map((l) => ({ ...l, erro: l.erro ? { codigo: l.erro.codigo, mensagem: semUrl(mensagemErro(l.erro.codigo, { canal: canalTexto(fonte.canal, fonte.rotulo), paraGestor: completo })) } : undefined })) });
 }
 
 /** Gestor: pausar, retomar ou aceitar o calendário como está. */
-async function mudarEstado({ id, acao, escopo }) {
+async function mudarEstado({ id, acao, escopo, ator = null, transporte = pedir }) {
   const fonte = await fonteDoEscopo(id, escopo);
   if (!fonte) return resp(404, { erro: 'Calendário não encontrado.' });
   if (acao === 'pausar') {
@@ -304,20 +334,77 @@ async function mudarEstado({ id, acao, escopo }) {
     fonte.referencia_futuros = fonte.ultimo_n_futuros || 0; fonte.suspeitas_consecutivas = 0; fonte.aceitar_proxima = true; fonte.aviso_suspeita_enviado_em = undefined; fonte.proxima_leitura_em = new Date();
   } else return resp(400, { erro: 'Ação inválida.' });
   await fonte.save();
-  return resp(200, { fonte: fonteParaApi(fonte.toObject()) });
+  // «Aceitar» dá resposta imediata: lê já o calendário (sem esperar pela próxima leitura agendada) e cria as limpezas.
+  let leitura = null;
+  if (acao === 'aceitar_calendario') {
+    try { leitura = await sincronizarFonte(fonte._id, { origem: ator && ator.tipo === 'parceiro' ? 'manual_parceiro' : 'manual_gestor', transporte, esperaLockMs: 3000 }); } catch (e) { console.error('⚠️  leitura após aceitar:', semUrl(e.message)); }
+    return resp(200, { fonte: fonteParaApi(await FonteCalendario.findById(fonte._id).lean(), {}, { paraGestor: !escopo.parceiroId }), leitura: resumoLeitura(leitura) });
+  }
+  return resp(200, { fonte: fonteParaApi(fonte.toObject(), {}, { paraGestor: !escopo.parceiroId }) });
 }
 
-/** Períodos por confirmar (ou com conflito) do escopo. */
-async function listarReservasExternas({ escopo, estado = 'por_confirmar', parceiroId = null }) {
+/**
+ * Depois de o proprietário aceitar o acordo: as ligações que estavam em pausa por isso voltam já a funcionar
+ * (não esperam pelo job horário). Melhor esforço: nunca lança. Lê já as primeiras; o job apanha as restantes.
+ */
+async function retomarAposAcordo({ parceiroId, empresaId, transporte = pedir, maxLeiturasImediatas = 5 }) {
+  try {
+    const filtro = { parceiro_id: parceiroId, empresa_id: empresaId, removida: false, estado: 'pausada', motivo_estado: 'acordo_por_aceitar' };
+    const fontes = await FonteCalendario.find(filtro).select('_id').lean();
+    if (!fontes.length) return { retomadas: 0 };
+    await FonteCalendario.updateMany(filtro, { $set: { estado: 'ativa', motivo_estado: null, proxima_leitura_em: new Date() }, $unset: { pausada_em: 1 } });
+    for (const f of fontes.slice(0, maxLeiturasImediatas)) {
+      // eslint-disable-next-line no-await-in-loop
+      await sincronizarFonte(f._id, { origem: 'retoma', transporte, esperaLockMs: 1000 }).catch((e) => console.error('⚠️  leitura após o acordo:', semUrl(e.message)));
+    }
+    return { retomadas: fontes.length };
+  } catch (e) {
+    console.error('⚠️  retomar após o acordo:', semUrl(e.message));
+    return { retomadas: 0 };
+  }
+}
+
+const LIMITE_LISTA_EXTERNAS = 500;
+
+/**
+ * Ids dos proprietários e das casas INATIVOS da empresa: os seus períodos não aparecem por defeito (não se
+ * podem confirmar: dariam 409) e não contam no selo, no separador nem no painel «Precisam de atenção».
+ */
+async function inativosDaEmpresa(empresaId) {
+  const [donos, casas] = await Promise.all([
+    Utilizador.find({ empresa_id: empresaId, role: 'parceiro', $or: [{ ativo: false }, { eliminado_em: { $ne: null } }] }).select('_id').lean(),
+    Propriedade.find({ empresa_id: empresaId, ativo: false }).select('_id').lean(),
+  ]);
+  return { donos: donos.map((d) => d._id), casas: casas.map((c) => c._id) };
+}
+
+/**
+ * Períodos por confirmar (ou com conflito) do escopo. Devolve também `total` (para dizer «a mostrar 500 de 612»);
+ * `pular` pagina, `proximosDias` filtra pelos que entram nos próximos N dias e `incluirInativos` mostra os de
+ * casas/proprietários inativos (que não se podem confirmar).
+ */
+async function listarReservasExternas({ escopo, estado = 'por_confirmar', parceiroId = null, pular = 0, proximosDias = null, incluirInativos = false }) {
   const hoje = Rv.dataDe(H.hojeLisboa());
   const filtro = { empresa_id: escopo.empresaId, ...(escopo.parceiroId ? { parceiro_id: escopo.parceiroId } : {}), check_out: { $gte: hoje } };
   if (parceiroId && !escopo.parceiroId && mongoose.isValidObjectId(parceiroId)) filtro.parceiro_id = parceiroId;
   if (estado === 'conflito') filtro.conflito = { $in: ['limpeza_em_curso', 'limpeza_concluida'] };
   else if (['por_confirmar', 'bloqueio'].includes(estado)) filtro.estado = estado;
   else return resp(400, { erro: 'Estado inválido.' });
-  const lista = await ReservaExterna.find(filtro).populate('propriedade_id', 'nome').populate('parceiro_id', 'nome').sort({ check_in: 1 }).limit(500)
-    .select('propriedade_id canal canal_chave check_in check_out noites classe estado motivo conflito decidido_por').lean();
+  const dias = parseInt(proximosDias, 10);
+  if (Number.isInteger(dias) && dias > 0 && dias <= 365) filtro.check_in = { $lte: Rv.dataDe(H.somarDiasISO(H.hojeLisboa(), dias)) };
+  if (!incluirInativos && !escopo.parceiroId) {
+    const ina = await inativosDaEmpresa(escopo.empresaId);
+    if (ina.donos.length) filtro.parceiro_id = filtro.parceiro_id ? { $eq: filtro.parceiro_id, $nin: ina.donos } : { $nin: ina.donos };
+    if (ina.casas.length) filtro.propriedade_id = { $nin: ina.casas };
+  }
+  const saltar = Math.max(0, parseInt(pular, 10) || 0);
+  const [total, lista] = await Promise.all([
+    ReservaExterna.countDocuments(filtro),
+    ReservaExterna.find(filtro).populate('propriedade_id', 'nome').populate('parceiro_id', 'nome').sort({ check_in: 1, _id: 1 }).skip(saltar).limit(LIMITE_LISTA_EXTERNAS)
+      .select('propriedade_id canal canal_chave check_in check_out noites classe estado motivo conflito decidido_por').lean(),
+  ]);
   return resp(200, {
+    total, limite: LIMITE_LISTA_EXTERNAS, desde: saltar, mostrando: lista.length,
     reservas_externas: lista.map((x) => ({
       _id: String(x._id), propriedade: { _id: String(x.propriedade_id._id), nome: x.propriedade_id.nome },
       parceiro: x.parceiro_id ? { _id: String(x.parceiro_id._id), nome: x.parceiro_id.nome } : null,
@@ -329,5 +416,5 @@ async function listarReservasExternas({ escopo, estado = 'por_confirmar', parcei
 
 module.exports = {
   fonteParaApi, testarLigacao, criarLigacao, substituirLigacao, atualizarAgora, reativarLigacao, impactoRemocao, removerLigacao,
-  parceirosSemAcordo, listarLigacoes, listarLeituras, mudarEstado, listarReservasExternas, limiteTestar, limparLimiteTestar, MESES_ERRO_DIAS,
+  parceirosSemAcordo, retomarAposAcordo, inativosDaEmpresa, listarLigacoes, listarLeituras, mudarEstado, listarReservasExternas, limparLimiteTestar, MESES_ERRO_DIAS,
 };
