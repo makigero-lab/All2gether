@@ -1381,13 +1381,13 @@ export function TabelaReservas({
       </div>
 
       <div className="flex flex-col gap-1">
-        <div className="flex items-center justify-between gap-3">
-          <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+          <h1 className="flex min-w-0 items-center gap-2 text-2xl font-bold tracking-tight">
             <Table2 className="h-6 w-6 text-brand-text" />
             {titulo}
           </h1>
 
-          <div className="flex shrink-0 gap-2">
+          <div className="flex max-w-full flex-wrap gap-2">
           <span className="hidden md:inline-flex">{botaoGravar()}</span>
           {mostrarExportar && (
             <Link href="/parceiro/calendarios" className="inline-flex h-10 items-center gap-2 rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent" title="Ligar os calendários do Airbnb e da Booking.com">
