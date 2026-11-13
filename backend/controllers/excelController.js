@@ -14,6 +14,7 @@ const ExcelJS = require('exceljs');
 const Tarefa = require('../models/Tarefa');
 const Propriedade = require('../models/Propriedade');
 const { tipoDe, ROTULOS_TIPO } = require('../utils/tipoLimpeza');
+const { listarLimpezasDaGestao, origemDaLimpeza } = require('../utils/limpezasDaGestao');
 
 const MIME_XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
@@ -124,17 +125,23 @@ exports.exportarExcelParceiro = async (req, res) => {
       .lean();
     const propIds = propriedades.map((p) => p._id);
 
+    const CABECALHO_VAZIO = {
+      'Propriedade': '', 'Origem': '', 'Tipo de limpeza': '', 'Data da limpeza': '',
+      'Check-in': '', 'Check-out': '', 'Hóspedes': '', 'Estado': '',
+    };
     if (propIds.length === 0) {
-      return enviarXlsx(
-        res,
-        [{ 'Propriedade': '', 'Tipo de limpeza': '', 'Check-in': '', 'Check-out': '', 'Hóspedes': '', 'Estado': '' }],
-        'minhas_reservas.xlsx'
-      );
+      return enviarXlsx(res, [CABECALHO_VAZIO], 'minhas_reservas.xlsx');
     }
+
+    // Limpezas da gestão (criadas pela All2gether ou vindas do Smoobu): as mesmas da tabela do ecrã.
+    // Só trazem origem, datas, tipo e estado: nunca dados de hóspedes.
+    const gestao = await listarLimpezasDaGestao(parceiroId);
+    const gestaoPorId = new Map(gestao.map((l) => [String(l._id), l]));
 
     const tarefas = await Tarefa.find({
       empresa_id: empresaId,
       propriedade_id: { $in: propIds },
+      tipo: 'limpeza',
       estado: { $ne: 'cancelada' },
     })
       .populate({ path: 'propriedade_id', select: 'nome' })
@@ -143,16 +150,53 @@ exports.exportarExcelParceiro = async (req, res) => {
       .select('-fotos_conclusao -avarias.fotos')
       .lean();
 
-    const linhas = tarefas.map((t) => ({
-      'Propriedade': t.propriedade_id?.nome ?? '',
-      'Tipo de limpeza': ROTULOS_TIPO[tipoDe(t)],
-      'Check-in': t.detalhes_reserva?.checkin ?? '',
-      'Check-out': t.detalhes_reserva?.checkout ?? '',
-      'Hóspedes': t.hospedes ?? t.detalhes_reserva?.pax ?? '',
-      'Estado': t.estado ?? '',
-    }));
+    // Para o proprietário, «Não atribuída» (detalhe interno) é igual a «Por atribuir» (como no ecrã).
+    const estadoPT = (e) => (e === 'nao_atribuida' ? 'por_atribuir' : e ?? '');
+    const vistos = new Set();
+    const linhas = [];
+    for (const t of tarefas) {
+      const g = gestaoPorId.get(String(t._id));
+      // Fora da janela de 90 dias do ecrã mas sem ser reserva dele: continua a ser da gestão.
+      const daGestao = !!g || (t.origem_parceiro !== true);
+      const textoOrigem = g ? g.origem_texto : origemDaLimpeza(t) === 'smoobu' ? 'Smoobu' : 'Criada pela All2gether';
+      vistos.add(String(t._id));
+      linhas.push({
+        ordem: new Date(t.data).getTime() || 0,
+        linha: {
+          'Propriedade': t.propriedade_id?.nome ?? '',
+          'Origem': daGestao ? textoOrigem : 'Reserva do proprietário',
+          'Tipo de limpeza': ROTULOS_TIPO[tipoDe(t)],
+          'Data da limpeza': t.data ? formatarDataPT(t.data) : '',
+          'Check-in': t.detalhes_reserva?.checkin ?? '',
+          'Check-out': t.detalhes_reserva?.checkout ?? '',
+          // Só o número de hóspedes das reservas dele; nas limpezas da gestão fica vazio (como no ecrã).
+          'Hóspedes': daGestao ? '' : (t.hospedes ?? t.detalhes_reserva?.pax ?? ''),
+          'Estado': estadoPT(t.estado),
+        },
+      });
+    }
+    // As que a tabela do ecrã mostra mas não entram acima (ex.: canceladas pela gestão).
+    for (const g of gestao) {
+      if (vistos.has(String(g._id))) continue;
+      linhas.push({
+        ordem: new Date(g.data).getTime() || 0,
+        linha: {
+          'Propriedade': g.propriedade?.nome ?? '',
+          'Origem': g.origem_texto,
+          'Tipo de limpeza': ROTULOS_TIPO[g.tipo_limpeza] ?? g.tipo_limpeza ?? '',
+          'Data da limpeza': g.data ? formatarDataPT(g.data) : '',
+          'Check-in': g.check_in ?? '',
+          'Check-out': g.check_out ?? '',
+          'Hóspedes': '',
+          'Estado': estadoPT(g.estado),
+        },
+      });
+    }
+    linhas.sort((a, b) => a.ordem - b.ordem);
+    const linhasXlsx = linhas.map((l) => l.linha);
+    if (linhasXlsx.length === 0) linhasXlsx.push(CABECALHO_VAZIO);
 
-    return enviarXlsx(res, linhas, 'minhas_reservas.xlsx');
+    return enviarXlsx(res, linhasXlsx, 'minhas_reservas.xlsx');
   } catch (err) {
     console.error('❌ excel.exportarExcelParceiro:', err.message);
     return res.status(500).json({ erro: 'Erro ao gerar Excel.' });

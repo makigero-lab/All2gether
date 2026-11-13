@@ -559,9 +559,20 @@ export default function AusenciasPage() {
       {destacar && !loading && (
         <div role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/40 bg-primary/10 px-4 py-2 text-sm">
           <span>
-            {ausencias.some((a) => a._id === destacar)
-              ? "Pedido aberto a partir do calendário (destacado na lista). Aprova ou rejeita na coluna Ações."
-              : "Esse pedido já não existe (foi decidido ou apagado)."}
+            {(() => {
+              const alvo = ausencias.find((a) => a._id === destacar);
+              if (!alvo) return "Esse pedido já não existe (foi apagado).";
+              if (alvo.estado === "pendente" || alvo.estado === "pendente_emergencia") {
+                return "Pedido aberto a partir do calendário (destacado na lista). Aprova ou rejeita na coluna Ações.";
+              }
+              const decisao: Record<string, string> = { aprovada: "aprovado", rejeitada: "rejeitado", cancelada: "cancelado" };
+              const palavra = decisao[alvo.estado ?? ""];
+              if (!palavra) return "Pedido aberto a partir do calendário (destacado na lista).";
+              // O registo não guarda quem decidiu; a data é a da última alteração do pedido.
+              const quando = alvo.updatedAt ? new Date(alvo.updatedAt) : null;
+              const quandoTxt = quando && !isNaN(quando.getTime()) ? ` em ${quando.toLocaleString("pt-PT", { timeZone: "Europe/Lisbon", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}` : "";
+              return `Este pedido já foi ${palavra}${quandoTxt}. Já não há nada para decidir aqui.`;
+            })()}
           </span>
           <Button variant="outline" size="sm" onClick={() => setDestacar(null)}>Fechar aviso</Button>
         </div>

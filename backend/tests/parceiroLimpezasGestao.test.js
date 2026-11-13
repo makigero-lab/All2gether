@@ -235,3 +235,32 @@ describe('avisos ao gestor quando o proprietário mexe em reservas (só limpezas
     expect(await msgs(c.g, /limpeza que cancelaste foi reaberta/)).toBe(1);
   });
 });
+
+describe('Excel do proprietário: limpezas da gestão com coluna Origem', () => {
+  test('inclui as limpezas da gestão e do Smoobu com Origem, as reservas dele, sem dados de hóspedes nem casas alheias', async () => {
+    const ExcelJS = require('exceljs');
+    const c = await cenario();
+    await request(app).post('/api/gestor/tarefas').set(auth(c.tokG)).send({ propriedade_id: String(c.p._id), data: dia(20), tipo: 'limpeza', nome_hospede: 'Ninguém Deve Ver' });
+    await processarReservaSmoobu(reservaSmoobu(9700 + n, c.p), c.e._id, c.e._id);
+    expect((await request(app).post('/api/parceiro/reservas').set(auth(c.tokP)).send({ propriedade_id: String(c.p._id), check_in: dia(30), check_out: dia(33), hospedes: 2 })).status).toBe(201);
+    await processarReservaSmoobu(reservaSmoobu(9800 + n, c.alheia), c.e._id, c.e._id);
+
+    const res = await request(app).get('/api/parceiro/reservas/exportar-excel').set(auth(c.tokP)).buffer(true)
+      .parse((r, cb) => { const ch = []; r.on('data', (d) => ch.push(d)); r.on('end', () => cb(null, Buffer.concat(ch))); });
+    expect(res.status).toBe(200);
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(res.body);
+    const ws = wb.worksheets[0];
+    const cab = ws.getRow(1).values.map((v) => String(v || ''));
+    expect(cab).toContain('Origem');
+    const iO = cab.indexOf('Origem');
+    const iP = cab.indexOf('Propriedade');
+    const iH = cab.indexOf('Hóspedes');
+    const linhas = [];
+    ws.eachRow((row, i) => { if (i > 1) linhas.push(row.values); });
+    expect(linhas.map((l) => String(l[iO])).sort()).toEqual(['Criada pela All2gether', 'Reserva do proprietário', 'Smoobu']);
+    expect(linhas.every((l) => String(l[iP]) === c.p.nome)).toBe(true);
+    expect(linhas.filter((l) => String(l[iO]) !== 'Reserva do proprietário').every((l) => !l[iH])).toBe(true);
+    expect(JSON.stringify(linhas)).not.toMatch(/Nome Secreto|Ninguém Deve Ver/);
+  });
+});
