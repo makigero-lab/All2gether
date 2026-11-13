@@ -74,9 +74,9 @@ describe('prazo da oferta', () => {
 describe('oferta à equipa', () => {
   test('sem ninguém disponível: a vaga é oferecida a quem não está ausente (sino) e os gestores são avisados', async () => {
     const c = await cenario();
-    const dia = diaEm(10);
+    const dia = diaEm(4);
     await ausente(c, c.cris, dia);
-    const r = await reservar(c, { check_in: diaEm(7), check_out: dia });
+    const r = await reservar(c, { check_in: diaEm(2), check_out: dia });
     expect(r.status).toBe(201);
     const t = await Tarefa.findById(r.body.tarefa._id).lean();
     expect(t.estado).toBe('por_atribuir');
@@ -97,7 +97,7 @@ describe('oferta à equipa', () => {
 
   test('dois a aceitar ao mesmo tempo: só um fica com ela, o outro recebe «já foi aceite»', async () => {
     const c = await cenario();
-    const r = await reservar(c, { check_in: diaEm(7), check_out: diaEm(10) });
+    const r = await reservar(c, { check_in: diaEm(2), check_out: diaEm(4) });
     const id = r.body.tarefa._id;
     const [ta, tb] = [await login(c.ana), await login(c.bia)];
     const [a, b] = await Promise.all([aceitar(ta, id), aceitar(tb, id)]);
@@ -117,7 +117,7 @@ describe('oferta à equipa', () => {
 
   test('equipa de 2 com 6 aceitações em simultâneo: acabam exatamente 2 aceites', async () => {
     const c = await cenario({ sn: 2 });
-    const r = await reservar(c, { check_in: diaEm(7), check_out: diaEm(10) });
+    const r = await reservar(c, { check_in: diaEm(2), check_out: diaEm(4) });
     const id = r.body.tarefa._id;
     const extra = [];
     for (const nome of ['Dani', 'Eva', 'Fabio']) extra.push(await c.mk(nome, 'staff', { dias_folga: TODOS_OS_DIAS }));
@@ -135,7 +135,7 @@ describe('oferta à equipa', () => {
 
   test('equipa de 2 pessoas: aceitam-se duas vagas e a terceira pessoa fica de fora', async () => {
     const c = await cenario({ sn: 2 });
-    const r = await reservar(c, { check_in: diaEm(7), check_out: diaEm(10) });
+    const r = await reservar(c, { check_in: diaEm(2), check_out: diaEm(4) });
     const id = r.body.tarefa._id;
     const [ta, tb, tc] = [await login(c.ana), await login(c.bia), await login(c.cris)];
     const lista = await request(app).get('/api/staff/vagas-livres').set(auth(ta));
@@ -159,9 +159,9 @@ describe('oferta à equipa', () => {
 
   test('o gestor atribui à mão: a oferta fecha-se; cancelada: ninguém aceita; ausente não aceita', async () => {
     const c = await cenario();
-    const r1 = await reservar(c, { check_in: diaEm(7), check_out: diaEm(10) });
-    const r2 = await reservar(c, { check_in: diaEm(8), check_out: diaEm(11) });
-    const dia2 = diaEm(11);
+    const r1 = await reservar(c, { check_in: diaEm(2), check_out: diaEm(4) });
+    const r2 = await reservar(c, { check_in: diaEm(3), check_out: diaEm(5) });
+    const dia2 = diaEm(5);
     await ausente(c, c.bia, dia2);
     const ta = await login(c.ana);
     // atribuição manual do gestor
@@ -183,7 +183,7 @@ describe('oferta à equipa', () => {
 
   test('prazo: depois dele ninguém aceita, a tarefa fica por atribuir e os gestores são avisados', async () => {
     const c = await cenario();
-    const r = await reservar(c, { check_in: diaEm(7), check_out: diaEm(10) });
+    const r = await reservar(c, { check_in: diaEm(2), check_out: diaEm(4) });
     const id = r.body.tarefa._id;
     await Tarefa.updateOne({ _id: id }, { $set: { oferta_expira_em: new Date(Date.now() - 1000) } });
     const exp = await aceitar(await login(c.ana), id);
@@ -203,9 +203,9 @@ describe('oferta à equipa', () => {
 
   test('o gestor muda o dia: a oferta recomeça para o novo dia', async () => {
     const c = await cenario();
-    const r = await reservar(c, { check_in: diaEm(7), check_out: diaEm(10) });
+    const r = await reservar(c, { check_in: diaEm(2), check_out: diaEm(4) });
     const id = r.body.tarefa._id;
-    const novo = diaEm(12);
+    const novo = diaEm(6);
     const m = await request(app).patch(`/api/gestor/tarefas/${id}/data`).set(auth(c.tokenG)).send({ data: novo });
     expect(m.status).toBe(200);
     const t = await Tarefa.findById(id).lean();
@@ -216,7 +216,7 @@ describe('oferta à equipa', () => {
 
   test('o rastreio apanha limpezas sem oferta (rede de segurança) e respeita o interruptor dos testes', async () => {
     const c = await cenario();
-    const dia = diaEm(9);
+    const dia = diaEm(5);
     const t = await Tarefa.create({ empresa_id: c.e._id, propriedade_id: c.p._id, data: new Date(`${dia}T10:00:00Z`), tempo_limpeza_minutos: 60, estado: 'por_atribuir', tipo: 'limpeza', origem: 'manual' });
     const r = await abrirOfertasPendentes();
     expect(r.abertas).toBeGreaterThanOrEqual(1);

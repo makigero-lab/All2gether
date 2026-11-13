@@ -29,6 +29,7 @@ import {
 } from "@/lib/ordenacao-reservas";
 import { EstadoTarefaBadge } from "@/components/ui/estado-tarefa-badge";
 import { LimpezaConcluida } from "@/components/parceiro/limpeza-concluida";
+import { CartoesLimpezasGestao, LinhasLimpezasGestao, type LimpezaGestaoDTO } from "@/components/parceiro/limpezas-da-gestao";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
@@ -595,6 +596,8 @@ interface Linha {
 
 export default function ParceiroReservasPage() {
   const [reservas, setReservas] = useState<ReservaDTO[]>([]);
+  // Limpezas criadas pela All2gether / vindas do Smoobu nas casas dele: só de leitura.
+  const [limpezasGestao, setLimpezasGestao] = useState<LimpezaGestaoDTO[]>([]);
   const [propriedades, setPropriedades] = useState<PropriedadeDTO[]>([]);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
@@ -702,11 +705,12 @@ export default function ParceiroReservasPage() {
     setErro(null);
     try {
       const [resReservas, resProps] = await Promise.all([
-        adminGet<{ reservas: ReservaDTO[] }>("/api/parceiro/reservas"),
+        adminGet<{ reservas: ReservaDTO[]; limpezas_gestao?: LimpezaGestaoDTO[] }>("/api/parceiro/reservas"),
         adminGet<{ propriedades: PropriedadeDTO[] }>("/api/parceiro/propriedades"),
       ]);
       reconciliarNoProximo.current = true;
       setReservas(resReservas.reservas ?? []);
+      setLimpezasGestao(resReservas.limpezas_gestao ?? []);
       const props = resProps.propriedades ?? [];
       setPropriedades(props);
       // Com uma só propriedade, a linha nova já vem preenchida.
@@ -1691,6 +1695,8 @@ export default function ParceiroReservasPage() {
                     </FragmentoLinha>
                   );
                 })}
+                {/* Limpezas da All2gether e do Smoobu: só de leitura */}
+                <LinhasLimpezasGestao limpezas={limpezasGestao} classeEstado={FIXO_ESTADO} classeAcoes={FIXO_ACOES} />
               </tbody>
             </table>
           </div>
@@ -1889,6 +1895,8 @@ export default function ParceiroReservasPage() {
               </Card>
             );
           })}
+
+          <CartoesLimpezasGestao limpezas={limpezasGestao} />
         </div>
         </>
       )}

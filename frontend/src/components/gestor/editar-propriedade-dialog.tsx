@@ -34,7 +34,12 @@ export interface EditarPropriedadeForm {
   dias_fixos_limpeza: number[];
 }
 
-interface Opcao { _id: string; nome: string }
+interface Opcao { _id: string; nome: string; ativo?: boolean }
+
+/** Só as opções ativas; a já associada mantém-se visível (marcada «(inativo)») para não a perder ao editar. */
+function opcoesAtivas(lista: Opcao[], atual: string) {
+  return lista.filter((o) => o.ativo !== false || o._id === atual);
+}
 
 const DIAS = [
   { dia: 1, label: "Seg" },
@@ -241,14 +246,14 @@ export function EditarPropriedadeDialog({
                   <label htmlFor="edit-parceiro" className="text-xs font-medium text-muted-foreground">Proprietário</label>
                   <select id="edit-parceiro" value={form.parceiro_id} onChange={(e) => upd({ parceiro_id: e.target.value })} className={CAMPO}>
                     <option value="">Nenhum (propriedade All2gether)</option>
-                    {parceiros.map((p) => <option key={p._id} value={p._id}>{p.nome}</option>)}
+                    {opcoesAtivas(parceiros, form.parceiro_id).map((p) => <option key={p._id} value={p._id}>{p.ativo === false ? `${p.nome} (inativo)` : p.nome}</option>)}
                   </select>
                 </div>
                 <div className="space-y-1.5">
                   <label htmlFor="edit-fornecedor" className="text-xs font-medium text-muted-foreground">Lavandaria</label>
                   <select id="edit-fornecedor" value={form.fornecedor_id} onChange={(e) => upd({ fornecedor_id: e.target.value })} className={CAMPO}>
                     <option value="">Nenhuma (sem lavandaria)</option>
-                    {fornecedores.map((f) => <option key={f._id} value={f._id}>{f.nome}</option>)}
+                    {opcoesAtivas(fornecedores, form.fornecedor_id).map((f) => <option key={f._id} value={f._id}>{f.ativo === false ? `${f.nome} (inativo)` : f.nome}</option>)}
                   </select>
                 </div>
               </div>

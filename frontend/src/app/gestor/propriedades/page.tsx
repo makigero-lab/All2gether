@@ -1131,7 +1131,7 @@ export default function PropriedadesPage() {
                             className="text-xs"
                             title={
                               p.parceiro_id && typeof p.parceiro_id === "object"
-                                ? `Proprietário associado: ${p.parceiro_id.nome}`
+                                ? `Proprietário associado: ${p.parceiro_id.nome}${p.parceiro_id.ativo === false ? " (inativo)" : ""}`
                                 : "Propriedade All2gether"
                             }
                           >
@@ -1140,7 +1140,8 @@ export default function PropriedadesPage() {
                               // parceiro_id estiver populado (objeto), usa o nome.
                               // Senão, fallback para "All2gether".
                               if (p.parceiro_id && typeof p.parceiro_id === "object") {
-                                return p.parceiro_id.nome || "All2gether";
+                                const nome = p.parceiro_id.nome || "All2gether";
+                                return p.parceiro_id.ativo === false ? `${nome} (inativo)` : nome;
                               }
                               return "All2gether";
                             })()}
@@ -1399,7 +1400,7 @@ export default function PropriedadesPage() {
                 className="flex h-11 md:h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <option value="">Nenhum (propriedade All2gether)</option>
-                {parceirosList.map((p) => (
+                {parceirosList.filter((p) => p.ativo !== false).map((p) => (
                   <option key={p._id} value={p._id}>{p.nome}</option>
                 ))}
               </select>
@@ -1421,7 +1422,7 @@ export default function PropriedadesPage() {
                 className="flex h-11 md:h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <option value="">Nenhuma (sem lavandaria)</option>
-                {fornecedoresList.map((f) => (
+                {fornecedoresList.filter((f) => f.ativo !== false).map((f) => (
                   <option key={f._id} value={f._id}>{f.nome}</option>
                 ))}
               </select>
