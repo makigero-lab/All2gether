@@ -82,7 +82,7 @@ const reservaManualSchema = new mongoose.Schema(
     sincronizada: { type: Boolean, default: false },
     // Cancelada pelo canal (ou pelo proprietário, numa reserva sincronizada): a linha fica na tabela.
     cancelada_em: { type: Date, default: null },
-    cancelada_motivo: { type: String, enum: ['canal', 'parceiro', null], default: null },
+    cancelada_motivo: { type: String, enum: ['canal', 'parceiro', 'ligacao_removida', null], default: null },
   },
   { timestamps: true }
 );

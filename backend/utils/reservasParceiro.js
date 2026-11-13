@@ -595,6 +595,16 @@ async function atualizarReservaServico({ parceiroId, id, body: corpo = {}, ator 
       return resp(404, { erro: 'Reserva não encontrada.' });
     }
 
+    // Reserva ligada a um calendário (Airbnb, Booking...): as datas vêm do canal e só lá se alteram.
+    if (reserva.sincronizada && ator.tipo !== 'ical') {
+      const mesmo = (a, b) => new Date(a).getTime() === new Date(b).getTime();
+      const mudaDatas = (corpo.check_in !== undefined && !mesmo(corpo.check_in, reserva.check_in))
+        || (corpo.check_out !== undefined && !mesmo(corpo.check_out, reserva.check_out));
+      if (mudaDatas) {
+        return resp(400, { erro: `As datas vêm do ${reserva.plataforma || 'calendário'}: altera-as lá.`, codigo: 'DATAS_SINCRONIZADAS' });
+      }
+    }
+
     const tarefa = reserva.tarefa_gerada_id ? await Tarefa.findById(reserva.tarefa_gerada_id) : null;
     if (tarefa && ESTADOS_BLOQUEADOS.includes(tarefa.estado)) {
       return resp(409, {
@@ -815,6 +825,12 @@ async function eliminarReservaServico({ parceiroId, id, ator = ATOR_PARCEIRO }) 
       return resp(409, {
         erro: 'A limpeza desta reserva já começou ou foi concluída. Contacta o gestor.',
       });
+    }
+    // Reserva ligada a um calendário: não se apaga (o canal voltaria a trazê-la); cancela-se a limpeza,
+    // a reserva fica como «cancelada» e o período passa a bloqueio (não volta a ser perguntado).
+    if (reserva.sincronizada && ator.tipo !== 'ical') {
+      const { desligarReservaSincronizada } = require('./calendarioExterno/decisoes');
+      return desligarReservaSincronizada({ reserva, tarefa, ator, parceiroId, avisar: avisarAcaoReserva });
     }
     if (tarefa && tarefa.estado !== 'cancelada') {
       const prop = await Propriedade.findById(reserva.propriedade_id).select('nome').lean();

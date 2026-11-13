@@ -179,6 +179,23 @@ router.post('/parceiros/:id/reservas', auth, isGestor, gestorReservas.criarReser
 router.put('/parceiros/:id/reservas/:reservaId', auth, isGestor, gestorReservas.atualizarReserva);
 router.delete('/parceiros/:id/reservas/:reservaId', auth, isGestor, gestorReservas.eliminarReserva);
 
+// Calendários externos (Airbnb, Booking...) das casas da empresa: o gestor também pode ligá-los e decidir períodos.
+const calGestor = require('../controllers/calendarioController').gestor;
+router.get('/calendarios', auth, isGestor, calGestor.listar);
+router.post('/calendarios/testar', auth, isGestor, calGestor.testar);
+router.post('/calendarios', auth, isGestor, calGestor.criar);
+router.put('/calendarios/:id', auth, isGestor, calGestor.substituir);
+router.post('/calendarios/:id/atualizar', auth, isGestor, calGestor.atualizar);
+router.post('/calendarios/:id/reativar', auth, isGestor, calGestor.reativar);
+router.get('/calendarios/:id/impacto-remocao', auth, isGestor, calGestor.impacto);
+router.delete('/calendarios/:id', auth, isGestor, calGestor.remover);
+router.get('/calendarios/:id/leituras', auth, isGestor, calGestor.leituras);
+router.patch('/calendarios/:id/estado', auth, isGestor, calGestor.estado);
+router.get('/reservas-externas', auth, isGestor, calGestor.listarExternas);
+router.post('/reservas-externas/:id/confirmar', auth, isGestor, calGestor.confirmar);
+router.post('/reservas-externas/:id/bloqueio', auth, isGestor, calGestor.bloqueio);
+router.post('/reservas-externas/:id/reabrir', auth, isGestor, calGestor.reabrir);
+
 // FIX (restrição lavandaria) — rota dedicada para fornecedores (lavandarias).
 router.get('/fornecedores', auth, isGestor, getFornecedores);
 router.put('/equipa/:id', auth, isGestor, atualizarMembroEquipa);
