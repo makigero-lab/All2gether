@@ -115,8 +115,8 @@ export function Dialog({ open, onOpenChange, children, ecraInteiroNoTelemovel = 
         aria-labelledby={titleId}
         tabIndex={-1}
         className={cn(
-          "relative z-10 w-full max-w-[min(32rem,calc(100vw-2rem))] max-h-[90vh] overflow-y-auto rounded-md border border-border/60 bg-card shadow-lg outline-none",
-          ecraInteiroNoTelemovel && "flex flex-col overflow-hidden sm:max-w-3xl max-sm:h-full max-sm:max-h-full max-sm:max-w-none max-sm:rounded-none max-sm:border-0"
+          "relative z-10 flex w-full max-w-[min(32rem,calc(100vw-2rem))] max-h-[90vh] flex-col overflow-y-auto rounded-md border border-border/60 bg-card shadow-lg outline-none",
+          ecraInteiroNoTelemovel && "sm:max-w-3xl max-sm:h-full max-sm:max-h-full max-sm:max-w-none max-sm:rounded-none max-sm:border-0"
         )}
       >
         <DialogTitleIdContext.Provider value={titleId}>
@@ -136,7 +136,7 @@ export function DialogHeader({
   children: React.ReactNode;
 }) {
   return (
-    <div className={cn("relative flex items-center justify-between border-b py-4 pl-6 pr-16", className)}>
+    <div className={cn("relative flex shrink-0 items-center justify-between border-b py-4 pl-6 pr-16", className)}>
       <div className="flex-1">{children}</div>
     </div>
   );
@@ -200,7 +200,8 @@ export function DialogContent({
   className?: string;
   children: React.ReactNode;
 }) {
-  return <div className={cn("px-6 py-4", className)}>{children}</div>;
+  // Corpo com scroll próprio: o cabeçalho e o rodapé ficam sempre visíveis (ver DialogFooter).
+  return <div className={cn("min-h-0 flex-1 overflow-y-auto px-6 py-4", className)}>{children}</div>;
 }
 
 export function DialogFooter({
@@ -213,7 +214,7 @@ export function DialogFooter({
   return (
     <div
       className={cn(
-        "flex flex-wrap items-center justify-end gap-2 border-t px-4 py-4 sm:px-6",
+        "sticky bottom-0 z-10 flex shrink-0 flex-wrap items-center justify-end gap-2 border-t bg-card px-4 py-4 sm:px-6",
         className
       )}
     >
