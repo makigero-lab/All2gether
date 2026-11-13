@@ -70,6 +70,19 @@ const reservaManualSchema = new mongoose.Schema(
     // parceiro): se a resposta se perder, o "Gravar" seguinte reenvia a mesma
     // chave e não cria uma segunda reserva/limpeza. Só existe em reservas novas.
     chave_idempotencia: { type: String, default: undefined, maxlength: 100 },
+    // Quem marcou a reserva quando foi o gestor em nome do proprietário (continua a ser uma reserva
+    // normal dele: ele pode editá-la e apagá-la). Sem o campo = criada pelo próprio proprietário.
+    criada_por: { type: mongoose.Schema.Types.ObjectId, ref: 'Utilizador', default: undefined },
+    criada_pelo_gestor: { type: Boolean, default: false },
+    // Origem da reserva: 'manual' (por omissão; as antigas não têm o campo) ou 'ical' (importada de
+    // um calendário Airbnb/Booking/outro). As reservas ligadas a um calendário («sincronizada») têm as
+    // datas bloqueadas: vêm do canal.
+    origem: { type: String, enum: ['manual', 'ical'], default: 'manual' },
+    reserva_externa_id: { type: mongoose.Schema.Types.ObjectId, ref: 'ReservaExterna', default: undefined },
+    sincronizada: { type: Boolean, default: false },
+    // Cancelada pelo canal (ou pelo proprietário, numa reserva sincronizada): a linha fica na tabela.
+    cancelada_em: { type: Date, default: null },
+    cancelada_motivo: { type: String, enum: ['canal', 'parceiro', null], default: null },
   },
   { timestamps: true }
 );
@@ -79,6 +92,13 @@ const reservaManualSchema = new mongoose.Schema(
 reservaManualSchema.index(
   { parceiro_id: 1, chave_idempotencia: 1 },
   { unique: true, partialFilterExpression: { chave_idempotencia: { $type: 'string' } } }
+);
+
+// Uma reserva por evento do calendário: garante na BD que duas leituras simultâneas nunca criam duas
+// reservas (nem duas limpezas) para o mesmo evento. Parcial: as reservas antigas não têm o campo.
+reservaManualSchema.index(
+  { reserva_externa_id: 1 },
+  { unique: true, partialFilterExpression: { reserva_externa_id: { $type: 'objectId' } } }
 );
 
 module.exports = mongoose.model('ReservaManual', reservaManualSchema);

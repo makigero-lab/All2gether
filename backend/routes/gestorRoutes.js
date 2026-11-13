@@ -171,6 +171,13 @@ router.get('/equipa', auth, isGestor, getEquipa);
 router.post('/equipa', auth, isGestor, criarMembroEquipa);
 // FIX (gestão de parceiros) — rota dedicada para parceiros B2B.
 router.get('/parceiros', auth, isGestor, getParceiros);
+// Reservas dos proprietários marcadas pelo gestor em nome deles (mesma lógica que o portal do proprietário).
+const gestorReservas = require('../controllers/gestorReservasController');
+router.get('/parceiros/:id/propriedades', auth, isGestor, gestorReservas.listarPropriedades);
+router.get('/parceiros/:id/reservas', auth, isGestor, gestorReservas.listarReservas);
+router.post('/parceiros/:id/reservas', auth, isGestor, gestorReservas.criarReserva);
+router.put('/parceiros/:id/reservas/:reservaId', auth, isGestor, gestorReservas.atualizarReserva);
+router.delete('/parceiros/:id/reservas/:reservaId', auth, isGestor, gestorReservas.eliminarReserva);
 
 // FIX (restrição lavandaria) — rota dedicada para fornecedores (lavandarias).
 router.get('/fornecedores', auth, isGestor, getFornecedores);
