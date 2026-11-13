@@ -5,7 +5,9 @@
  * (email/telefone, check-out + 30 dias) e WebhookLog (check-out + 30 dias). Prazos por
  * defeito (todos ajustáveis por variável de ambiente com o mesmo nome da constante):
  *
- *  RETENCAO_HOSPEDES_DIAS (90)                 nome do hóspede (Tarefa, TarefaArquivo, ReservaManual)
+ *  RETENCAO_HOSPEDES_DIAS (90)                 nome do hóspede (Tarefa, TarefaArquivo, ReservaManual) e
+ *                                              observações das ReservaManual (podem ter dados de hóspedes);
+ *                                              datas, casa e n.º de hóspedes ficam (histórico e faturação)
  *  RETENCAO_NOTAS_HOSPEDE_DIAS (30)            notas do hóspede (Tarefa, TarefaArquivo)
  *  RETENCAO_JUSTIFICACAO_DOENCA_DIAS (30)      justificacao/notas das ausências por doença, depois do fim
  *  RETENCAO_AUSENCIAS_DOENCA_MESES (12)        ausências por doença apagadas depois do fim
@@ -27,6 +29,8 @@ const Ausencia = require('../models/Ausencia');
 const Auditoria = require('../models/Auditoria');
 const Notificacao = require('../models/Notificacao');
 const Utilizador = require('../models/Utilizador');
+const WebhookLog = require('../models/WebhookLog');
+const { minimizarPayload } = require('../utils/minimizarPayloadWebhook');
 
 const LOTE = 500;
 const MS_DIA = 86400000;
@@ -79,7 +83,7 @@ async function executarRetencao(agora = new Date()) {
 
   const out = {
     hospedes: 0, notas_hospede: 0, ausencias: 0, justificacoes_doenca: 0, arquivo_anonimizado: 0,
-    auditoria: 0, notificacoes: 0, contas_anonimizadas: 0, por_empresa: {},
+    auditoria: 0, notificacoes: 0, contas_anonimizadas: 0, webhooklogs_minimizados: 0, por_empresa: {},
   };
   const regista = (categoria, r) => {
     out[categoria] += r.total;
@@ -100,7 +104,26 @@ async function executarRetencao(agora = new Date()) {
       for (const Modelo of [Tarefa, TarefaArquivo]) {
         regista('hospedes', await tratar(Modelo, { data: { $lt: lim }, 'detalhes_reserva.nome_hospede': { $nin: [null, ''] } }, nulo));
       }
-      regista('hospedes', await tratar(ReservaManual, { check_out: { $lt: lim }, nome_hospede: { $nin: [null, ''] } }, atualizar({ $set: { nome_hospede: null } })));
+      // Reservas manuais: nome e observações (texto livre, pode ter dados de hóspedes) depois do prazo
+      // contado a partir do check-out. Datas, casa e n.º de hóspedes mantêm-se.
+      regista('hospedes', await tratar(ReservaManual, {
+        check_out: { $lt: lim },
+        $or: [{ nome_hospede: { $nin: [null, ''] } }, { observacoes: { $nin: [null, ''] } }],
+      }, atualizar({ $set: { nome_hospede: null, observacoes: '' } })));
+    }],
+    ['webhooklogs', async () => {
+      // Logs do Smoobu ainda 'recebido' que já passaram a janela da retoma (7 dias) guardam a cópia completa
+      // sem necessidade: reduz-se ao mínimo. Idempotente (payload_minimo).
+      const lim = menosDias(8);
+      const col = WebhookLog.collection;
+      for (;;) {
+        const lote = await col.find({ payload_minimo: { $ne: true }, createdAt: { $lt: lim } }, { projection: { payload: 1 } }).limit(LOTE).toArray();
+        if (lote.length === 0) break;
+        for (const d of lote) {
+          await col.updateOne({ _id: d._id }, { $set: { payload: minimizarPayload(d.payload), payload_minimo: true } });
+        }
+        out.webhooklogs_minimizados += lote.length;
+      }
     }],
     ['notas_hospede', async () => {
       const lim = menosDias(diasNotas);

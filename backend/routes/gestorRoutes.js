@@ -181,6 +181,7 @@ router.delete('/parceiros/:id/reservas/:reservaId', auth, isGestor, gestorReserv
 
 // Calendários externos (Airbnb, Booking...) das casas da empresa: o gestor também pode ligá-los e decidir períodos.
 const calGestor = require('../controllers/calendarioController').gestor;
+const { protegerSegredo, setChaveSmoobu, credenciaisSmoobu } = require('../utils/segredoEmpresa');
 router.get('/calendarios', auth, isGestor, calGestor.listar);
 router.post('/calendarios/testar', auth, isGestor, calGestor.testar);
 router.post('/calendarios', auth, isGestor, calGestor.criar);
@@ -260,7 +261,7 @@ router.get('/configuracoes', auth, isGestor, async (req, res) => {
       // (fonte de verdade quando o backend corre no Render) com fallback à
       // chave da BD. Isto resolve o bug em que o cliente via "Não configurada"
       // na página principal de configurações apesar de a API estar a funcionar.
-      smoobu_api_key_mascarada: mascararApiKey(smoobu.api_key),
+      smoobu_api_key_mascarada: mascararApiKey(credenciaisSmoobu(smoobu, empresaId).chave),
       tem_api_key: temChaveBD,
       // O segredo nunca sai: só se existe (obrigatório no Smoobu desde 31/10/2026).
       tem_segredo: Boolean(smoobu.api_secret && smoobu.api_secret.trim()),
@@ -284,11 +285,11 @@ router.put('/configuracoes', auth, isGestor, async (req, res) => {
     const update = {};
     // Chave e segredo do Smoobu (antes a página enviava a chave e ela era ignorada).
     if (typeof smoobu_api_key === 'string' && smoobu_api_key.trim()) {
-      update['integracoes.smoobu.api_key'] = smoobu_api_key.trim();
+      Object.assign(update, setChaveSmoobu(smoobu_api_key, empresaId));
       update['integracoes.smoobu.ativo'] = true;
     }
     if (typeof smoobu_api_secret === 'string' && smoobu_api_secret.trim()) {
-      update['integracoes.smoobu.api_secret'] = smoobu_api_secret.trim();
+      update['integracoes.smoobu.api_secret'] = protegerSegredo(smoobu_api_secret, empresaId, 'api_secret');
     }
     if (nome !== undefined) update.nome = String(nome).trim();
     if (nif !== undefined) update.nif = String(nif).trim();
@@ -315,7 +316,7 @@ router.put('/configuracoes', auth, isGestor, async (req, res) => {
       morada: empresa.morada || '',
       telefone: empresa.telefone || '',
       email: empresa.email || '',
-      smoobu_api_key_mascarada: mascararApiKey(smoobu.api_key),
+      smoobu_api_key_mascarada: mascararApiKey(credenciaisSmoobu(smoobu, empresaId).chave),
       tem_api_key: temChaveBD,
       // O segredo nunca sai: só se existe (obrigatório no Smoobu desde 31/10/2026).
       tem_segredo: Boolean(smoobu.api_secret && smoobu.api_secret.trim()),
@@ -386,7 +387,7 @@ router.get('/configuracoes/integracoes', auth, isGestor, async (req, res) => {
     return res.status(200).json({
       smoobu: {
         // NUNCA devolver a chave em claro — só mascarada + booleano `configurado`.
-        api_key_mascarada: mascararApiKey(smoobu.api_key),
+        api_key_mascarada: mascararApiKey(credenciaisSmoobu(smoobu, empresaId).chave),
         configurado: Boolean(smoobu.api_key && smoobu.api_key.trim()),
         // O segredo nunca sai: só se existe.
         tem_segredo: Boolean(smoobu.api_secret && smoobu.api_secret.trim()),
@@ -445,11 +446,11 @@ router.put('/configuracoes/integracoes', auth, isGestor, async (req, res) => {
     const update = {};
     if (smoobu) {
       if (typeof smoobu.api_key === 'string') {
-        update['integracoes.smoobu.api_key'] = smoobu.api_key.trim();
+        Object.assign(update, setChaveSmoobu(smoobu.api_key, empresaId));
       }
       // Segredo HMAC: undefined mantém, '' apaga.
       if (typeof smoobu.api_secret === 'string') {
-        update['integracoes.smoobu.api_secret'] = smoobu.api_secret.trim();
+        update['integracoes.smoobu.api_secret'] = protegerSegredo(smoobu.api_secret, empresaId, 'api_secret');
       }
       if (typeof smoobu.ativo === 'boolean') {
         update['integracoes.smoobu.ativo'] = smoobu.ativo;
@@ -489,7 +490,7 @@ router.put('/configuracoes/integracoes', auth, isGestor, async (req, res) => {
     return res.status(200).json({
       message: 'Configurações de integrações guardadas com sucesso.',
       smoobu: {
-        api_key_mascarada: mascararApiKey(smoobuAtualizado.api_key),
+        api_key_mascarada: mascararApiKey(credenciaisSmoobu(smoobuAtualizado, empresaId).chave),
         configurado: Boolean(smoobuAtualizado.api_key && smoobuAtualizado.api_key.trim()),
         tem_segredo: Boolean(smoobuAtualizado.api_secret && smoobuAtualizado.api_secret.trim()),
         ativo: Boolean(smoobuAtualizado.ativo),

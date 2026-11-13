@@ -96,6 +96,9 @@ const empresaSchema = new mongoose.Schema(
           default: '',
           trim: true,
         },
+        // HMAC da chave (so existe quando a chave esta cifrada): identifica a empresa no webhook sem guardar
+        // a chave em claro. Nao e a chave.
+        api_key_hmac: { type: String, default: '' },
         // Segredo HMAC da chave (Smoobu → Advanced → API Keys; só é mostrado uma vez).
         // Obrigatório desde 31/10/2026 para assinar os pedidos. Nunca sai nas leituras
         // (select: false); só utils/smoobuApi o usa, via obterApiKeySmoobu.

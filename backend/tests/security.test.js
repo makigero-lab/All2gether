@@ -101,16 +101,16 @@ describe('Relatórios restritos a gestor/admin', () => {
 
 describe('GET /api/gestor/webhooks — isolamento por empresa', () => {
   it('só devolve logs da empresa do token', async () => {
-    await WebhookLog.create({ payload: { x: 'A' }, status: 'processado', empresa_id: empresaA._id });
-    await WebhookLog.create({ payload: { x: 'B' }, status: 'processado', empresa_id: empresaB._id });
-    await WebhookLog.create({ payload: { x: 'sem-empresa' }, status: 'erro' });
+    await WebhookLog.create({ payload: { action: 'A' }, status: 'processado', empresa_id: empresaA._id });
+    await WebhookLog.create({ payload: { action: 'B' }, status: 'processado', empresa_id: empresaB._id });
+    await WebhookLog.create({ payload: { action: 'sem-empresa' }, status: 'erro' });
 
     const res = await request(app)
       .get('/api/gestor/webhooks')
       .set('Authorization', `Bearer ${gestorToken}`);
     expect(res.status).toBe(200);
     expect(res.body.total).toBe(1);
-    expect(res.body.webhooks[0].payload.x).toBe('A');
+    expect(res.body.webhooks[0].payload.action).toBe('A');
   });
 
   it('ignora empresa_id passado na query', async () => {
