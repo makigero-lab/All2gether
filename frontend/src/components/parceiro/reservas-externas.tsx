@@ -8,13 +8,14 @@ import { EstadoTarefaBadge } from "@/components/ui/estado-tarefa-badge";
 import { rotuloTipoLimpeza } from "@/components/tipo-limpeza-badge";
 
 /**
- * Limpezas das casas do proprietário que NÃO vêm de uma reserva dele: as criadas pela All2gether
- * e as vindas do Smoobu. Aparecem na tabela de Reservas, SÓ DE LEITURA (o backend recusa editar
- * ou apagar). Mostram a origem, as datas, o tipo de limpeza e o estado; nunca dados de hóspedes.
+ * Reservas das casas do proprietário que NÃO foram criadas por ele: hoje as do Smoobu (o iCal e as
+ * marcadas pelo gestor chegam depois). Aparecem na tabela de Reservas, SÓ DE LEITURA (o backend recusa
+ * editar ou apagar). Mostram a origem, as datas, o n.º de hóspedes, o tipo de limpeza e o estado;
+ * nunca dados pessoais de hóspedes.
  */
-export interface LimpezaGestaoDTO {
+export interface ReservaExternaDTO {
   _id: string;
-  origem: "smoobu" | "all2gether";
+  origem: "smoobu"; // o iCal e o gestor chegam depois
   origem_texto: string;
   propriedade: { _id: string; nome: string; morada?: string | null };
   /** Dia da limpeza (ISO). */
@@ -23,10 +24,12 @@ export interface LimpezaGestaoDTO {
   tipo_limpeza: string;
   check_in: string | null;
   check_out: string | null;
+  /** Só o número de hóspedes (nunca dados pessoais). */
+  hospedes: number | null;
   somente_leitura: true;
 }
 
-const MSG_SO_LEITURA = "Só de leitura: esta limpeza é gerida pela All2gether (ou vem do Smoobu). Fala com o gestor para a alterar.";
+const MSG_SO_LEITURA = "Só de leitura: esta reserva vem do Smoobu. Fala com o gestor para a alterar.";
 
 /** «2026-11-13» ou ISO completo -> «13/11/2026». */
 function formatar(iso: string | null | undefined): string {
@@ -38,7 +41,7 @@ function formatar(iso: string | null | undefined): string {
 /** Para o proprietário, «Não atribuída» (detalhe interno) é igual a «Por atribuir». */
 const estadoParaParceiro = (e: string) => (e === "nao_atribuida" ? "por_atribuir" : e);
 
-function EtiquetaOrigem({ l }: { l: LimpezaGestaoDTO }) {
+function EtiquetaOrigem({ l }: { l: ReservaExternaDTO }) {
   return (
     <Badge variant={l.origem === "smoobu" ? "secondary" : "outline"} className="whitespace-nowrap px-1.5 py-0 text-xs">
       {l.origem_texto}
@@ -50,37 +53,37 @@ function EtiquetaOrigem({ l }: { l: LimpezaGestaoDTO }) {
  * Linhas da tabela (desktop). Segue as colunas da tabela de reservas: propriedade, check-in, [hora],
  * check-out, [noites], hóspedes, hóspede, plataforma, tipo, [horário], notas, estado (fixa), ações (fixa).
  */
-export function LinhasLimpezasGestao({
-  limpezas,
+export function LinhasReservasExternas({
+  reservas,
   classeEstado,
   classeAcoes,
 }: {
-  limpezas: LimpezaGestaoDTO[];
+  reservas: ReservaExternaDTO[];
   classeEstado: string;
   classeAcoes: string;
 }) {
-  if (limpezas.length === 0) return null;
+  if (reservas.length === 0) return null;
   return (
     <>
       <tr className="border-b bg-muted/40">
         <td colSpan={10} className="px-3 py-2 text-xs font-medium text-muted-foreground min-[1366px]:hidden">
-          Limpezas geridas pela All2gether e do Smoobu (só de leitura)
+          Reservas do Smoobu (só de leitura)
         </td>
         <td colSpan={11} className="hidden px-3 py-2 text-xs font-medium text-muted-foreground min-[1366px]:table-cell min-[1600px]:hidden">
-          Limpezas geridas pela All2gether e do Smoobu (só de leitura)
+          Reservas do Smoobu (só de leitura)
         </td>
         <td colSpan={13} className="hidden px-3 py-2 text-xs font-medium text-muted-foreground min-[1600px]:table-cell">
-          Limpezas geridas pela All2gether e do Smoobu (só de leitura)
+          Reservas do Smoobu (só de leitura)
         </td>
       </tr>
-      {limpezas.map((l) => (
-        <tr key={l._id} className="border-b bg-muted/20 text-muted-foreground last:border-0" data-testid="linha-limpeza-gestao">
+      {reservas.map((l) => (
+        <tr key={l._id} className="border-b bg-muted/20 text-muted-foreground last:border-0" data-testid="linha-reserva-externa">
           <td title={l.propriedade.nome} className="truncate px-2 py-2 font-medium text-foreground">{l.propriedade.nome}</td>
           <td className="px-2 py-2">{formatar(l.check_in)}</td>
           <td className="hidden px-2 py-2 min-[1600px]:table-cell">—</td>
           <td className="px-2 py-2">{formatar(l.check_out)}</td>
           <td className="hidden px-2 py-2 min-[1600px]:table-cell">—</td>
-          <td className="px-2 py-2 text-right">—</td>
+          <td className="px-2 py-2 text-right">{l.hospedes ?? "—"}</td>
           <td className="px-2 py-2">—</td>
           <td className="px-2 py-2">—</td>
           <td className="px-2 py-2">{rotuloTipoLimpeza(l.tipo_limpeza)}</td>
@@ -107,13 +110,13 @@ export function LinhasLimpezasGestao({
 }
 
 /** Cartões (telemóvel). */
-export function CartoesLimpezasGestao({ limpezas }: { limpezas: LimpezaGestaoDTO[] }) {
-  if (limpezas.length === 0) return null;
+export function CartoesReservasExternas({ reservas }: { reservas: ReservaExternaDTO[] }) {
+  if (reservas.length === 0) return null;
   return (
     <>
-      <h2 className="px-1 pt-2 text-sm font-semibold">Limpezas geridas pela All2gether e do Smoobu (só de leitura)</h2>
-      {limpezas.map((l) => (
-        <Card key={l._id} className="bg-muted/20" data-testid="cartao-limpeza-gestao">
+      <h2 className="px-1 pt-2 text-sm font-semibold">Reservas do Smoobu (só de leitura)</h2>
+      {reservas.map((l) => (
+        <Card key={l._id} className="bg-muted/20" data-testid="cartao-reserva-externa">
           <CardContent className="space-y-2 p-4 text-sm">
             <div className="flex items-start justify-between gap-2">
               <p className="font-medium">{l.propriedade.nome}</p>
@@ -135,6 +138,12 @@ export function CartoesLimpezasGestao({ limpezas }: { limpezas: LimpezaGestaoDTO
                 <dt className="text-xs">Tipo de limpeza</dt>
                 <dd className="text-foreground">{rotuloTipoLimpeza(l.tipo_limpeza)}</dd>
               </div>
+              {l.hospedes != null && (
+                <div>
+                  <dt className="text-xs">Hóspedes</dt>
+                  <dd className="text-foreground">{l.hospedes}</dd>
+                </div>
+              )}
               {(l.check_in || l.check_out) && (
                 <>
                   <div>
