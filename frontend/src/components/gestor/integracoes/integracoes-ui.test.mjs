@@ -75,6 +75,8 @@ test("D8: o lote usa blocos, mostra progresso, não perde o erro e deixa o resul
 test("L1/L3: o painel conta ligações e só de proprietários ativos (como o selo)", () => {
   assert.match(vista, /p\.ativo && p\.n_erros > 0/);
   assert.match(vista, /Precisam de atenção: /);
+  assert.match(vista, /linhasErro\.map/, "uma linha por ligação, com o seu botão (Aceitar nas que esperam validação)");
+  assert.match(vista, /e\.codigo === "muitos_novos"/);
 });
 
 test("L6/S6: sem <main> aninhado e o selo do separador tem aria-label", () => {

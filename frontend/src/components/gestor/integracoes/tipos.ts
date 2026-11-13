@@ -29,6 +29,8 @@ export interface CasaResumo {
   outros: CelulaCanal[];
 }
 
+export interface ErroDaLigacao { casa: string; canal: string; fonte_id: string; codigo?: string; mensagem: string; em: string | null; temporario?: boolean }
+
 export interface ProprietarioResumo {
   _id: string;
   nome: string;
@@ -43,7 +45,9 @@ export interface ProprietarioResumo {
   /** Casas inativas (não aparecem na matriz): o assistente explica porque não há casas para ligar. */
   n_casas_inativas?: number;
   ultima_leitura_em: string | null;
-  primeiro_erro: { casa: string; canal: string; fonte_id: string; codigo?: string; mensagem: string; em: string | null; temporario?: boolean } | null;
+  primeiro_erro: ErroDaLigacao | null;
+  /** Uma entrada por ligação com erro ou à espera de validação (até 10): o painel «Precisam de atenção» lista-as uma a uma. */
+  erros?: ErroDaLigacao[];
   casas: CasaResumo[];
 }
 

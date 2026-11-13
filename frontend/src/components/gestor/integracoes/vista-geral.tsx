@@ -63,19 +63,21 @@ export function VistaGeral({ lista, filtro, disponivel, aoAbrir, aoLigar, aoMuda
   // «Aceitar» também se faz aqui, na lista dos que precisam de atenção, com resposta imediata.
   const [aAceitar, setAAceitar] = useState<string | null>(null);
   const [aviso, setAviso] = useState<{ id: string; texto: string; erro: boolean } | null>(null);
-  const aceitar = async (donoId: string, fonteId: string) => {
-    setAAceitar(donoId); setAviso(null);
+  const aceitar = async (fonteId: string) => {
+    setAAceitar(fonteId); setAviso(null);
     try {
       const r = await adminPatch<{ leitura?: { alteracoes?: { criadas: number; por_confirmar: number } | null } | null }>(`/api/gestor/calendarios/${fonteId}/estado`, { acao: "aceitar_calendario" });
-      setAviso({ id: donoId, texto: resultadoAceitar(r.leitura), erro: false });
+      setAviso({ id: fonteId, texto: resultadoAceitar(r.leitura), erro: false });
       aoMudar?.();
-    } catch (e) { setAviso({ id: donoId, texto: msgErro(e, "Não foi possível aceitar o calendário."), erro: true }); }
+    } catch (e) { setAviso({ id: fonteId, texto: msgErro(e, "Não foi possível aceitar o calendário."), erro: true }); }
     finally { setAAceitar(null); }
   };
   const visiveis = ordenarLinhas(lista).filter((p) => passaFiltro(p, filtro));
   // Mesma regra do selo da barra lateral: só contam ligações de proprietários ativos (as casas inativas já não vêm no resumo).
   const comErro = visiveis.filter((p) => p.ativo && p.n_erros > 0 && p.primeiro_erro);
   const nLigacoesComErro = comErro.reduce((n, p) => n + p.n_erros, 0);
+  // Uma linha por ligação (como o selo), com o seu próprio botão.
+  const linhasErro = comErro.flatMap((p) => (p.erros?.length ? p.erros : [p.primeiro_erro!]).map((e) => ({ p, e })));
   if (visiveis.length === 0) return <p className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">Nenhum proprietário neste filtro.</p>;
   return (
     <div className="space-y-4">
@@ -84,18 +86,18 @@ export function VistaGeral({ lista, filtro, disponivel, aoAbrir, aoLigar, aoMuda
         <section aria-label="Precisam de atenção" className="space-y-2 rounded-md border border-destructive/50 p-3">
           <h2 className="text-sm font-semibold text-destructive">Precisam de atenção: {plural(nLigacoesComErro, "ligação", "ligações")} em {plural(comErro.length, "proprietário", "proprietários")}</h2>
           <ul className="space-y-2">
-            {comErro.map((p) => (
-              <li key={p._id} className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-                <p className="min-w-0 text-sm"><span className="font-medium">{p.nome}</span> · {p.primeiro_erro!.casa} · {p.primeiro_erro!.canal}: {p.primeiro_erro!.mensagem}</p>
+            {linhasErro.map(({ p, e }) => (
+              <li key={e.fonte_id} className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+                <p className="min-w-0 text-sm"><span className="font-medium">{p.nome}</span> · {e.casa} · {e.canal}: {e.mensagem}</p>
                 <div className="flex shrink-0 flex-wrap gap-2">
-                  {p.primeiro_erro!.codigo === "muitos_novos" && (
-                    <Button size="sm" className="min-h-11 sm:min-h-9" disabled={!disponivel || aAceitar === p._id} onClick={() => aceitar(p._id, p.primeiro_erro!.fonte_id)}>
-                      {aAceitar === p._id && <Loader2 className="h-4 w-4 animate-spin" />} {aAceitar === p._id ? "A criar as limpezas…" : "Aceitar"}
+                  {e.codigo === "muitos_novos" && (
+                    <Button size="sm" className="min-h-11 sm:min-h-9" disabled={!disponivel || aAceitar === e.fonte_id} onClick={() => aceitar(e.fonte_id)}>
+                      {aAceitar === e.fonte_id && <Loader2 className="h-4 w-4 animate-spin" />} {aAceitar === e.fonte_id ? "A criar as limpezas…" : "Aceitar"}
                     </Button>
                   )}
-                  <Button size="sm" variant={p.primeiro_erro!.temporario || p.primeiro_erro!.codigo === "muitos_novos" ? "outline" : "default"} className="min-h-11 sm:min-h-9" onClick={() => aoAbrir(p._id)}>{p.primeiro_erro!.temporario || p.primeiro_erro!.codigo === "muitos_novos" ? "Ver" : "Corrigir"}</Button>
+                  <Button size="sm" variant={e.temporario || e.codigo === "muitos_novos" ? "outline" : "default"} className="min-h-11 sm:min-h-9" onClick={() => aoAbrir(p._id)}>{e.temporario || e.codigo === "muitos_novos" ? "Ver" : "Corrigir"}</Button>
                 </div>
-                {aviso?.id === p._id && <p role={aviso.erro ? "alert" : "status"} className={`text-xs sm:basis-full ${aviso.erro ? "text-destructive" : "text-muted-foreground"}`}>{aviso.texto}</p>}
+                {aviso?.id === e.fonte_id && <p role={aviso.erro ? "alert" : "status"} className={`text-xs sm:basis-full ${aviso.erro ? "text-destructive" : "text-muted-foreground"}`}>{aviso.texto}</p>}
               </li>
             ))}
           </ul>

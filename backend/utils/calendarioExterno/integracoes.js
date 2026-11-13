@@ -81,15 +81,19 @@ async function resumoIntegracoes({ empresaId, incluirInativos = false }) {
     const id = String(d._id);
     const acordo = !obrigatorio ? 'nao_exigido' : aceites.has(id) ? 'aceite' : 'por_aceitar';
     const semAcordo = acordo === 'por_aceitar';
-    let nErros = 0; let nValid = 0; let nPausa = 0; let nLigadas = 0; let ultima = null; let primeiroErro = null; let nPorConf = 0;
+    let nErros = 0; let nValid = 0; let nPausa = 0; let nLigadas = 0; let ultima = null; let primeiroErro = null; let nPorConf = 0; const erros = [];
     const lista = (casasPorDono.get(id) || []).map((c) => {
       const cs = (fontesPorCasa.get(String(c._id)) || []).map((f) => celula(f, semAcordo));
       const pc = nPorCasa.get(String(c._id)) || 0;
       nPorConf += pc;
       for (const x of cs) {
-        if (x.estado === 'erro') { nErros += 1; if (!primeiroErro) primeiroErro = { casa: c.nome, canal: x.canal_texto, fonte_id: x.fonte_id, ...x.erro }; }
+        if (x.estado === 'erro') { nErros += 1; const e = { casa: c.nome, canal: x.canal_texto, fonte_id: x.fonte_id, ...x.erro }; if (!primeiroErro) primeiroErro = e; if (erros.length < 10) erros.push(e); }
         else if (x.estado === 'pausada' || x.estado === 'suspensa') nPausa += 1;
-        if (x.em_validacao && x.estado !== 'erro' && !primeiroErro) primeiroErro = { casa: c.nome, canal: x.canal_texto, fonte_id: x.fonte_id, codigo: 'muitos_novos', mensagem: x.aviso_validacao, em: x.ultima_leitura_em };
+        if (x.em_validacao && x.estado !== 'erro') {
+          const e = { casa: c.nome, canal: x.canal_texto, fonte_id: x.fonte_id, codigo: 'muitos_novos', mensagem: x.aviso_validacao, em: x.ultima_leitura_em };
+          if (!primeiroErro) primeiroErro = e;
+          if (erros.length < 10) erros.push(e);
+        }
         if (x.em_validacao && x.estado !== 'erro') nValid += 1;
         if (x.estado === 'ativa') nLigadas += 1;
         if (x.ultima_leitura_em && (!ultima || new Date(x.ultima_leitura_em) > new Date(ultima))) ultima = x.ultima_leitura_em;
@@ -111,7 +115,7 @@ async function resumoIntegracoes({ empresaId, incluirInativos = false }) {
     }
     return {
       _id: id, nome: d.nome, email: d.email, ativo: d.ativo !== false, acordo, estado, n_erros: nErros + nValid, n_ligadas: nLigadas, n_ligacoes: ligacoes,
-      n_por_confirmar: nPorConf, n_casas_inativas: nInativas.get(id) || 0, ultima_leitura_em: ultima, primeiro_erro: primeiroErro, casas: lista,
+      n_por_confirmar: nPorConf, n_casas_inativas: nInativas.get(id) || 0, ultima_leitura_em: ultima, primeiro_erro: primeiroErro, erros, casas: lista,
     };
   });
   return resp(200, { proprietarios, totais, ligado: chavesConfiguradas(), modo_teste: modoTesteAtivo(), acordo_obrigatorio: obrigatorio });

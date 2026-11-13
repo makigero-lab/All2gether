@@ -154,6 +154,8 @@ describe('mensagens de erro (D5/D6, M3)', () => {
     await FonteCalendario.updateOne({ _id: cr.body.fonte._id }, { ultimo_erro: { em: new Date(), codigo: 'http_5xx' } });
     const r = (await request(app).get('/api/gestor/integracoes/resumo').set(auth(c.tokG))).body;
     expect(r.proprietarios[0].primeiro_erro).toMatchObject({ temporario: true, mensagem: 'Problema temporário no Booking.com; voltamos a tentar sozinhos.' });
+    expect(r.proprietarios[0].erros).toHaveLength(1);
+    expect(r.proprietarios[0].erros[0]).toMatchObject({ fonte_id: String(cr.body.fonte._id), temporario: true });
   });
 });
 
