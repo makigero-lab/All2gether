@@ -70,4 +70,65 @@ function setChaveSmoobu(chave, empresaId, env = process.env) {
   };
 }
 
-module.exports = { estaCifrado, protegerSegredo, lerSegredo, hmacChave, credenciaisSmoobu, setChaveSmoobu, aad };
+/** Mensagem para o gestor/admin quando a chave está cifrada mas o servidor não a consegue decifrar. */
+const MSG_CREDENCIAIS_ILEGIVEIS =
+  'A chave do Smoobu está guardada cifrada, mas o servidor não tem a chave de cifra certa (ICAL_CHAVES). ' +
+  'Repõe as variáveis no Render ou volta a escrever a chave e o segredo do Smoobu.';
+
+/** Como lerSegredo, mas diz se o valor guardado existe e não se consegue ler: { valor, ilegivel }. */
+function lerSegredoEstado(valor, empresaId, campo, env = process.env) {
+  const v = String(valor == null ? '' : valor).trim();
+  if (!v) return { valor: '', ilegivel: false };
+  if (!estaCifrado(v)) return { valor: v, ilegivel: false };
+  const lido = lerSegredo(v, empresaId, campo, env);
+  return lido ? { valor: lido, ilegivel: false } : { valor: '', ilegivel: true };
+}
+
+/**
+ * Estado completo das credenciais Smoobu de um subdocumento `integracoes.smoobu` (lean):
+ * `tem_chave` / `tem_segredo` só são verdadeiros se o valor existe E se consegue ler; `ilegivel` é
+ * verdadeiro se algum dos dois existe cifrado e não decifra.
+ */
+function estadoCredenciaisSmoobu(smoobu, empresaId, env = process.env) {
+  const s = smoobu || {};
+  const k = lerSegredoEstado(s.api_key, empresaId, 'api_key', env);
+  const x = lerSegredoEstado(s.api_secret, empresaId, 'api_secret', env);
+  return {
+    chave: k.valor,
+    segredo: x.valor,
+    tem_chave: Boolean(k.valor),
+    tem_segredo: Boolean(x.valor),
+    chave_ilegivel: k.ilegivel,
+    segredo_ilegivel: x.ilegivel,
+    ilegivel: k.ilegivel || x.ilegivel,
+  };
+}
+
+const mascarar = (chave) => {
+  const c = String(chave || '').trim();
+  if (!c) return '';
+  return c.length <= 4 ? '••••' : `••••••••${c.slice(-4)}`;
+};
+
+/**
+ * Empresa pronta a sair numa resposta HTTP: sem api_key, api_key_hmac, api_secret nem valores cifrados;
+ * só a máscara e os estados. Aceita documentos lean ou mongoose.
+ */
+function empresaPublica(emp, env = process.env) {
+  if (!emp) return emp;
+  const o = typeof emp.toObject === 'function' ? emp.toObject() : { ...emp };
+  const smoobu = o.integracoes && o.integracoes.smoobu;
+  if (!o.integracoes) return o;
+  const { api_key, api_key_hmac, api_secret, ...resto } = smoobu || {};
+  const e = estadoCredenciaisSmoobu(smoobu, o._id, env);
+  o.integracoes = {
+    ...o.integracoes,
+    smoobu: { ...resto, api_key_mascarada: mascarar(e.chave), tem_api_key: e.tem_chave, tem_segredo: e.tem_segredo, ilegivel: e.ilegivel },
+  };
+  return o;
+}
+
+module.exports = {
+  estaCifrado, protegerSegredo, lerSegredo, lerSegredoEstado, hmacChave, credenciaisSmoobu, estadoCredenciaisSmoobu,
+  setChaveSmoobu, aad, empresaPublica, MSG_CREDENCIAIS_ILEGIVEIS,
+};
