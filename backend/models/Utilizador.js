@@ -57,6 +57,12 @@ const utilizadorSchema = new mongoose.Schema(
     // FIX (equipas preferenciais) — Se true, este staff SÓ é elegível para
     // tarefas de propriedades onde o seu ID conste na equipa_preferencial.
     // Staff com false (default) pode ser atribuído a qualquer propriedade.
+    // Cor da pessoa no calendário do gestor (#rrggbb). null = cor automática.
+    cor: {
+      type: String,
+      default: null,
+      match: [/^#[0-9a-f]{6}$/, 'Cor inválida (#rrggbb).'],
+    },
     exclusivo_preferenciais: {
       type: Boolean,
       default: false,

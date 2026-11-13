@@ -21,12 +21,13 @@ const { obterRangeDia, calcularInicioTarefaUtilizador, motivoNaoCabe } = require
 const { cabeNaAgendaNaHora, diagnosticarFaltaDeStaff, MOTIVO_LOTACAO } = require('./atribuicaoAutomatica');
 const H = require('./horario');
 const { idsEquipa } = require('./equipaTarefa');
+const Ausencia = require('../models/Ausencia');
 
 const MOTIVO_VAGA_SEM_HORA = 'Ninguém com a agenda livre à hora desta limpeza.';
 
 /**
  * @param {{ empresaId: *, tarefa: object, propriedade: object, acao?: 'atribuir'|'reatribuir' }} p
- * @returns {Promise<{ modo: 'vaga'|'responsavel', disponiveis: Array<{ _id: string, nome: string, hora_prevista: string, tempo_viagem_minutos: number }>, motivo: string|null }>}
+ * @returns {Promise<{ modo: 'vaga'|'responsavel', disponiveis: Array<{ _id: string, nome: string, hora_prevista: string, tempo_viagem_minutos: number, ausencia_pendente: boolean }>, motivo: string|null }>}
  */
 async function listarDisponiveis({ empresaId, tarefa, propriedade, acao = 'reatribuir' }) {
   const range = obterRangeDia(tarefa.data);
@@ -41,6 +42,19 @@ async function listarDisponiveis({ empresaId, tarefa, propriedade, acao = 'reatr
   // Quem já está na limpeza não aparece (já faz parte dela).
   const excluidos = new Set(membros);
   const { disponiveis: elegiveis } = await obterStaffDisponivel(empresaId, range, propriedade._id, excluidos);
+
+  // Pedidos de ausência por aprovar que cobrem o dia: a pessoa continua elegível (como no motor),
+  // mas o gestor tem de saber que o pedido ainda não foi decidido.
+  const pendentes = elegiveis.length
+    ? await Ausencia.find({
+        empresa_id: empresaId,
+        utilizador_id: { $in: elegiveis.map((u) => u._id) },
+        estado: 'pendente', // a de emergência já conta como ausência no motor
+        data_inicio: { $lt: range.end },
+        data_fim: { $gte: range.start },
+      }).select('utilizador_id').lean()
+    : [];
+  const comPendente = new Set(pendentes.map((a) => String(a.utilizador_id)));
 
   const ok = [];
   for (const u of elegiveis) {
@@ -68,7 +82,7 @@ async function listarDisponiveis({ empresaId, tarefa, propriedade, acao = 'reatr
       hora = r.data;
       viagem = Number(r.tempoViagem) || 0;
     }
-    ok.push({ _id: id, nome: u.nome, hora_prevista: hora.toISOString(), tempo_viagem_minutos: viagem });
+    ok.push({ _id: id, nome: u.nome, hora_prevista: hora.toISOString(), tempo_viagem_minutos: viagem, ausencia_pendente: comPendente.has(id) });
   }
   ok.sort((a, b) => a.hora_prevista.localeCompare(b.hora_prevista) || a.nome.localeCompare(b.nome, 'pt'));
   if (ok.length > 0) return { modo, disponiveis: ok, motivo: null };

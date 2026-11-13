@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Bell, Check } from "lucide-react";
+import { Bell } from "lucide-react";
 
 import { cn, parsearDataSegura } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -22,8 +22,12 @@ import { Button } from "@/components/ui/button";
  *
  * Polling: a cada 30s, refaz a contagem de não-lidas.
  */
-/** `paraCima`: abre a lista para cima (sino no fundo da barra lateral). */
-export function NotificationBell({ paraCima = false }: { paraCima?: boolean } = {}) {
+/**
+ * `noMenu`: sino no rodapé do menu móvel (a barra tem 14 rem): a lista abre sempre fixa ao ecrã, por cima do sino.
+ * `paraCima`: sino no fundo da barra lateral do computador. A lista abre ao
+ * lado da barra, alinhada pelo fundo, para não sair do ecrã à esquerda.
+ */
+export function NotificationBell({ paraCima = false, noMenu = false }: { paraCima?: boolean; noMenu?: boolean } = {}) {
   const router = useRouter();
   const [naoLidas, setNaoLidas] = useState(0);
   const [aberto, setAberto] = useState(false);
@@ -186,7 +190,7 @@ export function NotificationBell({ paraCima = false }: { paraCima?: boolean } = 
       </Button>
 
       {aberto && (
-        <div className={`absolute right-0 z-50 ${paraCima ? "bottom-full mb-2" : "top-full mt-2"} flex max-h-[70vh] w-[24rem] flex-col origin-top-right overflow-hidden rounded-lg border bg-card shadow-lg max-sm:fixed max-sm:inset-x-2 max-sm:right-2 max-sm:w-auto ${paraCima ? "max-sm:bottom-16 max-sm:mb-0" : "max-sm:top-14 max-sm:mt-0"}`}>
+        <div className={`z-50 flex max-h-[70vh] flex-col overflow-hidden rounded-lg border bg-card shadow-lg ${noMenu ? "fixed inset-x-2 bottom-16 mx-auto w-auto max-w-[24rem]" : `absolute w-[24rem] ${paraCima ? "bottom-0 left-full ml-3 origin-bottom-left" : "right-0 top-full mt-2 origin-top-right"} max-sm:fixed max-sm:inset-x-2 max-sm:right-2 max-sm:w-auto ${paraCima ? "max-sm:bottom-16 max-sm:mb-0" : "max-sm:top-14 max-sm:mt-0"}`}`}>
           <div className="flex shrink-0 items-center justify-between border-b px-4 py-3">
             <span className="text-sm font-semibold">Notificações</span>
             {naoLidas > 0 && (
@@ -233,8 +237,7 @@ export function NotificationBell({ paraCima = false }: { paraCima?: boolean } = 
           {notificacoes.length > 0 && (
             <div className="shrink-0 border-t px-4 py-2 text-center">
               <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                <Check className="h-3 w-3" />
-                Marcaste tudo como lido
+                Tudo marcado como lido
               </span>
             </div>
           )}

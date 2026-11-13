@@ -307,6 +307,8 @@ export interface UtilizadorDTO {
   // FIX (atribuição bidirecional fornecedor) — Propriedades atribuídas ao
   // fornecedor (lavandaria). Injetado pelo backend no getEquipa.
   propriedades_atribuidas?: string[];
+  /** Cor no calendário (#rrggbb); null = automática (ver lib/cores-equipa). */
+  cor?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }

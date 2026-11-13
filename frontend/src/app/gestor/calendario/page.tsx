@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { rotuloTipoLimpeza, EtiquetaManutencao } from "@/components/tipo-limpeza-badge";
 import {
+  CalendarDays,
   CalendarRange,
   CalendarClock,
   Filter,
@@ -21,9 +22,6 @@ import {
   Download,
   Plus,
   Trash2,
-  ChevronLeft,
-  ChevronRight,
-  ArrowLeft,
   Wrench,
 } from "lucide-react";
 import { format } from "date-fns";
@@ -38,7 +36,7 @@ import dayGridPlugin from "@fullcalendar/daygrid";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import interactionPlugin from "@fullcalendar/interaction";
 import ptLocale from "@fullcalendar/core/locales/pt";
-import type { DatesSetArg, DayCellContentArg, EventClickArg, EventContentArg, EventInput } from "@fullcalendar/core";
+import type { DatesSetArg, DayCellContentArg, EventClickArg, EventContentArg, EventInput, EventMountArg } from "@fullcalendar/core";
 
 type EventoOrdem = { title?: string; start?: Date | string | number | null; extendedProps?: { tipo?: string } };
 /** Ausências e folgas ficam sempre na faixa de cima das células do Mês. */
@@ -63,6 +61,10 @@ import {
 } from "@/components/ui/dialog";
 import { adminGet, adminPost, adminPatch, type PropriedadeDTO, type UtilizadorDTO } from "@/lib/api";
 import { textoEquipaGestor, textoFalta } from "@/lib/equipa";
+import { mapaCoresEquipa } from "@/lib/cores-equipa";
+import { VistaDiaEquipa, type TarefaDia } from "@/components/gestor/vista-dia-equipa";
+import { SemanaLista } from "@/components/gestor/semana-lista";
+import { AusentesLinha, primeiroNome, type AusenteDia } from "@/components/gestor/pessoa-estado";
 import { DetalheTarefaModal, type TarefaDetalheGestor } from "@/components/gestor/detalhe-tarefa-modal";
 
 /* ------------------------------------------------------------------ */
@@ -192,11 +194,6 @@ const GLIFO_ESTADO: Record<string, string> = { concluida: "✓", em_curso: "▶"
 
 function corPorEstado(estado: string): string {
   return paletaPorEstado(estado).dot;
-}
-
-function primeiroNome(nome: string | undefined): string {
-  if (!nome) return "";
-  return nome.split(" ")[0];
 }
 
 /** Devolve a hora "HH:mm" se a tarefa tiver hora real de trabalho; senão "—". */
@@ -334,16 +331,12 @@ export default function CalendarioOperacionalPage() {
   const [conflitoForcar, setConflitoForcar] = useState(false);
   // Telemóvel: tocar numa data do calendário abre a lista desse dia.
   const [diaAberto, setDiaAberto] = useState<string | null>(null);
-  // Modo temporário a partir da Semana (computador): um só dia com a largura toda do calendário.
-  const [diaLargo, setDiaLargo] = useState<string | null>(null);
-  const voltarSemanaRef = useRef<HTMLButtonElement | null>(null);
   // Prova da limpeza (fotos, hora, checklist) no modal partilhado.
   const [provaTarefa, setProvaTarefa] = useState<TarefaCalendario | null>(null);
 
   // SSR-safe mount: FullCalendar só pode ser renderizado no cliente.
   const [mounted, setMounted] = useState(false);
-  // Telemóvel: abre na vista Dia (a semana não cabe). O utilizador pode mudar; desktop inalterado.
-  // Vistas numa só barra: Mês, Semana, Tabela, Equipa (sem vista Dia). Por omissão, Mês.
+  // Vistas numa só barra: Dia (por defeito, uma coluna por funcionário), Mês, Semana, Tabela, Equipa.
   const [mudarDiaAberto, setMudarDiaAberto] = useState(false);
   const [dataCal, setDataCal] = useState<Date | null>(null);
   const [filtrosAbertos, setFiltrosAbertos] = useState(false);
@@ -360,18 +353,14 @@ export default function CalendarioOperacionalPage() {
   const calRef = useRef<FullCalendar | null>(null);
   const calBoxRef = useRef<HTMLDivElement | null>(null);
   const asideRef = useRef<HTMLElement | null>(null);
-  // Largura do calendário: na Semana, só cabem lado a lado as limpezas com >= 70 px; as outras vão para «+N mais».
-  const [larguraCal, setLarguraCal] = useState(0);
-  // Semana: largura real de cada dia (calendário menos a margem interior e a coluna das horas). Com menos de
-  // 200 px só cabe 1 cartão por hora (hora completa + nome); a partir daí cabem 2, nunca mais.
-  const larguraDiaSemana = Math.max(0, (larguraCal - 32 - 62) / 7);
-  const cartoesPorHora = larguraDiaSemana >= 200 ? 2 : 1;
 
   // Período atual do calendário (definido via datesSet do FullCalendar).
   const [periodo, setPeriodo] = useState<PeriodoState | null>(null);
 
   // Prompt 99 — Toggle de vistas: "calendario" (FullCalendar) | "tabela" (Data Table).
-  const [vista, setVista] = useState<"mes" | "semana" | "tabela" | "equipa">("mes");
+  const [vista, setVista] = useState<"dia" | "mes" | "semana" | "tabela" | "equipa">("dia");
+  // Dia escolhido na vista Dia (yyyy-MM-dd; hoje por defeito).
+  const [diaEscolhido, setDiaEscolhido] = useState(() => format(new Date(), "yyyy-MM-dd"));
   const [exportando, setExportando] = useState(false);
 
   // Modal de detalhe.
@@ -411,6 +400,20 @@ export default function CalendarioOperacionalPage() {
   useEffect(() => {
     carregarFiltros();
   }, [carregarFiltros]);
+
+  // Cor de cada pessoa (a escolhida pelo gestor ou, sem escolha, a da paleta).
+  const cores = useMemo(() => mapaCoresEquipa(equipa), [equipa]);
+
+  // Vista Dia: o FullCalendar não está montado, por isso o período é o próprio dia.
+  useEffect(() => {
+    if (vista !== "dia") return;
+    const d = new Date(`${diaEscolhido}T12:00:00`);
+    d.setDate(d.getDate() + 1);
+    setPeriodo((p) => {
+      const fim = format(d, "yyyy-MM-dd");
+      return p && p.inicio === diaEscolhido && p.fim === fim ? p : { inicio: diaEscolhido, fim };
+    });
+  }, [vista, diaEscolhido]);
 
   /* --- Carregar tarefas do período + filtros (lógica original — NÃO MUDAR) --- */
   const carregarTarefas = useCallback(async () => {
@@ -452,68 +455,10 @@ export default function CalendarioOperacionalPage() {
     return especial(a) - especial(b) || ini(a) - ini(b) || String(a.title ?? "").localeCompare(String(b.title ?? ""));
   }, []);
 
-  const eventos = useMemo<EventInput[]>(() => {
+  const eventosBase = useMemo<EventInput[]>(() => {
     return tarefas.flatMap((t) => {
-      // Ausência aprovada (férias/doença) — banner horizontal contínuo
-      // cinzento/roxo pastel atravessando os dias (Prompt 80, ponto 2).
-      if (t.tipo === "ausencia") {
-        // O backend já envia start/end/allDay/title. Usamos esses campos
-        // e aplicamos uma classe CSS para o estilo de banner.
-        return [{
-          id: t._id,
-          title: t.title ?? `Ausência: ${t.utilizador_id?.nome ?? "Elemento da equipa"}`,
-          start: t.start ?? t.data,
-          end: t.end,
-          allDay: true,
-          // Roxo pastel suave com opacidade — distinto de tarefas normais.
-          backgroundColor: "hsl(var(--status-curso-bg))",
-          borderColor: "hsl(var(--status-curso))",
-          textColor: "hsl(var(--status-curso))",
-          extendedProps: t,
-          // Flag custom para o eventContent aplicar a classe de banner.
-          classNames: ["fc-evt-ausencia"],
-        } as EventInput];
-      }
-
-      // HF25 — Ausência PENDENTE (pedido de férias/doença por aprovar).
-      // Banner âmbar listrado, distinto das aprovadas, para o gestor ver
-      // imediatamente que há um pedido a aguardar aprovação. Isto resolve
-      // o bug em que staff "em férias" aparecia com tarefas mas o calendário
-      // não mostrava nada — a ausência estava pendente (não aprovada).
-      if (t.tipo === "ausencia_pendente") {
-        return [{
-          id: t._id,
-          title: t.title ?? `Ausência (Pendente): ${t.utilizador_id?.nome ?? "Elemento da equipa"}`,
-          start: t.start ?? t.data,
-          end: t.end,
-          allDay: true,
-          // Âmbar pastel com opacidade — sinal de atenção (precisa ação).
-          backgroundColor: "hsl(var(--status-porat-bg))",
-          borderColor: "hsl(var(--status-porat))",
-          textColor: "hsl(var(--status-porat))",
-          extendedProps: t,
-          classNames: ["fc-evt-ausencia-pendente"],
-        } as EventInput];
-      }
-
-      // Folga fixa semanal — bloco cinzento claro, todo o dia.
-      if (t.tipo === "folga_fixa") {
-        // FIX (bug dias de folga) — Usa start como string date-only (YYYY-MM-DD)
-        // para o FullCalendar NÃO aplicar conversão de fuso aos eventos allDay.
-        // Antes, t.data (ISO com Z) era interpretado em fuso local, deslocando
-        // a folga para o dia anterior (falsos positivos no Sábado).
-        const dataFolga = typeof t.data === "string" ? t.data.slice(0, 10) : new Date(t.data).toISOString().slice(0, 10);
-        return [{
-          id: t._id,
-          title: `Folga - ${t.utilizador_id?.nome ?? "Elemento da equipa"}`,
-          start: dataFolga,
-          allDay: true,
-          backgroundColor: "hsl(var(--status-canc-bg))",
-          borderColor: "hsl(var(--status-canc))",
-          textColor: "hsl(var(--status-canc))",
-          extendedProps: t,
-        } as EventInput];
-      }
+      // Ausências e folgas não são eventos: aparecem em «Ausentes: ...» (ver ausentesPorDia).
+      if (ESPECIAIS_ORDEM.includes(t.tipo)) return [];
 
       // Prompt 129 — Extrai a hora diretamente da string ISO sem converter fuso.
       // O FullCalendar com timeZone: "local" aplica o offset do browser aos
@@ -623,6 +568,18 @@ export default function CalendarioOperacionalPage() {
     });
   }, [tarefas]);
 
+  // Cor da pessoa nas limpezas e manutenções (faixa à esquerda, ver eventDidMount). Sem pessoa, sem cor.
+  const eventos = useMemo<EventInput[]>(
+    () =>
+      eventosBase.map((e) => {
+        const x = e.extendedProps as (TarefaCalendario & { _isViagem?: boolean }) | undefined;
+        const id = x?.utilizador_id?._id;
+        const cor = id && !x?._isViagem && !ESPECIAIS_ORDEM.includes(x?.tipo ?? "") ? cores.get(id) : undefined;
+        return cor ? { ...e, extendedProps: { ...x, _cor: cor } } : e;
+      }),
+    [eventosBase, cores],
+  );
+
   /* --- Renderização customizada do bloco de evento (Prompt 74, ponto 4) --- */
   /* --- Prompt 80: destaque por_atribuir + banner ausência --- */
   /* --- Prompt 137: bloco de viagem (cinzento + tracejado) --- */
@@ -632,9 +589,7 @@ export default function CalendarioOperacionalPage() {
     const paleta = paletaPorEstado(t.estado);
     const emoji = emojiPorTipo(t.tipo);
     const tipoEspecial = t.tipo === "limpeza" && t.tipo_limpeza && t.tipo_limpeza !== "normal" ? rotuloTipoLimpeza(t.tipo_limpeza) : null;
-    // Semana com 2 cartões lado a lado: cartão estreito, só a hora de início e o nome da casa (o tipo vai no ponto).
-    const duo = !isMonthView && cartoesPorHora === 2;
-    const titulo = `${tipoEspecial && !duo ? `${tipoEspecial} - ` : ""}${t.propriedade_id?.nome ?? "—"}`;
+    const titulo = `${tipoEspecial ? `${tipoEspecial} - ` : ""}${t.propriedade_id?.nome ?? "—"}`;
     // Vista Mês: o tipo vai num ponto colorido (com rótulo acessível) e o título fica só com a casa.
     const tituloMes = t.propriedade_id?.nome ?? "—";
     const tipoVal = t.tipo === "limpeza" ? (t.tipo_limpeza && COR_TIPO_VALIDOS.includes(t.tipo_limpeza) ? t.tipo_limpeza : "normal") : null;
@@ -646,10 +601,6 @@ export default function CalendarioOperacionalPage() {
     const glifo = GLIFO_ESTADO[t.estado] ?? "";
     const riscada = t.estado === "cancelada" ? " fc-evt-cancelada" : "";
     const staff = t.utilizador_id?.nome ?? null;
-    const isFolga = t.tipo === "folga_fixa";
-    const isAusencia = t.tipo === "ausencia";
-    // HF25 — ausência pendente (pedido por aprovar).
-    const isAusenciaPendente = t.tipo === "ausencia_pendente";
     // por_atribuir e nao_atribuida têm o mesmo destaque; o rótulo vem de @/lib/estados.
     const isPorAtribuir = t.estado === "por_atribuir" || t.estado === "nao_atribuida";
     const rotuloEstado = infoEstadoTarefa(t.estado).label;
@@ -682,73 +633,7 @@ export default function CalendarioOperacionalPage() {
       );
     }
 
-    // --- Ausência: banner contínuo (não tem propriedade, só staff) ---
-    // Renderiza um conteúdo minimalista — o título já vem do backend
-    // ("🌴 Férias: Nome"). Não mostra hora nem bolinha.
-    if (isAusencia) {
-      const bannerTitle = t.title ?? `Ausência: ${staff ?? "Elemento da equipa"}`;
-      return (
-        <div className="fc-evt-ausencia__content" title={bannerTitle}>
-          <span className="fc-evt-ausencia__title">{bannerTitle}</span>
-        </div>
-      );
-    }
-
-    // HF25 — Ausência PENDENTE: banner âmbar com indicador de espera.
-    // Visualmente distinto das aprovadas para o gestor perceber que precisa
-    // de aprovar. Inclui a justificação no tooltip se existir.
-    if (isAusenciaPendente) {
-      const bannerTitle = t.title ?? `Ausência (Pendente): ${staff ?? "Elemento da equipa"}`;
-      const tooltip = t.justificacao
-        ? `${bannerTitle}\nJustificação: ${t.justificacao}`
-        : bannerTitle;
-      return (
-        <div className="fc-evt-ausencia-pendente__content" title={tooltip}>
-          <span className="fc-evt-ausencia-pendente__pulse" aria-hidden>⏳</span>
-          <span className="fc-evt-ausencia-pendente__title">{bannerTitle}</span>
-        </div>
-      );
-    }
-
-    // --- FIX (nomes desaparecidos) — Folga Fixa: barra cinzenta compacta
-    //     com o NOME do staff explicitamente renderizado. Antes caía no
-    //     ramo genérico que usa propriedade_id?.nome ("—") porque folgas
-    //     não têm propriedade associada. Usa arg.event.title (que o backend
-    //     já define como "Folga - {nome}") ou o nome do staff diretamente. ---
-    if (isFolga) {
-      const folgaTitle = arg.event.title ?? `Folga - ${staff ?? "Elemento da equipa"}`;
-      if (isMonthView) {
-        return (
-          <div className="fc-evt-month fc-evt-month--folga" title={folgaTitle}>
-            <span
-              className="fc-evt-month__dot"
-              style={{ backgroundColor: "#94a3b8" }}
-              aria-hidden
-            />
-            <span className="fc-evt-month__title">{folgaTitle}</span>
-          </div>
-        );
-      }
-      return (
-        <div className="fc-evt-block fc-evt-block--folga" title={folgaTitle}>
-          <div className="fc-evt-block__header">
-            <span
-              className="fc-evt-block__dot"
-              style={{ backgroundColor: "#94a3b8" }}
-              aria-hidden
-            />
-            <span className="fc-evt-block__emoji" aria-hidden>😴</span>
-          </div>
-          <div className="fc-evt-block__title">{folgaTitle}</div>
-          {staff && (
-            <div className="fc-evt-block__subtitle">
-              <User className="fc-evt-block__icon" />
-              <span>{primeiroNome(staff)}</span>
-            </div>
-          )}
-        </div>
-      );
-    }
+    // Ausências e folgas não são eventos do calendário: vão em «Ausentes: ...» (ver ausentesPorDia).
 
     // --- Vista mensal: layout compacto em linha ---
     if (isMonthView) {
@@ -792,8 +677,9 @@ export default function CalendarioOperacionalPage() {
         : "fc-evt-block";
     // Cartões curtos (até 30 min = até 2 linhas de 15 min) não têm altura para hora, casa e
     // pessoa em linhas separadas: vão numa só linha (hora de início + casa) e o resto no título.
+    // Na Semana em lista (dayGridWeek) há altura para tudo: só a grelha de horas usa o cartão curto.
     const minutos = arg.event.end && arg.event.start ? (arg.event.end.getTime() - arg.event.start.getTime()) / 60000 : 60;
-    if (minutos <= 30) {
+    if (arg.view.type.startsWith("timeGrid") && minutos <= 30) {
       const quem = t.alerta_orfao ? "Órfã" : staff ? (equipaTexto ?? primeiroNome(staff)) : rotuloEstado;
       return (
         <div className={`${blockClass} fc-evt-block--curto${riscada}`} title={`${arg.timeText} · ${titulo} · ${quem}`}>
@@ -805,12 +691,12 @@ export default function CalendarioOperacionalPage() {
       );
     }
     return (
-      <div className={`${blockClass}${riscada}${duo ? " fc-evt-block--duo" : ""}`}>
+      <div className={`${blockClass}${riscada}`}>
         <div className="fc-evt-block__header">
           {pontoTipo}
           {glifo && <span className="fc-evt-glifo" aria-hidden="true">{glifo}</span>}
           {t.alerta_orfao && <span className="fc-evt-block__emoji" aria-hidden>🚨</span>}
-          <span className="fc-evt-block__time" title={arg.timeText}>{duo ? arg.timeText.split(" - ")[0] : arg.timeText}</span>
+          <span className="fc-evt-block__time" title={arg.timeText}>{arg.timeText}</span>
         </div>
         <div className="fc-evt-block__title" title={titulo}>
           {titulo}
@@ -832,7 +718,7 @@ export default function CalendarioOperacionalPage() {
         </div>
       </div>
     );
-  }, [cartoesPorHora]);
+  }, []);
 
   /* --- Lista de um dia (telemóvel) --- */
   const itensDoDia = useMemo(() => {
@@ -843,7 +729,7 @@ export default function CalendarioOperacionalPage() {
         if (!d) return false;
         return format(d, "yyyy-MM-dd") === diaAberto;
       })
-      .filter((t) => t.tipo !== "viagem")
+      .filter((t) => t.tipo !== "viagem" && !ESPECIAIS_ORDEM.includes(t.tipo))
       .slice()
       .sort((a, b) => (parsearDataSegura(a.data)?.getTime() ?? 0) - (parsearDataSegura(b.data)?.getTime() ?? 0));
   }, [diaAberto, tarefas]);
@@ -875,105 +761,51 @@ export default function CalendarioOperacionalPage() {
     });
   }, [periodo]);
 
-  // Dia em largura total: abre a partir da Semana, navega dia a dia e volta à semana desse dia.
-  const abrirDiaLargo = useCallback((iso: string) => {
-    setDiaLargo(iso);
-    calRef.current?.getApi().gotoDate(`${iso}T12:00:00`);
-  }, []);
-  const mudarDiaLargo = (delta: number) => {
-    if (!diaLargo) return;
-    const d = new Date(`${diaLargo}T12:00:00`);
-    d.setDate(d.getDate() + delta);
-    abrirDiaLargo(format(d, "yyyy-MM-dd"));
-  };
-  const sairDiaLargo = useCallback(() => {
-    setDiaLargo(null);
-    // O FullCalendar esteve escondido: volta a medir a grelha.
-    requestAnimationFrame(() => calRef.current?.getApi().updateSize());
-  }, []);
-  // Só existe na Semana do computador.
-  useEffect(() => {
-    if (diaLargo && (vista !== "semana" || estreito)) setDiaLargo(null);
-  }, [diaLargo, vista, estreito]);
-  // Ao abrir, o foco vai para «← Semana»; Esc volta à Semana (se não houver detalhe/diálogo por cima).
-  const diaLargoAberto = diaLargo !== null;
-  useEffect(() => {
-    if (!diaLargoAberto) return;
-    voltarSemanaRef.current?.focus();
-  }, [diaLargoAberto]);
-  useEffect(() => {
-    if (!diaLargoAberto) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || e.defaultPrevented) return;
-      if (tarefaSelecionada || document.querySelector("[role='dialog'],[role='alertdialog']")) return;
-      sairDiaLargo();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [diaLargoAberto, tarefaSelecionada, sairDiaLargo]);
-
-  // Semana: o «+N mais» do FullCalendar é desenhado por cima de cartões (fica escondido por CSS);
-  // o total escondido de cada dia vai para o cabeçalho do dia, onde nunca tapa nada.
-  const [maisPorDia, setMaisPorDia] = useState<Record<string, number>>({});
-  const contagemMaisRef = useRef(0);
-  const contarMais = useCallback(() => {
-    const raiz = calBoxRef.current;
-    const novo: Record<string, number> = {};
-    if (raiz) {
-      raiz.querySelectorAll<HTMLElement>(".fc-timegrid-col[data-date] .fc-timegrid-more-link").forEach((a) => {
-        const dia = a.closest<HTMLElement>(".fc-timegrid-col")?.dataset.date;
-        const n = Number((a.textContent ?? "").replace(/\D/g, ""));
-        if (dia && n > 0) novo[dia] = (novo[dia] ?? 0) + n;
-      });
+  // Folgas e ausências não são cartões nem barras: vão numa linha curta «Ausentes: ...» por dia
+  // (Semana, Mês e Dia). Cada dia do período tem a lista completa e o motivo; pedidos por aprovar levam marca.
+  const diasPeriodo = useMemo(() => {
+    if (!periodo) return [] as string[];
+    const out: string[] = [];
+    const d = new Date(`${periodo.inicio}T12:00:00`);
+    const fim = new Date(`${periodo.fim}T12:00:00`);
+    while (d < fim && out.length < 50) {
+      out.push(format(d, "yyyy-MM-dd"));
+      d.setDate(d.getDate() + 1);
     }
-    setMaisPorDia((ant) => (JSON.stringify(ant) === JSON.stringify(novo) ? ant : novo));
-  }, []);
-  const agendarContagemMais = useCallback(() => {
-    window.clearTimeout(contagemMaisRef.current);
-    contagemMaisRef.current = window.setTimeout(contarMais, 60);
-  }, [contarMais]);
-  useEffect(() => {
-    if (vista !== "semana") return;
-    agendarContagemMais();
-    const t = window.setTimeout(agendarContagemMais, 400);
-    return () => window.clearTimeout(t);
-  }, [vista, eventos, larguraCal, diaLargo, agendarContagemMais]);
-  const conteudoCabecalhoSemana = (a: { date: Date; text: string }) => {
-    const iso = format(a.date, "yyyy-MM-dd");
-    const n = maisPorDia[iso] ?? 0;
-    return (
-      <div className="fc-cab-dia">
-        <button
-          type="button"
-          className="fc-cab-dia__abrir"
-          onClick={() => abrirDiaLargo(iso)}
-          aria-label={`Ver ${format(a.date, "EEEE, d 'de' MMMM", { locale: pt })} em largura total`}
-        >
-          {a.text}
-        </button>
-        {n > 0 && (
-          <button
-            type="button"
-            className="fc-cab-dia__mais"
-            onClick={() => abrirDiaLargo(iso)}
-            aria-label={`Mais ${n} limpezas escondidas em ${format(a.date, "EEEE, d 'de' MMMM", { locale: pt })}. Abrir o dia em largura total`}
-          >
-            +{n} mais
-          </button>
-        )}
-      </div>
-    );
-  };
-
-  // Mede o calendário (para decidir quantas limpezas lado a lado cabem na Semana).
-  useEffect(() => {
-    const el = calBoxRef.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => setLarguraCal(el.clientWidth));
-    ro.observe(el);
-    setLarguraCal(el.clientWidth);
-    return () => ro.disconnect();
-  }, [vista, mounted, estreito]);
+    return out;
+  }, [periodo]);
+  const ausentesPorDia = useMemo(() => {
+    const m = new Map<string, AusenteDia[]>();
+    const juntar = (dia: string, nome: string, texto: string, pendente: boolean, pedidoId?: string) => {
+      const l = m.get(dia) ?? [];
+      const ja = l.find((x) => x.nome === nome);
+      if (ja) {
+        if (pendente) {
+          ja.pendente = true;
+          ja.pedidoId = pedidoId;
+        }
+      } else l.push({ nome, texto, pendente, pedidoId });
+      m.set(dia, l);
+    };
+    for (const t of tarefas) {
+      if (!ESPECIAIS_ORDEM.includes(t.tipo)) continue;
+      const nome = primeiroNome(t.utilizador_id?.nome) || (t.title ?? "Ausência");
+      const pendente = t.tipo === "ausencia_pendente";
+      const pedidoId = pendente ? String(t._id).replace(/^ausencia_pendente_/, "") : undefined;
+      if (t.tipo === "folga_fixa") {
+        const dia = typeof t.data === "string" ? t.data.slice(0, 10) : new Date(t.data).toISOString().slice(0, 10);
+        juntar(dia, nome, `Folga - ${t.utilizador_id?.nome ?? nome}`, false);
+        continue;
+      }
+      // Ausências: `end` é exclusivo (o dia seguinte ao último).
+      const iniAus = String(t.start ?? t.data).slice(0, 10);
+      const fimAus = t.end ? String(t.end).slice(0, 10) : null;
+      for (const dia of diasPeriodo) {
+        if (dia >= iniAus && (fimAus ? dia < fimAus : dia === iniAus)) juntar(dia, nome, t.title ?? `Ausência - ${nome}`, pendente, pedidoId);
+      }
+    }
+    return m;
+  }, [tarefas, diasPeriodo]);
 
   // Telemóvel: ao tocar num dia, a lista desse dia aparece por baixo e é trazida para o ecrã.
   useEffect(() => {
@@ -987,7 +819,17 @@ export default function CalendarioOperacionalPage() {
     (arg: DayCellContentArg) => {
       // Fora do telemóvel mostra o nº do dia. Devolver undefined deixava a célula sem número
       // (o FullCalendar não repõe o conteúdo por omissão) e a 1.ª linha do mês parecia vazia.
-      if (!estreito || arg.view.type !== "dayGridMonth") return <>{arg.dayNumberText}</>;
+      if (arg.view.type !== "dayGridMonth") return <>{arg.dayNumberText}</>;
+      if (!estreito) {
+        // Computador: número do dia e, ao fundo da célula, «Ausentes: A, B +N» (sem barras de ausência).
+        const aus = ausentesPorDia.get(format(arg.date, "yyyy-MM-dd")) ?? [];
+        return (
+          <>
+            {arg.dayNumberText}
+            {aus.length > 0 && <AusentesLinha itens={aus} max={2} className="mes-ausentes" />}
+          </>
+        );
+      }
       const itens = (porDia.get(format(arg.date, "yyyy-MM-dd")) ?? []).filter((t) => !ESPECIAIS.includes(t.tipo));
       if (itens.length === 0) return <>{arg.dayNumberText}</>;
       const urgencia = (e: string) => (e === "nao_atribuida" ? 0 : e === "por_atribuir" ? 1 : e === "em_curso" ? 2 : e === "atribuida" ? 3 : 4);
@@ -1016,7 +858,7 @@ export default function CalendarioOperacionalPage() {
       );
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [estreito, porDia]
+    [estreito, porDia, ausentesPorDia]
   );
 
   /* --- Callbacks do FullCalendar --- */
@@ -1035,6 +877,14 @@ export default function CalendarioOperacionalPage() {
       inicio: format(arg.start, "yyyy-MM-dd"),
       fim: format(arg.end, "yyyy-MM-dd"),
     });
+  }, []);
+
+  // Põe a cor da pessoa no cartão: a classe liga a regra .fc-evt-pessoa e a variável dá a cor da faixa.
+  const handleEventDidMount = useCallback((arg: EventMountArg) => {
+    const cor = (arg.event.extendedProps as { _cor?: string })._cor;
+    if (!cor) return;
+    arg.el.classList.add("fc-evt-pessoa");
+    arg.el.style.setProperty("--cor-pessoa", cor);
   }, []);
 
   const handleEventClick = useCallback((arg: EventClickArg) => {
@@ -1078,24 +928,27 @@ export default function CalendarioOperacionalPage() {
       const avisoReatribuir = [res.warning, res.aviso_horario].filter(Boolean).join(" | ");
       if (avisoReatribuir) setWarningToast(avisoReatribuir);
 
-      // Atualiza localmente a tarefa no estado com a data recalculada.
+      // Atualiza já o cartão (data recalculada, nova pessoa) e depois volta a pedir a lista.
+      // NÃO se espalha `res.tarefa` por cima: o PATCH devolve a tarefa sem populate (propriedade_id e
+      // equipa_atribuida só com ids), e o cartão ficava com «—» no lugar da casa e sem nomes.
       const novoStaff = equipa.find((u) => u._id === reatribuindoPara);
       setTarefas((prev) =>
         prev.map((t) =>
           t._id === tarefaSelecionada._id
             ? {
                 ...t,
-                // O backend devolve a tarefa atualizada; usamos essa versão
-                // para garantir consistência (data + utilizador + estado).
-                ...(res?.tarefa ?? {}),
-                utilizador_id: novoStaff
-                  ? { _id: novoStaff._id, nome: novoStaff.nome }
-                  : null,
+                data: res?.tarefa?.data ?? t.data,
+                tempo_viagem_minutos: res?.tarefa?.tempo_viagem_minutos ?? t.tempo_viagem_minutos,
+                utilizador_id: novoStaff ? { _id: novoStaff._id, nome: novoStaff.nome } : null,
+                equipa_atribuida: novoStaff ? [{ _id: novoStaff._id, nome: novoStaff.nome }] : [],
                 estado: "atribuida",
+                alerta_orfao: false,
+                alerta_mensagem: undefined,
               }
             : t
         )
       );
+      void carregarTarefas();
       setTarefaSelecionada(null);
       setReatribuindoPara("");
     } catch (e) {
@@ -1404,103 +1257,6 @@ export default function CalendarioOperacionalPage() {
     );
   };
 
-  // Cartão de uma limpeza no dia em largura total: o nome ocupa até 2 linhas.
-  const renderCartaoDia = (x: TarefaCalendario) => {
-    const paleta = paletaPorEstado(x.estado);
-    const tipoVal = x.tipo_limpeza && COR_TIPO_VALIDOS.includes(x.tipo_limpeza) ? x.tipo_limpeza : "normal";
-    const glifo = GLIFO_ESTADO[x.estado] ?? "";
-    const nome = x.propriedade_id?.nome ?? "—";
-    const equipaTexto = textoEquipaGestor(x.utilizador_id, x.equipa_atribuida);
-    const faltaTexto = textoFalta(x.pessoas_em_falta);
-    const hora = temHoraReal(x.data) ? horaTarefa(x.data) : "Sem hora";
-    const resumo = `${hora}, ${nome}, ${equipaTexto ?? "por atribuir"}, ${infoEstadoTarefa(x.estado).label}`;
-    return (
-      <li key={x._id} className="min-w-0">
-        <button
-          type="button"
-          onClick={() => { setTarefaSelecionada(x); setReatribuindoPara(""); setInfoDisp(null); }}
-          aria-label={resumo}
-          className={cn("dia-largo__cartao flex h-full w-full min-w-0 flex-col gap-0.5 rounded-md border-2 p-2 text-left", x.estado === "cancelada" && "fc-evt-cancelada")}
-          style={{ background: paleta.bg, borderColor: paleta.border, color: paleta.text }}
-        >
-          <span className="fc-evt-block__header">
-            {x.tipo === "limpeza" && <span className="tipo-marca" data-tipo={tipoVal} aria-hidden="true" />}
-            {x.tipo === "manutencao" && <EtiquetaManutencao />}
-            {glifo && <span className="fc-evt-glifo" aria-hidden="true">{glifo}</span>}
-            <span className="fc-evt-block__time">{hora}</span>
-          </span>
-          <span className="fc-evt-block__title dia-largo__titulo" title={nome}>{nome}</span>
-          <span className="fc-evt-block__subtitle dia-largo__sub">
-            {equipaTexto ? (
-              <>
-                <User className="fc-evt-block__icon" aria-hidden="true" />
-                <span>{equipaTexto}{faltaTexto ? ` · ${faltaTexto}` : ""}</span>
-              </>
-            ) : (
-              <span className="fc-evt-block__unassigned">{infoEstadoTarefa(x.estado).label}</span>
-            )}
-          </span>
-          <OfertaVagaBadge tarefa={x} curto className="mt-1 self-start whitespace-normal px-1.5 text-[11px]" />
-        </button>
-      </li>
-    );
-  };
-
-  /** Dia em largura total: cartões agrupados por hora, a quebrar em linhas (nunca sobrepostos). */
-  const renderDiaLargo = () => {
-    if (!diaLargo) return null;
-    const d = new Date(`${diaLargo}T12:00:00`);
-    const nomeDia = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"][d.getDay()];
-    const titulo = `${nomeDia}, ${format(d, "d MMM", { locale: pt })}`;
-    const todos = porDia.get(diaLargo) ?? [];
-    const limpezas = todos.filter((t) => !ESPECIAIS.includes(t.tipo));
-    const outros = todos.filter((t) => ESPECIAIS.includes(t.tipo));
-    const grupos = new Map<string, TarefaCalendario[]>();
-    for (const t of limpezas) {
-      const k = temHoraReal(t.data) ? horaTarefa(t.data) : "Sem hora";
-      const l = grupos.get(k);
-      if (l) l.push(t);
-      else grupos.set(k, [t]);
-    }
-    const horas = [...grupos.keys()].sort((a, b) => (a === "Sem hora" ? 1 : b === "Sem hora" ? -1 : a.localeCompare(b)));
-    return (
-      <section data-testid="dia-largura" aria-label={`Limpezas de ${titulo}`}>
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <Button ref={voltarSemanaRef} variant="outline" className="gap-1.5" onClick={sairDiaLargo} aria-label="Voltar à semana">
-            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-            Semana
-          </Button>
-          <Button variant="outline" size="icon" aria-label="Dia anterior" onClick={() => mudarDiaLargo(-1)}>
-            <ChevronLeft className="h-4 w-4" aria-hidden="true" />
-          </Button>
-          <Button variant="outline" size="icon" aria-label="Dia seguinte" onClick={() => mudarDiaLargo(1)}>
-            <ChevronRight className="h-4 w-4" aria-hidden="true" />
-          </Button>
-          <h2 className="ml-1 text-lg font-semibold" aria-live="polite">{titulo}</h2>
-          <span className="text-sm text-muted-foreground">
-            {loading ? "A carregar…" : limpezas.length === 0 ? "Sem limpezas" : plural(limpezas.length, "limpeza")}
-          </span>
-        </div>
-        {horas.map((h) => {
-          const l = grupos.get(h) ?? [];
-          return (
-            <div key={h} className="mb-4">
-              <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                {h} · {plural(l.length, "limpeza")}
-              </h3>
-              <ul className="dia-largo__grelha">{l.map(renderCartaoDia)}</ul>
-            </div>
-          );
-        })}
-        {outros.length > 0 && (
-          <p className="text-xs text-muted-foreground">
-            {outros.map((o) => o.title ?? "Ausência").join(" · ")}
-          </p>
-        )}
-      </section>
-    );
-  };
-
   const tituloSemana = (() => {
     if (diasDaSemana.length === 0) return "";
     const a = new Date(`${diasDaSemana[0]}T12:00:00`);
@@ -1508,7 +1264,45 @@ export default function CalendarioOperacionalPage() {
     return `${format(a, "d MMM", { locale: pt })} – ${format(b, "d MMM yyyy", { locale: pt })}`;
   })();
   const hojeISO = format(new Date(), "yyyy-MM-dd");
-  const listaSemana = vista === "semana" && estreito;
+  // Extras de cada limpeza no Dia e na Semana: etiqueta de manutenção e vaga oferecida à equipa.
+  const renderExtraLimpeza = (t: TarefaDia) => (
+    <>
+      {t.tipo === "manutencao" && <EtiquetaManutencao />}
+      <OfertaVagaBadge tarefa={t} curto className="shrink-0" />
+    </>
+  );
+  const listaSemana = vista === "semana";
+
+  const mudarDiaEscolhido = (delta: number) => {
+    const d = new Date(`${diaEscolhido}T12:00:00`);
+    d.setDate(d.getDate() + delta);
+    setDiaEscolhido(format(d, "yyyy-MM-dd"));
+  };
+
+  // Troca de vista sem perder o sítio onde o gestor estava.
+  const mudarVista = (v: typeof vista) => {
+    if (v === vista) return;
+    if (vista === "dia") {
+      if (v === "mes" || v === "semana") {
+        // O FullCalendar monta de novo no dia escolhido e depois diz o período (datesSet).
+        setDataCal(new Date(`${diaEscolhido}T12:00:00`));
+        setPeriodo(null);
+      } else {
+        // Tabela e Equipa mostram um período: do dia passa ao mês desse dia.
+        const ini = new Date(`${diaEscolhido.slice(0, 8)}01T12:00:00`);
+        const fim = new Date(ini);
+        fim.setMonth(fim.getMonth() + 1);
+        setPeriodo({ inicio: format(ini, "yyyy-MM-dd"), fim: format(fim, "yyyy-MM-dd") });
+      }
+    } else if (v === "dia") {
+      // Vem do calendário: hoje, se estiver no período visto; senão a data onde o calendário estava.
+      const dentro = periodo && hojeISO >= periodo.inicio && hojeISO < periodo.fim;
+      setDiaEscolhido(vista === "mes" && diaAberto ? diaAberto : dentro ? hojeISO : format(dataCal ?? new Date(), "yyyy-MM-dd"));
+    } else if (v === "semana" && vista === "mes") {
+      setDataCal(diaAberto ? new Date(`${diaAberto}T12:00:00`) : new Date());
+    }
+    setVista(v);
+  };
 
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
@@ -1573,24 +1367,20 @@ export default function CalendarioOperacionalPage() {
           </Button>
         </div>
         <p className="text-sm text-muted-foreground">
-          Vista mensal e semanal de todas as tarefas de limpeza. Filtra por
+          Vista por dia (uma coluna por funcionário), semanal e mensal de todas as tarefas de limpeza. Filtra por
           propriedade, staff ou estado. Clica numa limpeza para ver o detalhe e reatribuir.
           Alterna para a Vista Tabela e exporta para Excel.
         </p>
       </div>
 
-      {/* Vistas numa só barra (Mês, Semana, Tabela, Equipa) + Filtros no telemóvel */}
+      {/* Vistas numa só barra (Dia, Mês, Semana, Tabela, Equipa) + Filtros no telemóvel */}
       <div className="flex flex-wrap items-center gap-2">
         <div role="group" aria-label="Vista do calendário" className="flex w-full max-w-full items-center gap-1 overflow-x-auto rounded-md border bg-muted/40 p-1 sm:w-auto">
-          {([["mes", "Mês", CalendarRange], ["semana", "Semana", CalendarRange], ["tabela", "Tabela", Table], ["equipa", "Equipa", Users]] as const).map(([v, rotulo, Ic]) => (
+          {([["dia", "Dia", CalendarDays], ["mes", "Mês", CalendarRange], ["semana", "Semana", CalendarRange], ["tabela", "Tabela", Table], ["equipa", "Equipa", Users]] as const).map(([v, rotulo, Ic]) => (
             <button
               key={v}
               type="button"
-              onClick={() => {
-                if (v === "semana" && vista === "mes") setDataCal(diaAberto ? new Date(`${diaAberto}T12:00:00`) : new Date());
-                setDiaLargo(null);
-                setVista(v);
-              }}
+              onClick={() => mudarVista(v)}
               aria-pressed={vista === v}
               className={cn(
                 "flex min-h-11 shrink-0 flex-1 items-center justify-center gap-1.5 rounded px-2.5 py-1.5 text-sm font-medium transition-colors sm:min-h-9 sm:flex-none sm:px-3",
@@ -1728,50 +1518,54 @@ export default function CalendarioOperacionalPage() {
         </div>
       )}
 
+      {/* Vista Dia: horas na vertical e uma coluna por funcionário (a grelha rola na horizontal se não couber) */}
+      {vista === "dia" && (
+        <VistaDiaEquipa
+          dia={diaEscolhido}
+          tarefas={tarefas as unknown as TarefaDia[]}
+          equipa={equipa}
+          cores={cores}
+          loading={loading}
+          onMudarDia={mudarDiaEscolhido}
+          onHoje={() => setDiaEscolhido(hojeISO)}
+          estreito={estreito}
+          renderExtra={renderExtraLimpeza}
+          onAbrir={(t) => {
+            const tarefa = tarefas.find((x) => x._id === t._id);
+            if (!tarefa) return;
+            setTarefaSelecionada(tarefa);
+            setReatribuindoPara("");
+            setInfoDisp(null);
+          }}
+        />
+      )}
+
       {/* Prompt 99 — Vista Calendário (FullCalendar) */}
       {(vista === "mes" || vista === "semana") && (
         <div className={cn("grid gap-4", diaAberto && "lg:grid-cols-[minmax(0,1fr)_24rem]")}>
         {listaSemana && (
-          <section aria-label="Limpezas da semana" className="rounded-lg border bg-card p-2">
-            <div className="mb-2 flex items-center gap-2">
-              <Button variant="outline" size="icon" aria-label="Semana anterior" onClick={() => calRef.current?.getApi().prev()}>
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-              <Button variant="outline" size="icon" aria-label="Semana seguinte" onClick={() => calRef.current?.getApi().next()}>
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-              <Button variant="outline" onClick={() => calRef.current?.getApi().today()}>Hoje</Button>
-              <h2 className="ml-1 min-w-0 flex-1 truncate text-sm font-semibold">{tituloSemana}</h2>
-            </div>
-            <div className="space-y-4">
-              {diasDaSemana.map((dia) => {
-                const itens = porDia.get(dia) ?? [];
-                return (
-                  <div key={dia}>
-                    <h3 className={cn("mb-1 flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-muted-foreground", dia === hojeISO && "text-primary")}>
-                      <span>{formatarDataSegura(`${dia}T12:00:00`, (d) => format(d, "EEE, d 'de' MMM", { locale: pt }), dia)}{dia === hojeISO ? " · hoje" : ""}</span>
-                      <span>{itens.filter((t) => !ESPECIAIS.includes(t.tipo)).length || ""}</span>
-                    </h3>
-                    {itens.length === 0 ? (
-                      <p className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">Sem limpezas.</p>
-                    ) : (
-                      <div className="space-y-1.5">{itens.map(renderLinhaDia)}</div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </section>
+          <SemanaLista
+            dias={diasDaSemana}
+            porDia={porDia}
+            ausentesPorDia={ausentesPorDia}
+            cores={cores}
+            titulo={tituloSemana}
+            loading={loading}
+            onAnterior={() => calRef.current?.getApi().prev()}
+            onSeguinte={() => calRef.current?.getApi().next()}
+            onHoje={() => calRef.current?.getApi().today()}
+            onAbrir={(t) => { setTarefaSelecionada(t); setReatribuindoPara(""); setInfoDisp(null); }}
+            renderExtra={renderExtraLimpeza}
+          />
         )}
         <div ref={calBoxRef} className={cn("min-w-0 rounded-lg border bg-card p-2 sm:p-4", listaSemana && "hidden")}>
-          {diaLargo && renderDiaLargo()}
           {mounted ? (
-            <div className={cn(diaLargo && "hidden")}>
+            <div>
             <FullCalendar
               ref={calRef}
               plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
               key={vista}
-              initialView={vista === "semana" ? "timeGridWeek" : "dayGridMonth"}
+              initialView={vista === "semana" ? "dayGridWeek" : "dayGridMonth"}
               initialDate={dataCal ?? undefined}
               locale={ptLocale}
               timeZone="local"
@@ -1788,28 +1582,27 @@ export default function CalendarioOperacionalPage() {
               slotLabelInterval="01:00:00"
               // Ponto 3 — Indicador de tempo real (linha vermelha)
               nowIndicator
-              height={700}
+              // Semana em lista: cresce com o conteúdo (a página rola); Mês com altura fixa.
+              height={vista === "semana" ? "auto" : 700}
               editable={false}
               eventStartEditable={false}
               eventDurationEditable={false}
-              events={eventos}
+              events={vista === "semana" ? [] : eventos}
+              displayEventEnd
               eventClick={handleEventClick}
+              eventDidMount={handleEventDidMount}
               dateClick={handleDateClick}
               datesSet={handleDatesSet}
-              // FIX (calendário compacto) — Limita a 2 o nº de eventos allDay
-              // visíveis por dia; o excesso fica escondido num botão "+X mais".
+              // Mês: no máximo 2 por dia, o resto em «+X mais». A Semana é a lista SemanaLista (o FullCalendar fica escondido só para dar o período).
               dayMaxEvents={2}
               // Ausências e folgas primeiro (faixa de cima); depois por hora. Sem isto, no Mês as
               // barras de vários dias ficavam na mesma faixa das limpezas e eram tapadas por elas.
               eventOrder={ordemEventos}
-              // Semana: no máximo 2 colunas lado a lado; o resto fica em «+N mais» (popover que fecha ao clicar fora ou Esc).
               slotEventOverlap={false}
-              eventMaxStack={vista === "semana" ? cartoesPorHora : 2}
+              eventMaxStack={2}
               dayCellContent={conteudoDia}
               dayCellClassNames={(a) => (estreito && format(a.date, "yyyy-MM-dd") === diaAberto ? ["dia-selecionado"] : [])}
-              dayHeaderContent={vista === "semana" ? conteudoCabecalhoSemana : undefined}
-              moreLinkDidMount={vista === "semana" ? agendarContagemMais : undefined}
-              moreLinkClick={vista === "semana" ? (arg) => { abrirDiaLargo(format(arg.date, "yyyy-MM-dd")); } : "popover"}
+              moreLinkClick="popover"
               moreLinkContent={(a) => `+${a.num} mais`}
               eventDisplay="block"
               // Ponto 4 — Renderização customizada do bloco
@@ -1844,8 +1637,13 @@ export default function CalendarioOperacionalPage() {
                   {formatarDataSegura(`${diaAberto}T12:00:00`, (d) => format(d, "EEEE, d 'de' MMMM", { locale: pt }), diaAberto)}
                 </h2>
                 <p className="text-xs text-muted-foreground">
-                  {itensDoDia.some((x) => x.tipo !== "ausencia" && x.tipo !== "ausencia_pendente" && x.tipo !== "folga_fixa") ? "Escolhe uma limpeza para ver o detalhe." : "Sem limpezas neste dia."}
+                  {itensDoDia.length > 0 ? "Escolhe uma limpeza para ver o detalhe." : "Sem limpezas neste dia."}
                 </p>
+                {(ausentesPorDia.get(diaAberto) ?? []).length > 0 && (
+                  <p className="mt-1 text-xs">
+                    <AusentesLinha itens={ausentesPorDia.get(diaAberto) ?? []} />
+                  </p>
+                )}
               </div>
               <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => setDiaAberto(null)} aria-label="Fechar a lista do dia">
                 <X className="h-4 w-4" />
@@ -1958,10 +1756,6 @@ export default function CalendarioOperacionalPage() {
             {info.label}
           </span>
         ))}
-        <span className="flex items-center gap-1.5">
-          <span className="h-3 w-3 rounded border border-slate-300 bg-slate-200 dark:border-slate-500 dark:bg-slate-700" />
-          Folga fixa
-        </span>
         <span className="flex flex-wrap items-center gap-3">
           <span className="font-medium">Tipo:</span>
           {COR_TIPO_VALIDOS.map((tp) => (
@@ -1972,7 +1766,7 @@ export default function CalendarioOperacionalPage() {
           ))}
         </span>
         <span className="flex items-center gap-1.5">
-          <span aria-hidden>✓ ▶ ? !</span> concluída, em curso, por atribuir, não atribuída
+          Faixa e círculo = pessoa · fundo e borda = estado
         </span>
       </div>
 

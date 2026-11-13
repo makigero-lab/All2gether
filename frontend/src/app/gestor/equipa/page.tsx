@@ -71,6 +71,7 @@ import { PaginationBar } from "@/components/admin/pagination-bar";
 import { ApagarDadosDialog } from "@/components/rgpd/apagar-dados-dialog";
 import { descarregarFicheiro } from "@/lib/descarregar";
 import { lerUtilizador } from "@/lib/auth";
+import { NOME_COR_EQUIPA, PALETA_EQUIPA, mapaCoresEquipa } from "@/lib/cores-equipa";
 import { Switch } from "@/components/ui/switch";
 import { parsearDataSegura, tarefasPorAtribuir, textoRedistribuicao, type RedistribuicaoDTO, plural } from "@/lib/utils";
 
@@ -262,6 +263,8 @@ function EquipaPage() {
     responsavel_id: "" as string,
     dias_folga: [] as number[],
     telefone: "",
+    // Cor da pessoa no calendário (#rrggbb); "" = automática.
+    cor: "",
     // HF10 — Folgas rotativas (datas específicas).
     folgas_rotativas: [] as { _id?: string; data: string; motivo: string }[],
     // FIX (alocação bidirecional) — Propriedades às quais este staff está
@@ -422,6 +425,9 @@ function EquipaPage() {
     );
   }
 
+  // Cor de cada funcionário no calendário (a mesma conta que o calendário faz: staff ativo).
+  const coresEquipa = mapaCoresEquipa(utilizadores.filter((u) => u.role === "staff" && u.ativo));
+
   // Utilizadores que podem ser responsáveis (só gestor — admin não aparece).
   const responsaveisPossiveis = utilizadores.filter(
     (u) => u.role === "gestor"
@@ -563,6 +569,7 @@ function EquipaPage() {
       responsavel_id: u.responsavel_id ?? "",
       dias_folga: u.dias_folga ?? [],
       telefone: u.telefone ?? "",
+      cor: u.cor ?? "",
       folgas_rotativas: folgas,
       // FIX (alocação bidirecional) — Array de IDs de propriedades às quais
       // o staff está alocado (controlo geográfico).
@@ -638,6 +645,8 @@ function EquipaPage() {
         responsavel_id: editForm.responsavel_id || null,
         dias_folga: editForm.dias_folga,
         telefone: editForm.telefone,
+        // Cor no calendário (só equipa): "" volta à cor automática.
+        ...(editForm.role === "staff" ? { cor: editForm.cor || null } : {}),
         // HF10 — Envia o array completo de folgas rotativas (substituição total).
         folgas_rotativas: editForm.folgas_rotativas.map((fr) => ({
           data: fr.data,
@@ -1209,6 +1218,14 @@ function EquipaPage() {
                         <tr key={u._id} className={`hover:bg-muted/30 ${ausenteTipo ? "opacity-65" : ""}`}>
                           <td className="px-4 py-3 font-medium">
                             <div className="flex items-center gap-2">
+                              {u.role === "staff" && coresEquipa.get(u._id) && (
+                                <span
+                                  aria-hidden="true"
+                                  title="Cor no calendário"
+                                  className="h-3 w-3 shrink-0 rounded-full border border-black/10"
+                                  style={{ backgroundColor: coresEquipa.get(u._id) }}
+                                />
+                              )}
                               {u.nome}
                               {/* FIX (visualização exclusivo) — Badge visível na
                                   tabela sempre que exclusivo_preferenciais for true. */}
@@ -1446,6 +1463,43 @@ function EquipaPage() {
                     placeholder="900 000 000"
                   />
                 </div>
+                {editForm.role === "staff" && (
+                  <div className="space-y-1.5">
+                    <span id="edit-cor-rotulo" className="text-sm font-medium">
+                      Cor no calendário
+                    </span>
+                    <div role="group" aria-labelledby="edit-cor-rotulo" className="flex flex-wrap items-center gap-2">
+                      {PALETA_EQUIPA.map((c) => (
+                        <button
+                          key={c}
+                          type="button"
+                          aria-label={NOME_COR_EQUIPA[c] ?? c}
+                          title={NOME_COR_EQUIPA[c] ?? c}
+                          aria-pressed={editForm.cor.toLowerCase() === c}
+                          onClick={() => setEditForm((f) => ({ ...f, cor: c }))}
+                          className="flex h-11 w-11 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          <span
+                            aria-hidden="true"
+                            className={`h-8 w-8 rounded-full border-2 transition ${editForm.cor.toLowerCase() === c ? "border-foreground ring-2 ring-ring ring-offset-2" : "border-transparent"}`}
+                            style={{ backgroundColor: c }}
+                          />
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        aria-pressed={editForm.cor === ""}
+                        onClick={() => setEditForm((f) => ({ ...f, cor: "" }))}
+                        className={`h-11 rounded-full border px-4 text-xs font-medium ${editForm.cor === "" ? "border-foreground bg-muted" : "border-input"}`}
+                      >
+                        Automática
+                      </button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      A cor aparece nos cartões do calendário. Automática: a cor é escolhida pela ordem de criação.
+                    </p>
+                  </div>
+                )}
                 <div className="space-y-1.5">
                   <label htmlFor="edit-role" className="text-sm font-medium">
                     Tipo de utilizador

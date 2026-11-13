@@ -2018,8 +2018,9 @@ exports.atualizarMembroEquipa = async (req, res) => {
       return res.status(400).json({ erro: 'ID de utilizador inválido.' });
     }
 
-    const { nome, email, role, password, responsavel_id, dias_folga, telefone, folgas_rotativas, nif, observacoes, exclusivo_preferenciais, propriedades_alocadas, propriedades_atribuidas } = req.body || {};
+    const { nome, email, role, password, responsavel_id, dias_folga, telefone, folgas_rotativas, nif, observacoes, exclusivo_preferenciais, propriedades_alocadas, propriedades_atribuidas, cor } = req.body || {};
     if (
+      cor === undefined &&
       nome === undefined &&
       email === undefined &&
       role === undefined &&
@@ -2032,7 +2033,7 @@ exports.atualizarMembroEquipa = async (req, res) => {
       observacoes === undefined
     ) {
       return res.status(400).json({
-        erro: 'Nada para atualizar. Envie nome, email, role, password, responsavel_id, dias_folga, folgas_rotativas, telefone, nif e/ou observacoes.',
+        erro: 'Nada para atualizar. Envie nome, email, role, password, responsavel_id, dias_folga, folgas_rotativas, telefone, nif, cor e/ou observacoes.',
       });
     }
 
@@ -2059,6 +2060,17 @@ exports.atualizarMembroEquipa = async (req, res) => {
     }
     // SEGURANÇA: só o admin altera outros gestores (email/password = tomar a conta).
     if (recusaMexerEmGestor(req, res, { alvo: utilizador, roleNovo: role })) return;
+
+    // --- Cor no calendário (#rrggbb; null ou '' volta à cor automática) ---
+    if (cor !== undefined) {
+      if (cor === null || cor === '') {
+        utilizador.cor = null;
+      } else if (typeof cor === 'string' && /^#[0-9a-fA-F]{6}$/.test(cor)) {
+        utilizador.cor = cor.toLowerCase();
+      } else {
+        return res.status(400).json({ erro: 'Cor inválida. Use o formato #rrggbb.' });
+      }
+    }
 
     // --- Nome ---
     if (nome !== undefined) {

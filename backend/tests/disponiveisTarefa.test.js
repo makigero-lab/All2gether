@@ -108,3 +108,19 @@ describe('disponíveis para atribuir à mão', () => {
     expect((await lista(token, t._id)).status).toBe(409);
   });
 });
+
+describe('pedido de ausência por aprovar', () => {
+  test('a pessoa continua elegível e vem marcada com ausencia_pendente; sem pedido vem false', async () => {
+    const c = await cenario(app, { extra: 0 });
+    const p = await Propriedade.create({ nome: 'CasaP' + Math.random(), empresa_id: c.e._id, smoobu_id: String(Math.random()), ativo: true, tempo_limpeza_minutos: 60, staff_necessario: 1 });
+    const t = await limpeza(c.e, p);
+    await Ausencia.create({ utilizador_id: c.ana._id, empresa_id: c.e._id, data_inicio: new Date(`${DIA}T00:00:00Z`), data_fim: new Date(`${DIA}T00:00:00Z`), tipo: 'ferias', estado: 'pendente' });
+    const r = await lista(c.token, t._id);
+    expect(r.status).toBe(200);
+    const ana = r.body.disponiveis.find((d) => d.nome === 'Ana');
+    const bia = r.body.disponiveis.find((d) => d.nome === 'Bia');
+    expect(ana).toBeTruthy();
+    expect(ana.ausencia_pendente).toBe(true);
+    expect(bia.ausencia_pendente).toBe(false);
+  });
+});

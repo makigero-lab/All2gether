@@ -67,6 +67,8 @@ interface AusenciaAmp extends Omit<AusenciaDTO, "tipo"> {
   tipo: TipoAusenciaAmp;
   estado?: string;
   notas?: string;
+  /** Justificação dada por quem pediu (a coluna Notas só mostrava `notas`). */
+  justificacao?: string;
 }
 
 const TIPO_LABEL: Record<TipoAusenciaAmp, string> = {
@@ -231,6 +233,17 @@ export default function AusenciasPage() {
       setFolgasLoading(false);
     }
   }
+
+  // Vindo do calendário (/gestor/ausencias?pedido=<id>): destaca esse pedido e leva-o para o ecrã.
+  const [destacar, setDestacar] = useState<string | null>(null);
+  useEffect(() => {
+    setDestacar(new URLSearchParams(window.location.search).get("pedido"));
+  }, []);
+  useEffect(() => {
+    if (!destacar || loading) return;
+    const alvo = [...document.querySelectorAll<HTMLElement>(`[data-ausencia="${CSS.escape(destacar)}"]`)].find((el) => el.offsetParent !== null);
+    alvo?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [destacar, loading, ausencias]);
 
   useEffect(() => {
     carregar();
@@ -543,6 +556,17 @@ export default function AusenciasPage() {
         </Card>
       )}
 
+      {destacar && !loading && (
+        <div role="status" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/40 bg-primary/10 px-4 py-2 text-sm">
+          <span>
+            {ausencias.some((a) => a._id === destacar)
+              ? "Pedido aberto a partir do calendário (destacado na lista). Aprova ou rejeita na coluna Ações."
+              : "Esse pedido já não existe (foi decidido ou apagado)."}
+          </span>
+          <Button variant="outline" size="sm" onClick={() => setDestacar(null)}>Fechar aviso</Button>
+        </div>
+      )}
+
       {/* FIX (filtros) — Barra de filtros Estado + Mês (view única, sem Tabs). */}
       <Card>
         <CardContent className="flex flex-wrap items-center gap-3 p-4">
@@ -622,7 +646,7 @@ export default function AusenciasPage() {
                 const fim = parsearDataSegura(a.data_fim);
                 const jaPassada = fim ? fim.getTime() < hoje.getTime() : false;
                 return (
-                  <li key={a._id} className="space-y-2 py-3">
+                  <li key={a._id} data-ausencia={a._id} className={`space-y-2 py-3${destacar === a._id ? " rounded-md bg-primary/10 px-2 ring-2 ring-primary" : ""}`}>
                     <div className="flex items-start justify-between gap-2">
                       <p className="min-w-0 break-words font-medium">{a.utilizador?.nome ?? "—"}</p>
                       <div className="shrink-0">
@@ -642,7 +666,11 @@ export default function AusenciasPage() {
                       <TipoIcon className="h-4 w-4 shrink-0" />
                       {TIPO_LABEL[a.tipo] ?? a.tipo} · {formatarPeriodo(a.data_inicio, a.data_fim)}
                     </p>
-                    {a.notas && <p className="break-words text-sm text-muted-foreground">{a.notas}</p>}
+                    {(a.notas || a.justificacao) && (
+                      <p className="break-words text-sm text-muted-foreground">
+                        {a.notas || `Justificação: ${a.justificacao}`}
+                      </p>
+                    )}
                     <div className="flex items-center justify-end gap-1">{acoesAusencia(a, jaPassada, "h-11 w-11")}</div>
                   </li>
                 );
@@ -670,7 +698,7 @@ export default function AusenciasPage() {
                     const fim = parsearDataSegura(a.data_fim);
                     const jaPassada = fim ? fim.getTime() < hoje.getTime() : false;
                     return (
-                      <tr key={a._id} className="hover:bg-muted/30">
+                      <tr key={a._id} data-ausencia={a._id} className={`hover:bg-muted/30${destacar === a._id ? " bg-primary/10 outline outline-2 -outline-offset-2 outline-primary" : ""}`}>
                         <td className="px-4 py-3 font-medium">
                           {a.utilizador?.nome ?? "—"}
                         </td>
@@ -698,12 +726,12 @@ export default function AusenciasPage() {
                           )}
                         </td>
                         <td className="px-4 py-3 max-w-xs">
-                          {a.notas ? (
+                          {a.notas || a.justificacao ? (
                             <span
                               className="line-clamp-2 text-muted-foreground"
-                              title={a.notas}
+                              title={a.notas || `Justificação: ${a.justificacao}`}
                             >
-                              {a.notas}
+                              {a.notas || `Justificação: ${a.justificacao}`}
                             </span>
                           ) : (
                             <span className="text-muted-foreground">—</span>
