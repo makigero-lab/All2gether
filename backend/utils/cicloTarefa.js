@@ -34,10 +34,10 @@ async function parceiroDaTarefa(tarefa) {
   if (!t) return null;
   const reserva = await ReservaManual.findOne({ tarefa_gerada_id: t._id }).select('parceiro_id').lean();
   if (reserva && reserva.parceiro_id) return String(reserva.parceiro_id);
-  if (t.origem_parceiro || t.origem === 'manual') {
-    const p = await Propriedade.findById(t.propriedade_id).select('parceiro_id').lean();
-    if (p && p.parceiro_id) return String(p.parceiro_id);
-  }
+  // Qualquer limpeza de uma casa de proprietário (criada pelo gestor, vinda do Smoobu ou pela rotina)
+  // é dele: o parceiro vê-as na tabela de Reservas (só de leitura) e recebe os avisos.
+  const p = await Propriedade.findById(t.propriedade_id).select('parceiro_id').lean();
+  if (p && p.parceiro_id) return String(p.parceiro_id);
   return null;
 }
 
@@ -46,7 +46,10 @@ async function nomeCasa(tarefa) {
   return (p && p.nome) || 'a casa';
 }
 
-/** Aviso ao parceiro. `evento`: 'concluida' | 'cancelada' | 'alterada'. */
+/**
+ * Aviso ao parceiro. `evento`: 'concluida' | 'cancelada' | 'alterada' (pelo gestor)
+ * | 'cancelada_smoobu' | 'alterada_smoobu' (a reserva mudou no Smoobu).
+ */
 async function avisarParceiro(tarefa, evento) {
   try {
     if (!tarefa || tarefa.tipo !== 'limpeza') return false;
@@ -64,9 +67,14 @@ async function avisarParceiro(tarefa, evento) {
     } else if (evento === 'cancelada') {
       mensagem = `Limpeza cancelada pelo gestor: ${casa} (${diaCurto(tarefa.data)}).`;
       chave = `limpeza_cancelada:${tarefa._id}`;
+    } else if (evento === 'cancelada_smoobu') {
+      mensagem = `Limpeza cancelada (a reserva foi cancelada no Smoobu): ${casa} (${diaCurto(tarefa.data)}).`;
+      chave = `limpeza_cancelada:${tarefa._id}`;
     } else {
       const hora = H.temHoraReal(tarefa.data) ? ` às ${horaLisboa(tarefa.data)}` : '';
-      mensagem = `Limpeza alterada pelo gestor: ${casa}, agora a ${diaCurto(tarefa.data)}${hora}.`;
+      mensagem = evento === 'alterada_smoobu'
+        ? `Limpeza alterada (a reserva mudou no Smoobu): ${casa}, agora a ${diaCurto(tarefa.data)}${hora}.`
+        : `Limpeza alterada pelo gestor: ${casa}, agora a ${diaCurto(tarefa.data)}${hora}.`;
       // A chave leva a hora; a notificação é substituída (ver abaixo) para o sino mostrar sempre a atual.
       chave = `limpeza_alterada:${tarefa._id}:${new Date(tarefa.data).toISOString()}`;
       substituir = `limpeza_alterada:${tarefa._id}:`;
@@ -79,7 +87,7 @@ async function avisarParceiro(tarefa, evento) {
       });
     }
     return await notificarSino(parceiroId, mensagem, {
-      tipo: evento === 'cancelada' ? 'tarefa_cancelada' : 'aviso',
+      tipo: String(evento).startsWith('cancelada') ? 'tarefa_cancelada' : 'aviso',
       url,
       empresa_id: tarefa.empresa_id ? String(tarefa.empresa_id) : null,
       tarefa_id: tarefa._id,

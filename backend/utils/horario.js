@@ -75,6 +75,18 @@ function diaUTC(d) {
   return new Date(d).toISOString().slice(0, 10);
 }
 
+/** Dia de hoje em Lisboa, 'aaaa-mm-dd' (o dia de calendário de Lisboa, não o de UTC). */
+function hojeLisboa(agora = new Date()) {
+  const p = partesLisboa(new Date(agora));
+  return `${String(p.year).padStart(4, '0')}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')}`;
+}
+
+/** 'aaaa-mm-dd' + n dias de calendário (n pode ser negativo). */
+function somarDiasISO(diaISO, n) {
+  const [y, m, d] = diaISO.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
+}
+
 /** Instante UTC correspondente a `min` minutos locais de Lisboa no dia 'aaaa-mm-dd'. */
 function utcDeMinutosLocais(diaISO, min) {
   const [y, m, d] = diaISO.split('-').map(Number);
@@ -264,6 +276,8 @@ module.exports = {
   offsetLisboaMin,
   minutosLocais,
   diaUTC,
+  hojeLisboa,
+  somarDiasISO,
   utcDeMinutosLocais,
   horaPadraoDoDia,
   temHoraReal,

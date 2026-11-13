@@ -253,7 +253,7 @@ export interface PropriedadeDTO {
   // FIX (parceiro associado relacional) — ID do parceiro B2B associado.
   // Populado pelo backend com { _id, nome, email, role } para o frontend
   // mostrar no Badge sem extrair das observações.
-  parceiro_id?: string | { _id: string; nome: string; email: string; role: string } | null;
+  parceiro_id?: string | { _id: string; nome: string; email: string; role: string; ativo?: boolean } | null;
   // FIX (restrição lavandaria) — Fornecedor (lavandaria) atribuído à propriedade.
   fornecedor_id?: string | { _id: string; nome: string; email: string; role: string } | null;
   // FIX (morada estruturada) — Morada decomposta (rua, codigo_postal, cidade).
@@ -307,6 +307,8 @@ export interface UtilizadorDTO {
   // FIX (atribuição bidirecional fornecedor) — Propriedades atribuídas ao
   // fornecedor (lavandaria). Injetado pelo backend no getEquipa.
   propriedades_atribuidas?: string[];
+  /** Cor no calendário (#rrggbb); null = automática (ver lib/cores-equipa). */
+  cor?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }

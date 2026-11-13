@@ -45,7 +45,7 @@ export default function GestorLayout({
       <div className="flex min-h-screen flex-col bg-background lg:flex-row">
         <GestorSidebar />
         <TabelasResponsivas />
-        <main className="flex-1 lg:overflow-x-hidden">
+        <main className="min-w-0 flex-1 lg:overflow-x-clip">
           <ImpersonationBanner />
           {children}
         </main>

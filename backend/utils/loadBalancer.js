@@ -53,10 +53,22 @@ const {
 const { minutosLocais } = require('./horario');
 const { comMembro, EXPR_MEMBROS, retirarMembroDoc } = require('./equipaTarefa');
 
+const { distanciaHaversine } = require('./distancia');
+
 // Pesos do score (em minutos — quanto menor o score, melhor).
-const PESO_CLUSTERING = 120;    // 2h de bónus se já está na mesma propriedade
+// Mesmo sítio (decisão 2026-11-13): quem já está no prédio nesse dia fica com
+// a limpeza seguinte para evitar deslocações. Peso maior que a janela do dia.
+const PESO_CLUSTERING = 600;
 const PESO_ROTATIVIDADE = 30;   // 30 min de penalização se limpou ontem
-const PESO_EQUIDADE_HORA = 10;  // 10 min de penalização por hora semanal acumulada
+// Equilíbrio semanal (em horas): cada hora a mais na semana do que o colega
+// menos carregado pesa como começar uma hora mais tarde.
+const PESO_EQUIDADE_HORA = 60;
+// Duas propriedades a menos de 50 m contam como o mesmo prédio.
+const RAIO_MESMO_SITIO_KM = 0.05;
+
+function coordValida(c) {
+  return !!c && Number.isFinite(c.lat) && Number.isFinite(c.lng);
+}
 
 // Os `aggregate` NÃO fazem cast automático: um id em string (ex.: do JWT)
 // nunca casaria e a carga daria 0 (limite de 8h ignorado). Cast aqui, uma vez.
@@ -116,8 +128,31 @@ async function temTarefaNaMesmaPropriedade(utilizadorId, propriedadeId, range) {
 }
 
 /**
+ * Já tem, nesse dia, uma limpeza na mesma propriedade ou noutra do mesmo
+ * prédio (coordenadas a menos de 50 m)?
+ */
+async function temTarefaNoMesmoSitio(utilizadorId, propriedadeId, coord, range) {
+  if (!propriedadeId && !coordValida(coord)) return false;
+  const tarefas = await Tarefa.find(comMembro({
+    data: { $gte: range.start, $lt: range.end },
+    estado: { $nin: ['cancelada'] },
+  }, utilizadorId))
+    .select('propriedade_id')
+    .populate({ path: 'propriedade_id', select: 'coordenadas' })
+    .lean();
+  return tarefas.some((t) => {
+    const p = t.propriedade_id;
+    if (!p) return false;
+    if (propriedadeId && String(p._id || p) === String(propriedadeId)) return true;
+    return coordValida(coord) && coordValida(p.coordenadas)
+      && distanciaHaversine(coord, p.coordenadas) <= RAIO_MESMO_SITIO_KM;
+  });
+}
+
+/**
  * HF16 — Calcula a carga horária SEMANAL acumulada do staff (seg a dom).
- * Inclui tarefas não-canceladas/não-concluídas. Usado para equidade semanal.
+ * Conta todas as limpezas não canceladas da semana (incluindo as concluídas).
+ * A semana segue os dias de obterRangeDia (meia-noite UTC), não o fuso do servidor.
  *
  * @param {import('mongoose').Types.ObjectId} empresaId
  * @param {import('mongoose').Types.ObjectId} utilizadorId
@@ -128,14 +163,11 @@ async function calcularCargaSemanal(empresaId, utilizadorId, dataReferencia) {
   // Calcula o início da semana (segunda-feira).
   // getDay(): 0=Dom, 1=Seg, ..., 6=Sáb. Para começar em segunda:
   //   se Dom (0) → retrocede 6 dias; se Seg (1) → 0; etc.
-  const dia = dataReferencia.getDay();
+  const ref = new Date(dataReferencia);
+  const dia = ref.getUTCDay();
   const diasParaSegunda = dia === 0 ? 6 : dia - 1;
-  const inicioSemana = new Date(dataReferencia);
-  inicioSemana.setDate(dataReferencia.getDate() - diasParaSegunda);
-  inicioSemana.setHours(0, 0, 0, 0);
-
-  const fimSemana = new Date(inicioSemana);
-  fimSemana.setDate(inicioSemana.getDate() + 7); // próxima segunda
+  const inicioSemana = new Date(Date.UTC(ref.getUTCFullYear(), ref.getUTCMonth(), ref.getUTCDate() - diasParaSegunda));
+  const fimSemana = new Date(inicioSemana.getTime() + 7 * 24 * 3600 * 1000); // próxima segunda
 
   const res = await Tarefa.aggregate([
     {
@@ -362,47 +394,58 @@ async function determinarUtilizadorAtribuido(
     // para o funcionario_preferencial_id (legacy) e depois para o LB geral.
     const equipaIds = propVIP?.equipa_preferencial || [];
     if (equipaIds.length > 0) {
-      for (const equipaId of equipaIds) {
-        const equipaIdStr = String(equipaId);
-        const vip = disponiveis.find((s) => String(s._id) === equipaIdStr);
-        if (vip) {
-          let cabeVIP = await cabeNoHorario(vip._id, range, coordenadasNovaPropriedade, tempoNovaTarefa, propriedadeId);
+      // A equipa preferida ganha sempre (decisão 2026-11-13). Entre os membros
+      // que cabem no dia: primeiro quem já está no mesmo prédio, depois quem
+      // tem menos horas na semana, por fim a ordem da lista.
+      const membros = equipaIds
+        .map((id) => disponiveis.find((s) => String(s._id) === String(id)))
+        .filter(Boolean);
+      const cabem = [];
+      for (const [ordem, vip] of membros.entries()) {
+        if (!(await cabeNoHorario(vip._id, range, coordenadasNovaPropriedade, tempoNovaTarefa, propriedadeId))) continue;
+        cabem.push({
+          vip,
+          ordem,
+          mesmoSitio: await temTarefaNoMesmoSitio(vip._id, propriedadeId, coordenadasNovaPropriedade, range),
+          carga: await calcularCargaSemanal(empresaId, vip._id, range.start),
+        });
+      }
+      if (cabem.length > 0) {
+        cabem.sort((a, b) => (b.mesmoSitio - a.mesmoSitio) || (a.carga - b.carga) || (a.ordem - b.ordem));
+        const v = cabem[0];
+        console.log(
+          `⭐ VIP (equipa): ${v.vip._id} escolhido entre ${cabem.length} preferido(s) ` +
+            `(mesmo prédio=${v.mesmoSitio}, semana=${(v.carga / 60).toFixed(1)}h).`
+        );
+        return { utilizadorId: v.vip._id, tempoViagem: 0 };
+      }
+      // Nenhum preferido cabe: tenta libertar capacidade, pela ordem da lista.
+      for (const vip of membros) {
+        const equipaIdStr = String(vip._id);
+        // FIX (prioridade equipa) — desatribui a última limpeza ainda não
+        // iniciada desse dia do preferido e volta a ver se cabe.
+        console.log(
+          `⭐ VIP (equipa): ${equipaIdStr} não cabe no horário. A tentar libertar capacidade...`
+        );
+        const tarefaParaLibertar = await Tarefa.findOne(comMembro({
+          empresa_id: empresaId,
+          // Só liberta uma tarefa do MESMO dia e ainda não iniciada: libertar outro
+          // dia não reduz a carga deste e libertar 'em_curso' tira trabalho a quem já está a fazê-lo.
+          data: { $gte: range.start, $lt: range.end },
+          estado: 'atribuida',
+        }, vip._id)).sort({ data: -1 });
+        if (!tarefaParaLibertar) continue;
 
-          // FIX (prioridade equipa) — Se o VIP não cabe no horário, tenta libertar
-          // capacidade desatribuindo a tarefa futura mais distante desse VIP.
-          // Isto garante que a equipa preferencial é priorizada mesmo que
-          // tenha tarefas futuras que possam ser reatribuídas a outro staff.
-          if (!cabeVIP) {
-            console.log(
-              `⭐ VIP (equipa): ${equipaIdStr} não cabe no horário. A tentar libertar capacidade...`
-            );
-            // Procura a tarefa futura mais distante do VIP (maior data) que
-            // não seja a tarefa atual e que esteja 'atribuida' ou 'em_curso'.
-            const tarefaParaLibertar = await Tarefa.findOne(comMembro({
-              empresa_id: empresaId,
-              // Só liberta uma tarefa do MESMO dia e ainda não iniciada: libertar outro
-              // dia não reduz a carga deste e libertar 'em_curso' tira trabalho a quem já está a fazê-lo.
-              data: { $gte: range.start, $lt: range.end },
-              estado: 'atribuida',
-            }, vip._id)).sort({ data: -1 });
-
-            if (tarefaParaLibertar) {
-              // Sai só o VIP; se a equipa ficar vazia a tarefa volta a 'por_atribuir'.
-              const vazia = retirarMembroDoc(tarefaParaLibertar, vip._id);
-              if (vazia) tarefaParaLibertar.motivo_nao_atribuicao = 'Desatribuída para libertar equipa preferencial';
-              await tarefaParaLibertar.save();
-              console.log(
-                `⭐ VIP (equipa): tarefa ${tarefaParaLibertar._id} desatribuída do VIP ${equipaIdStr} para libertar capacidade.`
-              );
-              // Volta a verificar (a tarefa libertada já não conta).
-              cabeVIP = await cabeNoHorario(vip._id, range, coordenadasNovaPropriedade, tempoNovaTarefa, propriedadeId);
-            }
-          }
-
-          if (cabeVIP) {
-            console.log(`⭐ VIP (equipa): tarefa atribuída ao preferencial ${equipaIdStr} (cabe no horário).`);
-            return { utilizadorId: vip._id, tempoViagem: 0 };
-          }
+        // Sai só o VIP; se a equipa ficar vazia a tarefa volta a 'por_atribuir'.
+        const vazia = retirarMembroDoc(tarefaParaLibertar, vip._id);
+        if (vazia) tarefaParaLibertar.motivo_nao_atribuicao = 'Desatribuída para libertar equipa preferencial';
+        await tarefaParaLibertar.save();
+        console.log(
+          `⭐ VIP (equipa): tarefa ${tarefaParaLibertar._id} desatribuída do VIP ${equipaIdStr} para libertar capacidade.`
+        );
+        if (await cabeNoHorario(vip._id, range, coordenadasNovaPropriedade, tempoNovaTarefa, propriedadeId)) {
+          console.log(`⭐ VIP (equipa): tarefa atribuída ao preferencial ${equipaIdStr} (cabe no horário).`);
+          return { utilizadorId: vip._id, tempoViagem: 0 };
         }
       }
       console.log(
@@ -453,16 +496,14 @@ async function determinarUtilizadorAtribuido(
     const tempoViagem = Number(resultadoScheduler.tempoViagem) || 0;
     const origemViagem = 'maps';
 
-    // FATOR 1: Agrupamento Diário (Same-Day Clustering).
-    const jaNaPropriedade = propriedadeId
-      ? await temTarefaNaMesmaPropriedade(u._id, propriedadeId, range)
-      : false;
+    // FATOR 1: mesmo sítio (mesma propriedade ou mesmo prédio, a menos de 50 m).
+    const jaNaPropriedade = await temTarefaNoMesmoSitio(u._id, propriedadeId, coordenadasNovaPropriedade, range);
     const bonusClustering = jaNaPropriedade ? PESO_CLUSTERING : 0;
 
-    // FATOR 3a: Equidade Semanal (carga horária da semana).
+    // FATOR 3a: Equidade Semanal (horas da semana). A penalização é relativa ao
+    // colega menos carregado e é somada depois do ciclo.
     const cargaSemanalMin = await calcularCargaSemanal(empresaId, u._id, range.start);
     const horasSemana = cargaSemanalMin / 60;
-    const penalizacaoEquidade = Math.round(horasSemana * PESO_EQUIDADE_HORA);
 
     // FATOR 3b: Rotatividade (limpou ontem?).
     const limpouOntem = propriedadeId
@@ -480,9 +521,9 @@ async function determinarUtilizadorAtribuido(
     const score =
       minutosDesdeMeiaNoite   // F2: início mais cedo
       - bonusClustering       // F1: bónus de clustering (subtrai → melhora)
-      + penalizacaoEquidade   // F3a: equidade semanal (soma → piora)
       + penalizacaoRotatividade // F3b: rotatividade (soma → piora)
       + tempoViagem;          // F4: tempo de viagem (soma → piora)
+    // F3a (equidade semanal) é somada a seguir ao ciclo.
 
     candidatos.push({
       utilizador: u,
@@ -499,7 +540,7 @@ async function determinarUtilizadorAtribuido(
     console.log(
       `📊 [HF16] staff ${u._id}: score=${score} ` +
         `(início=${minutosDesdeMeiaNoite}min, cluster=${jaNaPropriedade ? '+' + PESO_CLUSTERING : '0'}, ` +
-        `equidade=${penalizacaoEquidade} (${horasSemana.toFixed(1)}h sem), ` +
+        `semana=${horasSemana.toFixed(1)}h, ` +
         `rotação=${limpouOntem ? '+' + PESO_ROTATIVIDADE : '0'}, ` +
         `viagem=${tempoViagem}min [${origemViagem}]).`
     );
@@ -510,6 +551,12 @@ async function determinarUtilizadorAtribuido(
       '⚠️  determinarUtilizadorAtribuido: nenhum staff coube no horário do dia.'
     );
     return null;
+  }
+
+  // F3a: equilíbrio semanal, relativo ao colega menos carregado entre os que cabem.
+  const menorSemana = Math.min(...candidatos.map((c) => c.cargaSemanalMin));
+  for (const c of candidatos) {
+    c.score += Math.round(((c.cargaSemanalMin - menorSemana) / 60) * PESO_EQUIDADE_HORA);
   }
 
   // Ordena por score (menor = melhor).
@@ -646,6 +693,7 @@ module.exports = {
   obterStaffDisponivel,
   // Exportados para testes:
   temTarefaNaMesmaPropriedade,
+  temTarefaNoMesmoSitio,
   calcularCargaSemanal,
   limpouPropriedadeOntem,
 };

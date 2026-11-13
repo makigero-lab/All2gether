@@ -29,13 +29,15 @@ import {
   DialogContent,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { MudarEstadoProprietarioDialog } from "@/components/gestor/mudar-estado-proprietario";
 import {
   adminGet,
   adminPost,
   adminPut,
-  adminPatch,
   type UtilizadorDTO,
 } from "@/lib/api";
+
+type FiltroEstado = "ativos" | "inativos" | "todos";
 
 /**
  * Página de Gestão de Parceiros B2B — /gestor/parceiros
@@ -84,6 +86,13 @@ export default function ParceirosPage() {
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editErro, setEditErro] = useState<string | null>(null);
   const [showEditPassword, setShowEditPassword] = useState(false);
+
+  // Filtro de estado (como na Equipa): por defeito só os ativos.
+  const [filtroEstado, setFiltroEstado] = useState<FiltroEstado>("ativos");
+  const [aviso, setAviso] = useState<string | null>(null);
+
+  // Confirmação de desativar/reativar (diálogo partilhado com a Equipa).
+  const [mudarEstado, setMudarEstado] = useState<UtilizadorDTO | null>(null);
 
   const carregar = useCallback(async () => {
     setLoading(true);
@@ -182,21 +191,11 @@ export default function ParceirosPage() {
     }
   }
 
-  async function handleToggleAtivo(p: UtilizadorDTO) {
-    // Optimistic UI.
-    setParceiros((prev) =>
-      prev.map((x) => (x._id === p._id ? { ...x, ativo: !x.ativo } : x))
-    );
-    try {
-      await adminPatch(`/api/gestor/equipa/${p._id}/estado`, { ativo: !p.ativo });
-    } catch (e) {
-      // Reverte em caso de erro.
-      setParceiros((prev) =>
-        prev.map((x) => (x._id === p._id ? { ...x, ativo: p.ativo } : x))
-      );
-      setErro(e instanceof Error ? e.message : "Erro ao alterar estado.");
-    }
-  }
+  const visiveis = parceiros.filter((p) => {
+    if (filtroEstado === "ativos") return p.ativo;
+    if (filtroEstado === "inativos") return !p.ativo;
+    return true;
+  });
 
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
@@ -225,6 +224,29 @@ export default function ParceirosPage() {
         </div>
       </div>
 
+      {/* Filtro de estado (como na Equipa) */}
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          value={filtroEstado}
+          onChange={(e) => setFiltroEstado(e.target.value as FiltroEstado)}
+          className="h-11 md:h-9 rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
+          aria-label="Filtrar por estado"
+        >
+          <option value="ativos">Estado: Ativos</option>
+          <option value="inativos">Estado: Inativos</option>
+          <option value="todos">Estado: Todos</option>
+        </select>
+      </div>
+
+      {aviso && (
+        <Card className="border-brand-border">
+          <CardContent className="flex items-start gap-3 p-4 text-sm" role="status">
+            <span>{aviso}</span>
+            <Button variant="ghost" size="sm" onClick={() => setAviso(null)} className="ml-auto">Fechar</Button>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Erro */}
       {erro && (
         <Card className="border-destructive/50">
@@ -249,6 +271,14 @@ export default function ParceirosPage() {
               <p className="text-sm">Ainda não há proprietários.</p>
               <p className="text-xs">Clica em &quot;Novo Proprietário&quot; para adicionar o primeiro.</p>
             </div>
+          ) : visiveis.length === 0 ? (
+            <div className="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">
+              <Handshake className="h-10 w-10 opacity-40" />
+              <p className="text-sm">
+                {filtroEstado === "inativos" ? "Não há proprietários inativos." : "Não há proprietários ativos."}
+              </p>
+              <Button variant="outline" size="sm" onClick={() => setFiltroEstado("todos")}>Ver todos</Button>
+            </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="rt w-full text-sm">
@@ -264,7 +294,7 @@ export default function ParceirosPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {parceiros.map((p) => (
+                  {visiveis.map((p) => (
                     <tr key={p._id} className={`hover:bg-muted/30 ${!p.ativo ? "opacity-60" : ""}`}>
                       <td className="px-4 py-3 font-medium">{p.nome}</td>
                       <td className="px-4 py-3 text-muted-foreground">{p.email}</td>
@@ -294,7 +324,7 @@ export default function ParceirosPage() {
                             variant="ghost"
                             size="icon"
                             className="h-8 w-8"
-                            onClick={() => handleToggleAtivo(p)}
+                            onClick={() => { setAviso(null); setMudarEstado(p); }}
                             aria-label={p.ativo ? "Desativar" : "Ativar"}
                             title={p.ativo ? "Desativar" : "Ativar"}
                           >
@@ -310,6 +340,13 @@ export default function ParceirosPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Confirmação de desativar / reativar */}
+      <MudarEstadoProprietarioDialog
+        pessoa={mudarEstado}
+        onFechar={() => setMudarEstado(null)}
+        onConcluido={async (msg) => { setAviso(msg); await carregar(); }}
+      />
 
       {/* Dialog de Criação */}
       <Dialog open={criarOpen} onOpenChange={setCriarOpen}>

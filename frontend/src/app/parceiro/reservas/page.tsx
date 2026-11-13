@@ -29,6 +29,7 @@ import {
 } from "@/lib/ordenacao-reservas";
 import { EstadoTarefaBadge } from "@/components/ui/estado-tarefa-badge";
 import { LimpezaConcluida } from "@/components/parceiro/limpeza-concluida";
+import { CartoesReservasExternas, LinhasReservasExternas, type ReservaExternaDTO } from "@/components/parceiro/reservas-externas";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
@@ -595,6 +596,8 @@ interface Linha {
 
 export default function ParceiroReservasPage() {
   const [reservas, setReservas] = useState<ReservaDTO[]>([]);
+  // Limpezas criadas pela All2gether / vindas do Smoobu nas casas dele: só de leitura.
+  const [reservasExternas, setReservasExternas] = useState<ReservaExternaDTO[]>([]);
   const [propriedades, setPropriedades] = useState<PropriedadeDTO[]>([]);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
@@ -702,11 +705,12 @@ export default function ParceiroReservasPage() {
     setErro(null);
     try {
       const [resReservas, resProps] = await Promise.all([
-        adminGet<{ reservas: ReservaDTO[] }>("/api/parceiro/reservas"),
+        adminGet<{ reservas: ReservaDTO[]; reservas_externas?: ReservaExternaDTO[] }>("/api/parceiro/reservas"),
         adminGet<{ propriedades: PropriedadeDTO[] }>("/api/parceiro/propriedades"),
       ]);
       reconciliarNoProximo.current = true;
       setReservas(resReservas.reservas ?? []);
+      setReservasExternas(resReservas.reservas_externas ?? []);
       const props = resProps.propriedades ?? [];
       setPropriedades(props);
       // Com uma só propriedade, a linha nova já vem preenchida.
@@ -1691,6 +1695,8 @@ export default function ParceiroReservasPage() {
                     </FragmentoLinha>
                   );
                 })}
+                {/* Limpezas da All2gether e do Smoobu: só de leitura */}
+                <LinhasReservasExternas reservas={reservasExternas} classeEstado={FIXO_ESTADO} classeAcoes={FIXO_ACOES} />
               </tbody>
             </table>
           </div>
@@ -1889,6 +1895,8 @@ export default function ParceiroReservasPage() {
               </Card>
             );
           })}
+
+          <CartoesReservasExternas reservas={reservasExternas} />
         </div>
         </>
       )}

@@ -11,6 +11,8 @@ export interface Disponivel {
   /** Hora de início prevista para esta pessoa (ISO). */
   hora_prevista: string;
   tempo_viagem_minutos: number;
+  /** Tem um pedido de ausência por aprovar que cobre o dia (continua elegível). */
+  ausencia_pendente?: boolean;
 }
 
 export interface InfoDisponiveis {
@@ -113,12 +115,12 @@ export function SeletorDisponiveis({
         <option value="">{info.modo === "vaga" ? "— Escolher quem entra na equipa —" : "— Selecionar —"}</option>
         {info.disponiveis.map((d) => (
           <option key={d._id} value={d._id}>
-            {d.nome} — às {horaLisboa(d.hora_prevista)}
+            {d.nome} — às {horaLisboa(d.hora_prevista)}{d.ausencia_pendente ? " (ausência por aprovar)" : ""}
           </option>
         ))}
       </select>
       <p className="text-xs text-muted-foreground">
-        Só aparecem as pessoas disponíveis (sem ausência nem folga, da equipa da casa, com a limpeza dentro do horário).
+        Só aparecem as pessoas disponíveis (sem ausência aprovada nem folga, da equipa da casa, com a limpeza dentro do horário). Quem tem um pedido de ausência por aprovar aparece marcado.
         A hora é a prevista para cada uma.
       </p>
     </div>

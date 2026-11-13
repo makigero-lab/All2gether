@@ -26,6 +26,9 @@ const { planearAtribuicao } = require('../utils/atribuicaoAutomatica');
 const { idsEquipa } = require('../utils/equipaTarefa');
 const { agregarNotificacao } = require('../utils/notificarAgregado');
 const { avisarGestores } = require('../utils/notificar');
+const { avisarGestorReserva } = require('../utils/avisoGestorReserva');
+const { limpezaDaGestaoDoParceiro, MSG_LIMPEZA_DA_GESTAO } = require('../utils/limpezasDaGestao');
+const { listarReservasExternas } = require('../utils/reservasExternas');
 const { temProgresso, planearAtribuicao: planearMotor, cabeNaAgendaNaHora } = require('../utils/atribuicaoAutomatica');
 const {
   normalizarTipo, tipoDe, eSaida, tempoDoTipo, checklistDoTipo, temChecklistPropria, resolverDiaLimpeza, ROTULOS_TIPO,
@@ -731,6 +734,8 @@ async function criarReserva(req, res) {
       if (campos) Object.assign(novaTarefa, campos);
     }
     if (deOutraOrigem) await avisarGestorDuasLimpezas(empresaId, propriedade, inicioDiaSaida);
+    // Sino ao gestor se a limpeza nova cai nas próximas 48 h.
+    await avisarGestorReserva({ empresaId, propriedadeId: propriedade._id, acao: 'criou', datas: [novaTarefa.data] });
 
     console.log(
       `📅 [Parceiro] reserva criada por parceiro ${parceiroId} para "${propriedade.nome}" ` +
@@ -763,7 +768,10 @@ async function listarReservas(req, res) {
       .sort({ check_out: -1 })
       .lean();
 
-    return res.status(200).json({ reservas });
+    // Reservas das casas dele que vêm de fora (Smoobu; iCal e gestor chegam depois): só de leitura.
+    const reservas_externas = await listarReservasExternas(parceiroId);
+
+    return res.status(200).json({ reservas, reservas_externas });
   } catch (err) {
     console.error('❌ parceiroController.listarReservas:', err.message);
     return res.status(500).json({ erro: 'Erro interno.' });
@@ -788,7 +796,10 @@ async function atualizarReserva(req, res) {
     if (!mongoose.isValidObjectId(id)) return res.status(400).json({ erro: 'ID inválido.' });
 
     const reserva = await ReservaManual.findOne({ _id: id, parceiro_id: parceiroId });
-    if (!reserva) return res.status(404).json({ erro: 'Reserva não encontrada.' });
+    if (!reserva) {
+      if (await limpezaDaGestaoDoParceiro(id, parceiroId)) return res.status(403).json({ erro: MSG_LIMPEZA_DA_GESTAO, codigo: 'LIMPEZA_DA_GESTAO' });
+      return res.status(404).json({ erro: 'Reserva não encontrada.' });
+    }
 
     const tarefa = reserva.tarefa_gerada_id ? await Tarefa.findById(reserva.tarefa_gerada_id) : null;
     if (tarefa && ESTADOS_BLOQUEADOS.includes(tarefa.estado)) {
@@ -796,6 +807,9 @@ async function atualizarReserva(req, res) {
         erro: 'A limpeza desta reserva já começou ou foi concluída. Contacta o gestor para alterações.',
       });
     }
+    // Para o aviso ao gestor (48 h): a data e o estado da limpeza ANTES de mudar.
+    const dataLimpezaAntes = tarefa ? tarefa.data : null;
+    const limpezaEstavaCancelada = !!tarefa && tarefa.estado === 'cancelada';
 
     const body = req.body || {};
     const extras = lerCamposExtra(body);
@@ -949,6 +963,18 @@ async function atualizarReserva(req, res) {
       await tarefa.save();
     }
     await reserva.save();
+    // Sino ao gestor: só se mexeu em limpezas das próximas 48 h (dia, tipo ou limpeza reaberta).
+    if (tarefa && (checkOutMudou || tipoMudou)) {
+      const tarefaFinal = reserva.tarefa_gerada_id ? await Tarefa.findById(reserva.tarefa_gerada_id).select('data estado').lean() : null;
+      const reaberta = limpezaEstavaCancelada && checkOutMudou && tarefaFinal && tarefaFinal.estado !== 'cancelada';
+      await avisarGestorReserva({
+        empresaId: reserva.empresa_id,
+        propriedadeId: reserva.propriedade_id,
+        acao: reaberta ? 'reabriu' : 'alterou',
+        // Uma limpeza já cancelada não conta como «mexida» no dia antigo.
+        datas: [limpezaEstavaCancelada ? null : dataLimpezaAntes, tarefaFinal && tarefaFinal.estado !== 'cancelada' ? tarefaFinal.data : null],
+      });
+    }
     // Só avisa se o dia da limpeza mudou de facto (mudar só notas ou hóspedes não conta).
     if (perdeuAjuste && checkOutMudou) {
       try {
@@ -983,7 +1009,10 @@ async function eliminarReserva(req, res) {
     if (!mongoose.isValidObjectId(id)) return res.status(400).json({ erro: 'ID inválido.' });
 
     const reserva = await ReservaManual.findOne({ _id: id, parceiro_id: parceiroId });
-    if (!reserva) return res.status(404).json({ erro: 'Reserva não encontrada.' });
+    if (!reserva) {
+      if (await limpezaDaGestaoDoParceiro(id, parceiroId)) return res.status(403).json({ erro: MSG_LIMPEZA_DA_GESTAO, codigo: 'LIMPEZA_DA_GESTAO' });
+      return res.status(404).json({ erro: 'Reserva não encontrada.' });
+    }
 
     const tarefa = reserva.tarefa_gerada_id ? await Tarefa.findById(reserva.tarefa_gerada_id) : null;
     if (tarefa && ESTADOS_BLOQUEADOS.includes(tarefa.estado)) {
@@ -993,8 +1022,10 @@ async function eliminarReserva(req, res) {
     }
     if (tarefa && tarefa.estado !== 'cancelada') {
       const prop = await Propriedade.findById(reserva.propriedade_id).select('nome').lean();
+      const dataLimpeza = tarefa.data;
       // Se outra reserva continua associada, a limpeza fica e passa a pertencer-lhe.
-      await largarTarefaDaReserva(tarefa, reserva._id, prop, 'foi cancelada (reserva eliminada).');
+      const cancelou = await largarTarefaDaReserva(tarefa, reserva._id, prop, 'foi cancelada (reserva eliminada).');
+      if (cancelou) await avisarGestorReserva({ empresaId: reserva.empresa_id, propriedadeId: reserva.propriedade_id, acao: 'apagou', datas: [dataLimpeza] });
     }
     await reserva.deleteOne();
     return res.status(200).json({ mensagem: 'Reserva eliminada.' });

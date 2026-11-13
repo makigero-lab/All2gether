@@ -205,10 +205,14 @@ export function GestorSidebar() {
       </header>
 
       {/* Sidebar — desktop */}
-      <aside className="hidden w-56 shrink-0 border-r bg-side text-side-foreground lg:flex lg:flex-col">
+      {/* Fixa à altura do ecrã: em páginas longas (ex.: Limpezas) o rodapé
+          com notificações, tema e sair fica sempre visível. Só o menu rola. */}
+      <aside className="hidden w-56 shrink-0 border-r bg-side text-side-foreground lg:sticky lg:top-0 lg:z-40 lg:flex lg:h-screen lg:flex-col">
         <Brand />
-        <NavLinks />
-        <div className="mt-auto space-y-2 border-t p-3">
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <NavLinks />
+        </div>
+        <div className="shrink-0 space-y-2 border-t p-3">
           <div className="flex items-center justify-between gap-2">
             <span className="text-xs text-side-muted">Notificações</span>
             <NotificationBell paraCima />
@@ -263,7 +267,7 @@ export function GestorSidebar() {
             <div className="mt-auto space-y-2 border-t p-3">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-xs text-side-muted">Notificações</span>
-                <NotificationBell />
+                <NotificationBell noMenu />
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-xs text-side-muted">Tema</span>

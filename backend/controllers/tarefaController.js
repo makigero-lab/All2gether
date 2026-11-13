@@ -23,6 +23,7 @@ const { obterStaffDisponivel } = require('../utils/loadBalancer');
 const { cabeNaAgendaNaHora } = require('../utils/atribuicaoAutomatica');
 const { diaTexto, tipoDe: tipoDeTarefa } = require('../utils/tipoLimpeza');
 const { avisarGestores } = require('../utils/notificar');
+const { estadoDaCasa, casaInativa } = require('../utils/casaAtiva');
 
 /**
  * 'YYYY-MM-DD' (+ 'HH:MM' de Lisboa, com hora de verão) -> instante UTC.
@@ -312,7 +313,7 @@ exports.criarTarefa = async (req, res) => {
       });
     }
 
-    // Valida que a propriedade pertence à empresa e está ativa.
+    // Valida que a propriedade pertence à empresa e está ativa (e que o proprietário, se houver, também).
     const propriedade = await Propriedade.findOne({
       _id: propriedade_id,
       empresa_id: empresaId,
@@ -321,6 +322,10 @@ exports.criarTarefa = async (req, res) => {
       return res.status(404).json({
         erro: 'Propriedade não encontrada (ou não pertence a esta empresa).',
       });
+    }
+    const estadoCasa = await estadoDaCasa(propriedade);
+    if (estadoCasa.inativa) {
+      return res.status(400).json({ erro: estadoCasa.mensagem, codigo: estadoCasa.motivo === 'proprietario' ? 'PROPRIETARIO_INATIVO' : 'PROPRIEDADE_INATIVA' });
     }
 
     // Prompt 128 — Persistência de Hora Exata (Fuso de Portugal).
@@ -1385,11 +1390,17 @@ exports.apagarTarefasFuturas = async (req, res) => {
       Date.UTC(agora.getUTCFullYear(), agora.getUTCMonth(), agora.getUTCDate())
     );
 
-    const resultado = await Tarefa.deleteMany({
+    // As limpezas ligadas a reservas de proprietários NÃO se apagam: o Smoobu não as recria e o
+    // proprietário ficaria com a reserva sem limpeza, sem aviso.
+    const ReservaManual = require('../models/ReservaManual');
+    const idsDeReservas = await ReservaManual.find({ empresa_id: empresaId, tarefa_gerada_id: { $ne: null } }).distinct('tarefa_gerada_id');
+    const filtroApagar = {
       empresa_id: empresaId,
       data: { $gte: hojeInicio },
       estado: { $nin: ['concluida', 'cancelada'] },
-    });
+    };
+    const poupadas = await Tarefa.countDocuments({ ...filtroApagar, _id: { $in: idsDeReservas } });
+    const resultado = await Tarefa.deleteMany({ ...filtroApagar, _id: { $nin: idsDeReservas } });
 
     console.log(
       `🧹 apagarTarefasFuturas: ${resultado.deletedCount} tarefa(s) apagada(s) ` +
@@ -1401,12 +1412,14 @@ exports.apagarTarefasFuturas = async (req, res) => {
       empresa_id: empresaId,
       acao: 'apagar_tarefas_futuras',
       recurso: 'tarefa',
-      descricao: `Apagadas ${resultado.deletedCount} limpeza(s) futuras não concluídas (desde ${hojeInicio.toISOString().slice(0, 10)}).`,
+      descricao: `Apagadas ${resultado.deletedCount} limpeza(s) futuras não concluídas (desde ${hojeInicio.toISOString().slice(0, 10)}); ${poupadas} de reservas de proprietários poupada(s).`,
     });
 
     return res.status(200).json({
-      mensagem: `${resultado.deletedCount} tarefa(s) futura(s) apagada(s) com sucesso.`,
+      mensagem: `${resultado.deletedCount} tarefa(s) futura(s) apagada(s) com sucesso.` +
+        (poupadas > 0 ? ` ${poupadas} limpeza(s) de reservas de proprietários foram poupadas.` : ''),
       apagadas: resultado.deletedCount,
+      poupadas,
     });
   } catch (err) {
     console.error('❌ apagarTarefasFuturas:', err.message);
@@ -1463,9 +1476,13 @@ exports.autoAtribuirTarefas = async (req, res) => {
         FILTRO_SEM_PESSOA,
       ],
     })
-      .populate({ path: 'propriedade_id', select: 'nome coordenadas staff_necessario tempo_limpeza_minutos' })
+      .populate({ path: 'propriedade_id', select: 'nome coordenadas staff_necessario tempo_limpeza_minutos ativo parceiro_id' })
       .sort({ data: 1 })
       .lean();
+    // Casas inativas (ou de proprietário inativo) não recebem pessoas: ficam de fora.
+    for (let i = tarefasOrfas.length - 1; i >= 0; i--) {
+      if (await casaInativa(tarefasOrfas[i].propriedade_id)) tarefasOrfas.splice(i, 1);
+    }
 
     if (tarefasOrfas.length === 0) {
       return res.status(200).json({
@@ -1689,6 +1706,10 @@ exports.criarTarefaEspontanea = async (req, res) => {
       return res.status(404).json({
         erro: 'Propriedade não encontrada (ou não pertence a esta empresa).',
       });
+    }
+    const estadoCasaEsp = await estadoDaCasa(propriedade);
+    if (estadoCasaEsp.inativa) {
+      return res.status(400).json({ erro: estadoCasaEsp.mensagem, codigo: estadoCasaEsp.motivo === 'proprietario' ? 'PROPRIETARIO_INATIVO' : 'PROPRIEDADE_INATIVA' });
     }
 
     // Normaliza a data (mesma lógica do criarTarefa).

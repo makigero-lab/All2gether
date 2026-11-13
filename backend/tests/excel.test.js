@@ -143,10 +143,15 @@ describe('Exportação Excel', () => {
     // Reservas de duas casas: o export do parceiro só traz a dele.
     for (const casa of [casaParceiro, casaOutroParceiro]) {
       await Tarefa.create({
-        empresa_id: empresa._id, propriedade_id: casa._id, origem: 'manual', tipo: 'limpeza',
+        empresa_id: empresa._id, propriedade_id: casa._id, origem: 'manual', origem_parceiro: true, tipo: 'limpeza',
         data: new Date(Date.UTC(2030, 8, 10, 10)), estado: 'por_atribuir', tempo_limpeza_minutos: 30,
       });
     }
+    // Limpeza avulsa do gestor na casa dele: não é uma reserva, não entra no Excel.
+    await Tarefa.create({
+      empresa_id: empresa._id, propriedade_id: casaParceiro._id, origem: 'manual', tipo: 'limpeza',
+      data: new Date(Date.UTC(2030, 8, 11, 10)), estado: 'por_atribuir', tempo_limpeza_minutos: 30,
+    });
     const res = await request(app)
       .get('/api/parceiro/reservas/exportar-excel')
       .set('Authorization', `Bearer ${parceiroToken}`)
@@ -156,5 +161,6 @@ describe('Exportação Excel', () => {
     const linhas = await lerXlsx(res.body);
     expect(linhas.length).toBeGreaterThan(0);
     expect(linhas.every((l) => l['Propriedade'] === 'Casa Parceiro')).toBe(true);
+    expect(linhas).toHaveLength(1); // só a reserva dele; a limpeza avulsa do gestor fica de fora
   });
 });

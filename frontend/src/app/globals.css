@@ -515,153 +515,49 @@
    uma inconsistência: o staff tem ausência aprovada mas continua com tarefas.
    -------------------------------------------------------------------------- */
 
+/* Cores só pelos tokens --status-naoat*: o tema escuro troca-os e o contraste mantém-se (7:1 nos dois). */
 .fc-evt-orfao {
-  border: 2px solid #dc2626 !important;
-  border-left: 4px solid #991b1b !important;
-  background-color: #fee2e2 !important;
-  box-shadow: 0 0 0 1px rgba(220, 38, 38, 0.3);
+  border: 2px solid hsl(var(--status-naoat)) !important;
+  border-left: 4px solid hsl(var(--status-naoat)) !important;
+  background-color: hsl(var(--status-naoat-bg)) !important;
+  color: hsl(var(--status-naoat)) !important;
+  box-shadow: 0 0 0 1px hsl(var(--status-naoat) / 0.3);
   animation: fc-orfao-pulse 2s ease-in-out infinite;
 }
 
 @keyframes fc-orfao-pulse {
-  0%, 100% { box-shadow: 0 0 0 1px rgba(220, 38, 38, 0.3); }
-  50% { box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.45); }
+  0%, 100% { box-shadow: 0 0 0 1px hsl(var(--status-naoat) / 0.3); }
+  50% { box-shadow: 0 0 0 3px hsl(var(--status-naoat) / 0.45); }
 }
 
 .fc-evt-block--orfao {
-  border-left: 4px solid #991b1b !important;
-  background-color: #fee2e2 !important;
+  border-left: 4px solid hsl(var(--status-naoat)) !important;
+  background-color: hsl(var(--status-naoat-bg)) !important;
   animation: fc-orfao-pulse 2s ease-in-out infinite;
 }
 
 .fc-evt-block__orphan-alert {
   font-size: 0.7rem;
   font-weight: 700;
-  color: #991b1b;
+  color: hsl(var(--status-naoat));
   text-transform: uppercase;
   letter-spacing: 0.02em;
 }
 
 .fc-evt-month--orfao {
-  border-left: 3px solid #991b1b !important;
-  background-color: #fee2e2 !important;
+  border-left: 3px solid hsl(var(--status-naoat)) !important;
+  background-color: hsl(var(--status-naoat-bg)) !important;
+  color: hsl(var(--status-naoat)) !important;
   animation: fc-orfao-pulse 2s ease-in-out infinite;
 }
 
+.fc-evt-month--orfao .fc-evt-month__title {
+  color: hsl(var(--status-naoat));
+}
+
 .fc-evt-month--orfao .fc-evt-month__alert-tag {
-  background-color: #dc2626;
-  color: white;
-}
-
-/* --------------------------------------------------------------------------
-   Ponto 2 — Banner contínuo para ausências (férias/doença)
-   Roxo pastel suave com opacidade, atravessa os dias sem confundir com tarefas.
-   -------------------------------------------------------------------------- */
-
-.fc-evt-ausencia {
-  /* Override do background para um tom roxo pastel mais suave com opacidade. */
-  background-color: rgba(237, 233, 254, 0.85) !important;
-  border-color: #c4b5fd !important;
-  border-left: 3px solid #8b5cf6 !important;
-  opacity: 0.9;
-}
-
-.fc-evt-ausencia:hover {
-  opacity: 1;
-}
-
-.fc-evt-ausencia__content {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  min-width: 0;
-  width: 100%;
-  overflow: hidden;
-  white-space: nowrap;
-  padding: 2px 6px;
-}
-
-.fc-evt-ausencia__title {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: #5b21b6;
-  font-style: italic;
-}
-
-/* Em vista mensal, ausências aparecem como blocos allDay no topo do dia.
-   Garantimos que têm cantos arredondados e não parecem tarefas normais. */
-.fc-daygrid-day-frame .fc-evt-ausencia {
-  border-radius: calc(var(--radius) - 1px);
-  margin-top: 1px;
-}
-
-/* --------------------------------------------------------------------------
-   HF25 — Banner contínuo para ausências PENDENTES (férias/doença por aprovar)
-   Âmbar listrado com efeito de pulse no ícone, para sinalizar que precisa
-   de ação do gestor. Distinto das aprovadas (roxo) para não confundir.
-   -------------------------------------------------------------------------- */
-
-.fc-evt-ausencia-pendente {
-  /* Fundo âmbar pastel com riscas diagonais (pattern "atenção"). */
-  background-color: rgba(254, 243, 199, 0.9) !important;
-  background-image: repeating-linear-gradient(
-    45deg,
-    rgba(245, 158, 11, 0.12),
-    rgba(245, 158, 11, 0.12) 6px,
-    transparent 6px,
-    transparent 12px
-  ) !important;
-  border-color: #f59e0b !important;
-  border-left: 3px solid #d97706 !important;
-  opacity: 0.95;
-}
-
-.fc-evt-ausencia-pendente:hover {
-  opacity: 1;
-}
-
-.fc-evt-ausencia-pendente__content {
-  display: flex;
-  align-items: center;
-  gap: 0.3rem;
-  min-width: 0;
-  width: 100%;
-  overflow: hidden;
-  white-space: nowrap;
-  padding: 2px 6px;
-}
-
-.fc-evt-ausencia-pendente__pulse {
-  font-size: 0.7rem;
-  animation: fc-pulse-pendente 1.8s ease-in-out infinite;
-}
-
-@keyframes fc-pulse-pendente {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
-}
-
-.fc-evt-ausencia-pendente__title {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: #92400e;
-  font-style: italic;
-}
-
-/* Em vista mensal, mantém o mesmo tratamento visual das aprovadas. */
-.fc-daygrid-day-frame .fc-evt-ausencia-pendente {
-  border-radius: calc(var(--radius) - 1px);
-  margin-top: 1px;
+  background-color: hsl(var(--status-naoat));
+  color: hsl(var(--status-naoat-bg));
 }
 
 /* --------------------------------------------------------------------------
@@ -754,19 +650,6 @@
   min-height: 0 !important;
 }
 
-/* Banners de ausência (aprovada + pendente) — barras finas e compactas. */
-.fc-evt-ausencia__content,
-.fc-evt-ausencia-pendente__content {
-  padding: 1px 4px !important;
-  line-height: 1.1 !important;
-}
-
-.fc-evt-ausencia__title,
-.fc-evt-ausencia-pendente__title {
-  font-size: 0.6875rem !important;
-  line-height: 1.1 !important;
-}
-
 /* (Removido em 2026-11-10: forçar margin-top: 0 nos «harness» anulava o espaço que o
    FullCalendar calcula para pôr as limpezas de um dia por baixo das barras de vários dias,
    e as férias ficavam tapadas pelas limpezas no Mês e na faixa «Todo o dia» da Semana.) */
@@ -785,55 +668,6 @@
 .fc .fc-daygrid-event.fc-daygrid-block-event {
   min-height: 15px !important;
 }
-
-/* ==========================================================================
-   FIX (nomes desaparecidos) — Folga Fixa com nome do staff visível.
-   Barra cinzenta compacta mas com texto legível (nome do staff).
-   ========================================================================== */
-
-/* Vista mensal — barra compacta com bolinha + nome. */
-.fc-evt-month--folga {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  min-width: 0;
-  width: 100%;
-  overflow: hidden;
-  white-space: nowrap;
-  background-color: #f1f5f9 !important;
-  border-left: 3px solid #94a3b8 !important;
-  padding: 1px 4px !important;
-  border-radius: calc(var(--radius) - 1px);
-  font-weight: 500;
-  color: #475569 !important;
-}
-
-.fc-evt-month--folga .fc-evt-month__title {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 0.6875rem;
-  font-weight: 600;
-  color: #475569;
-}
-
-/* Vista semanal/diária — bloco compacto com nome. */
-.fc-evt-block--folga {
-  border-left: 3px solid #94a3b8 !important;
-  background-color: #f1f5f9 !important;
-}
-
-.fc-evt-block--folga .fc-evt-block__title {
-  color: #475569;
-  font-weight: 600;
-}
-
-.fc-evt-block--folga .fc-evt-block__subtitle {
-  color: #475569;
-}
-
 
 /* ==========================================================================
    Tabelas responsivas (`table.rt`): abaixo de 760 px cada linha vira um cartão, sem scroll lateral.
@@ -1124,84 +958,418 @@
   }
 }
 
-/* ==========================================================================
-   Semana (computador): «+N mais» no cabeçalho do dia e dia em largura total
-   ========================================================================== */
-
-/* O «+N mais» desenhado dentro da grelha tapava cartões: fica escondido e o total vai para o cabeçalho. */
-.fc-timeGridWeek-view .fc-timegrid-more-link {
-  display: none;
+/* ------------------------------------------------------------------ */
+/* Vista Dia (gestor): uma coluna por pessoa, horas na vertical.       */
+/* Fundo/borda = estado; faixa esquerda grossa = cor da pessoa.        */
+/* ------------------------------------------------------------------ */
+/* A página rola na vertical (sem scroll dentro de scroll); a grelha só rola na horizontal se houver
+   muitas colunas, e o cabeçalho das colunas (fora dela) fica colado ao topo e acompanha esse scroll. */
+.vista-dia__scroll {
+  overflow-x: auto;
+  border: 1px solid hsl(var(--border));
+  border-top: 0;
+  border-radius: 0 0 calc(var(--radius) - 2px) calc(var(--radius) - 2px);
 }
-
-.fc .fc-cab-dia {
+.vista-dia__cabs {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  overflow: hidden;
+  border: 1px solid hsl(var(--border));
+  border-radius: calc(var(--radius) - 2px) calc(var(--radius) - 2px) 0 0;
+  background: hsl(var(--card));
+}
+.vista-dia__grelha {
+  display: grid;
+  min-width: max-content;
+}
+.vista-dia__cab {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-width: 0;
+  padding: 0.5rem;
+  border-bottom: 1px solid hsl(var(--border));
+  border-left: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+.vista-dia__cab--canto {
+  position: sticky;
+  left: 0;
+  z-index: 4;
+  border-left: 0;
+}
+.vista-dia__horas {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: hsl(var(--card));
+}
+.vista-dia__horas span {
+  position: absolute;
+  right: 0.375rem;
+  transform: translateY(-0.4rem);
+  font-size: 0.6875rem;
+  color: hsl(var(--muted-foreground));
+}
+.vista-dia__horas span:first-child {
+  transform: none;
+}
+.vista-dia__coluna {
+  position: relative;
+  border-left: 1px solid hsl(var(--border));
+  background-image: linear-gradient(to bottom, hsl(var(--border) / 0.7) 1px, transparent 1px);
+}
+.vista-dia__agora {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  height: 2px;
+  background: hsl(var(--destructive));
+  pointer-events: none;
+}
+.vista-dia__viagem {
+  position: absolute;
+  border-radius: 4px;
+  background: repeating-linear-gradient(45deg, hsl(var(--muted)), hsl(var(--muted)) 4px, transparent 4px, transparent 8px);
+  opacity: 0.9;
+}
+.vista-dia__cartao {
+  position: absolute;
+  z-index: 1;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 0.125rem;
-  padding: 0.25rem 0.125rem;
-}
-.fc .fc-cab-dia__abrir,
-.fc .fc-cab-dia__mais {
-  min-height: 1.5rem;
-  padding: 0 0.5rem;
-  border-radius: calc(var(--radius) - 2px);
-  font-size: 0.75rem;
-  line-height: 1.25rem;
+  gap: 0.0625rem;
+  overflow: hidden;
+  padding: 0.25rem 0.375rem 0.25rem 0.5rem;
+  border: 1px solid;
+  border-left-width: 6px;
+  border-radius: 6px;
+  text-align: left;
+  color: hsl(var(--foreground));
   cursor: pointer;
 }
-.fc .fc-cab-dia__abrir {
-  border: 1px solid transparent;
-  background: transparent;
-  color: hsl(var(--muted-foreground));
+.vista-dia__cartao:hover {
+  filter: brightness(0.97);
+  z-index: 2;
+}
+.vista-dia__cartao:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 1px;
+  z-index: 2;
+}
+/* Sem pessoa: tracejado à volta, mas a faixa esquerda é cheia (tracejada repetia-se como um teclado). */
+.vista-dia__cartao--sem-pessoa {
+  border-style: dashed;
+  border-left-style: solid;
+}
+.vista-dia__cab--pa {
+  background: linear-gradient(hsl(var(--status-porat-bg) / 0.6), hsl(var(--status-porat-bg) / 0.6)), hsl(var(--card));
+}
+.vista-dia__coluna--pa {
+  background-color: hsl(var(--status-porat-bg) / 0.35);
+}
+.vista-dia__selos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.1875rem;
+  margin-top: 0.125rem;
+}
+.vista-dia__cartao--cancelada .vista-dia__casa {
+  text-decoration: line-through;
+}
+.vista-dia__linha {
+  display: flex;
+  align-items: center;
+  gap: 0.3125rem;
+  font-size: 0.6875rem;
   font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-.fc .fc-cab-dia__abrir:hover {
-  background: hsl(var(--muted));
-  color: hsl(var(--foreground));
-}
-.fc .fc-cab-dia__mais {
-  border: 1px solid hsl(var(--primary) / 0.55);
-  background: hsl(var(--primary) / 0.1);
-  color: hsl(var(--primary));
-  font-weight: 700;
+  line-height: 1rem;
   white-space: nowrap;
 }
-.dark .fc .fc-cab-dia__mais {
-  color: hsl(var(--foreground));
-}
-.fc .fc-cab-dia__mais:hover {
-  background: hsl(var(--primary) / 0.2);
-}
-.fc .fc-cab-dia__abrir:focus-visible,
-.fc .fc-cab-dia__mais:focus-visible,
-.dia-largo__cartao:focus-visible {
-  outline: 2px solid hsl(var(--ring));
-  outline-offset: 2px;
-}
-
-/* Dia em largura total: cartões lado a lado, a quebrar em linhas (nunca abaixo de ~150 px, nunca sobrepostos). */
-.dia-largo__grelha {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 0.5rem;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.dia-largo__cartao {
-  cursor: pointer;
+.vista-dia__casa {
   overflow: hidden;
-}
-.dia-largo__titulo {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
-  overflow: hidden;
-  white-space: normal;
-  overflow-wrap: anywhere;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.05rem;
 }
-.dia-largo__sub {
-  overflow-wrap: anywhere;
+
+/* Círculo com a inicial da pessoa, grupo sobreposto (equipa) e etiqueta de estado. */
+.pessoa-av {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 1.625rem;
+  height: 1.625rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+}
+.pessoa-av--s {
+  width: 1.125rem;
+  height: 1.125rem;
+  font-size: 0.625rem;
+}
+.pessoa-av--vazio {
+  border: 2px dashed hsl(var(--status-porat));
+  color: hsl(var(--status-porat));
+  background: transparent;
+}
+.pessoa-grupo {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.pessoa-grupo .pessoa-av {
+  outline: 2px solid hsl(var(--card));
+}
+.pessoa-grupo .pessoa-av + .pessoa-av {
+  margin-left: -0.3125rem;
+}
+.pessoa-etiqueta {
+  display: inline-flex;
+  width: max-content;
+  max-width: 100%;
+  align-items: center;
+  gap: 0.25rem;
+  height: 1.125rem;
+  padding: 0 0.4375rem;
+  border: 1px solid;
+  border-radius: 9999px;
+  background: hsl(var(--card) / 0.7);
+  font-size: 0.65625rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.pessoa-etiqueta--icone {
+  width: 1.125rem;
+  justify-content: center;
+  padding: 0;
+}
+.pessoa-etiqueta--neutra {
+  color: hsl(var(--foreground));
+  border-color: hsl(var(--border));
+}
+/* Aviso vermelho (órfã, falta pessoa): ícone + texto, mesmas cores dos alertas do Mês. */
+.pessoa-aviso {
+  display: inline-flex;
+  width: max-content;
+  max-width: 100%;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.25rem;
+  height: 1.125rem;
+  padding: 0 0.4375rem;
+  border: 1px solid hsl(var(--status-naoat));
+  border-radius: 9999px;
+  background: hsl(var(--status-naoat-bg));
+  color: hsl(var(--status-naoat));
+  font-size: 0.65625rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* Linha curta «Ausentes: A, B +N» (Dia, Semana e Mês). Pendentes levam um ponto âmbar. */
+.ausentes-linha {
+  font-size: 0.6875rem;
+  line-height: 1.1;
+  color: hsl(var(--muted-foreground));
+  cursor: help;
+}
+.ausentes-linha__rotulo {
+  font-weight: 600;
+  color: hsl(var(--foreground));
+}
+.ausentes-linha__ligacao {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: hsl(var(--status-porat));
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.ausentes-linha__ligacao:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 1px;
+}
+.ausentes-linha__pendente {
+  display: inline-block;
+  width: 0.4375rem;
+  height: 0.4375rem;
+  margin-left: 0.1875rem;
+  border-radius: 9999px;
+  background: hsl(var(--status-porat));
+  opacity: 0.8;
+  vertical-align: 0.0625rem;
+}
+
+/* Semana: totais por pessoa (horas · limpezas), da mais para a menos carregada. */
+.semana-totais {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem 0.75rem;
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.75rem;
+  list-style: none;
+  border: 1px solid hsl(var(--border));
+  border-radius: calc(var(--radius) - 2px);
+  background: hsl(var(--muted) / 0.4);
+}
+.semana-totais__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3125rem;
+  font-size: 0.75rem;
+}
+
+/* Semana: lista por dia a toda a largura. */
+.semana-lista {
+  overflow: hidden;
+  border: 1px solid hsl(var(--border));
+  border-radius: calc(var(--radius) - 2px);
+}
+.semana-lista__dia {
+  padding-bottom: 0.25rem;
+}
+.semana-lista__dia + .semana-lista__dia {
+  border-top: 1px solid hsl(var(--border));
+}
+.semana-lista__cab {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.625rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--muted) / 0.55);
+  font-size: 0.8125rem;
+}
+.semana-lista__cab h3 {
+  font-weight: 700;
+}
+.semana-lista__hoje {
+  padding: 0 0.5rem;
+  border-radius: 9999px;
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+.semana-lista__n {
+  font-size: 0.75rem;
+  color: hsl(var(--muted-foreground));
+}
+.semana-lista__ausentes {
+  margin-left: auto;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.75rem;
+}
+.semana-lista__lin {
+  display: grid;
+  grid-template-columns: 5.75rem minmax(0, 1fr) 9.5rem 6.75rem;
+  align-items: center;
+  gap: 0.25rem 0.625rem;
+  width: calc(100% - 1.25rem);
+  min-height: 2.25rem;
+  margin: 0.3125rem 0.625rem 0;
+  padding: 0.25rem 0.625rem 0.25rem 0.5rem;
+  border: 1px solid;
+  border-left-width: 6px;
+  border-radius: 6px;
+  font-size: 0.8125rem;
+  text-align: left;
+  color: hsl(var(--foreground));
+  cursor: pointer;
+}
+.semana-lista__lin:hover {
+  filter: brightness(0.97);
+}
+.semana-lista__lin:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 1px;
+}
+.semana-lista__lin--pa {
+  border-style: dashed;
+  border-left-style: solid;
+}
+.semana-lista__lin--cancelada .semana-lista__casa {
+  text-decoration: line-through;
+}
+.semana-lista__hora {
+  font-size: 0.78125rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.semana-lista__casa {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.375rem;
+  font-weight: 600;
+}
+.semana-lista__pessoa {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.78125rem;
+}
+.semana-lista__estado {
+  justify-self: end;
+}
+/* Ecrã estreito: duas linhas por limpeza (hora e estado em cima, casa e pessoa por baixo). */
+@media (max-width: 639px) {
+  .semana-lista__lin {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "hora estado" "casa casa" "pessoa pessoa";
+    padding-block: 0.375rem;
+  }
+  .semana-lista__hora { grid-area: hora; }
+  .semana-lista__estado { grid-area: estado; }
+  .semana-lista__casa { grid-area: casa; white-space: normal; }
+  .semana-lista__casa > .truncate { overflow: visible; white-space: normal; text-overflow: clip; }
+  .semana-lista__pessoa { grid-area: pessoa; }
+  .semana-lista__ausentes { max-width: 100%; margin-left: 0; flex-basis: 100%; }
+}
+
+/* Mês: «Ausentes: A, B +N» fixo ao fundo da célula (sem barras nem cartões de ausência). */
+.fc-dayGridMonth-view .fc-daygrid-day-number {
+  position: static;
+}
+.fc-dayGridMonth-view .fc-daygrid-day-frame {
+  padding-bottom: 1.125rem;
+}
+.fc .mes-ausentes {
+  position: absolute;
+  right: 0.25rem;
+  bottom: 0.125rem;
+  left: 0.25rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.65625rem;
+  font-weight: 400;
+  text-align: left;
+}
+
+/* Cor da pessoa nos cartões da Semana e do Mês (a borda e o fundo continuam a dizer o estado). */
+.fc .fc-event.fc-evt-pessoa {
+  border-left-width: 5px !important;
+  border-left-color: var(--cor-pessoa) !important;
+  border-radius: 6px !important;
 }
