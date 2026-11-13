@@ -3,6 +3,7 @@
 import { RouteGuard } from "@/components/auth/route-guard";
 import { PortalHeader } from "@/components/portal/portal-header";
 import { AvisoAcordo } from "@/components/parceiro/acordo-dados";
+import { AvisoAcesso } from "@/components/auth/aviso-acesso";
 
 /**
  * Layout da Área do Parceiro (B2B).
@@ -29,6 +30,7 @@ export default function ParceiroLayout({
   return (
     <RouteGuard role="parceiro">
       <PortalHeader portalLabel="Proprietário" />
+      <AvisoAcesso />
       <AvisoAcordo />
       {children}
     </RouteGuard>

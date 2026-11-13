@@ -48,7 +48,7 @@ function IntegracoesGestor() {
   const ir = (q: Record<string, string>) => router.replace(`/gestor/integracoes${Object.keys(q).length ? "?" + new URLSearchParams(q).toString() : ""}`);
 
   return (
-    <main className="flex flex-col gap-4 p-4 sm:p-6 lg:p-8">
+    <div className="flex flex-col gap-4 p-4 sm:p-6 lg:p-8">
       <div className="space-y-1">
         <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight"><Plug className="h-6 w-6 text-brand-text" /> Integrações</h1>
         <p className="text-sm text-muted-foreground">Os calendários do Airbnb e da Booking.com dos proprietários. Só tu ligas, testas, corriges e removes; o proprietário só vê o estado.</p>
@@ -68,10 +68,10 @@ function IntegracoesGestor() {
       {erro && <p role="alert" className="flex items-center gap-2 text-sm text-destructive"><AlertCircle className="h-4 w-4" /> {erro}</p>}
 
       <div role="tablist" aria-label="Separadores" className="flex gap-1 border-b">
-        {[{ id: "proprietarios", texto: "Por proprietário", n: resumo?.totais.erros ?? 0 }, { id: "confirmar", texto: "Reservas por confirmar", n: resumo?.totais.por_confirmar ?? 0 }].map((s) => (
+        {[{ id: "proprietarios", texto: "Por proprietário", n: resumo?.totais.erros ?? 0, leitor: (n: number) => `${n} ${n === 1 ? "ligação com erro" : "ligações com erro"}` }, { id: "confirmar", texto: "Reservas por confirmar", n: resumo?.totais.por_confirmar ?? 0, leitor: (n: number) => `${n} por confirmar` }].map((s) => (
           <button key={s.id} role="tab" type="button" aria-selected={separador === s.id} onClick={() => ir(s.id === "confirmar" ? { sep: "confirmar" } : {})}
             className={`-mb-px min-h-11 border-b-2 px-3 text-sm font-medium ${separador === s.id ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
-            {s.texto}{s.n > 0 && <span className={`ml-1.5 rounded-full px-1.5 py-0.5 text-xs ${s.id === "proprietarios" ? "bg-destructive text-destructive-foreground" : "bg-muted"}`}>{s.n}</span>}
+            {s.texto}{s.n > 0 && <span aria-label={s.leitor(s.n)} className={`ml-1.5 rounded-full px-1.5 py-0.5 text-xs ${s.id === "proprietarios" ? "bg-destructive text-destructive-foreground" : "bg-muted"}`}>{s.n}</span>}
           </button>
         ))}
       </div>
@@ -91,7 +91,7 @@ function IntegracoesGestor() {
               <input type="checkbox" checked={inativos} onChange={(e) => setInativos(e.target.checked)} className="h-4 w-4" /> Incluir inativos
             </label>
           </div>
-          <VistaGeral lista={resumo.proprietarios} filtro={filtro} disponivel={disponivel} aoAbrir={(id) => ir({ p: id })} aoLigar={(p) => setAssistente({ p })} />
+          <VistaGeral lista={resumo.proprietarios} filtro={filtro} disponivel={disponivel} aoAbrir={(id) => ir({ p: id })} aoLigar={(p) => setAssistente({ p })} aoMudar={recarregar} />
         </>
       )}
 
@@ -113,7 +113,7 @@ function IntegracoesGestor() {
       {assistente && (
         <AssistenteLigar proprietario={resumo?.proprietarios.find((x) => x._id === assistente.p._id) ?? assistente.p} casaInicial={assistente.casa} canalInicial={assistente.canal} aberto aoFechar={() => setAssistente(null)} aoLigar={recarregar} />
       )}
-    </main>
+    </div>
   );
 }
 

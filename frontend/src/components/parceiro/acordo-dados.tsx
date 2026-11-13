@@ -10,8 +10,9 @@ import { adminGet, adminPost } from "@/lib/api";
 export interface AcordoDTO {
   obrigatorio: boolean;
   versao: string;
-  hash: string;
-  texto: string;
+  /** Sem o interruptor ligado o texto é só um modelo: o servidor não o envia. */
+  hash: string | null;
+  texto: string | null;
   aceite: boolean;
   aceite_em: string | null;
 }
@@ -65,7 +66,7 @@ export function EcraAcordo() {
   useEffect(() => { void carregar(); }, []);
 
   const aceitar = async () => {
-    if (!a) return;
+    if (!a || !a.hash) return;
     setOcupado(true); setErro(null);
     try { await adminPost("/api/parceiro/acordo-dados/aceitar", { versao: a.versao, hash: a.hash, confirmo: true }); await carregar(); }
     catch (e) { setErro((e as Error).message || "Não foi possível registar a aceitação."); }
@@ -73,6 +74,15 @@ export function EcraAcordo() {
   };
 
   if (!a) return erro ? <p role="alert" className="text-sm text-destructive">{erro}</p> : <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> A carregar…</p>;
+  // Acordo ainda não em vigor: nada para ler nem para aceitar (não se registam aceitações de um texto-modelo).
+  if (!a.obrigatorio || !a.texto) {
+    return (
+      <div className="space-y-3">
+        <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight"><FileText className="h-6 w-6 text-brand-text" /> Acordo de tratamento de dados</h1>
+        <p role="status" className="rounded-md bg-muted/40 p-3 text-sm">O acordo ainda não está em vigor. Quando estiver, a All2gether avisa-o aqui e poderá lê-lo e aceitá-lo. Até lá não tem de fazer nada.</p>
+      </div>
+    );
+  }
   return (
     <div className="space-y-4">
       <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight"><FileText className="h-6 w-6 text-brand-text" /> Acordo de tratamento de dados dos seus hóspedes</h1>
@@ -80,7 +90,6 @@ export function EcraAcordo() {
         Para limpar as suas casas recebemos as datas das reservas. Guardamos só o mínimo (datas, casa, n.º de hóspedes e um identificador da reserva) e apagamos o resto logo que chega.
         Os dados ficam até 90 dias depois da saída. Você continua responsável pelos dados dos seus hóspedes; nós tratamo-los só por sua conta.
       </p>
-      {!a.obrigatorio && <p className="text-sm text-muted-foreground">Neste momento o acordo não é obrigatório. Pode lê-lo e aceitá-lo já, se quiser.</p>}
       <div tabIndex={0} aria-label="Texto do acordo" className="max-h-[50vh] overflow-y-auto rounded-md border p-4 text-sm leading-relaxed"><TextoAcordo texto={a.texto} /></div>
       <p className="text-xs text-muted-foreground">Versão {a.versao}</p>
       {a.aceite ? (

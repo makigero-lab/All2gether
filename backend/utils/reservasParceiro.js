@@ -393,7 +393,7 @@ async function respostaReservaRepetida(reserva) {
  *   tipo_limpeza: normal|intermedia|profunda|preparacao (opcional; omissão = normal)
  * O dia da limpeza é automático; `data_limpeza`, se vier, é ignorado.
  */
-async function criarReservaComLimpeza({ parceiroId, empresaId, body: corpo = {}, ator = ATOR_PARCEIRO, camposReserva = {} }) {
+async function criarReservaComLimpeza({ parceiroId, empresaId, body: corpo = {}, ator = ATOR_PARCEIRO, camposReserva = {}, semAvisoDono = false }) {
   try {
     if (!parceiroId || !empresaId) {
       return resp(401, { erro: 'Não autenticado.' });
@@ -553,7 +553,8 @@ async function criarReservaComLimpeza({ parceiroId, empresaId, body: corpo = {},
     }
     if (deOutraOrigem) await avisarGestorDuasLimpezas(empresaId, propriedade, inicioDiaSaida);
     // Sino ao gestor se a limpeza nova cai nas próximas 48 h.
-    await avisarAcaoReserva({ ator, parceiroId, empresaId, propriedadeId: propriedade._id, acao: 'criou', datas: [novaTarefa.data] });
+    // Num lote o gestor avisa o proprietário uma só vez no fim (semAvisoDono), em vez de um aviso por reserva.
+    if (!semAvisoDono) await avisarAcaoReserva({ ator, parceiroId, empresaId, propriedadeId: propriedade._id, acao: 'criou', datas: [novaTarefa.data] });
 
     console.log(
       `📅 [Parceiro] reserva criada por parceiro ${parceiroId} para "${propriedade.nome}" ` +

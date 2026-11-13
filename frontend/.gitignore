@@ -14,6 +14,8 @@
 /public/sw.js
 /public/workbox-*.js
 /public/swe-worker-*.js
+# Custom worker (frontend/worker/index.js) compilado pelo next-pwa no `next build`: worker-<hash>.js
+/public/worker-*.js
 /public/fallback-*.js
 
 # TypeScript build info (gerado por tsc --noEmit em modo incremental)

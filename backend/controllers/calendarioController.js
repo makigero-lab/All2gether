@@ -36,9 +36,9 @@ function criarHandlers(papel) {
   const h = {
     listar: corre('listar', async (req, res) => enviar(res, await S.listarLigacoes({ escopo: escopo(req), propriedadeId: req.query.propriedade_id, estado: req.query.estado }))),
     testar: soGestor(corre('testar', async (req, res) => {
-      if (!S.limiteTestar(req.user.id)) return res.status(429).json({ erro: 'Testaste muitas vezes. Tenta outra vez daqui a uma hora.' });
+      // O limite de testes (utilizador, site e link) é aplicado no serviço, depois de validar o pedido.
       const b = req.body || {};
-      return enviar(res, await S.testarLigacao({ propriedadeId: b.propriedade_id, url: b.url, escopo: escopo(req) }));
+      return enviar(res, await S.testarLigacao({ propriedadeId: b.propriedade_id, url: b.url, escopo: escopo(req), utilizadorId: req.user.id }));
     })),
     criar: soGestor(corre('criar', async (req, res) => {
       const b = req.body || {};
@@ -50,8 +50,8 @@ function criarHandlers(papel) {
     impacto: soGestor(corre('impacto', async (req, res) => enviar(res, await S.impactoRemocao({ id: req.params.id, escopo: escopo(req) })))),
     remover: soGestor(corre('remover', async (req, res) => enviar(res, await S.removerLigacao({ id: req.params.id, escopo: escopo(req), ator: ator(req) })))),
     leituras: corre('leituras', async (req, res) => enviar(res, await S.listarLeituras({ id: req.params.id, escopo: escopo(req), limite: req.query.limite, completo: ehGestor }))),
-    estado: corre('estado', async (req, res) => enviar(res, await S.mudarEstado({ id: req.params.id, acao: (req.body || {}).acao, escopo: escopo(req) }))),
-    listarExternas: corre('listarExternas', async (req, res) => enviar(res, await S.listarReservasExternas({ escopo: escopo(req), estado: req.query.estado || 'por_confirmar', parceiroId: req.query.parceiro_id }))),
+    estado: corre('estado', async (req, res) => enviar(res, await S.mudarEstado({ id: req.params.id, acao: (req.body || {}).acao, escopo: escopo(req), ator: ator(req) }))),
+    listarExternas: corre('listarExternas', async (req, res) => enviar(res, await S.listarReservasExternas({ escopo: escopo(req), estado: req.query.estado || 'por_confirmar', parceiroId: req.query.parceiro_id, pular: req.query.pular, proximosDias: req.query.proximos_dias, incluirInativos: ehGestor && req.query.inativos === '1' }))),
     confirmar: corre('confirmar', async (req, res) => {
       const e = escopo(req);
       return enviar(res, await D.confirmarExterna({ externaId: req.params.id, empresaId: e.empresaId, parceiroId: e.parceiroId || null, ator: ator(req), dados: req.body }));
@@ -75,7 +75,10 @@ function criarHandlers(papel) {
     aceitarAcordo: corre('aceitarAcordo', async (req, res) => {
       const u = await Utilizador.findById(req.user.id).select('nome email empresa_id').lean();
       const b = req.body || {};
-      return enviar(res, await Acordo.aceitar({ user: { id: req.user.id, empresa_id: req.user.empresa_id, nome: u && u.nome, email: u && u.email }, versao: b.versao, hash: b.hash, confirmo: b.confirmo, ip: req.ip, agente: req.get('user-agent') }));
+      const r = await Acordo.aceitar({ user: { id: req.user.id, empresa_id: req.user.empresa_id, nome: u && u.nome, email: u && u.email }, versao: b.versao, hash: b.hash, confirmo: b.confirmo, ip: req.ip, agente: req.get('user-agent') });
+      // Aceitou: as ligações que estavam em pausa por causa do acordo retomam já, sem esperar pelo job horário.
+      if (r.status === 200 || r.status === 201) await S.retomarAposAcordo({ parceiroId: req.user.id, empresaId: req.user.empresa_id });
+      return enviar(res, r);
     }),
   };
   return h;

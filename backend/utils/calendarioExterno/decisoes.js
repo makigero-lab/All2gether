@@ -32,7 +32,7 @@ function filtroAcesso({ empresaId, parceiroId = null }) {
   return { empresa_id: empresaId, ...(parceiroId ? { parceiro_id: parceiroId } : {}) };
 }
 
-async function confirmarExterna({ externaId, empresaId, parceiroId = null, ator, dados = {} }) {
+async function confirmarExterna({ externaId, empresaId, parceiroId = null, ator, dados = {}, semAvisoDono = false }) {
   if (!mongoose.isValidObjectId(externaId)) return resp(400, { erro: 'ID inválido.' });
   const hoje = H.hojeLisboa();
   const erroHN = R.erroHospedesENome(dados);
@@ -56,7 +56,7 @@ async function confirmarExterna({ externaId, empresaId, parceiroId = null, ator,
   const extras = {};
   for (const k of ['hospedes', 'tipo_limpeza', 'nome_hospede', 'horario_preferido', 'observacoes']) if (d[k] !== undefined && d[k] !== null && d[k] !== '') extras[k] = d[k];
   const r = await Rv.criarReservaDaExterna(ex, {
-    rotulo: fonte && fonte.rotulo, extras,
+    rotulo: fonte && fonte.rotulo, extras, semAvisoDono,
     ator: ator.tipo === 'gestor' ? { tipo: 'gestor', id: ator.id } : { tipo: 'parceiro' },
   });
   if (!r.ok) { await reverter(); return resp(r.status && r.status < 500 ? r.status : 400, { erro: r.erro }); }
