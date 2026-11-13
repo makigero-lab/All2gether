@@ -1622,7 +1622,8 @@ async function obterApiKeySmoobu(empresaId) {
       const smoobu = empresa?.integracoes?.smoobu;
       if (smoobu?.ativo && smoobu.api_key && smoobu.api_key.trim()) {
         // Segredo HMAC (obrigatório no Smoobu desde 31/10/2026).
-        return { chave: smoobu.api_key.trim(), segredo: String(smoobu.api_secret || '').trim(), origem: 'empresa' };
+        const cred = require('../utils/segredoEmpresa').credenciaisSmoobu(smoobu, empresaId);
+        if (cred.chave) return { chave: cred.chave, segredo: cred.segredo, origem: 'empresa' };
       }
     } catch {
       // Se falhar a leitura da empresa, continua para o fallback.

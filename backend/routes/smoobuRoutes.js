@@ -47,6 +47,7 @@ const WebhookLog = require('../models/WebhookLog');
 const Propriedade = require('../models/Propriedade');
 const Empresa = require('../models/Empresa');
 const { extrairDadosReserva } = require('../controllers/smoobuController');
+const { hmacChave } = require('../utils/segredoEmpresa');
 
 const router = express.Router();
 // Aviso de webhook sem autenticação: uma vez por arranque.
@@ -153,10 +154,15 @@ async function validarChaveSmoobu(chaveRecebida) {
   // 1. Procura em empresas ativas com a chave configurada (SEM exigir ativo).
   if (chaveRecebida) {
     try {
+      // Chave em claro (formato antigo) OU o HMAC dela (chave guardada cifrada).
+      const hmacRecebido = hmacChave(chaveRecebida);
       const empresa = await Empresa.findOne({
         ativa: true,
         apagada: false,
-        'integracoes.smoobu.api_key': chaveRecebida,
+        $or: [
+          { 'integracoes.smoobu.api_key': chaveRecebida },
+          ...(hmacRecebido ? [{ 'integracoes.smoobu.api_key_hmac': hmacRecebido }] : []),
+        ],
       })
         .select('_id integracoes.smoobu')
         .lean();
