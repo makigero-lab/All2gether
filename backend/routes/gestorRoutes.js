@@ -191,7 +191,10 @@ router.get('/calendarios/:id/impacto-remocao', auth, isGestor, calGestor.impacto
 router.delete('/calendarios/:id', auth, isGestor, calGestor.remover);
 router.get('/calendarios/:id/leituras', auth, isGestor, calGestor.leituras);
 router.patch('/calendarios/:id/estado', auth, isGestor, calGestor.estado);
+router.get('/integracoes/resumo', auth, isGestor, calGestor.resumo);
+router.get('/integracoes/contagem', auth, isGestor, calGestor.contagem);
 router.get('/reservas-externas', auth, isGestor, calGestor.listarExternas);
+router.post('/reservas-externas/lote', auth, isGestor, calGestor.lote);
 router.post('/reservas-externas/:id/confirmar', auth, isGestor, calGestor.confirmar);
 router.post('/reservas-externas/:id/bloqueio', auth, isGestor, calGestor.bloqueio);
 router.post('/reservas-externas/:id/reabrir', auth, isGestor, calGestor.reabrir);

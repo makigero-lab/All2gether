@@ -152,6 +152,12 @@ async function reconciliar({ fonte, propriedade, eventos, suspeita, hoje, agora,
           hist(ex, 'reapareceu', 'cancelada', d.estado);
           if (d.estado === 'duplicada') { await aplicar(ex, ev, d); alt.reaparecidas -= 1; continue; }
           await aplicar(ex, ev, d);
+        } else if (antes === 'confirmada' && decidirNovo(ev, ex._id).estado === 'duplicada') {
+          // A estadia já está coberta por outra reserva viva (ex.: o Airbnb herdou a limpeza): é só uma cópia, sem limpeza nem linha nova.
+          const d = decidirNovo(ev, ex._id);
+          ex.reserva_manual_id = undefined; // a reserva e a limpeza já são da outra reserva
+          hist(ex, 'reapareceu', 'cancelada', 'duplicada');
+          await aplicar(ex, ev, d); alt.reaparecidas -= 1; alt.duplicadas += 1; continue;
         } else if (antes === 'confirmada') {
           if (ex.reserva_manual_id) await ReservaManual.updateOne({ _id: ex.reserva_manual_id }, { $unset: { reserva_externa_id: 1 } });
           ex.reserva_manual_id = undefined;

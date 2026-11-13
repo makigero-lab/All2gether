@@ -15,6 +15,7 @@ const Empresa = require('../../models/Empresa');
 const H = require('../horario');
 const { obterLock, libertarLock, renovarLock } = require('../lockEmpresa');
 const { estadoDaCasa } = require('../casaAtiva');
+const { acordoPermiteLigar } = require('../acordoRgpd');
 const { chavesConfiguradas, decifrar, hmac, semUrl } = require('./cifra');
 const { buscarFeed, ErroFeed, pedir } = require('./buscar');
 const { analisarIcal, hashNormalizado, amostraRedigida } = require('./parser');
@@ -81,6 +82,7 @@ async function elegibilidade(fonte) {
   if (!empresa || empresa.ativa === false || empresa.eliminacao_agendada_para) return { ok: false, estado: 'pausada', motivo: 'empresa_inativa', propriedade: p };
   const est = await estadoDaCasa(p);
   if (est.inativa) return { ok: false, estado: 'pausada', motivo: est.motivo === 'proprietario' ? 'parceiro_inativo' : 'casa_inativa', propriedade: p };
+  if (!(await acordoPermiteLigar(p.parceiro_id))) return { ok: false, estado: 'pausada', motivo: 'acordo_por_aceitar', propriedade: p };
   return { ok: true, propriedade: p };
 }
 
@@ -211,7 +213,7 @@ async function sincronizarFonte(fonteId, { origem = 'agendada', transporte = ped
     }
     return { resultado: el.estado, motivo: el.motivo };
   }
-  if (fonte.estado === 'pausada' && ['casa_inativa', 'parceiro_inativo', 'empresa_inativa'].includes(fonte.motivo_estado)) {
+  if (fonte.estado === 'pausada' && ['casa_inativa', 'parceiro_inativo', 'empresa_inativa', 'acordo_por_aceitar'].includes(fonte.motivo_estado)) {
     // A causa passou: retoma sozinha (nada é recriado; só se volta a ler).
     fonte.estado = 'ativa'; fonte.motivo_estado = null; fonte.pausada_em = undefined; origem = 'retoma';
     await FonteCalendario.updateOne({ _id: fonte._id }, { $set: { estado: 'ativa', motivo_estado: null }, $unset: { pausada_em: 1 } });

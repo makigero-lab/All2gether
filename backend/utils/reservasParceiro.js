@@ -112,7 +112,7 @@ function erroHospedesENome(corpo) {
   const b = corpo || {};
   if (b.hospedes !== undefined && b.hospedes !== null && b.hospedes !== '') {
     const n = typeof b.hospedes === 'number' || typeof b.hospedes === 'string' ? Number(b.hospedes) : NaN;
-    if (!Number.isInteger(n) || n < 0 || n > MAX_HOSPEDES_RESERVA) return `O número de hóspedes tem de ser um número inteiro entre 1 e ${MAX_HOSPEDES_RESERVA}.`;
+    if (!Number.isInteger(n) || n < 0 || n > MAX_HOSPEDES_RESERVA) return `O número de hóspedes tem de ser um número inteiro entre 0 e ${MAX_HOSPEDES_RESERVA} (0 = usar a capacidade da casa).`;
   }
   if (b.nome_hospede !== undefined && b.nome_hospede !== null) {
     if (typeof b.nome_hospede !== 'string') return 'O nome do hóspede é inválido.';

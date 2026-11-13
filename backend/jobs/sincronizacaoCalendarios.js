@@ -114,7 +114,7 @@ async function executarTique({ agora = new Date(), opcoes = {} } = {}) {
     const resultados = await processarEmLote(devidas, { agora, ...opcoes });
     // Pausadas por causas externas: de hora a hora, vê-se se já podem retomar.
     if (agora.getMinutes() < 5) {
-      const pausadas = await FonteCalendario.find({ removida: false, estado: 'pausada', motivo_estado: { $in: ['casa_inativa', 'parceiro_inativo', 'empresa_inativa'] } }).limit(100).select('_id url_host').lean();
+      const pausadas = await FonteCalendario.find({ removida: false, estado: 'pausada', motivo_estado: { $in: ['casa_inativa', 'parceiro_inativo', 'empresa_inativa', 'acordo_por_aceitar'] } }).limit(100).select('_id url_host').lean();
       await processarEmLote(pausadas, { agora, ...opcoes });
     }
     const dia = H.hojeLisboa(agora);
