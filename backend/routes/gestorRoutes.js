@@ -181,7 +181,7 @@ router.delete('/parceiros/:id/reservas/:reservaId', auth, isGestor, gestorReserv
 
 // Calendários externos (Airbnb, Booking...) das casas da empresa: o gestor também pode ligá-los e decidir períodos.
 const calGestor = require('../controllers/calendarioController').gestor;
-const { protegerSegredo, setChaveSmoobu, credenciaisSmoobu } = require('../utils/segredoEmpresa');
+const { protegerSegredo, setChaveSmoobu, estadoCredenciaisSmoobu, MSG_CREDENCIAIS_ILEGIVEIS } = require('../utils/segredoEmpresa');
 router.get('/calendarios', auth, isGestor, calGestor.listar);
 router.post('/calendarios/testar', auth, isGestor, calGestor.testar);
 router.post('/calendarios', auth, isGestor, calGestor.criar);
@@ -253,6 +253,7 @@ router.get('/configuracoes', auth, isGestor, async (req, res) => {
     }
     const smoobu = empresa.integracoes?.smoobu || {};
     const temChaveBD = Boolean(smoobu.api_key && smoobu.api_key.trim());
+    const cred = estadoCredenciaisSmoobu(smoobu, empresaId);
     return res.status(200).json({
       nome: empresa.nome,
       nif: empresa.nif || '',
@@ -264,10 +265,13 @@ router.get('/configuracoes', auth, isGestor, async (req, res) => {
       // (fonte de verdade quando o backend corre no Render) com fallback à
       // chave da BD. Isto resolve o bug em que o cliente via "Não configurada"
       // na página principal de configurações apesar de a API estar a funcionar.
-      smoobu_api_key_mascarada: mascararApiKey(credenciaisSmoobu(smoobu, empresaId).chave),
-      tem_api_key: temChaveBD,
+      smoobu_api_key_mascarada: mascararApiKey(cred.chave),
+      // Só verdadeiros se o valor existe E se consegue ler; `ilegivel` diz que há valor cifrado que o servidor não decifra.
+      tem_api_key: cred.tem_chave,
       // O segredo nunca sai: só se existe (obrigatório no Smoobu desde 31/10/2026).
-      tem_segredo: Boolean(smoobu.api_secret && smoobu.api_secret.trim()),
+      tem_segredo: cred.tem_segredo,
+      ilegivel: cred.ilegivel,
+      mensagem_ilegivel: cred.ilegivel ? MSG_CREDENCIAIS_ILEGIVEIS : null,
       ultimo_resultado: smoobu.ultimo_resultado && smoobu.ultimo_resultado.em ? smoobu.ultimo_resultado : null,
       smoobu_ativo: Boolean(process.env.SMOOBU_API_KEY || temChaveBD),
     });
@@ -275,6 +279,24 @@ router.get('/configuracoes', auth, isGestor, async (req, res) => {
     return res.status(500).json({ erro: 'Erro interno.' });
   }
 });
+
+/**
+ * Se a chave ou o segredo guardados estão cifrados e ilegíveis, repor só um deles deixa o outro ilegível
+ * (a ligação continuaria a falhar apesar de o ecrã dizer que existe). Devolve a mensagem de erro, ou null.
+ * `novos`: { chave, segredo } = true se o pedido traz um valor novo (ou apaga) para esse campo.
+ */
+async function validarReposicaoCredenciais(empresaId, novos) {
+  if (!novos.chave && !novos.segredo) return null;
+  const Empresa = require('../models/Empresa');
+  const emp = await Empresa.findById(empresaId).select('integracoes.smoobu.api_key +integracoes.smoobu.api_secret').lean();
+  const e = estadoCredenciaisSmoobu(emp && emp.integracoes && emp.integracoes.smoobu, empresaId);
+  if (!e.ilegivel) return null;
+  const falta = [];
+  if (e.chave_ilegivel && !novos.chave) falta.push('a chave');
+  if (e.segredo_ilegivel && !novos.segredo) falta.push('o segredo');
+  if (!falta.length) return null;
+  return `A chave e o segredo do Smoobu estão guardados cifrados e o servidor não os consegue ler. Volta a escrever também ${falta.join(' e ')} do Smoobu (têm de ser repostos juntos), ou repõe as variáveis ICAL_CHAVES no Render.`;
+}
 
 // PUT /api/gestor/configuracoes — atualiza a configuração da empresa.
 router.put('/configuracoes', auth, isGestor, async (req, res) => {
@@ -286,6 +308,11 @@ router.put('/configuracoes', auth, isGestor, async (req, res) => {
     }
     const { nome, nif, morada, telefone, email, smoobu_api_key, smoobu_api_secret } = req.body || {};
     const update = {};
+    const erroRepor = await validarReposicaoCredenciais(empresaId, {
+      chave: typeof smoobu_api_key === 'string' && Boolean(smoobu_api_key.trim()),
+      segredo: typeof smoobu_api_secret === 'string' && Boolean(smoobu_api_secret.trim()),
+    });
+    if (erroRepor) return res.status(400).json({ erro: erroRepor });
     // Chave e segredo do Smoobu (antes a página enviava a chave e ela era ignorada).
     if (typeof smoobu_api_key === 'string' && smoobu_api_key.trim()) {
       Object.assign(update, setChaveSmoobu(smoobu_api_key, empresaId));
@@ -312,6 +339,7 @@ router.put('/configuracoes', auth, isGestor, async (req, res) => {
     // Smoobu para o frontend atualizar a UI após guardar.
     const smoobu = empresa.integracoes?.smoobu || {};
     const temChaveBD = Boolean(smoobu.api_key && smoobu.api_key.trim());
+    const cred = estadoCredenciaisSmoobu(smoobu, empresaId);
     return res.status(200).json({
       message: 'Configuração guardada com sucesso.',
       nome: empresa.nome,
@@ -319,10 +347,13 @@ router.put('/configuracoes', auth, isGestor, async (req, res) => {
       morada: empresa.morada || '',
       telefone: empresa.telefone || '',
       email: empresa.email || '',
-      smoobu_api_key_mascarada: mascararApiKey(credenciaisSmoobu(smoobu, empresaId).chave),
-      tem_api_key: temChaveBD,
+      smoobu_api_key_mascarada: mascararApiKey(cred.chave),
+      // Só verdadeiros se o valor existe E se consegue ler; `ilegivel` diz que há valor cifrado que o servidor não decifra.
+      tem_api_key: cred.tem_chave,
       // O segredo nunca sai: só se existe (obrigatório no Smoobu desde 31/10/2026).
-      tem_segredo: Boolean(smoobu.api_secret && smoobu.api_secret.trim()),
+      tem_segredo: cred.tem_segredo,
+      ilegivel: cred.ilegivel,
+      mensagem_ilegivel: cred.ilegivel ? MSG_CREDENCIAIS_ILEGIVEIS : null,
       ultimo_resultado: smoobu.ultimo_resultado && smoobu.ultimo_resultado.em ? smoobu.ultimo_resultado : null,
       smoobu_ativo: Boolean(process.env.SMOOBU_API_KEY || temChaveBD),
     });
@@ -386,14 +417,19 @@ router.get('/configuracoes/integracoes', auth, isGestor, async (req, res) => {
       return res.status(404).json({ erro: 'Empresa não encontrada.' });
     }
     const smoobu = empresa.integracoes?.smoobu || {};
+    const cred = estadoCredenciaisSmoobu(smoobu, empresaId);
     const rotinas = empresa.rotinas || {};
     return res.status(200).json({
       smoobu: {
         // NUNCA devolver a chave em claro — só mascarada + booleano `configurado`.
-        api_key_mascarada: mascararApiKey(credenciaisSmoobu(smoobu, empresaId).chave),
+        api_key_mascarada: mascararApiKey(cred.chave),
+        // `configurado`: há chave guardada (mesmo que cifrada e ilegível; ver `ilegivel`).
         configurado: Boolean(smoobu.api_key && smoobu.api_key.trim()),
-        // O segredo nunca sai: só se existe.
-        tem_segredo: Boolean(smoobu.api_secret && smoobu.api_secret.trim()),
+        tem_api_key: cred.tem_chave,
+        // O segredo nunca sai: só se existe E se consegue ler.
+        tem_segredo: cred.tem_segredo,
+        ilegivel: cred.ilegivel,
+        mensagem_ilegivel: cred.ilegivel ? MSG_CREDENCIAIS_ILEGIVEIS : null,
         ativo: Boolean(smoobu.ativo),
         ultima_sincronizacao: smoobu.ultima_sincronizacao || null,
         ultimo_resultado: smoobu.ultimo_resultado && smoobu.ultimo_resultado.em ? smoobu.ultimo_resultado : null,
@@ -448,6 +484,11 @@ router.put('/configuracoes/integracoes', auth, isGestor, async (req, res) => {
 
     const update = {};
     if (smoobu) {
+      const erroRepor = await validarReposicaoCredenciais(empresaId, {
+        chave: typeof smoobu.api_key === 'string',
+        segredo: typeof smoobu.api_secret === 'string',
+      });
+      if (erroRepor) return res.status(400).json({ erro: erroRepor });
       if (typeof smoobu.api_key === 'string') {
         Object.assign(update, setChaveSmoobu(smoobu.api_key, empresaId));
       }
@@ -489,13 +530,17 @@ router.put('/configuracoes/integracoes', auth, isGestor, async (req, res) => {
     }
 
     const smoobuAtualizado = empresa.integracoes?.smoobu || {};
+    const credAtual = estadoCredenciaisSmoobu(smoobuAtualizado, empresaId);
     const rotinasAtualizadas = empresa.rotinas || {};
     return res.status(200).json({
       message: 'Configurações de integrações guardadas com sucesso.',
       smoobu: {
-        api_key_mascarada: mascararApiKey(credenciaisSmoobu(smoobuAtualizado, empresaId).chave),
+        api_key_mascarada: mascararApiKey(credAtual.chave),
         configurado: Boolean(smoobuAtualizado.api_key && smoobuAtualizado.api_key.trim()),
-        tem_segredo: Boolean(smoobuAtualizado.api_secret && smoobuAtualizado.api_secret.trim()),
+        tem_api_key: credAtual.tem_chave,
+        tem_segredo: credAtual.tem_segredo,
+        ilegivel: credAtual.ilegivel,
+        mensagem_ilegivel: credAtual.ilegivel ? MSG_CREDENCIAIS_ILEGIVEIS : null,
         ativo: Boolean(smoobuAtualizado.ativo),
         ultima_sincronizacao: smoobuAtualizado.ultima_sincronizacao || null,
       },

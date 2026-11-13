@@ -243,7 +243,7 @@ router.post('/empresas', async (req, res) => {
       telefone: telefone ? String(telefone).trim() : '',
       email: email ? String(email).trim().toLowerCase() : '',
     });
-    return res.status(201).json({ empresa: nova });
+    return res.status(201).json({ empresa: require('../utils/segredoEmpresa').empresaPublica(nova) });
   } catch (err) {
     return res.status(500).json({ erro: 'Erro ao criar empresa.' });
   }
