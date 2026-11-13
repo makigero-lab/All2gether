@@ -22,6 +22,7 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 
 const Empresa = require('../models/Empresa');
+const { empresaPublica } = require('../utils/segredoEmpresa');
 const Utilizador = require('../models/Utilizador');
 const Propriedade = require('../models/Propriedade');
 const Tarefa = require('../models/Tarefa');
@@ -49,7 +50,8 @@ const TOKEN_IMPERSONACAO = process.env.JWT_EXPIRACAO_IMPERSONACAO || '2h';
  */
 exports.listarEmpresas = async (req, res) => {
   try {
-    const empresas = await Empresa.find().sort({ createdAt: -1 }).lean();
+    // +api_secret só para saber se existe/é legível: empresaPublica() retira-o antes de responder.
+    const empresas = await Empresa.find().select('+integracoes.smoobu.api_secret').sort({ createdAt: -1 }).lean();
 
     // Para cada empresa, procura o gestor + contagens em paralelo.
     const empresasComDados = await Promise.all(
@@ -67,7 +69,8 @@ exports.listarEmpresas = async (req, res) => {
         ]);
 
         return {
-          ...emp,
+          // Sem chave, segredo, HMAC nem cifrados do Smoobu: só a máscara e os estados.
+          ...empresaPublica(emp),
           gestor: gestor
             ? { id: String(gestor._id), nome: gestor.nome, email: gestor.email }
             : null,
