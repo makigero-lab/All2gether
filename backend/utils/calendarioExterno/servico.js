@@ -93,7 +93,7 @@ async function testarLigacao({ propriedadeId, url, escopo, transporte = pedir })
   const v = await validarPedido({ propriedadeId, url, escopo });
   if (v.erro) return v.erro;
   const { casa, analise } = v;
-  const hash = hmac(normalizarUrl(analise.url));
+  const hash = hmac(normalizarUrl(analise.url, analise.canal));
   const outra = await FonteCalendario.findOne({ url_hash: hash, removida: false }).select('propriedade_id').lean();
   if (outra && String(outra.propriedade_id) !== String(casa._id)) return resp(409, { erro: 'Este link já está a ser usado noutra casa.' });
   const existente = await FonteCalendario.findOne({ propriedade_id: casa._id, canal_chave: analise.canal_chave, removida: false }).select('_id').lean();
@@ -137,7 +137,7 @@ async function criarLigacao({ propriedadeId, url, rotulo, escopo, ator, transpor
   const cfg = configDoAmbiente();
   const limite = await contarLimites(casa, escopo, cfg);
   if (limite) return resp(400, { erro: limite, codigo: 'LIMITE' });
-  const hash = hmac(normalizarUrl(analise.url));
+  const hash = hmac(normalizarUrl(analise.url, analise.canal));
   if (await FonteCalendario.exists({ url_hash: hash, removida: false })) return resp(409, { erro: 'Este link já está a ser usado (nesta ou noutra casa).', codigo: 'LINK_REPETIDO' });
   if (await FonteCalendario.exists({ propriedade_id: casa._id, canal_chave: analise.canal_chave, removida: false })) {
     return resp(409, { erro: `Esta casa já tem um calendário ${analise.rotulo}. Remove-o ou substitui o link.`, codigo: 'CANAL_REPETIDO' });
@@ -182,7 +182,7 @@ async function substituirLigacao({ id, url, escopo, ator, transporte = pedir }) 
   const analise = analisarUrl(url);
   if (!analise.ok) return resp(400, { erro: analise.erro, codigo: analise.codigo });
   if (analise.canal_chave !== fonte.canal_chave) return resp(400, { erro: 'O novo link tem de ser do mesmo canal.' });
-  const hash = hmac(normalizarUrl(analise.url));
+  const hash = hmac(normalizarUrl(analise.url, analise.canal));
   if (await FonteCalendario.exists({ url_hash: hash, removida: false, _id: { $ne: fonte._id } })) return resp(409, { erro: 'Este link já está a ser usado noutra ligação.', codigo: 'LINK_REPETIDO' });
   fonte.url_cifrada = cifrar(analise.url.href, String(fonte._id)); fonte.url_hash = hash; fonte.url_mascara = mascara(analise.url); fonte.url_host = analise.host.slice(0, 120);
   fonte.estado = 'ativa'; fonte.motivo_estado = null; fonte.erros_consecutivos = 0; fonte.etag = undefined; fonte.last_modified = undefined; fonte.ultimo_erro = undefined; fonte.aviso_falha_enviado_em = undefined;

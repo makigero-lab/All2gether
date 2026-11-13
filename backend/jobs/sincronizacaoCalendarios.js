@@ -17,24 +17,59 @@ const { semUrl } = require('../utils/calendarioExterno/cifra');
 
 const MAX_POR_TIQUE = 40;
 const CONCORRENCIA = 3;
+// Um host lento nunca prende o tique: prazo por fonte (acima dos 15 s do pedido + o tratamento) e orçamento do tique
+// (abaixo dos 5 min entre tiques). O que ficar por ler continua «devido» e entra no tique seguinte.
+const PRAZO_FONTE_MS = 45000;
+const ORCAMENTO_TIQUE_MS = 4 * 60000;
+const ADIAMENTO_HOST_LENTO_MS = 30 * 60000;
 let emCurso = false;
 let ultimoLembrete = null;
 
-/** Processa uma lista de fontes com concorrência limitada e 1 pedido por servidor de cada vez. */
+/** Corre `promessa` com prazo: devolve { atrasada: true } se passar de `ms` (a promessa continua em segundo plano, limitada pelo prazo do pedido). */
+function comPrazoFonte(promessa, ms) {
+  let t;
+  const prazo = new Promise((resolve) => { t = setTimeout(() => resolve({ atrasada: true }), ms); });
+  return Promise.race([promessa, prazo]).finally(() => clearTimeout(t));
+}
+
+/**
+ * Processa uma lista de fontes com concorrência limitada, 1 pedido por servidor de cada vez, prazo por fonte e
+ * orçamento de tempo para o lote. Um servidor que falhou por tempo é deixado em paz até ao tique seguinte.
+ */
 async function processarEmLote(fontes, opcoes = {}) {
+  const { prazoFonteMs = PRAZO_FONTE_MS, orcamentoMs = ORCAMENTO_TIQUE_MS, ...restoOpcoes } = opcoes;
   const fila = [...fontes];
   const hostsAtivos = new Set();
+  const hostsLentos = new Set();
+  const adiar = [];
   const resultados = [];
+  const limite = Date.now() + orcamentoMs;
   const trabalhador = async () => {
-    while (fila.length) {
-      const i = fila.findIndex((f) => !hostsAtivos.has(f.url_host));
-      if (i === -1) { await new Promise((r) => setTimeout(r, 50)); if (!hostsAtivos.size) break; continue; }
+    while (fila.length && Date.now() < limite) {
+      const i = fila.findIndex((f) => !hostsAtivos.has(f.url_host) && !hostsLentos.has(f.url_host));
+      if (i === -1) {
+        if (!hostsAtivos.size) break; // só restam fontes de hosts lentos: ficam para o próximo tique
+        await new Promise((r) => setTimeout(r, 50));
+        continue;
+      }
       const [f] = fila.splice(i, 1);
       hostsAtivos.add(f.url_host);
-      try { resultados.push(await sincronizarFonte(f._id, { esperaLockMs: 0, ...opcoes })); } catch (e) { console.error('⚠️  calendário (leitura):', semUrl(e.message)); } finally { hostsAtivos.delete(f.url_host); }
+      try {
+        const r = await comPrazoFonte(sincronizarFonte(f._id, { esperaLockMs: 0, ...restoOpcoes }), prazoFonteMs);
+        if (r && r.atrasada) { hostsLentos.add(f.url_host); adiar.push(f._id); } else {
+          resultados.push(r);
+          if (r && r.resultado === 'erro' && r.codigo === 'timeout') hostsLentos.add(f.url_host);
+        }
+      } catch (e) { console.error('⚠️  calendário (leitura):', semUrl(e.message)); } finally { hostsAtivos.delete(f.url_host); }
     }
   };
   await Promise.all(Array.from({ length: CONCORRENCIA }, trabalhador));
+  // As fontes de um host lento que ficaram por ler são adiadas, para não ocuparem o início da fila em todos os tiques.
+  for (const f of fila) if (hostsLentos.has(f.url_host)) adiar.push(f._id);
+  if (adiar.length) {
+    const ate = new Date(Date.now() + ADIAMENTO_HOST_LENTO_MS);
+    try { await FonteCalendario.updateMany({ _id: { $in: adiar }, proxima_leitura_em: { $lt: ate } }, { $set: { proxima_leitura_em: ate } }); } catch (e) { console.error('⚠️  calendário (adiar):', semUrl(e.message)); }
+  }
   return resultados;
 }
 

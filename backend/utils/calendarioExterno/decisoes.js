@@ -18,6 +18,7 @@ const { estadoDaCasa } = require('../casaAtiva');
 const Rv = require('./reservas');
 const { avisarParceiro, avisarGestor } = require('./avisos');
 const { mesmaEstadia } = require('./reconciliar');
+const { promoverDuplicada, perguntarIncertas } = require('./promocao');
 
 const resp = (status, body) => ({ status, body });
 const hist = (ex, evento, de = '', para = '') => {
@@ -34,6 +35,8 @@ function filtroAcesso({ empresaId, parceiroId = null }) {
 async function confirmarExterna({ externaId, empresaId, parceiroId = null, ator, dados = {} }) {
   if (!mongoose.isValidObjectId(externaId)) return resp(400, { erro: 'ID inválido.' });
   const hoje = H.hojeLisboa();
+  const erroHN = R.erroHospedesENome(dados);
+  if (erroHN) return resp(400, { erro: erroHN });
   // findOneAndUpdate atómico: dois cliques só confirmam uma vez.
   const ex = await ReservaExterna.findOneAndUpdate(
     { _id: externaId, ...filtroAcesso({ empresaId, parceiroId }), estado: 'por_confirmar' },
@@ -124,7 +127,14 @@ async function desligarReservaSincronizada({ reserva, tarefa, ator, parceiroId, 
 async function contarImpactoRemocao(fonte, hoje = H.hojeLisboa()) {
   const externas = await ReservaExterna.find({
     propriedade_id: fonte.propriedade_id, canal_chave: fonte.canal_chave, estado: 'confirmada', check_out: { $gt: Rv.dataDe(hoje) }, reserva_manual_id: { $exists: true },
-  }).select('reserva_manual_id').lean();
+  }).select('_id reserva_manual_id').lean();
+  if (!externas.length) return { limpezas: 0, reservas: 0 };
+  // As que têm a mesma estadia viva noutro canal (duplicada) passam para esse canal: não se cancelam.
+  const cobertas = new Set((await ReservaExterna.find({
+    propriedade_id: fonte.propriedade_id, estado: 'duplicada', classe: 'reserva', 'duplicada_de.id': { $in: externas.map((e) => e._id) },
+    check_out: { $gte: Rv.dataDe(hoje) }, presente_no_feed: { $ne: false }, leituras_em_falta: { $not: { $gt: 0 } },
+  }).select('duplicada_de').lean()).map((d) => String(d.duplicada_de.id)));
+  externas.splice(0, externas.length, ...externas.filter((e) => !cobertas.has(String(e._id))));
   if (!externas.length) return { limpezas: 0, reservas: 0 };
   const reservas = await ReservaManual.find({ _id: { $in: externas.map((e) => e.reserva_manual_id) }, origem: 'ical', cancelada_em: null }).select('tarefa_gerada_id').lean();
   const tarefas = await Tarefa.find({ _id: { $in: reservas.map((r) => r.tarefa_gerada_id).filter(Boolean) }, estado: { $nin: ['cancelada', 'em_curso', 'concluida'] } }).select('_id').lean();
@@ -142,13 +152,17 @@ async function removerFonte(fonte, { ator = null, silencioso = false } = {}) {
   });
   let canceladas = 0;
   let mantidas = 0;
+  let promovidas = 0;
   const prop = await Propriedade.findById(fonte.propriedade_id).select('nome').lean();
   for (const ex of externas) {
     if (ex.estado === 'confirmada' && ex.reserva_manual_id) {
       const reserva = await ReservaManual.findById(ex.reserva_manual_id).select('origem tarefa_gerada_id').lean();
       if (reserva && reserva.origem === 'ical' && Rv.iso(ex.check_out) > hoje) {
+        // A mesma estadia noutro canal (duplicada) herda a reserva e a limpeza, em vez de ficar sem limpeza.
+        const promovida = await promoverDuplicada(ex, { hoje });
+        if (promovida) { promovidas += 1; await ReservaExterna.deleteOne({ _id: ex._id }); continue; }
         const r = await Rv.cancelarReservaDaExterna(ex, { motivo: 'ligacao_removida', textoMotivo: 'foi cancelada (o calendário foi desligado).' });
-        if (r.cancelada) canceladas += 1; else { mantidas += 1; await ReservaManual.updateOne({ _id: ex.reserva_manual_id }, { $set: { sincronizada: false } }); }
+        if (r.cancelada) { canceladas += 1; await perguntarIncertas(ex, { hoje }); } else { mantidas += 1; await ReservaManual.updateOne({ _id: ex.reserva_manual_id }, { $set: { sincronizada: false } }); }
       } else {
         // reserva do próprio proprietário (adotada) ou já passada: passa a ser uma reserva normal
         await ReservaManual.updateOne({ _id: ex.reserva_manual_id }, { $set: { sincronizada: false }, $unset: { reserva_externa_id: 1 } });
@@ -167,7 +181,7 @@ async function removerFonte(fonte, { ator = null, silencioso = false } = {}) {
     await avisarParceiro(fonte.parceiro_id, fonte.empresa_id, txt);
     await avisarGestor(fonte.empresa_id, 'Calendário externo desligado', txt);
   }
-  return { canceladas, mantidas };
+  return { canceladas, mantidas, promovidas };
 }
 
 module.exports = { confirmarExterna, marcarBloqueio, reabrirBloqueio, desligarReservaSincronizada, contarImpactoRemocao, removerFonte };
