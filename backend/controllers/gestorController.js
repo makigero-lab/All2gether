@@ -26,6 +26,11 @@ const { contarAvariasAbertas } = require('../utils/avarias');
 const { lerConfigTipos } = require('../utils/tipoLimpeza');
 const { lerCamposCasa, decidirPessoas } = require('../utils/pessoasCasa');
 
+const MSG_ASSOCIAR_INATIVO = {
+  parceiro: 'Este proprietário está inativo. Reativa-o antes de o associar a uma propriedade.',
+  fornecedor: 'Esta lavandaria está inativa. Reativa-a antes de a associar a uma propriedade.',
+};
+
 /* ------------------------------------------------------------------ */
 /* Helper — obter empresa_id do JWT (req.user)                        */
 /* ------------------------------------------------------------------ */
@@ -291,7 +296,7 @@ exports.getPropriedades = async (req, res) => {
     // parceiro para o frontend mostrar no Badge sem precisar de extrair das
     // observações (lógica legacy improvisada).
     const propriedades = await Propriedade.find({ empresa_id: empresaId })
-      .populate({ path: 'parceiro_id', select: 'nome email role' })
+      .populate({ path: 'parceiro_id', select: 'nome email role ativo' })
       .sort({ nome: 1 });
 
     return res.status(200).json({ propriedades });
@@ -356,16 +361,19 @@ exports.criarPropriedade = async (req, res) => {
         if (!mongoose.isValidObjectId(valorCampo)) {
           return res.status(400).json({ erro: `${campo} inválido.` });
         }
-        const existe = await Utilizador.exists({
+        const existe = await Utilizador.findOne({
           _id: valorCampo,
           empresa_id: empresaId,
           role: roleEsperada,
           eliminado_em: null,
-        });
+        }).select('ativo').lean();
         if (!existe) {
           return res.status(400).json({
             erro: `${campo} não corresponde a um utilizador "${roleEsperada}" desta empresa.`,
           });
+        }
+        if (existe.ativo === false) {
+          return res.status(400).json({ erro: MSG_ASSOCIAR_INATIVO[roleEsperada], codigo: 'ASSOCIADO_INATIVO' });
         }
       }
     }
@@ -794,6 +802,7 @@ exports.getDadosCalendario = async (req, res) => {
         empresa_id: empresaId,
         role: { $in: ['staff', 'gestor'] },
         eliminado_em: null,
+        ativo: true, // pessoa inativa já não trabalha: a folga fixa não aparece no calendário
         dias_folga: { $exists: true, $ne: [] },
       })
         .select('nome dias_folga')
@@ -862,7 +871,7 @@ exports.getDadosCalendario = async (req, res) => {
       }
 
       const ausenciasAprovadas = await Ausencia.find(filtroAusencias)
-        .populate({ path: 'utilizador_id', select: 'nome eliminado_em' })
+        .populate({ path: 'utilizador_id', select: 'nome eliminado_em ativo' })
         .select('data_inicio data_fim tipo utilizador_id notas')
         .lean();
 
@@ -874,18 +883,16 @@ exports.getDadosCalendario = async (req, res) => {
       };
 
       const ausenciasPendentes = await Ausencia.find(filtroAusenciasPendentes)
-        .populate({ path: 'utilizador_id', select: 'nome eliminado_em' })
+        .populate({ path: 'utilizador_id', select: 'nome eliminado_em ativo' })
         .select('data_inicio data_fim tipo utilizador_id notas justificacao')
         .lean();
 
       // Filtra ausências cujo utilizador foi eliminado (soft delete) —
       // não devem aparecer no calendário.
-      const ausenciasFiltradas = ausenciasAprovadas.filter(
-        (a) => a.utilizador_id && !a.utilizador_id.eliminado_em
-      );
-      const ausenciasPendentesFiltradas = ausenciasPendentes.filter(
-        (a) => a.utilizador_id && !a.utilizador_id.eliminado_em
-      );
+      // Pessoas inativas também ficam de fora (já não trabalham: a ausência deixa de contar no calendário).
+      const aindaTrabalha = (a) => a.utilizador_id && !a.utilizador_id.eliminado_em && a.utilizador_id.ativo !== false;
+      const ausenciasFiltradas = ausenciasAprovadas.filter(aindaTrabalha);
+      const ausenciasPendentesFiltradas = ausenciasPendentes.filter(aindaTrabalha);
 
       // Converte cada ausência APROVADA num evento virtual tipo 'ausencia'.
       // FullCalendar com allDay espera que `end` seja EXCLUSIVE (o dia
@@ -1449,6 +1456,10 @@ exports.atualizarPropriedade = async (req, res) => {
             erro: 'Proprietário não encontrado (não é um proprietário desta empresa).',
           });
         }
+        // Inativo: só se mantém o que já estava associado; não se associa um novo.
+        if (parceiro.ativo === false && String(propriedade.parceiro_id || '') !== String(parceiro._id)) {
+          return res.status(400).json({ erro: MSG_ASSOCIAR_INATIVO.parceiro, codigo: 'ASSOCIADO_INATIVO' });
+        }
       }
       propriedade.parceiro_id = valor;
     }
@@ -1604,6 +1615,9 @@ exports.atualizarPropriedade = async (req, res) => {
           return res.status(400).json({
             erro: 'Lavandaria não encontrada (não é uma lavandaria desta empresa).',
           });
+        }
+        if (fornecedor.ativo === false && String(propriedade.fornecedor_id || '') !== String(fornecedor._id)) {
+          return res.status(400).json({ erro: MSG_ASSOCIAR_INATIVO.fornecedor, codigo: 'ASSOCIADO_INATIVO' });
         }
       }
       propriedade.fornecedor_id = valor;
@@ -2333,8 +2347,21 @@ exports.alternarEstadoMembro = async (req, res) => {
     const novoEstado =
       typeof req.body?.ativo === 'boolean' ? req.body.ativo : !utilizador.ativo;
 
+    const estavaAtivo = utilizador.ativo !== false;
     utilizador.ativo = novoEstado;
     await utilizador.save();
+
+    // PROPRIETÁRIO: desativar desativa as casas dele e cancela as limpezas futuras não iniciadas
+    // (avisando a equipa); reativar volta a ativar as casas, sem recriar as limpezas canceladas.
+    let efeitosProprietario = null;
+    if (utilizador.role === 'parceiro') {
+      const prop = require('../utils/estadoProprietario');
+      if (!novoEstado) {
+        efeitosProprietario = await prop.desativarCasasDoProprietario(empresaId, utilizador._id);
+      } else if (!estavaAtivo) {
+        efeitosProprietario = await prop.reativarCasasDoProprietario(empresaId, utilizador._id);
+      }
+    }
 
     // FIX (soft-delete com desatribuição) — Ao INATIVAR um funcionário de
     // limpeza (role staff ou gestor), o sistema desatribui automaticamente
@@ -2382,9 +2409,38 @@ exports.alternarEstadoMembro = async (req, res) => {
       // FIX (soft-delete com desatribuição) — devolve contagem de tarefas
       // desatribuídas para o frontend mostrar feedback ao gestor.
       tarefas_desatribuidas: tarefasDesatribuidas,
+      // Só para proprietários: casas e limpezas afetadas (desativar) ou casas reativadas.
+      ...(efeitosProprietario || {}),
     });
   } catch (err) {
     console.error('❌ alternarEstadoMembro:', err.message);
+    return res.status(500).json({ erro: 'Erro interno do servidor.' });
+  }
+};
+
+/**
+ * GET /api/gestor/equipa/:id/impacto-desativar
+ * Quantas casas e limpezas seriam afetadas ao desativar um proprietário (não altera nada).
+ * Serve o ecrã de confirmação, para o gestor ver os números ANTES de confirmar.
+ * Resposta 200: { casas, limpezas }  (zeros para quem não é proprietário)
+ */
+exports.impactoDesativarMembro = async (req, res) => {
+  try {
+    const { ok, empresaId } = obterEmpresaId(req, res);
+    if (!ok) return;
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(400).json({ erro: 'ID de utilizador inválido.' });
+    }
+    const utilizador = await Utilizador.findOne({ _id: id, empresa_id: empresaId }).select('role').lean();
+    if (!utilizador) {
+      return res.status(404).json({ erro: 'Utilizador não encontrado (ou não pertence a esta empresa).' });
+    }
+    if (utilizador.role !== 'parceiro') return res.status(200).json({ casas: 0, limpezas: 0 });
+    const { impactoDesativar } = require('../utils/estadoProprietario');
+    return res.status(200).json(await impactoDesativar(empresaId, utilizador._id));
+  } catch (err) {
+    console.error('❌ impactoDesativarMembro:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
   }
 };

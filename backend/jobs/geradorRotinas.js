@@ -27,6 +27,7 @@ const Tarefa = require('../models/Tarefa');
 const { obterRangeDia } = require('../utils/scheduler');
 const { horaPadraoDoDia } = require('../utils/horario');
 const { planearAtribuicao } = require('../utils/atribuicaoAutomatica');
+const { casaInativa } = require('../utils/casaAtiva');
 
 const DIAS_SEMANA = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 
@@ -56,9 +57,13 @@ async function executarGeradorRotinas() {
     .lean();
 
   // Filtra só propriedades de empresas ativas.
-  const propriedadesValidas = propriedades.filter(
-    (p) => p.empresa_id && p.empresa_id.ativa !== false
-  );
+  const propriedadesValidas = [];
+  for (const p of propriedades) {
+    if (!p.empresa_id || p.empresa_id.ativa === false) continue;
+    // Casa de proprietário inativo: não gera limpezas (as casas dele também ficam inativas ao desativá-lo).
+    if (await casaInativa(p)) continue;
+    propriedadesValidas.push(p);
+  }
 
   if (propriedadesValidas.length === 0) {
     console.log('ℹ️  [GeradorRotinas] nenhuma propriedade com limpeza fixa para amanhã.');

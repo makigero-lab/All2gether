@@ -27,14 +27,27 @@ const H = require('./horario');
 const { idsEquipa } = require('./equipaTarefa');
 const { notificarUtilizador, avisarGestores } = require('./notificar');
 const { calcularInicioEquipa, obterRangeDia } = require('./scheduler');
+const { casaInativa } = require('./casaAtiva');
 
 const ANTECEDENCIA_MIN_MS = 2 * 60 * 60 * 1000; // a limpeza começa daqui a menos de 2 h: sem oferta
 const HORA_LIMITE_VESPERA = 18 * 60; // 18:00 de Lisboa
 const ESTADOS_SEM_PESSOA = ['por_atribuir', 'nao_atribuida'];
+// Só se oferecem limpezas até 7 dias de calendário (dia de Lisboa) a partir de hoje.
+const JANELA_OFERTA_DIAS = 7;
 
 function ofertasAtivas() {
   if (process.env.OFERTA_VAGAS_DESLIGADA === '1') return false;
   return process.env.NODE_ENV !== 'test' || process.env.OFERTA_VAGAS_TESTE === '1';
+}
+
+/** Último dia ('aaaa-mm-dd') em que ainda se oferecem limpezas: hoje (Lisboa) + 7 dias. */
+function limiteOferta(agora = new Date()) {
+  return H.somarDiasISO(H.hojeLisboa(agora), JANELA_OFERTA_DIAS);
+}
+
+/** O dia da limpeza está dentro da janela de oferta (hoje .. hoje+7)? */
+function dentroDaJanelaOferta(diaISO, agora = new Date()) {
+  return !!diaISO && diaISO <= limiteOferta(agora);
 }
 
 const fmtDia = (diaISO) => diaISO.split('-').reverse().slice(0, 2).join('/');
@@ -79,6 +92,7 @@ function ofertaViva(tarefa, staffNecessario = 1, agora = new Date()) {
     && !!tarefa.oferta_expira_em
     && new Date(tarefa.oferta_expira_em) > agora
     && tarefa.oferta_dia === H.diaUTC(tarefa.data)
+    && dentroDaJanelaOferta(tarefa.oferta_dia, agora)
     && vagasEmFalta(tarefa, staffNecessario) > 0;
 }
 
@@ -112,10 +126,14 @@ async function destinatariosDaOferta(tarefa, diaISO) {
 async function abrirOferta(tarefaId, agora = new Date()) {
   const t = await Tarefa.findById(tarefaId).lean();
   if (!t || t.tipo !== 'limpeza') return { aberta: false, motivo: 'nao_aplicavel' };
-  const prop = await Propriedade.findById(t.propriedade_id).select('nome staff_necessario').lean();
+  const prop = await Propriedade.findById(t.propriedade_id).select('nome staff_necessario ativo parceiro_id').lean();
   const falta = vagasEmFalta(t, prop && prop.staff_necessario);
   if (falta <= 0) return { aberta: false, motivo: 'sem_vaga' };
   const dia = H.diaUTC(t.data);
+  // Além dos 7 dias não se abre nem se notifica; a rotina abre-a quando entrar na janela.
+  if (!dentroDaJanelaOferta(dia, agora)) return { aberta: false, motivo: 'fora_da_janela' };
+  // Casa inativa (ou com proprietário inativo): não há trabalho a oferecer.
+  if (await casaInativa(prop || t.propriedade_id)) return { aberta: false, motivo: 'casa_inativa' };
   if (t.oferta_estado === 'aberta' && t.oferta_dia === dia) return { aberta: false, motivo: 'ja_aberta' };
   if (t.oferta_estado === 'expirada' && t.oferta_dia === dia) return { aberta: false, motivo: 'ja_expirou' };
 
@@ -189,9 +207,16 @@ async function expirarOfertas(agora = new Date()) {
   const abertas = await Tarefa.find({ oferta_estado: 'aberta' }).populate({ path: 'propriedade_id', select: 'nome staff_necessario' }).lean();
   let expiradas = 0;
   let fechadas = 0;
+  const limite = limiteOferta(agora);
   for (const t of abertas) {
     const prop = t.propriedade_id || {};
     const falta = vagasEmFalta(t, prop.staff_necessario);
+    // Aberta além dos 7 dias (ofertas antigas): fecha-se sem avisar ninguém; reabre ao entrar na janela.
+    if (falta > 0 && t.oferta_dia && t.oferta_dia > limite && !['cancelada', 'concluida', 'em_curso'].includes(t.estado)) {
+      const r = await Tarefa.updateOne({ _id: t._id, oferta_estado: 'aberta' }, { $set: { oferta_estado: 'fechada' } });
+      if (r.modifiedCount === 1) fechadas++;
+      continue;
+    }
     const obsoleta = falta <= 0 || t.oferta_dia !== H.diaUTC(t.data) || ['cancelada', 'concluida', 'em_curso'].includes(t.estado);
     if (obsoleta) {
       const r = await Tarefa.updateOne({ _id: t._id, oferta_estado: 'aberta' }, { $set: { oferta_estado: falta <= 0 && t.utilizador_id ? 'aceite' : 'fechada' } });
@@ -218,9 +243,11 @@ async function expirarOfertas(agora = new Date()) {
 /** Procura limpezas com vaga sem oferta e abre-as (rede de segurança para todos os pontos de criação). */
 async function abrirOfertasPendentes(agora = new Date()) {
   const hoje = new Date(Date.UTC(agora.getUTCFullYear(), agora.getUTCMonth(), agora.getUTCDate()));
+  // Só as que estão na janela dos 7 dias (as outras abrem-se quando lá chegarem).
+  const apos = new Date(`${H.somarDiasISO(limiteOferta(agora), 1)}T00:00:00Z`);
   const candidatas = await Tarefa.find({
     tipo: 'limpeza',
-    data: { $gte: hoje },
+    data: { $gte: hoje, $lt: apos },
     oferta_estado: { $ne: 'aberta' },
     // Já expirou neste mesmo dia: não volta a tentar.
     $expr: { $not: [{ $and: [{ $eq: ['$oferta_estado', 'expirada'] }, { $eq: ['$oferta_dia', { $dateToString: { format: '%Y-%m-%d', date: '$data' } }] }] }] },
@@ -228,7 +255,7 @@ async function abrirOfertasPendentes(agora = new Date()) {
       { estado: { $in: ESTADOS_SEM_PESSOA }, utilizador_id: null },
       { estado: 'atribuida', pessoas_em_falta: { $gt: 0 } },
     ],
-  }).select('_id').limit(200).lean();
+  }).select('_id').sort({ data: 1 }).limit(200).lean();
   let abertas = 0;
   for (const c of candidatas) {
     const r = await abrirOferta(c._id, agora).catch((e) => { console.error('⚠️  abrirOferta:', e.message); return null; });
@@ -248,7 +275,8 @@ async function listarOfertas(utilizador, agora = new Date()) {
     .select('propriedade_id data tempo_limpeza_minutos estado utilizador_id equipa_atribuida pessoas_em_falta oferta_estado oferta_expira_em oferta_dia tipo')
     .populate({ path: 'propriedade_id', select: 'nome morada staff_necessario' })
     .lean();
-  const candidatas = tarefas.filter((t) => ofertaViva(t, t.propriedade_id && t.propriedade_id.staff_necessario, agora) && !idsEquipa(t).includes(String(utilizador.id)));
+  const limite = limiteOferta(agora);
+  const candidatas = tarefas.filter((t) => t.oferta_dia <= limite && ofertaViva(t, t.propriedade_id && t.propriedade_id.staff_necessario, agora) && !idsEquipa(t).includes(String(utilizador.id)));
   const dias = [...new Set(candidatas.map((t) => t.oferta_dia))];
   const ausentePorDia = new Map();
   for (const d of dias) ausentePorDia.set(d, (await ausentesNoDia([utilizador.id], d)).has(String(utilizador.id)));
@@ -383,6 +411,9 @@ async function aceitarOferta(args) {
 module.exports = {
   ofertasAtivas,
   calcularPrazoOferta,
+  limiteOferta,
+  dentroDaJanelaOferta,
+  JANELA_OFERTA_DIAS,
   vagasEmFalta,
   ofertaViva,
   abrirOferta,

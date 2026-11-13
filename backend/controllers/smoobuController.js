@@ -59,7 +59,8 @@ const {
 } = require('../utils/scheduler');
 const { minutosLocais, horaPadraoDoDia } = require('../utils/horario');
 const { avisarGestores } = require('../utils/notificar');
-const { inicioAutomaticoSemToque } = require('../utils/cicloTarefa');
+const { inicioAutomaticoSemToque, avisarParceiro } = require('../utils/cicloTarefa');
+const { estadoDaCasa, casaInativa } = require('../utils/casaAtiva');
 
 /**
  * Avisa os gestores de que limpezas ficaram por atribuir. Com `opcoes.porAtribuir` (array)
@@ -569,9 +570,12 @@ async function criarTarefaPorReserva(
   }
 
   // 3. Valida propriedade ativa.
-  if (!propriedade.ativo) {
+  const estadoCasa = await estadoDaCasa(propriedade);
+  if (estadoCasa.inativa) {
     throw new Error(
-      `Propriedade "${propriedade.nome}" está suspensa (ativo: false). Tarefa não criada.`
+      estadoCasa.motivo === 'proprietario'
+        ? `O proprietário da propriedade "${propriedade.nome}" está inativo. Tarefa não criada.`
+        : `Propriedade "${propriedade.nome}" está suspensa (ativo: false). Tarefa não criada.`
     );
   }
 
@@ -997,6 +1001,7 @@ async function criarTarefaPorReserva(
     empresa_id: empresaId,
     propriedade_id: propriedade._id,
     smoobu_reserva_id: reservaId || undefined,
+    origem: 'smoobu', // vem do Smoobu: o proprietário vê-a só de leitura, com esta origem
     utilizador_id: utilizadorAtribuido,
     equipa_atribuida: equipaIds.length > 0 ? equipaIds : undefined, // HF21
     data: dataAgendada,
@@ -1110,6 +1115,8 @@ async function cancelarTarefaPorReserva(reservaId, empresaRestrita = null) {
     tarefa.equipa_atribuida = [];
     await tarefa.save();
     canceladas++;
+    // O proprietário da casa (se houver) vê a limpeza cancelada e recebe aviso no sino.
+    await avisarParceiro(tarefa, 'cancelada_smoobu');
   }
 
   console.log(
@@ -1149,11 +1156,14 @@ async function atualizarTarefaPorReserva(
 
   // Tarefas concluídas são intocáveis.
   if (tarefa.estado === 'concluida') return tarefa;
+  // Uma limpeza cancelada (ex.: ao desativar o proprietário) não renasce numa casa inativa.
+  if (tarefa.estado === 'cancelada' && (await casaInativa(tarefa.propriedade_id))) return tarefa;
   const jaEstavaPorAtribuir = ['por_atribuir', 'nao_atribuida'].includes(tarefa.estado);
 
   let mudou = false;
   let mudouData = false;
   let novoRange = null;
+  let avisoParceiroPendente = false;
 
   // 1. Atualizar data.
   if (dataTarefaRaw) {
@@ -1306,6 +1316,8 @@ async function atualizarTarefaPorReserva(
     console.log(
       `📝 [Smoobu] tarefa ${tarefa._id} atualizada (reserva ${reservaId}).`
     );
+    // Mudou o dia (ou voltou a ser ativa): o proprietário é avisado no sino.
+    avisoParceiroPendente = mudouData || reativada;
 
     // Equipa que ficou incompleta ao mudar a data: procura substituto só para a vaga.
     if (saiuAlguem && tarefa.utilizador_id && (Number(tarefa.pessoas_em_falta) || 0) > 0) {
@@ -1377,6 +1389,11 @@ async function atualizarTarefaPorReserva(
         );
       }
     }
+  }
+  if (avisoParceiroPendente) {
+    // Relê a limpeza: depois do save a hora pode ter sido recalculada pelo motor.
+    const atual = await Tarefa.findById(tarefa._id).lean();
+    if (atual) await avisarParceiro(atual, 'alterada_smoobu');
   }
   return tarefa;
 }
@@ -2452,7 +2469,8 @@ async function executarSincronizacaoCore(empresaId, credSmoobu, opcoes = {}) {
 
         // Recria a tarefa de limpeza para o check-out.
         const propriedadeRM = await Propriedade.findById(rm.propriedade_id).lean();
-        if (!propriedadeRM) {
+        // Casa inexistente, inativa ou de proprietário inativo: não se recria a limpeza.
+        if (!propriedadeRM || (await casaInativa(propriedadeRM))) {
           parceirosSkipped++;
           continue;
         }
@@ -2666,6 +2684,10 @@ async function reconciliarCancelamentos(req, res) {
         { $set: { estado: 'cancelada', utilizador_id: null, equipa_atribuida: [] } }
       );
       canceladas = r.modifiedCount;
+      for (const c of paraCancelar) {
+        const tc = await Tarefa.findById(c.tarefa_id).lean().catch(() => null);
+        if (tc && tc.estado === 'cancelada') await avisarParceiro(tc, 'cancelada_smoobu');
+      }
       registarAuditoria({
         utilizador_id: req.user.id,
         utilizador_nome: req.user.nome || 'Admin',

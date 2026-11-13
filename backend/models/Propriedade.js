@@ -60,6 +60,12 @@ const propriedadeSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    // true quando a casa foi desativada ao desativar o proprietário: só estas voltam a ativar-se
+    // ao reativá-lo (as que o gestor desativou por outra razão ficam como estão).
+    inativa_por_proprietario: {
+      type: Boolean,
+      default: false,
+    },
     // v1.34.0 — Checklist de limpeza da propriedade (lista de itens a verificar).
     // O staff vê esta lista ao concluir a tarefa e pode marcar cada item.
     // Definida pelo gestor no painel de propriedades.

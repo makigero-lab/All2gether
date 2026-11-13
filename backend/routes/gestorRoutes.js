@@ -41,6 +41,7 @@ const {
   criarMembroEquipa,
   atualizarMembroEquipa,
   alternarEstadoMembro,
+  impactoDesativarMembro,
   eliminarMembroEquipa,
   reportarFaltaSubita,
   registarBaixaProlongada,
@@ -175,6 +176,7 @@ router.get('/parceiros', auth, isGestor, getParceiros);
 router.get('/fornecedores', auth, isGestor, getFornecedores);
 router.put('/equipa/:id', auth, isGestor, atualizarMembroEquipa);
 router.patch('/equipa/:id/estado', auth, isGestor, alternarEstadoMembro);
+router.get('/equipa/:id/impacto-desativar', auth, isGestor, impactoDesativarMembro);
 router.delete('/equipa/:id', auth, isGestor, eliminarMembroEquipa);
 // RGPD: exportar e apagar os dados pessoais de uma pessoa da equipa (art. 28.º, n.º 3, al. e).
 router.get('/equipa/:id/exportar-dados', auth, isGestor, rgpd.exportarDadosMembro);

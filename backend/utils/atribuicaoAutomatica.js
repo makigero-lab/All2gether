@@ -17,6 +17,7 @@ const {
 } = require('./loadBalancer');
 const { calcularInicioEquipa, obterRangeDia, carregarAgenda, prepararViagens, motivoNaoCabe } = require('./scheduler');
 const H = require('./horario');
+const { casaInativa } = require('./casaAtiva');
 const Tarefa = require('../models/Tarefa');
 const { idsEquipa, comMembro, normalizarEquipa } = require('./equipaTarefa');
 
@@ -103,6 +104,13 @@ async function procurarEquipaComHoraComum({ empresaId, range, propriedade, tempo
  */
 async function planearAtribuicao({ empresaId, propriedade, dia, tempoLimpeza }) {
   const range = obterRangeDia(dia);
+  // Casa inativa (ou de proprietário inativo): nunca se atribui ninguém.
+  if (await casaInativa(propriedade)) {
+    return {
+      utilizador_id: null, equipa_atribuida: [], data: H.horaPadraoDoDia(range.start), tempo_viagem_minutos: 0,
+      estado: 'por_atribuir', motivo_nao_atribuicao: 'Casa inativa (ou proprietário inativo): sem atribuição.', faltam: 0,
+    };
+  }
   const staffNecessario = Math.max(1, Number(propriedade.staff_necessario) || 1);
   const tempo = Number(tempoLimpeza) || propriedade.tempo_limpeza_minutos || 45;
 
@@ -228,6 +236,7 @@ async function planearVaga({ empresaId, tarefa, propriedade, excluirExtra = [] }
   const precisa = Math.min(Number(tarefa.pessoas_em_falta) || 0, Math.max(0, staffNecessario - membros.length));
   const out = { membros, precisa, novos: [], conflitos: 0, faltam: precisa, staffNecessario };
   if (precisa === 0) return out;
+  if (await casaInativa(propriedade)) return out; // casa inativa: não se preenchem vagas
 
   const range = obterRangeDia(tarefa.data);
   const tempo = Number(tarefa.tempo_limpeza_minutos) || 45;
