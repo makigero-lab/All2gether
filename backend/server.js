@@ -45,6 +45,7 @@ const { iniciarRetencao } = require('./jobs/retencao');
 const { iniciarEliminacaoEmpresas } = require('./jobs/eliminacaoEmpresas');
 const { iniciarOfertasVagas } = require('./jobs/ofertaVagas');
 const { iniciarSincronizacaoSmoobu } = require('./jobs/sincronizacaoSmoobu');
+const { iniciarSincronizacaoCalendarios } = require('./jobs/sincronizacaoCalendarios');
 const { iniciarLimpezaFotos } = require('./jobs/limpezaFotos');
 const { iniciarGeradorRotinas } = require('./jobs/geradorRotinas');
 const { iniciarInicioLimpeza } = require('./jobs/inicioLimpeza');
@@ -205,6 +206,8 @@ module.exports = app;
 /* Arranque do servidor (apenas em execução direta)                   */
 /* ------------------------------------------------------------------ */
 if (require.main === module) {
+  // O modo de teste do iCal (servidor falso local) nunca pode estar ligado em produção.
+  require('./utils/calendarioExterno/seguranca').garantirSemModoTesteEmProducao();
   mongoose
     .connect(process.env.MONGODB_URI)
     .then(async () => {
@@ -314,6 +317,10 @@ if (require.main === module) {
       // por defeito), com intervalo mínimo de 1 hora, sem sobreposição, só reservas futuras e
       // pedidos espaçados; nunca reativa tarefas canceladas. Ver docs/BACKEND.md.
       iniciarSincronizacaoSmoobu();
+
+      // Calendários externos (iCal Airbnb/Booking) dos proprietários: leitura de hora a hora, sem ação
+      // se as chaves de cifra (ICAL_*) não estiverem configuradas.
+      iniciarSincronizacaoCalendarios();
 
       // HF19 — Cron job "Limpeza de Fotos": todos os dias às 03:00,
       // esvazia fotos_conclusao e avarias[*].fotos de tarefas concluídas
