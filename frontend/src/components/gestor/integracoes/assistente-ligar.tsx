@@ -81,7 +81,8 @@ export function AssistenteLigar({
   const casa = casasLivres.find((c) => c._id === casaId) ?? null;
   const bloqueioCasa = casa?.smoobu ? "Esta casa já recebe as reservas pelo Smoobu. Só pode haver uma ligação automática por casa." : null;
   const canalLigado = casa && canal ? !!casa[canal] : false;
-  const sugerido = canal ? canalDoLink(url) : null;
+  // O canal que o servidor reconheceu no teste manda; antes do teste, o domínio do link dá uma primeira sugestão.
+  const sugerido = canal ? (teste?.canal === "airbnb" || teste?.canal === "booking" ? (teste.canal as CanalAssistente) : canalDoLink(url)) : null;
   const canalErrado = sugerido && sugerido !== "outro" && canal && sugerido !== canal ? sugerido : null;
 
   const testar = async (link = url) => {

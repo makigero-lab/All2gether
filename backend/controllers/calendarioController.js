@@ -22,7 +22,14 @@ function criarHandlers(papel) {
   const escopo = (req) => ({ empresaId: req.user.empresa_id, ...(ehGestor ? {} : { parceiroId: req.user.id }) });
   const ator = (req) => ({ tipo: ehGestor ? 'gestor' : 'parceiro', id: req.user.id, nome: req.user.nome || '' });
   const corre = (nome, fn) => async (req, res) => {
-    try { return await fn(req, res); } catch (err) { return erroInterno(res, nome, err); }
+    try {
+      // O token só traz o id: o nome (para auditoria e avisos) vem da base de dados, uma vez por pedido.
+      if (req.user && req.user.nome === undefined) {
+        const u = await Utilizador.findById(req.user.id).select('nome').lean();
+        req.user.nome = (u && u.nome) || '';
+      }
+      return await fn(req, res);
+    } catch (err) { return erroInterno(res, nome, err); }
   };
   // Só o gestor liga, testa, corrige e remove calendários: ao proprietário a API responde 403.
   const soGestor = (fn) => (ehGestor ? fn : async (req, res) => res.status(403).json({ erro: 'Só a All2gether liga, muda ou remove os calendários. Fala com o teu gestor.', codigo: 'SO_GESTOR' }));

@@ -16,6 +16,26 @@ export interface AcordoDTO {
   aceite_em: string | null;
 }
 
+/** Negrito `**…**` como nós React (nunca innerHTML). */
+function comNegrito(t: string) {
+  return t.split(/(\*\*[^*]+\*\*)/g).map((p, i) => (p.startsWith("**") && p.endsWith("**") && p.length > 4 ? <strong key={i}>{p.slice(2, -2)}</strong> : p));
+}
+
+/** Mostra o texto do acordo (markdown simples: títulos # e negrito) sem sinais soltos. */
+function TextoAcordo({ texto }: { texto: string }) {
+  return (
+    <>
+      {texto.split("\n").map((l, i) => {
+        if (!l.trim()) return null;
+        const m = l.match(/^(#{1,3})\s+(.*)$/);
+        if (m) return m[1].length === 1 ? <h2 key={i} className="mb-2 text-base font-semibold">{m[2]}</h2> : <h3 key={i} className="mb-1 mt-4 font-semibold">{m[2]}</h3>;
+        if (/^\|?\s*-{3,}/.test(l)) return null;
+        return <p key={i} className="mb-2">{comNegrito(l)}</p>;
+      })}
+    </>
+  );
+}
+
 const fmtData = (iso: string) => new Date(iso).toLocaleString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 
 /**
@@ -61,7 +81,7 @@ export function EcraAcordo() {
         Os dados ficam até 90 dias depois da saída. Você continua responsável pelos dados dos seus hóspedes; nós tratamo-los só por sua conta.
       </p>
       {!a.obrigatorio && <p className="text-sm text-muted-foreground">Neste momento o acordo não é obrigatório. Pode lê-lo e aceitá-lo já, se quiser.</p>}
-      <div tabIndex={0} aria-label="Texto do acordo" className="max-h-[50vh] overflow-y-auto whitespace-pre-wrap rounded-md border p-4 text-sm leading-relaxed">{a.texto}</div>
+      <div tabIndex={0} aria-label="Texto do acordo" className="max-h-[50vh] overflow-y-auto rounded-md border p-4 text-sm leading-relaxed"><TextoAcordo texto={a.texto} /></div>
       <p className="text-xs text-muted-foreground">Versão {a.versao}</p>
       {a.aceite ? (
         <p role="status" className="flex items-center gap-2 text-sm text-emerald-700 dark:text-emerald-400"><CheckCircle2 className="h-4 w-4" /> Aceitou o acordo a {a.aceite_em ? fmtData(a.aceite_em) : ""}.</p>

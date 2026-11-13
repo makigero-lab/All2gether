@@ -218,14 +218,19 @@ describe('vista geral, por confirmar e lote', () => {
     expect(r.body.proprietarios[0].primeiro_erro.mensagem).toMatch(/deixou de funcionar/);
   });
 
-  test('o resumo não faz uma consulta por casa (sem N+1)', async () => {
+  test('o resumo não faz uma consulta por casa (sem N+1): o n.º de consultas não cresce com as casas', async () => {
     const c = await cen();
+    const contar = async () => {
+      const lista = []; mongoose.set('debug', (col, metodo) => lista.push(`${col}.${metodo}`));
+      await request(app).get('/api/gestor/integracoes/resumo').set(auth(c.tokG));
+      mongoose.set('debug', false);
+      return lista.length;
+    };
+    const com1 = await contar();
     for (let i = 0; i < 6; i += 1) await Propriedade.create({ nome: 'Extra' + i, empresa_id: c.e._id, origem: 'manual', ativo: true, capacidade_hospedes: 2, tempo_limpeza_minutos: 60, parceiro_id: c.dono._id });
-    const antes = []; mongoose.set('debug', (col, metodo) => antes.push(`${col}.${metodo}`));
-    await request(app).get('/api/gestor/integracoes/resumo').set(auth(c.tokG));
-    mongoose.set('debug', false);
-    const consultas = antes.filter((x) => /^(utilizadors|propriedades|fontecalendarios|reservaexternas|aceitacaoacordos)\./.test(x));
-    expect(consultas.length).toBeLessThanOrEqual(6);
+    const com7 = await contar();
+    expect(com7).toBe(com1);
+    expect(com7).toBeLessThanOrEqual(8);
   });
 
   test('lista única da empresa por confirmar (com proprietário) e decisões em lote', async () => {
