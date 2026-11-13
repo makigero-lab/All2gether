@@ -32,6 +32,7 @@ const leituraSchema = new mongoose.Schema({
   eventos: { type: [String], default: undefined },
   eventos_truncados: { type: Boolean, default: undefined },
   amostra_redigida: { type: String, maxlength: 8192 },
+  bytes: Number, // tamanho aproximado do documento (para o teto em bytes por fonte)
 }, { versionKey: false });
 
 leituraSchema.index({ fonte_id: 1, iniciada_em: -1 });
