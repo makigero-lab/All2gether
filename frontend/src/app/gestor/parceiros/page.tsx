@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import {
   Plus,
@@ -11,6 +12,7 @@ import {
   Power,
   Eye,
   EyeOff,
+  CalendarCheck,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -369,6 +371,16 @@ export default function ParceirosPage() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1">
+                          {p.ativo && (
+                            <Link
+                              href={`/gestor/reservas?parceiro=${p._id}`}
+                              className="inline-flex h-8 items-center gap-1 rounded-md px-2 text-sm font-medium hover:bg-accent"
+                              aria-label={`Reservas de ${p.nome}`}
+                              title="Ver e marcar as reservas deste proprietário"
+                            >
+                              <CalendarCheck className="h-4 w-4" /> Reservas
+                            </Link>
+                          )}
                           <Button
                             variant="ghost"
                             size="icon"

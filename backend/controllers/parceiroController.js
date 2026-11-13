@@ -110,7 +110,7 @@ async function listarPropriedades(req, res) {
       parceiro_id: parceiroId,
       ativo: true,
     })
-      .select('nome morada coordenadas tempo_limpeza_minutos capacidade_hospedes origem')
+      .select('nome morada coordenadas tempo_limpeza_minutos capacidade_hospedes origem smoobu_id')
       .lean();
 
     return res.status(200).json({ propriedades });
