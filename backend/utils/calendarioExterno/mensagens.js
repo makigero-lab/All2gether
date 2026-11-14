@@ -1,4 +1,4 @@
-﻿/** Mensagens em linguagem simples (pt-PT) para os erros de leitura do calendário. Nunca levam o link. */
+/** Mensagens em linguagem simples (pt-PT) para os erros de leitura do calendário. Nunca levam o link. */
 const MENSAGENS_ERRO = {
   timeout: 'O calendário demorou demasiado a responder. Vamos tentar outra vez mais tarde.',
   dns: 'Não foi possível encontrar o servidor do calendário. Vamos tentar outra vez mais tarde.',
