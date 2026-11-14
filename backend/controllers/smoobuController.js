@@ -537,7 +537,11 @@ async function criarTarefaPorReserva(
 
   // 1. Idempotência: procura tarefa existente por smoobu_reserva_id.
   if (reservaId) {
-    const existente = await Tarefa.findOne({ smoobu_reserva_id: reservaId });
+    // Multi-tenant: o mesmo id de reserva pode existir em duas empresas; procura sempre dentro da empresa.
+    const existente = await Tarefa.findOne({
+      smoobu_reserva_id: reservaId,
+      ...(empresaRestrita ? { empresa_id: empresaRestrita } : {}),
+    });
     if (existente) {
       if (existente.estado === 'cancelada') {
         // Reserva re-ativada no Smoobu: reutiliza o fluxo de update (atualiza data,
@@ -564,7 +568,10 @@ async function criarTarefaPorReserva(
 
   // 1b. Reserva já arquivada (tarefa concluída/cancelada há mais de 3 meses): um webhook
   // tardio/duplicado não pode recriar a limpeza.
-  if (reservaId && (await TarefaArquivo.exists({ smoobu_reserva_id: String(reservaId) }))) {
+  if (reservaId && (await TarefaArquivo.exists({
+    smoobu_reserva_id: String(reservaId),
+    ...(empresaRestrita ? { empresa_id: empresaRestrita } : {}),
+  }))) {
     console.log(`ℹ️  [Smoobu] reserva ${reservaId} já arquivada — ignorada.`);
     return null;
   }
@@ -1188,6 +1195,20 @@ async function atualizarTarefaPorReserva(
   });
   if (!tarefa) return null; // caller cai para criarTarefaPorReserva
 
+  // Update sem data de saída (consulta falhou) sobre uma limpeza que já existe: o log diz a verdade.
+  // Já provisória: continua por atribuir. Com dia certo: mantém-se, nada a corrigir (não é erro).
+  if (opcoes.saidaDesconhecida) {
+    if (tarefa.data_saida_desconhecida) {
+      opcoes.saidaDesconhecidaMsg =
+        `Reserva ${reservaId}: ${opcoes.saidaDesconhecida.motivo} ` +
+        'A limpeza continua por atribuir no dia de chegada; corrige-se sozinha na próxima sincronização com a data certa.';
+    } else {
+      delete opcoes.saidaDesconhecidaMsg;
+      const [, mm, dd] = tarefa.data.toISOString().slice(0, 10).split('-');
+      opcoes.notaLog = `Sem data de saída na alteração; a limpeza mantém-se em ${dd}/${mm}.`;
+    }
+  }
+
   // Tarefas concluídas são intocáveis.
   if (tarefa.estado === 'concluida') return tarefa;
   // Uma limpeza cancelada (ex.: ao desativar o proprietário) não renasce numa casa inativa.
@@ -1211,7 +1232,7 @@ async function atualizarTarefaPorReserva(
     const ids = [String(reservaId)];
     if (/^\d+$/.test(String(reservaId)) && Number.isSafeInteger(Number(reservaId))) ids.push(Number(reservaId));
     await WebhookLog.updateMany(
-      { status: 'erro', erro_msg: { $regex: PREFIXO_SAIDA_DESCONHECIDA }, 'payload.data.id': { $in: ids } },
+      { empresa_id: tarefa.empresa_id, status: 'erro', erro_msg: { $regex: PREFIXO_SAIDA_DESCONHECIDA }, 'payload.data.id': { $in: ids } },
       { $set: { status: 'processado', erro_msg: 'Data de saída entretanto confirmada: limpeza corrigida para o dia certo.' } }
     ).catch(() => {});
   }
@@ -1527,14 +1548,6 @@ async function processarReservaSmoobu(payload, empresaId, empresaRestrita = null
       if (!e || e.code !== 'CREDENCIAIS_ILEGIVEIS') throw e;
       chaveIlegivel = true; // falta apenas completar o nome se já tem departure
     }
-    if (!dataCheckOutRaw && !(enriched && enriched.departure)) {
-      saidaDesconhecida = chaveIlegivel
-        ? { motivo: MSG_SAIDA_DESCONHECIDA_CHAVE, url: '/gestor/configuracoes' }
-        : { motivo: MSG_SAIDA_DESCONHECIDA, url: '/gestor/tarefas' };
-      opcoes.saidaDesconhecidaMsg =
-        `Reserva ${reservaId}: ${saidaDesconhecida.motivo}${chaveIlegivel ? ` ${MSG_CREDENCIAIS_ILEGIVEIS}` : ''} ` +
-        'Limpeza criada por atribuir no dia de chegada; corrige-se sozinha na próxima sincronização com a data certa.';
-    }
     if (enriched) {
       dataCheckOutFinal = enriched.departure || dataCheckOutRaw || null;
       detalhesFinal = {
@@ -1555,6 +1568,15 @@ async function processarReservaSmoobu(payload, empresaId, empresaRestrita = null
         return null;
       }
     }
+    // Só depois de excluir o bloqueio: um bloqueio sem departure não é uma limpeza provisória.
+    if (!dataCheckOutRaw && !(enriched && enriched.departure)) {
+      saidaDesconhecida = chaveIlegivel
+        ? { motivo: MSG_SAIDA_DESCONHECIDA_CHAVE, url: '/gestor/configuracoes' }
+        : { motivo: MSG_SAIDA_DESCONHECIDA, url: '/gestor/tarefas' };
+      opcoes.saidaDesconhecidaMsg =
+        `Reserva ${reservaId}: ${saidaDesconhecida.motivo}${chaveIlegivel ? ` ${MSG_CREDENCIAIS_ILEGIVEIS}` : ''} ` +
+        'Limpeza criada por atribuir no dia de chegada; corrige-se sozinha na próxima sincronização com a data certa.';
+    }
   }
 
   // 3. Data da tarefa = departure (check-out) || arrival (check-in).
@@ -1565,7 +1587,9 @@ async function processarReservaSmoobu(payload, empresaId, empresaRestrita = null
     );
   }
 
-  const opcoesFinal = saidaDesconhecida ? { ...opcoes, saidaDesconhecida } : opcoes;
+  // Mutação intencional: o orquestrador (processarWebhookSmoobu) lê no fim a mensagem/nota do log.
+  if (saidaDesconhecida) opcoes.saidaDesconhecida = saidaDesconhecida;
+  const opcoesFinal = opcoes;
 
   // 4. Atualização (se ação é update E existe tarefa).
   if (ACOES_ATUALIZAR.includes(action)) {
@@ -1625,7 +1649,11 @@ async function processarWebhookSmoobu(payload, webhookLogId, empresaId, empresaR
         webhookLogId,
         opcoesProc.saidaDesconhecidaMsg
           ? { status: 'erro', erro_msg: opcoesProc.saidaDesconhecidaMsg, empresa_id: empresaId || undefined }
-          : { status: 'processado', empresa_id: empresaId || undefined }
+          : {
+              status: 'processado',
+              empresa_id: empresaId || undefined,
+              ...(opcoesProc.notaLog ? { erro_msg: opcoesProc.notaLog } : {}),
+            }
       );
     } catch (logErr) {
       console.error(
