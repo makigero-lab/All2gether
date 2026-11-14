@@ -54,6 +54,8 @@ import {
 import { PaginationBar } from "@/components/admin/pagination-bar";
 import { DetalheTarefaModal } from "@/components/gestor/detalhe-tarefa-modal";
 import { parsearDataSegura, extrairHoraISO, plural } from "@/lib/utils";
+import { lerUtilizador } from "@/lib/auth";
+import { diasDoFiltro, guardarEscolha, lerEscolhaGuardada, passaFiltroRapido, type DiaRapido } from "@/lib/filtro-dias-rapido";
 import { SeletorDisponiveis, corpoAtribuicao, type InfoDisponiveis } from "@/components/gestor/seletor-disponiveis";
 
 interface TarefaAdmin {
@@ -193,6 +195,30 @@ export default function AdminTarefasPage() {
   const [filtroStaff, setFiltroStaff] = useState("");
   // FIX (sync parceiros) — Toggle para mostrar só tarefas de reservas de parceiros.
   const [soParceiros, setSoParceiros] = useState(false);
+  // Filtro rápido «Hoje / Amanhã» (multi-seleção; nenhum ligado = sem este filtro).
+  const [diasRapidos, setDiasRapidos] = useState<DiaRapido[]>([]);
+  const [utilizadorFiltroId, setUtilizadorFiltroId] = useState<string | null>(null);
+  useEffect(() => {
+    let vivo = true;
+    lerUtilizador()
+      .then((u) => {
+        if (!vivo) return;
+        const id = u?.id ?? null;
+        setUtilizadorFiltroId(id);
+        setDiasRapidos(lerEscolhaGuardada(id));
+      })
+      .catch(() => {});
+    return () => { vivo = false; };
+  }, []);
+  const alternarDiaRapido = (d: DiaRapido) => {
+    setDiasRapidos((atual) => {
+      const novo = atual.includes(d) ? atual.filter((x) => x !== d) : [...atual, d];
+      guardarEscolha(utilizadorFiltroId, novo);
+      return novo;
+    });
+    setPagina(1);
+  };
+  const diasRapidosISO = diasDoFiltro(diasRapidos);
 
   // v1.58.0 (Prompt 80, ponto 3) — Aba de filtragem por estado.
   // 'todas' | 'por_atribuir' | 'pendentes' | 'concluidas'
@@ -209,6 +235,8 @@ export default function AdminTarefasPage() {
     if (soParceiros && !t.origem_parceiro) {
       return false;
     }
+    // Filtro rápido Hoje / Amanhã (dias de Lisboa).
+    if (!passaFiltroRapido(t.data, diasRapidosISO)) return false;
     // FIX (filtros avançados) — Intervalo de datas.
     if (filtroDataInicio) {
       const dataTarefa = t.data?.slice(0, 10);
@@ -1042,6 +1070,21 @@ export default function AdminTarefasPage() {
               ))}
             </select>
           </div>
+          {/* Filtro rápido: Hoje / Amanhã (os dois = mostra hoje e amanhã). */}
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filtro rápido por dia">
+            {([["hoje", "Hoje"], ["amanha", "Amanhã"]] as const).map(([id, rotulo]) => (
+              <Button
+                key={id}
+                variant={diasRapidos.includes(id) ? "default" : "outline"}
+                size="sm"
+                className="h-11 min-w-[5.5rem] rounded-full sm:h-9"
+                onClick={() => alternarDiaRapido(id)}
+                aria-pressed={diasRapidos.includes(id)}
+              >
+                {rotulo}
+              </Button>
+            ))}
+          </div>
           {/* FIX (sync parceiros) — Toggle “Apenas Parceiros”. */}
           <Button
             variant={soParceiros ? "default" : "outline"}
@@ -1053,7 +1096,7 @@ export default function AdminTarefasPage() {
           >
             🤝 Apenas proprietários
           </Button>
-          {(filtroDataInicio || filtroDataFim || filtroPropriedade || filtroStaff || soParceiros) && (
+          {(filtroDataInicio || filtroDataFim || filtroPropriedade || filtroStaff || soParceiros || diasRapidos.length > 0) && (
             <Button
               variant="ghost"
               size="sm"
@@ -1064,6 +1107,8 @@ export default function AdminTarefasPage() {
                 setFiltroPropriedade("");
                 setFiltroStaff("");
                 setSoParceiros(false);
+                setDiasRapidos([]);
+                guardarEscolha(utilizadorFiltroId, []);
                 setPagina(1);
               }}
             >
