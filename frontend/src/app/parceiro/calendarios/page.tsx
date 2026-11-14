@@ -26,10 +26,15 @@ function EstadoDaFonte({ f }: { f: Fonte }) {
 export default function ParceiroCalendariosPage() {
   const [casas, setCasas] = useState<Casa[] | null>(null);
   const [fontes, setFontes] = useState<Fonte[]>([]);
+  const [pendentes, setPendentes] = useState<Record<string, number>>({});
   const [contacto, setContacto] = useState<{ nome: string | null; telefone: string | null; email: string | null } | null>(null);
   const [erro, setErro] = useState<string | null>(null);
 
   useEffect(() => {
+    // Os períodos por confirmar contam-se pela lista de reservas externas, por isso aparecem mesmo com a ligação em erro ou em pausa.
+    adminGet<{ reservas_externas: { propriedade: { _id: string } }[] }>("/api/parceiro/reservas-externas?estado=por_confirmar")
+      .then((r) => { const m: Record<string, number> = {}; for (const x of r.reservas_externas ?? []) m[x.propriedade._id] = (m[x.propriedade._id] ?? 0) + 1; setPendentes(m); })
+      .catch(() => { /* a contagem das fontes serve de alternativa */ });
     Promise.all([
       adminGet<{ propriedades: Casa[] }>("/api/parceiro/propriedades"),
       adminGet<{ fontes: Fonte[]; contacto?: { nome: string | null; telefone: string | null; email: string | null } | null }>("/api/parceiro/calendarios"),
@@ -56,7 +61,7 @@ export default function ParceiroCalendariosPage() {
       {casas && casas.length === 0 && <p className="text-sm text-muted-foreground">Ainda não há casas.</p>}
       {casas?.map((c) => {
         const daCasa = fontes.filter((f) => f.propriedade_id === c._id);
-        const porConfirmar = daCasa.reduce((n, f) => n + (f.n_por_confirmar ?? 0), 0);
+        const porConfirmar = Math.max(pendentes[c._id] ?? 0, daCasa.reduce((n, f) => n + (f.n_por_confirmar ?? 0), 0));
         return (
           <Card key={c._id}>
             <CardContent className="space-y-2 p-4">

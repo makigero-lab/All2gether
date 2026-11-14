@@ -107,7 +107,7 @@ export function VistaGeral({ lista, filtro, disponivel, aoAbrir, aoLigar, aoMuda
         {visiveis.map((p) => {
           const acordoBloqueia = p.acordo === "por_aceitar";
           return (
-            <li key={p._id} className="grid gap-x-4 gap-y-2 p-3 sm:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_auto_auto] sm:items-center">
+            <li key={p._id} className="grid gap-x-4 gap-y-2 p-3 sm:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_9.5rem_13.5rem] sm:items-center">
               <div className="min-w-0">
                 <button type="button" onClick={() => aoAbrir(p._id)} className="min-h-11 text-left font-medium hover:underline sm:min-h-0" aria-label={`Abrir ${p.nome}`}>
                   {p.nome}{!p.ativo && <span className="ml-1 text-xs font-normal text-muted-foreground">(inativo)</span>}

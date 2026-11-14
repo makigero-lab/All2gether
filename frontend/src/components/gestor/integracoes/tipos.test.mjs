@@ -45,27 +45,27 @@ test("a regra «uma só fonte» é dita numa frase única", () => {
   assert.equal(REGRA_UMA_FONTE, "Cada casa recebe reservas de uma só origem automática: Smoobu, ou os calendários Airbnb/Booking, que podem coexistir.");
 });
 
-test("blocos de 200: 239 períodos partem-se em 200 + 39", () => {
-  assert.equal(TAMANHO_BLOCO, 200);
+test("blocos de 25: 239 períodos partem-se em 9 blocos de 25 + 14", () => {
+  assert.equal(TAMANHO_BLOCO, 25);
   const ids = Array.from({ length: 239 }, (_, i) => `id${i}`);
   const b = blocos(ids);
-  assert.deepEqual(b.map((x) => x.length), [200, 39]);
-  assert.deepEqual(blocos([], 200), []);
+  assert.deepEqual(b.map((x) => x.length), [...Array(9).fill(25), 14]);
+  assert.deepEqual(blocos([], 25), []);
   assert.deepEqual(blocos(["a", "b", "c"], 2), [["a", "b"], ["c"]]);
 });
 
-test("lote em blocos: envia 200 + 39, soma o resultado e dá progresso", async () => {
+test("lote em blocos: envia 9 x 25 + 14, soma o resultado e dá progresso", async () => {
   const ids = Array.from({ length: 239 }, (_, i) => `id${i}`);
   const pedidos = []; const progresso = [];
   const enviar = async ({ ids: bloco, acao }) => { pedidos.push({ n: bloco.length, acao }); return { ok: bloco.length - 1, falhas: 1, resultados: [{ id: bloco[0], ok: false, erro: "O proprietário desta casa está inativo." }, ...bloco.slice(1).map((id) => ({ id, ok: true }))] }; };
   const r = await enviarEmBlocos(ids, "confirmar", enviar, (f) => progresso.push(f));
-  assert.deepEqual(pedidos.map((p) => p.n), [200, 39]);
-  assert.equal(r.ok, 237);
-  assert.equal(r.falhas.length, 2);
+  assert.deepEqual(pedidos.map((p) => p.n), [...Array(9).fill(25), 14]);
+  assert.equal(r.ok, 229);
+  assert.equal(r.falhas.length, 10);
   assert.deepEqual(r.restantes, []);
   assert.equal(r.erro, null);
-  assert.deepEqual(progresso, [0, 200, 239]);
-  assert.deepEqual(agruparFalhas(r.falhas), [{ texto: "O proprietário desta casa está inativo.", n: 2 }]);
+  assert.deepEqual(progresso, [0, 25, 50, 75, 100, 125, 150, 175, 200, 225, 239]);
+  assert.deepEqual(agruparFalhas(r.falhas), [{ texto: "O proprietário desta casa está inativo.", n: 10 }]);
 });
 
 test("lote em blocos: se o servidor pára mais cedo (nao_tratados) o resto segue no pedido seguinte", async () => {
@@ -87,8 +87,8 @@ test("lote em blocos: um erro de rede a meio não perde o que já foi feito e di
   let n = 0;
   const enviar = async ({ ids: bloco }) => { n += 1; if (n === 2) throw new Error("Falhou a ligação."); return { ok: bloco.length, falhas: 0, resultados: bloco.map((id) => ({ id, ok: true })) }; };
   const r = await enviarEmBlocos(ids, "confirmar", enviar);
-  assert.equal(r.ok, 200);
-  assert.equal(r.restantes.length, 100);
+  assert.equal(r.ok, 25);
+  assert.equal(r.restantes.length, 275);
   assert.equal(r.erro, "Falhou a ligação.");
 });
 
