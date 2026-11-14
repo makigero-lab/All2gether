@@ -13,7 +13,7 @@ import { agruparFalhas, enviarEmBlocos, msgErro, nomesDistintos, textoCorte, typ
 interface Externa {
   _id: string;
   parceiro: { _id: string; nome: string } | null;
-  propriedade: { _id: string; nome: string; morada_curta?: string | null };
+  propriedade: { _id: string; nome: string; morada_curta?: string | null; morada_rua?: string | null; morada_localidade?: string | null };
   canal_texto: string;
   check_in: string;
   check_out: string;
@@ -203,7 +203,7 @@ export function ReservasPorConfirmarGestor({ proprietariosComErro, disponivel, a
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h3 className="text-sm font-medium">{nomes.get(c.casaId) ?? c.casa} <span className="font-normal text-muted-foreground">· {c.itens.length}</span></h3>
                   <div className="flex flex-wrap gap-2">
-                    <Button size="sm" variant="outline" className="min-h-11 sm:min-h-8" disabled={ocupado} onClick={() => alternar(ids, !ids.every((i) => escolhidos.has(i)))}>{ids.every((i) => escolhidos.has(i)) ? "Limpar" : "Escolher a casa"}</Button>
+                    <Button size="sm" variant="outline" className="min-h-11 sm:min-h-8" disabled={ocupado} aria-label={`${ids.every((i) => escolhidos.has(i)) ? "Limpar" : "Escolher a casa"} ${nomes.get(c.casaId) ?? c.casa}`} onClick={() => alternar(ids, !ids.every((i) => escolhidos.has(i)))}>{ids.every((i) => escolhidos.has(i)) ? "Limpar" : "Escolher a casa"}</Button>
                     <Button size="sm" variant="outline" className="min-h-11 sm:min-h-8" disabled={ocupado} onClick={() => pedirBloqueio(ids)}>Marcar todos como bloqueio</Button>
                   </div>
                 </div>

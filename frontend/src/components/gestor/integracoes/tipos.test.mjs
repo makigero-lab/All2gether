@@ -177,32 +177,69 @@ test("haQuanto: 1 dia no singular", () => {
   assert.equal(haQuanto(null), "ainda não");
 });
 
-test("S1: falha de 24 h ou mais diz «a tentar de novo» e conta como longa", () => {
+test("S1: falha de 24 h ou mais usa a mesma frase («nova tentativa») e conta como longa", () => {
   assert.equal(falhaLonga({ falha_desde: em(-60 * 25) }, AGORA), true);
   assert.equal(falhaLonga({ falha_desde: em(-60 * 23) }, AGORA), false);
   assert.equal(falhaLonga({}, AGORA), false);
-  assert.equal(textoFalha({ falha_desde: em(-60 * 72), proxima_leitura_em: em(120) }, AGORA), "Falha há 3 dias · a tentar de novo às 14:10");
-  assert.equal(textoFalha({ falha_desde: em(-60 * 72), proxima_leitura_em: em(-2) }, AGORA), "Falha há 3 dias · a tentar de novo em breve");
+  assert.equal(textoFalha({ falha_desde: em(-60 * 72), proxima_leitura_em: em(120) }, AGORA), "Falha há 3 dias · nova tentativa às 14:10");
+  assert.equal(textoFalha({ falha_desde: em(-60 * 72), proxima_leitura_em: em(-2) }, AGORA), "Falha há 3 dias · nova tentativa em breve");
 });
 
-test("S11: nomes iguais distinguem-se pela morada curta (só a localidade se ficar comprido) ou por número", () => {
+const casa = (_id, nome, m = {}) => ({ _id, nome, ...m });
+
+test("casas homónimas: nome único fica como está", () => {
+  const n = nomesDistintos([casa("1", "Casa Azul"), casa("2", "Estoril Villa", { morada_localidade: "Estoril" })]);
+  assert.equal(n.get("1"), "Casa Azul");
+  assert.equal(n.get("2"), "Estoril Villa");
+});
+
+test("casas homónimas em cidades diferentes: (Localidade)", () => {
   const n = nomesDistintos([
-    { _id: "a", nome: "Casa Azul", morada_curta: "Rua do Ouro 10, Lisboa" },
-    { _id: "b", nome: "casa azul ", morada_curta: "Rua das Flores 5, Porto" },
-    { _id: "c", nome: "Única" },
-    { _id: "d", nome: "Apartamento Vista Mar Cascais", morada_curta: "Avenida Marginal 1234, Cascais" },
-    { _id: "e", nome: "Apartamento Vista Mar Cascais", morada_curta: "Rua Curta 2, Estoril" },
-    { _id: "f", nome: "Sem Morada" }, { _id: "g", nome: "Sem Morada" },
+    casa("a", "Casa Azul", { morada_rua: "Rua do Ouro 10", morada_localidade: "Lisboa" }),
+    casa("b", "casa  azul ", { morada_rua: "Rua das Flores 5", morada_localidade: "Porto" }),
   ]);
-  assert.equal(n.get("a"), "Casa Azul (Rua do Ouro 10, Lisboa)");
-  assert.equal(n.get("b"), "casa azul (Rua das Flores 5, Porto)");
-  assert.equal(n.get("c"), "Única");
-  assert.equal(n.get("d"), "Apartamento Vista Mar Cascais (Cascais)");
-  assert.equal(n.get("f"), "Sem Morada (1)");
-  assert.equal(n.get("g"), "Sem Morada (2)");
+  assert.equal(n.get("a"), "Casa Azul (Lisboa)");
+  assert.equal(n.get("b"), "casa  azul (Porto)");
 });
 
-test("S11: o seletor de casas mostra o canal ligado em forma curta e distingue nomes repetidos", () => {
+test("casas homónimas na mesma cidade: rua curta (sem o número da porta)", () => {
+  const n = nomesDistintos([
+    casa("a", "Apartamento T1 Baixa", { morada_rua: "Rua Augusta 100", morada_localidade: "Lisboa" }),
+    casa("b", "Apartamento T1 Baixa", { morada_rua: "Rua do Ouro 10", morada_localidade: "Lisboa" }),
+    casa("c", "Apartamento T1 Baixa", { morada_rua: "Rua da Prata 3", morada_localidade: "Porto" }),
+  ]);
+  assert.equal(n.get("a"), "Apartamento T1 Baixa (Rua Augusta)");
+  assert.equal(n.get("b"), "Apartamento T1 Baixa (Rua do Ouro)");
+  assert.equal(n.get("c"), "Apartamento T1 Baixa (Porto)");
+});
+
+test("casas homónimas na mesma rua: rua com número; se nem assim, (1), (2) por _id", () => {
+  const n = nomesDistintos([
+    casa("a", "Loft", { morada_rua: "Rua Augusta 100", morada_localidade: "Lisboa" }),
+    casa("b", "Loft", { morada_rua: "Rua Augusta 120", morada_localidade: "Lisboa" }),
+  ]);
+  assert.equal(n.get("a"), "Loft (Rua Augusta 100)");
+  assert.equal(n.get("b"), "Loft (Rua Augusta 120)");
+  const m = nomesDistintos([
+    casa("z", "Loft", { morada_rua: "Rua Augusta 100", morada_localidade: "Lisboa" }),
+    casa("y", "Loft", { morada_rua: "Rua Augusta 100", morada_localidade: "Lisboa" }),
+  ]);
+  assert.equal(m.get("y"), "Loft (1)");
+  assert.equal(m.get("z"), "Loft (2)");
+});
+
+test("casas homónimas sem morada: (1), (2) por ordem estável; misturadas com casas com morada", () => {
+  const n = nomesDistintos([casa("b", "Sem Morada"), casa("a", "Sem Morada"), casa("c", "Sem Morada", { morada_localidade: "Faro" })]);
+  assert.equal(n.get("c"), "Sem Morada (Faro)");
+  assert.equal(n.get("a"), "Sem Morada (1)");
+  assert.equal(n.get("b"), "Sem Morada (2)");
+  // a ordem não depende da ordem da lista
+  assert.equal(nomesDistintos([casa("a", "Sem Morada"), casa("b", "Sem Morada")]).get("a"), "Sem Morada (1)");
+  // compatível com a morada_curta antiga «Rua, Localidade»
+  assert.equal(nomesDistintos([casa("1", "X", { morada_curta: "Rua A 1, Porto" }), casa("2", "X", { morada_curta: "Rua B 2, Lisboa" })]).get("1"), "X (Porto)");
+});
+
+test("S11: seletor com o canal ligado antes da desambiguação (cabe no telemóvel)", () => {
   const c = (id, nome, o = {}) => ({ _id: id, nome, smoobu: false, airbnb: null, booking: null, outros: [], ...o });
   const r = rotulosDasCasas([
     c("1", "Baixa Pombalina", { airbnb: { canal_texto: "Airbnb" } }),
@@ -211,19 +248,15 @@ test("S11: o seletor de casas mostra o canal ligado em forma curta e distingue n
     c("4", "Graça", { airbnb: {}, booking: {} }),
     c("5", "Sé", { booking: {} }),
   ]);
-  assert.equal(r.get("1"), "Baixa Pombalina — Airbnb");
-  assert.equal(r.get("2"), "Alfama — Smoobu");
+  assert.equal(r.get("1"), "Baixa Pombalina · Airbnb");
+  assert.equal(r.get("2"), "Alfama · Smoobu");
   assert.equal(r.get("3"), "Chiado");
-  assert.equal(r.get("4"), "Graça — Airbnb + Booking");
-  assert.equal(r.get("5"), "Sé — Booking");
+  assert.equal(r.get("4"), "Graça · Airbnb + Booking");
+  assert.equal(r.get("5"), "Sé · Booking");
   const d = rotulosDasCasas([
-    c("a", "Casa do Mar", { morada_curta: "Rua A, Lisboa", airbnb: {} }),
-    c("b", "Casa do Mar", { morada_curta: "Rua B, Porto", booking: {} }),
+    c("a", "Apartamento T1 Baixa", { morada_rua: "Rua Augusta 100", morada_localidade: "Lisboa", airbnb: {}, booking: {} }),
+    c("b", "Apartamento T1 Baixa", { morada_rua: "Rua do Ouro 10", morada_localidade: "Lisboa" }),
   ]);
-  assert.equal(d.get("a"), "Casa do Mar (Rua A, Lisboa) — Airbnb");
-  assert.equal(d.get("b"), "Casa do Mar (Rua B, Porto) — Booking");
-  // rótulo inteiro acima de 40 caracteres: a morada encurta para a localidade
-  const e = rotulosDasCasas([c("x", "Casa Azul", { morada_curta: "Rua do Ouro 10, Lisboa", airbnb: {} }), c("y", "Casa Azul", { morada_curta: "Rua das Flores 5, Porto", booking: {} })]);
-  assert.equal(e.get("x"), "Casa Azul (Lisboa) — Airbnb");
-  assert.equal(e.get("y"), "Casa Azul (Porto) — Booking");
+  assert.equal(d.get("a"), "Apartamento T1 Baixa · Airbnb + Booking (Rua Augusta)");
+  assert.equal(d.get("b"), "Apartamento T1 Baixa (Rua do Ouro)");
 });

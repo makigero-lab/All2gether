@@ -153,3 +153,14 @@ test("ronda 2: a página real do proprietário mostra o tempo da falha; casas ho
   assert.match(confirmar, /variant=\{destrutivo \? "destructive" : "default"\}/);
   assert.match(porConfirmar, /<ConfirmarDialog aberto destrutivo/);
 });
+
+test("ronda 3: rótulo único para casas homónimas em todos os ecrãs; botões do calendário maiores no pc", () => {
+  assert.match(paginaCalendariosParceiro, /nomesDistintos\(todas\)/);
+  assert.match(porConfirmar, /Escolher a casa"\} \$\{nomes\.get\(c\.casaId\)/);
+  assert.match(porConfirmar, /nomes\.get\(c\.casaId\) \?\? c\.casa/);
+  const propriedades = ler("../../../app/gestor/propriedades/page.tsx");
+  const calendario = propriedades.slice(propriedades.indexOf("Calendários externos de ${p.nome}") - 400, propriedades.indexOf("Calendários externos de ${p.nome}"));
+  assert.match(calendario, /h-9 w-9/);
+  assert.doesNotMatch(calendario, /h-8 w-8/);
+  assert.doesNotMatch(porConfirmar, /nova tentativa|a tentar de novo/);
+});

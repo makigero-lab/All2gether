@@ -21,7 +21,7 @@ const { notificarSino } = require('../notificar');
 const { semUrl } = require('./cifra');
 const D = require('./decisoes');
 const Rv = require('./reservas');
-const { moradaCurta } = require('./moradaCurta');
+const { moradaParaApi } = require('./moradaCurta');
 
 const resp = (status, body) => ({ status, body });
 const MAX_LOTE = 200;
@@ -100,7 +100,7 @@ async function resumoIntegracoes({ empresaId, incluirInativos = false }) {
         if (x.ultima_leitura_em && (!ultima || new Date(x.ultima_leitura_em) > new Date(ultima))) ultima = x.ultima_leitura_em;
       }
       return {
-        _id: String(c._id), nome: c.nome, morada_curta: moradaCurta(c), ativo: c.ativo !== false, smoobu: !!c.smoobu_id, por_confirmar: pc,
+        _id: String(c._id), nome: c.nome, ...moradaParaApi(c), ativo: c.ativo !== false, smoobu: !!c.smoobu_id, por_confirmar: pc,
         airbnb: cs.find((x) => x.canal === 'airbnb') || null,
         booking: cs.find((x) => x.canal === 'booking') || null,
         outros: cs.filter((x) => x.canal !== 'airbnb' && x.canal !== 'booking'),

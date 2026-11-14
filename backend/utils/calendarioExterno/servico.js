@@ -26,7 +26,7 @@ const { tentarTeste, limparLimiteTestes } = require('./limiteTestes');
 const Empresa = require('../../models/Empresa');
 const Utilizador = require('../../models/Utilizador');
 const { avisarParceiro } = require('./avisos');
-const { moradaCurta } = require('./moradaCurta');
+const { moradaParaApi } = require('./moradaCurta');
 const Rv = require('./reservas');
 
 const resp = (status, body) => ({ status, body });
@@ -417,7 +417,7 @@ async function listarReservasExternas({ escopo, estado = 'por_confirmar', parcei
   return resp(200, {
     total, limite: LIMITE_LISTA_EXTERNAS, desde: saltar, mostrando: lista.length,
     reservas_externas: lista.map((x) => ({
-      _id: String(x._id), propriedade: { _id: String(x.propriedade_id._id), nome: x.propriedade_id.nome, morada_curta: moradaCurta(x.propriedade_id) },
+      _id: String(x._id), propriedade: { _id: String(x.propriedade_id._id), nome: x.propriedade_id.nome, ...moradaParaApi(x.propriedade_id) },
       parceiro: x.parceiro_id ? { _id: String(x.parceiro_id._id), nome: x.parceiro_id.nome } : null,
       canal: x.canal, canal_texto: ({ airbnb: 'Airbnb', booking: 'Booking.com', vrbo: 'Vrbo' })[x.canal] || 'Outro canal',
       check_in: Rv.iso(x.check_in), check_out: Rv.iso(x.check_out), noites: x.noites, motivo: x.motivo, estado: x.estado, conflito: x.conflito, decidido_por: x.decidido_por,

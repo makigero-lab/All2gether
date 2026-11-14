@@ -177,3 +177,15 @@ describe('falha_desde: ciclos', () => {
     expect(JSON.stringify(po.body)).not.toContain('falha_desde');
   });
 });
+
+describe('ronda 3: o proprietário recebe rua e localidade só das suas casas', () => {
+  test('GET /api/parceiro/propriedades traz morada_rua e morada_localidade', async () => {
+    const c = await cen();
+    await Propriedade.updateOne({ _id: c.casa._id }, { $set: { morada_estruturada: { rua: 'Rua Augusta 100', cidade: 'Lisboa' } } });
+    const r = await request(app).get('/api/parceiro/propriedades').set(auth(c.tokP));
+    expect(r.status).toBe(200);
+    const minha = r.body.propriedades.find((p) => String(p._id) === String(c.casa._id));
+    expect(minha).toMatchObject({ morada_rua: 'Rua Augusta 100', morada_localidade: 'Lisboa', morada_curta: 'Rua Augusta 100, Lisboa' });
+    expect(r.body.propriedades.some((p) => String(p._id) === String(c.alheia._id))).toBe(false);
+  });
+});

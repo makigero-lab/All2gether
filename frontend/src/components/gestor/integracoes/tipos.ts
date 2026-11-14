@@ -27,8 +27,10 @@ export interface CasaResumo {
   airbnb: CelulaCanal | null;
   booking: CelulaCanal | null;
   outros: CelulaCanal[];
-  /** Morada curta (rua e localidade) para distinguir casas com o mesmo nome. */
+  /** Morada para distinguir casas com o mesmo nome (ver `distinguirCasas`). */
   morada_curta?: string | null;
+  morada_rua?: string | null;
+  morada_localidade?: string | null;
 }
 
 export interface ErroDaLigacao { casa: string; canal: string; fonte_id: string; codigo?: string; mensagem: string; em: string | null; temporario?: boolean; falha_desde?: string | null; proxima_leitura_em?: string | null }
@@ -118,13 +120,11 @@ export function textoFalha(e: { falha_desde?: string | null; proxima_leitura_em?
   if (!e) return null;
   const partes: string[] = [];
   const desde = e.falha_desde ? new Date(e.falha_desde) : null;
-  const longa = falhaLonga(e, agora);
   if (desde && !Number.isNaN(desde.getTime())) {
     const q = haQuanto(desde.toISOString(), agora.getTime());
     partes.push(q === "agora mesmo" ? "Falhou agora mesmo" : `Falha ${q}`);
   }
-  // Falha de um dia ou mais: «a tentar de novo» (o servidor continua a tentar sozinho) em vez de «nova tentativa».
-  const tentativa = longa ? "a tentar de novo" : "nova tentativa";
+  const tentativa = "nova tentativa"; // a mesma frase em qualquer duração; a falha longa só ganha destaque na interface
   const prox = e.proxima_leitura_em ? new Date(e.proxima_leitura_em) : null;
   if (prox && !Number.isNaN(prox.getTime())) {
     if (prox.getTime() <= agora.getTime()) partes.push(`${tentativa} em breve`);
@@ -145,46 +145,77 @@ export function falhaLonga(e: { falha_desde?: string | null } | null | undefined
   return !Number.isNaN(d) && agora.getTime() - d >= 86400000;
 }
 
-/** Localidade de uma morada curta («Rua do Ouro 10, Lisboa» → «Lisboa»). */
-const localidade = (m: string) => m.split(",").pop()!.trim() || m;
+export interface CasaNomeavel {
+  _id: string;
+  nome: string;
+  morada_curta?: string | null;
+  morada_rua?: string | null;
+  morada_localidade?: string | null;
+}
+
+const norm = (t: string | null | undefined) => (t ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+/** «Rua Augusta 100» → «Rua Augusta» (sem o número da porta). */
+const ruaCurta = (r: string) => r.replace(/[\s,]+\d+[a-zA-Z]?(\s*[-–/].*)?$/, "").trim() || r;
+
+/** Rua e localidade de uma casa (os campos novos, ou a «Rua, Localidade» antiga). */
+function partesDaMorada(c: CasaNomeavel): { rua: string | null; localidade: string | null } {
+  if (c.morada_rua || c.morada_localidade) return { rua: c.morada_rua?.trim() || null, localidade: c.morada_localidade?.trim() || null };
+  const m = c.morada_curta?.trim();
+  if (!m) return { rua: null, localidade: null };
+  const i = m.lastIndexOf(",");
+  return i < 0 ? { rua: m, localidade: null } : { rua: m.slice(0, i).trim() || null, localidade: m.slice(i + 1).trim() || null };
+}
 
 /**
- * Nomes das casas que se distinguem uns dos outros: se um nome se repete (sem diferenças de maiúsculas ou espaços),
- * acrescenta a morada curta («Casa Azul (Rua do Ouro 10, Lisboa)») ou, sem morada, um número. Com `max`, uma morada
- * que faria o nome passar desse tamanho encurta-se para a localidade.
+ * A ÚNICA função que distingue casas com o mesmo nome (seletor, cabeçalhos, matriz, diálogo de bloqueio, cartões).
+ * Nome sozinho se é único; se repete, «(Localidade)»; se a localidade também colide (ou falta), a rua curta
+ * («Rua Augusta»); se ainda colide, a rua com o número; no fim «(1)», «(2)» por ordem estável do _id.
+ * Devolve o nome e o complemento separados (`extra` é null para nomes únicos).
  */
-export function nomesDistintos(casas: { _id: string; nome: string; morada_curta?: string | null }[], max: number | ((id: string) => number) = 40): Map<string, string> {
-  const repetidos = new Map<string, number>();
-  for (const c of casas) { const k = c.nome.trim().toLowerCase(); repetidos.set(k, (repetidos.get(k) ?? 0) + 1); }
-  const contador = new Map<string, number>();
-  const out = new Map<string, string>();
-  for (const c of casas) {
-    const k = c.nome.trim().toLowerCase();
-    if ((repetidos.get(k) ?? 0) <= 1) { out.set(c._id, c.nome); continue; }
-    const n = (contador.get(k) ?? 0) + 1;
-    if (!c.morada_curta) contador.set(k, n);
-    const nome = c.nome.trim();
-    const morada = c.morada_curta ? (`${nome} (${c.morada_curta})`.length > (typeof max === "function" ? max(c._id) : max) ? localidade(c.morada_curta) : c.morada_curta) : null;
-    out.set(c._id, morada ? `${nome} (${morada})` : `${nome} (${n})`);
+export function distinguirCasas(casas: CasaNomeavel[]): Map<string, { nome: string; extra: string | null }> {
+  const grupos = new Map<string, CasaNomeavel[]>();
+  for (const c of casas) { const k = norm(c.nome); grupos.set(k, [...(grupos.get(k) ?? []), c]); }
+  const out = new Map<string, { nome: string; extra: string | null }>();
+  for (const g of grupos.values()) {
+    if (g.length === 1) { out.set(g[0]._id, { nome: g[0].nome, extra: null }); continue; }
+    let pendentes = g.map((c) => ({ c, ...partesDaMorada(c) }));
+    const atribuir = (valor: (x: (typeof pendentes)[number]) => string | null) => {
+      const conta = new Map<string, number>();
+      for (const x of pendentes) { const v = norm(valor(x)); if (v) conta.set(v, (conta.get(v) ?? 0) + 1); }
+      pendentes = pendentes.filter((x) => {
+        const v = valor(x);
+        if (v && conta.get(norm(v)) === 1) { out.set(x.c._id, { nome: x.c.nome.trim(), extra: v }); return false; }
+        return true;
+      });
+    };
+    atribuir((x) => x.localidade);
+    atribuir((x) => (x.rua ? ruaCurta(x.rua) : null));
+    atribuir((x) => x.rua);
+    [...pendentes].sort((a, b) => (a.c._id < b.c._id ? -1 : 1)).forEach((x, i) => out.set(x.c._id, { nome: x.c.nome.trim(), extra: String(i + 1) }));
   }
   return out;
 }
 
+/** «Casa Azul (Lisboa)» — o nome já com o complemento, ou só o nome se é único. */
+export function nomesDistintos(casas: CasaNomeavel[]): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const [id, d] of distinguirCasas(casas)) out.set(id, d.extra ? `${d.nome} (${d.extra})` : d.nome);
+  return out;
+}
+
 /**
- * Nome da casa para o seletor do assistente, com o canal já ligado em forma curta para caber no telemóvel:
- * «Baixa — Airbnb + Booking», «— Airbnb», «— Smoobu» e sem sufixo se nada. Nomes repetidos levam a morada curta
- * (só a localidade se o rótulo passar dos ~40 caracteres).
+ * Nome da casa para o seletor do assistente: o canal ligado em forma curta vem ANTES da desambiguação, para não ser
+ * cortado no telemóvel: «Apartamento T1 Baixa · Airbnb + Booking (Rua Augusta)», «Estoril Villa» (sem nada).
  */
-export function rotulosDasCasas(casas: Pick<CasaResumo, "_id" | "nome" | "smoobu" | "airbnb" | "booking" | "outros" | "morada_curta">[]): Map<string, string> {
-  const sufixos = new Map<string, string>();
+export function rotulosDasCasas(casas: (CasaNomeavel & Pick<CasaResumo, "smoobu" | "airbnb" | "booking" | "outros">)[]): Map<string, string> {
+  const d = distinguirCasas(casas);
+  const out = new Map<string, string>();
   for (const c of casas) {
     const canais = [c.airbnb ? "Airbnb" : "", c.booking ? "Booking" : "", ...(c.outros ?? []).map((o) => o.canal_texto)].filter(Boolean);
-    sufixos.set(c._id, c.smoobu ? " — Smoobu" : canais.length ? ` — ${canais.join(" + ")}` : "");
+    const canal = c.smoobu ? " · Smoobu" : canais.length ? ` · ${canais.join(" + ")}` : "";
+    const x = d.get(c._id) ?? { nome: c.nome, extra: null };
+    out.set(c._id, `${x.nome}${canal}${x.extra ? ` (${x.extra})` : ""}`);
   }
-  // O rótulo inteiro (nome, morada e canal) tem de caber numa linha do telemóvel: ~40 caracteres.
-  const nomes = nomesDistintos(casas, (id) => 40 - (sufixos.get(id)?.length ?? 0));
-  const out = new Map<string, string>();
-  for (const c of casas) out.set(c._id, (nomes.get(c._id) ?? c.nome) + (sufixos.get(c._id) ?? ""));
   return out;
 }
 

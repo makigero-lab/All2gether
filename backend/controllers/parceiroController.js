@@ -16,6 +16,7 @@
  * (filtro por parceiro_id = req.user.id).
  */
 
+const { moradaParaApi } = require('../utils/calendarioExterno/moradaCurta');
 const mongoose = require('mongoose');
 const Propriedade = require('../models/Propriedade');
 const Tarefa = require('../models/Tarefa');
@@ -110,10 +111,11 @@ async function listarPropriedades(req, res) {
       parceiro_id: parceiroId,
       ativo: true,
     })
-      .select('nome morada coordenadas tempo_limpeza_minutos capacidade_hospedes origem smoobu_id')
+      .select('nome morada morada_estruturada coordenadas tempo_limpeza_minutos capacidade_hospedes origem smoobu_id')
       .lean();
 
-    return res.status(200).json({ propriedades });
+    // Acrescenta rua e localidade (só das casas dele) para o ecrã distinguir casas com o mesmo nome.
+    return res.status(200).json({ propriedades: propriedades.map((p) => ({ ...p, ...moradaParaApi(p) })) });
   } catch (err) {
     console.error('❌ parceiroController.listarPropriedades:', err.message);
     return res.status(500).json({ erro: 'Erro interno.' });

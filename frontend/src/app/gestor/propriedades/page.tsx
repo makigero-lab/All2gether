@@ -1231,7 +1231,7 @@ export default function PropriedadesPage() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-8 w-8"
+                            className="h-9 w-9"
                             onClick={() => abrirEdicao(p)}
                             aria-label={`Editar ${p.nome}`}
                             title="Editar"
@@ -1241,7 +1241,7 @@ export default function PropriedadesPage() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-8 w-8"
+                            className="h-9 w-9"
                             onClick={() => setCalendarioDe(p)}
                             aria-label={`Calendários externos de ${p.nome}`}
                             title="Calendários externos (Airbnb, Booking...)"
@@ -1251,7 +1251,7 @@ export default function PropriedadesPage() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-8 w-8"
+                            className="h-9 w-9"
                             onClick={() => handleToggleAtivo(p)}
                             aria-label={p.ativo ? "Desativar" : "Ativar"}
                             title={p.ativo ? "Desativar" : "Ativar"}
@@ -1265,7 +1265,7 @@ export default function PropriedadesPage() {
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-8 w-8 text-destructive hover:text-destructive"
+                              className="h-9 w-9 text-destructive hover:text-destructive"
                               onClick={() => setEliminandoProp(p)}
                               aria-label={`Eliminar definitivamente ${p.nome}`}
                               title="Eliminar Definitivamente (admin)"

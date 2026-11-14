@@ -12,7 +12,7 @@ import { emCurso, hojeLisboaISO, OPCOES_CHEGADA, ordenarPorChegada, passaFiltroC
 
 export interface ReservaExternaDTO {
   _id: string;
-  propriedade: { _id: string; nome: string; morada_curta?: string | null };
+  propriedade: { _id: string; nome: string; morada_curta?: string | null; morada_rua?: string | null; morada_localidade?: string | null };
   canal: string;
   canal_texto: string;
   check_in: string;

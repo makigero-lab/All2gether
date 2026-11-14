@@ -132,6 +132,20 @@ describe('S11/ronda 2: a lista por confirmar traz o id e a morada curta da casa'
     await Propriedade.updateOne({ _id: c.casa._id }, { $set: { morada_estruturada: { rua: 'Rua do Ouro 10', cidade: 'Lisboa' } } });
     await ligar(c, urlBooking(), BOOKING([{ uid: 'b1', ci: 2, co: 4 }]));
     const r = await Servico.listarReservasExternas({ escopo: c.escopoG, estado: 'por_confirmar' });
-    expect(r.body.reservas_externas[0].propriedade).toMatchObject({ _id: String(c.casa._id), morada_curta: 'Rua do Ouro 10, Lisboa' });
+    expect(r.body.reservas_externas[0].propriedade).toMatchObject({ _id: String(c.casa._id), morada_curta: 'Rua do Ouro 10, Lisboa', morada_rua: 'Rua do Ouro 10', morada_localidade: 'Lisboa' });
+  });
+});
+
+describe('ronda 3: partes da morada (rua e localidade) para distinguir casas homónimas', () => {
+  const { moradaPartes, moradaParaApi } = require('../utils/calendarioExterno/moradaCurta');
+  test('estruturada, livre com código postal, só uma parte e sem morada', () => {
+    expect(moradaPartes({ morada_estruturada: { rua: 'Rua Augusta 100', cidade: 'Lisboa' } })).toEqual({ rua: 'Rua Augusta 100', localidade: 'Lisboa' });
+    expect(moradaPartes({ morada_estruturada: { rua: 'Rua Augusta 100' } })).toEqual({ rua: 'Rua Augusta 100', localidade: null });
+    expect(moradaPartes({ morada: 'Avenida da Liberdade 5, 3º Esq, 1250-001 Lisboa' })).toEqual({ rua: 'Avenida da Liberdade 5', localidade: 'Lisboa' });
+    expect(moradaPartes({ morada: 'Rua das Flores 5, Porto' })).toEqual({ rua: 'Rua das Flores 5', localidade: 'Porto' });
+    expect(moradaPartes({ morada: 'Rua das Flores 5' })).toEqual({ rua: 'Rua das Flores 5', localidade: null });
+    expect(moradaPartes({ morada: '' })).toEqual({ rua: null, localidade: null });
+    expect(moradaPartes(null)).toEqual({ rua: null, localidade: null });
+    expect(moradaParaApi({ morada: 'Rua das Flores 5, Porto' })).toEqual({ morada_curta: 'Rua das Flores 5, Porto', morada_rua: 'Rua das Flores 5', morada_localidade: 'Porto' });
   });
 });

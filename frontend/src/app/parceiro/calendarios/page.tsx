@@ -5,9 +5,9 @@ import Link from "next/link";
 import { AlertCircle, ArrowLeft, CalendarDays, CheckCircle2, CircleDashed, Loader2, PauseCircle } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { adminGet } from "@/lib/api";
-import { falhaLonga, textoFalha } from "@/components/gestor/integracoes/tipos";
+import { falhaLonga, nomesDistintos, textoFalha } from "@/components/gestor/integracoes/tipos";
 
-interface Casa { _id: string; nome: string; smoobu_id?: string | null }
+interface Casa { _id: string; nome: string; smoobu_id?: string | null; morada_curta?: string | null; morada_rua?: string | null; morada_localidade?: string | null }
 interface Fonte {
   propriedade_id: string; canal_texto: string; estado: "ativa" | "erro" | "pausada" | "suspensa";
   estado_texto: string | null; ultimo_erro: { mensagem: string } | null; falha_desde?: string | null; proxima_leitura_em?: string | null; em_validacao?: boolean; aviso_validacao?: string | null; n_por_confirmar?: number;
@@ -60,13 +60,15 @@ export default function ParceiroCalendariosPage() {
       {erro && <p role="alert" className="flex items-center gap-2 text-sm text-destructive"><AlertCircle className="h-4 w-4" /> {erro}</p>}
       {!casas && !erro && <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> A carregar…</p>}
       {casas && casas.length === 0 && <p className="text-sm text-muted-foreground">Ainda não há casas.</p>}
-      {casas?.map((c) => {
+      {casas?.map((c, _i, todas) => {
+        // Casas com o mesmo nome distinguem-se pela localidade ou pela rua (só as dele).
+        const nome = nomesDistintos(todas).get(c._id) ?? c.nome;
         const daCasa = fontes.filter((f) => f.propriedade_id === c._id);
         const porConfirmar = Math.max(pendentes[c._id] ?? 0, daCasa.reduce((n, f) => n + (f.n_por_confirmar ?? 0), 0));
         return (
           <Card key={c._id}>
             <CardContent className="space-y-2 p-4">
-              <h2 className="text-base font-semibold">{c.nome}</h2>
+              <h2 className="text-base font-semibold">{nome}</h2>
               {c.smoobu_id ? <p className="text-sm text-muted-foreground">Esta casa recebe as reservas pelo Smoobu.</p>
                 : daCasa.length === 0 ? <p className="flex items-center gap-1.5 text-sm text-muted-foreground"><CircleDashed className="h-4 w-4" aria-hidden /> Por ligar</p>
                 : daCasa.map((f) => <EstadoDaFonte key={f.canal_texto} f={f} />)}
