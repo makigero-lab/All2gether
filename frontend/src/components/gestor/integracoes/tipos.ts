@@ -214,7 +214,7 @@ export function rotulosDasCasas(casas: (CasaNomeavel & Pick<CasaResumo, "smoobu"
     const canais = [c.airbnb ? "Airbnb" : "", c.booking ? "Booking" : "", ...(c.outros ?? []).map((o) => o.canal_texto)].filter(Boolean);
     const canal = c.smoobu ? " · Smoobu" : canais.length ? ` · ${canais.join(" + ")}` : "";
     const x = d.get(c._id) ?? { nome: c.nome, extra: null };
-    out.set(c._id, `${x.nome}${canal}${x.extra ? ` (${x.extra})` : ""}`);
+    out.set(c._id, `${x.nome}${x.extra ? ` (${x.extra})` : ""}${canal}`);
   }
   return out;
 }
