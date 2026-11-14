@@ -185,7 +185,7 @@ describe('A1: chaves ICAL_* perdidas depois de cifrar', () => {
       expect(new Date(t.data_hora_agendada || t.data_limite || t.data).toISOString().slice(0, 10)).toBe('2032-02-05');
     });
 
-    test('com a chave ilegível NÃO cria a limpeza no dia de chegada: o log fica com erro explícito e o gestor é avisado', async () => {
+    test('com a chave ilegível a limpeza fica POR ATRIBUIR (não no dia de chegada em silêncio): log com erro explícito e gestor avisado', async () => {
       ligarChaves();
       const g = await preparar({ ativo: true });
       await comCifra(g.e);
@@ -195,10 +195,15 @@ describe('A1: chaves ICAL_* perdidas depois de cifrar', () => {
       expect(l.status).toBe('erro');
       expect(l.erro_msg).toContain('ICAL_CHAVES');
       expect(l.erro_msg).toContain('8102');
-      expect(await Tarefa.countDocuments({ smoobu_reserva_id: '8102' })).toBe(0);
+      expect(l.erro_msg).toMatch(/Data de saída desconhecida/);
+      const t = await Tarefa.findOne({ smoobu_reserva_id: '8102' }).lean();
+      expect(t.estado).toBe('por_atribuir');
+      expect(t.data_saida_desconhecida).toBe(true);
+      expect(t.motivo_nao_atribuicao).toMatch(/Data de saída desconhecida/);
+      expect(t.utilizador_id).toBeNull();
       expect(global.fetch).not.toHaveBeenCalled();
       const Notificacao = require('../models/Notificacao');
-      expect(await Notificacao.countDocuments({ chave: `smoobu_credenciais_ilegiveis:${g.e._id}` })).toBeGreaterThan(0);
+      expect(await Notificacao.countDocuments({ chave: `smoobu_saida_desconhecida:${g.e._id}:8102` })).toBeGreaterThan(0);
     });
 
     test('com departure no webhook e chave ilegível processa normalmente (não precisa de consultar)', async () => {

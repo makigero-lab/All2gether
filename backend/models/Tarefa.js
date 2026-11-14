@@ -132,6 +132,19 @@ const tarefaSchema = new mongoose.Schema(
       default: null,
       trim: true,
     },
+    // true: a reserva do Smoobu chegou sem data de saída e a consulta falhou; a limpeza ficou provisória no
+    // dia de chegada, por atribuir. A sincronização seguinte com a data real corrige o dia e limpa a marca.
+    data_saida_desconhecida: {
+      type: Boolean,
+      default: false,
+    },
+    // Enquanto a data é provisória, o dia que o gestor pôs à mão (mudar dia / atribuir / reatribuir) e quem foi.
+    // A marca provisória mantém-se; serve para avisar o gestor se a data real do Smoobu for diferente.
+    dia_mudado_pelo_gestor: {
+      dia: { type: String, default: undefined },
+      por: { type: mongoose.Schema.Types.ObjectId, ref: 'Utilizador', default: undefined },
+      em: { type: Date, default: undefined },
+    },
     // Data em que a tarefa foi concluída (para relatórios).
     concluida_em: {
       type: Date,

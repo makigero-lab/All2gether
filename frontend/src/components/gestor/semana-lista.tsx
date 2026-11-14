@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { infoEstadoTarefa } from "@/lib/estados";
 import { cn, extrairHoraISO, plural, temHoraReal } from "@/lib/utils";
 import { rotuloTipoLimpeza } from "@/components/tipo-limpeza-badge";
-import { AusentesLinha, AvatarPessoa, AvisosLimpeza, EtiquetaEstado, GrupoAvatares, COR_SEM_MAPA, primeiroNome, textoAvisos, tokenDoCartao, type AusenteDia } from "@/components/gestor/pessoa-estado";
+import { AusentesLinha, AvatarPessoa, AvisosLimpeza, EtiquetaEstado, GrupoAvatares, MotivoSaida, COR_SEM_MAPA, primeiroNome, textoAvisos, tokenDoCartao, type AusenteDia } from "@/components/gestor/pessoa-estado";
 import type { TarefaDia } from "@/components/gestor/vista-dia-equipa";
 
 export const TIPOS_FORA = ["ausencia", "ausencia_pendente", "folga_fixa", "viagem"];
@@ -76,16 +76,19 @@ export function LinhaLimpeza<T extends TarefaDia>({
       }}
     >
       <span className="semana-lista__hora">{hora}</span>
-      <span className="semana-lista__casa">
-        <span className="truncate">{casa}</span>
-        <AvisosLimpeza t={t} />
-        {renderExtra?.(t)}
+      <span className="semana-lista__coluna">
+        <span className="semana-lista__casa">
+          <span className="truncate">{casa}</span>
+          <AvisosLimpeza t={t} />
+          {renderExtra?.(t)}
+        </span>
+        <MotivoSaida t={t} />
       </span>
       <span className="semana-lista__pessoa">
         {semPessoa ? <AvatarPessoa pequeno /> : <GrupoAvatares membros={ms} cores={cores} pequeno />}
         <span className={cn("truncate", semPessoa && "font-bold")} style={semPessoa ? { color: "hsl(var(--status-porat))" } : undefined}>{quem}</span>
       </span>
-      <EtiquetaEstado estado={t.estado} className="semana-lista__estado" />
+      <EtiquetaEstado estado={t.estado} saida={t} className="semana-lista__estado" />
     </button>
   );
 }

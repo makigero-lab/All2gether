@@ -23,6 +23,7 @@ const { obterStaffDisponivel } = require('../utils/loadBalancer');
 const { cabeNaAgendaNaHora } = require('../utils/atribuicaoAutomatica');
 const { diaTexto, tipoDe: tipoDeTarefa } = require('../utils/tipoLimpeza');
 const { avisarGestores } = require('../utils/notificar');
+const { registarDiaMudadoPeloGestor } = require('../utils/diaMudadoGestor');
 const { estadoDaCasa, casaInativa } = require('../utils/casaAtiva');
 
 /**
@@ -742,6 +743,7 @@ exports.mudarDiaTarefa = async (req, res) => {
     }
     tarefa.data = dataNova;
     tarefa.data_ajustada_gestor = true;
+    registarDiaMudadoPeloGestor(tarefa, req.user); // data provisória (Smoobu sem saída): lembra o dia que o gestor pôs
     await tarefa.save();
 
     // Falta gente: tenta preencher a vaga sem mexer na hora.
@@ -962,6 +964,7 @@ exports.atribuirTarefa = async (req, res) => {
       } catch (e) { /* mantém */ }
     }
 
+    registarDiaMudadoPeloGestor(tarefa, req.user); // data provisória: o gestor aceitou/pôs este dia
     await tarefa.save();
     // O gestor mudou o dia/hora de uma limpeza de parceiro: aviso no sino do parceiro.
     if (new Date(tarefa.data).getTime() !== dataAntes) await avisarParceiro(tarefa, 'alterada');
@@ -1232,6 +1235,7 @@ exports.reatribuirTarefa = async (req, res) => {
     // Recalcula as vagas com o staff_necessario atual (a equipa pode ter encolhido,
     // p.ex. se o novo responsável já era membro).
     tarefa.pessoas_em_falta = Math.max(0, (Number(propriedade.staff_necessario) || 1) - eq.equipa_atribuida.length);
+    registarDiaMudadoPeloGestor(tarefa, req.user); // data provisória: o gestor pôs esta pessoa neste dia
     await tarefa.save();
     if (new Date(tarefa.data).getTime() !== dataAntesReatrib) await avisarParceiro(tarefa, 'alterada');
 

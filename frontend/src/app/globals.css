@@ -1156,6 +1156,36 @@
   justify-content: center;
   padding: 0;
 }
+/* «Data de saída por confirmar»: rótulo longo, pode quebrar em duas linhas (cartões e linhas estreitos). */
+.pessoa-etiqueta--confirmar {
+  height: auto;
+  min-height: 1.125rem;
+  padding-block: 0.0625rem;
+  border-radius: 0.625rem;
+  line-height: 1.1;
+  white-space: normal;
+  text-align: left;
+}
+/* Motivo da data provisória, em texto visível por baixo da casa. */
+.pessoa-motivo {
+  display: block;
+  min-width: 0;
+  font-size: 0.6875rem;
+  font-weight: 400;
+  line-height: 1.25;
+  color: hsl(var(--status-naoat));
+  white-space: normal;
+}
+/* Quadro de aviso do modal de detalhe. */
+.pessoa-quadro-aviso {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid hsl(var(--status-naoat));
+  border-radius: 0.375rem;
+  background: hsl(var(--status-naoat-bg));
+  color: hsl(var(--status-naoat));
+}
 .pessoa-etiqueta--neutra {
   color: hsl(var(--foreground));
   border-color: hsl(var(--border));
@@ -1322,6 +1352,12 @@
   gap: 0.375rem;
   font-weight: 600;
 }
+.semana-lista__coluna {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.125rem;
+}
 .semana-lista__pessoa {
   display: flex;
   min-width: 0;
@@ -1341,7 +1377,9 @@
   }
   .semana-lista__hora { grid-area: hora; }
   .semana-lista__estado { grid-area: estado; }
-  .semana-lista__casa { grid-area: casa; white-space: normal; }
+  .semana-lista__coluna { grid-area: casa; }
+  .semana-lista__casa { white-space: normal; }
+  .pessoa-etiqueta--confirmar { max-width: 11rem; }
   .semana-lista__casa > .truncate { overflow: visible; white-space: normal; text-overflow: clip; }
   .semana-lista__pessoa { grid-area: pessoa; }
   .semana-lista__ausentes { max-width: 100%; margin-left: 0; flex-basis: 100%; }
