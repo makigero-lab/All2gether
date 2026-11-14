@@ -68,16 +68,24 @@ async function planear(desde, info = {}) {
   const todas = await Tarefa.find(FILTRO_CAND(desde)).lean();
   // As que o gestor fixou à mão ficam como estão (e continuam a ocupar a agenda na cópia).
   const reservas = await reservasPorTarefa(todas);
-  info.porOrigem = Object.fromEntries(ORIGENS.map((o) => [o, { total: 0, fixadas_pelo_gestor: 0, recalculadas: 0, mudam: 0 }]));
+  info.porOrigem = Object.fromEntries(ORIGENS.map((o) => [o, { total: 0, fixadas_pelo_gestor: 0, a_preencher_a_hora_fixa: 0, recalculadas: 0, mudam: 0 }]));
   const origemDe = new Map();
+  const horaFixaDe = new Set();
   const cands = [];
   for (const t of todas) {
     const reserva = reservas.get(String(t._id));
     const o = origemDaLimpeza(t, reserva);
     origemDe.set(String(t._id), o);
     info.porOrigem[o].total++;
-    if (fixadaPeloGestor(t, reserva, H.temHoraReal)) info.porOrigem[o].fixadas_pelo_gestor++;
-    else { info.porOrigem[o].recalculadas++; cands.push(t); }
+    if (fixadaPeloGestor(t, reserva, H.temHoraReal)) {
+      info.porOrigem[o].fixadas_pelo_gestor++;
+      // Fixada e sem pessoa: procura-se quem caiba à hora que o gestor pôs (a hora nunca muda).
+      if (!t.utilizador_id && !(t.equipa_atribuida && t.equipa_atribuida.length) && H.temHoraReal(t.data)) {
+        info.porOrigem[o].a_preencher_a_hora_fixa++;
+        horaFixaDe.add(String(t._id));
+        cands.push(t);
+      }
+    } else { info.porOrigem[o].recalculadas++; cands.push(t); }
   }
   info.origemDe = origemDe;
   const props = new Map((await Propriedade.find({ _id: { $in: [...new Set(cands.map((t) => String(t.propriedade_id)))] } }).lean()).map((p) => [String(p._id), p]));
@@ -103,7 +111,7 @@ async function planear(desde, info = {}) {
       const prop = props.get(String(t.propriedade_id));
       const novo = { utilizador_id: null, equipa_atribuida: [], estado: 'por_atribuir', data: t.data, tempo_viagem_minutos: 0, pessoas_em_falta: 0, motivo_nao_atribuicao: 'Propriedade não encontrada' };
       if (prop) {
-        const p = await planearAtribuicao({ empresaId: t.empresa_id, propriedade: prop, dia: new Date(`${dia(t.data)}T00:00:00Z`), tempoLimpeza: t.tempo_limpeza_minutos || prop.tempo_limpeza_minutos || 45 });
+        const p = await planearAtribuicao({ empresaId: t.empresa_id, propriedade: prop, dia: new Date(`${dia(t.data)}T00:00:00Z`), tempoLimpeza: t.tempo_limpeza_minutos || prop.tempo_limpeza_minutos || 45, ...(horaFixaDe.has(String(t._id)) ? { horaFixa: new Date(t.data), tarefaId: t._id } : {}) });
         Object.assign(novo, {
           utilizador_id: p.utilizador_id || null,
           equipa_atribuida: p.equipa_atribuida || [],

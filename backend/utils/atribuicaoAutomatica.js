@@ -132,19 +132,42 @@ async function planearAtribuicao({ empresaId, propriedade, dia, tempoLimpeza, ho
   try {
     let ids = [];
     let viagemLB = 0;
-    if (staffNecessario > 1) {
-      const r = await determinarEquipaAtribuida(
-        empresaId, range, propriedade.coordenadas, tempo, propriedade._id, staffNecessario
-      );
-      ids = (r?.equipa || []).map((m) => m.utilizadorId);
-    } else {
+    const escolher = async (excl) => {
+      if (staffNecessario > 1) {
+        const r = await determinarEquipaAtribuida(
+          empresaId, range, propriedade.coordenadas, tempo, propriedade._id, staffNecessario, excl
+        );
+        return { ids: (r?.equipa || []).map((m) => m.utilizadorId), viagem: 0 };
+      }
       const r = await determinarUtilizadorAtribuido(
-        empresaId, range, propriedade.coordenadas, tempo, propriedade._id
+        empresaId, range, propriedade.coordenadas, tempo, propriedade._id, excl
       );
-      if (r?.utilizadorId) ids = [r.utilizadorId];
-      viagemLB = Number(r?.tempoViagem) || 0;
+      return { ids: r?.utilizadorId ? [r.utilizadorId] : [], viagem: Number(r?.tempoViagem) || 0 };
+    };
+    // Com hora fixada pelo gestor, o motor escolhe pela ordem de preferência de sempre (equipa preferida, carga
+    // semanal, mesmo prédio) mas só entre quem CABE a essa hora: quem não cabe é posto de parte e tenta-se a seguinte.
+    let excluidos = null;
+    let naoCouberam = 0;
+    for (let tentativa = 0; tentativa < 25; tentativa++) {
+      const e = await escolher(excluidos);
+      ids = e.ids; viagemLB = e.viagem;
+      if (!horaFixa || ids.length === 0) break;
+      const naoCabem = [];
+      for (const id of ids) {
+        if (!(await cabeNaAgendaNaHora(id, horaFixa, tempo, tarefaId, propriedade.coordenadas, propriedade._id))) naoCabem.push(String(id));
+      }
+      if (naoCabem.length === 0) break;
+      naoCouberam += naoCabem.length;
+      excluidos = new Set([...(excluidos || []), ...naoCabem]);
+      ids = [];
     }
 
+    if (ids.length === 0 && naoCouberam > 0) {
+      plano.estado = 'nao_atribuida';
+      plano.motivo_nao_atribuicao = MOTIVO_HORA_FIXA;
+      plano.data = new Date(horaFixa);
+      return plano;
+    }
     if (ids.length === 0) {
       const d = await diagnosticarFaltaDeStaff(empresaId, range, propriedade._id, null, tempo);
       plano.estado = d.estado;
@@ -152,16 +175,8 @@ async function planearAtribuicao({ empresaId, propriedade, dia, tempoLimpeza, ho
       return plano;
     }
 
-    // Hora fixada pelo gestor: nunca se muda. A pessoa só serve se couber a essa hora.
+    // Hora fixada pelo gestor: nunca se muda (já só entraram pessoas que cabem a essa hora).
     if (horaFixa) {
-      for (const id of ids) {
-        if (!(await cabeNaAgendaNaHora(id, horaFixa, tempo, tarefaId, propriedade.coordenadas, propriedade._id))) {
-          plano.estado = 'nao_atribuida';
-          plano.motivo_nao_atribuicao = MOTIVO_HORA_FIXA;
-          plano.data = new Date(horaFixa);
-          return plano;
-        }
-      }
       plano.utilizador_id = ids[0];
       plano.equipa_atribuida = ids;
       plano.data = new Date(horaFixa);

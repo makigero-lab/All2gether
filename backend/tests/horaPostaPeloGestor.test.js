@@ -117,18 +117,30 @@ describe('atribuir / reatribuir', () => {
 });
 
 describe('automação respeita a hora posta pelo gestor', () => {
-  test('motor sem pessoa (vagas/job): a pessoa tem de caber à hora fixada; a hora nunca muda', async () => {
+  test('motor: a preferida não cabe à hora fixada e vai para a seguinte que cabe (a hora nunca muda)', async () => {
     const c = await cenario(app, { sn: 1, extra: 0 });
     const p = await casa(c);
+    await Propriedade.updateOne({ _id: p._id }, { $set: { funcionario_preferencial_id: c.ana._id } });
     const fixa = await tar(c, p, null, '2036-02-19', '11:00:00', { data_ajustada_gestor: true });
-    await tar(c, p, c.ana, '2036-02-19', '11:00:00'); // Ana ocupada às 11:00
+    await tar(c, p, c.ana, '2036-02-19', '11:00:00'); // a preferida (Ana) está ocupada às 11:00
     const lean = await Tarefa.findById(fixa._id).populate('propriedade_id').lean();
     const r = await atribuirTarefaEmFalta(lean, new Date('2036-02-19T00:00:00Z'));
-    // O motor escolhe a Bia (livre) e a hora mantém-se; se escolhesse a Ana ficaria por atribuir.
+    expect(r.resultado).toBe('atribuida');
     const dep = await Tarefa.findById(fixa._id);
+    expect(String(dep.utilizador_id)).toBe(String(c.bia._id));
     expect(hora(dep)).toBe('11:00');
-    if (r.resultado === 'atribuida') expect(String(dep.utilizador_id)).toBe(String(c.bia._id));
-    else expect(['por_atribuir', 'nao_atribuida']).toContain(dep.estado);
+  });
+
+  test('motor: a preferida cabe à hora fixada e continua a ser a escolhida', async () => {
+    const c = await cenario(app, { sn: 1, extra: 0 });
+    const p = await casa(c);
+    await Propriedade.updateOne({ _id: p._id }, { $set: { funcionario_preferencial_id: c.ana._id } });
+    const fixa = await tar(c, p, null, '2036-02-24', '11:00:00', { data_ajustada_gestor: true });
+    const lean = await Tarefa.findById(fixa._id).populate('propriedade_id').lean();
+    await atribuirTarefaEmFalta(lean, new Date('2036-02-24T00:00:00Z'));
+    const dep = await Tarefa.findById(fixa._id);
+    expect(String(dep.utilizador_id)).toBe(String(c.ana._id));
+    expect(hora(dep)).toBe('11:00');
   });
 
   test('motor: sem ninguém que caiba à hora fixada, fica por atribuir com o motivo e a hora intacta', async () => {
@@ -153,7 +165,7 @@ describe('automação respeita a hora posta pelo gestor', () => {
     const auto = await tar(c, p, c.bia, '2036-02-21', '09:00:00', { smoobu_reserva_id: 'HX2', origem: 'smoobu' });
     const info = {};
     await planear(new Date('2036-02-20T00:00:00Z'), info);
-    expect(info.porOrigem.smoobu).toEqual({ total: 2, fixadas_pelo_gestor: 1, recalculadas: 1, mudam: 0 });
+    expect(info.porOrigem.smoobu).toEqual({ total: 2, fixadas_pelo_gestor: 1, a_preencher_a_hora_fixa: 0, recalculadas: 1, mudam: 0 });
     expect(hora(await Tarefa.findById(fixa._id))).toBe('08:00');
     expect(H.minutosLocais((await Tarefa.findById(auto._id)).data)).toBeGreaterThanOrEqual(H.HORARIO.INICIO_DIA);
     // reagendar-horarios: só a automática (09:00) é afetada.
@@ -161,5 +173,18 @@ describe('automação respeita a hora posta pelo gestor', () => {
     const r = await reagendarHorarios({ aplicar: true, agora: new Date('2036-02-01T12:00:00Z'), empresaId: c.e._id });
     expect(r.total).toBe(1);
     expect(hora(await Tarefa.findById(fixa._id))).toBe('08:00');
+  });
+
+  test('reatribuir-futuras: limpeza fixada pelo gestor e sem pessoa recebe quem caiba a essa hora, sem mudar a hora', async () => {
+    const c = await cenario(app, { sn: 1, extra: 0 });
+    const p = await casa(c);
+    const fixa = await tar(c, p, null, '2036-02-25', '08:00:00', { data_ajustada_gestor: true });
+    await tar(c, p, c.ana, '2036-02-25', '08:00:00'); // a Ana não cabe às 08:00
+    const info = {};
+    await planear(new Date('2036-02-24T00:00:00Z'), info);
+    expect(info.porOrigem.avulsa.a_preencher_a_hora_fixa).toBe(1);
+    const dep = await Tarefa.findById(fixa._id);
+    expect(hora(dep)).toBe('08:00');
+    expect(String(dep.utilizador_id)).toBe(String(c.bia._id));
   });
 });

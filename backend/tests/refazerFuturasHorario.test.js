@@ -77,11 +77,11 @@ test('planear: recalcula as automáticas de todas as origens para as 10:00 e res
   const info = {};
   const plano = await planear(DESDE, info);
   expect(plano).toHaveLength(5); // 4 com reserva + a avulsa sem hora; as 2 fixadas e a de hoje ficam de fora
-  expect(info.porOrigem.smoobu).toEqual({ total: 2, fixadas_pelo_gestor: 1, recalculadas: 1, mudam: 0 });
+  expect(info.porOrigem.smoobu).toEqual({ total: 2, fixadas_pelo_gestor: 1, a_preencher_a_hora_fixa: 0, recalculadas: 1, mudam: 0 });
   expect(info.porOrigem.parceiro.recalculadas).toBe(1);
   expect(info.porOrigem.gestor_em_nome_do_parceiro.recalculadas).toBe(1);
   expect(info.porOrigem.ical.recalculadas).toBe(1);
-  expect(info.porOrigem.avulsa).toEqual({ total: 2, fixadas_pelo_gestor: 1, recalculadas: 1, mudam: 0 });
+  expect(info.porOrigem.avulsa).toEqual({ total: 2, fixadas_pelo_gestor: 1, a_preencher_a_hora_fixa: 0, recalculadas: 1, mudam: 0 });
 
   // Todas as recalculadas ficam atribuídas e a partir das 10:00 (nunca antes).
   for (const t of [tSm, tPa, tGe, tIc, tAv]) {
