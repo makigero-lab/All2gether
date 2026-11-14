@@ -21,6 +21,7 @@ const { notificarSino } = require('../notificar');
 const { semUrl } = require('./cifra');
 const D = require('./decisoes');
 const Rv = require('./reservas');
+const { moradaParaApi } = require('./moradaCurta');
 
 const resp = (status, body) => ({ status, body });
 const MAX_LOTE = 200;
@@ -39,7 +40,7 @@ function celula(f, semAcordo) {
     em_validacao: !!f.aviso_muitos_novos_em,
     aviso_validacao: f.aviso_muitos_novos_em ? textoMuitosNovos(f.ultimo_n_futuros || 0, true) : null,
     erro: estado === 'erro' && f.ultimo_erro && f.ultimo_erro.codigo
-      ? { codigo: f.ultimo_erro.codigo, temporario: eErroTemporario(f.ultimo_erro.codigo), mensagem: semUrl(mensagemErro(f.ultimo_erro.codigo, { canal: canalTexto(f.canal, f.rotulo) })), em: f.ultimo_erro.em || null }
+      ? { codigo: f.ultimo_erro.codigo, temporario: eErroTemporario(f.ultimo_erro.codigo), mensagem: semUrl(mensagemErro(f.ultimo_erro.codigo, { canal: canalTexto(f.canal, f.rotulo) })), em: f.ultimo_erro.em || null, falha_desde: f.falha_desde || null, proxima_leitura_em: f.proxima_leitura_em || null }
       : null,
   };
 }
@@ -51,8 +52,8 @@ async function resumoIntegracoes({ empresaId, incluirInativos = false }) {
   const ids = donos.map((d) => d._id);
   const hoje = Rv.dataDe(H.hojeLisboa());
   const [casas, fontes, porConf, aceites, inativasPorDono] = await Promise.all([
-    Propriedade.find({ empresa_id: empresaId, parceiro_id: { $in: ids }, ...(incluirInativos ? {} : { ativo: { $ne: false } }) }).select('nome ativo parceiro_id smoobu_id').sort({ nome: 1 }).lean(),
-    FonteCalendario.find({ empresa_id: empresaId, parceiro_id: { $in: ids }, removida: false }).select('propriedade_id parceiro_id canal rotulo canal_chave aviso_muitos_novos_em ultimo_n_futuros estado motivo_estado url_mascara ultima_leitura_em ultimo_sucesso_em ultimo_erro').lean(),
+    Propriedade.find({ empresa_id: empresaId, parceiro_id: { $in: ids }, ...(incluirInativos ? {} : { ativo: { $ne: false } }) }).select('nome ativo parceiro_id smoobu_id morada morada_estruturada').sort({ nome: 1 }).lean(),
+    FonteCalendario.find({ empresa_id: empresaId, parceiro_id: { $in: ids }, removida: false }).select('propriedade_id parceiro_id canal rotulo canal_chave aviso_muitos_novos_em ultimo_n_futuros estado motivo_estado url_mascara ultima_leitura_em ultimo_sucesso_em ultimo_erro falha_desde proxima_leitura_em').lean(),
     ReservaExterna.aggregate([
       { $match: { empresa_id: new mongoose.Types.ObjectId(String(empresaId)), parceiro_id: { $in: ids }, estado: 'por_confirmar', check_out: { $gte: hoje } } },
       { $group: { _id: '$propriedade_id', n: { $sum: 1 } } },
@@ -99,7 +100,7 @@ async function resumoIntegracoes({ empresaId, incluirInativos = false }) {
         if (x.ultima_leitura_em && (!ultima || new Date(x.ultima_leitura_em) > new Date(ultima))) ultima = x.ultima_leitura_em;
       }
       return {
-        _id: String(c._id), nome: c.nome, ativo: c.ativo !== false, smoobu: !!c.smoobu_id, por_confirmar: pc,
+        _id: String(c._id), nome: c.nome, ...moradaParaApi(c), ativo: c.ativo !== false, smoobu: !!c.smoobu_id, por_confirmar: pc,
         airbnb: cs.find((x) => x.canal === 'airbnb') || null,
         booking: cs.find((x) => x.canal === 'booking') || null,
         outros: cs.filter((x) => x.canal !== 'airbnb' && x.canal !== 'booking'),

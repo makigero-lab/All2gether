@@ -15,7 +15,7 @@ export interface CelulaCanal {
   ultimo_sucesso_em: string | null;
   em_validacao: boolean;
   aviso_validacao: string | null;
-  erro: { codigo: string; mensagem: string; em: string | null; /** Passa sozinho (5xx, tempo esgotado): não pede «Corrigir». */ temporario?: boolean } | null;
+  erro: { codigo: string; mensagem: string; em: string | null; /** Passa sozinho (5xx, tempo esgotado): não pede «Corrigir». */ temporario?: boolean; /** Início da série de falhas seguidas (nunca inventado: null se o servidor não o sabe). */ falha_desde?: string | null; /** Quando o servidor volta a tentar ler. */ proxima_leitura_em?: string | null } | null;
 }
 
 export interface CasaResumo {
@@ -27,9 +27,13 @@ export interface CasaResumo {
   airbnb: CelulaCanal | null;
   booking: CelulaCanal | null;
   outros: CelulaCanal[];
+  /** Morada para distinguir casas com o mesmo nome (ver `distinguirCasas`). */
+  morada_curta?: string | null;
+  morada_rua?: string | null;
+  morada_localidade?: string | null;
 }
 
-export interface ErroDaLigacao { casa: string; canal: string; fonte_id: string; codigo?: string; mensagem: string; em: string | null; temporario?: boolean }
+export interface ErroDaLigacao { casa: string; canal: string; fonte_id: string; codigo?: string; mensagem: string; em: string | null; temporario?: boolean; falha_desde?: string | null; proxima_leitura_em?: string | null }
 
 export interface ProprietarioResumo {
   _id: string;
@@ -93,13 +97,126 @@ export function diaMes(iso: string): string {
 }
 
 /** «há 20 min», «há 3 h», «há 2 dias». */
-export function haQuanto(iso: string | null): string {
+export function haQuanto(iso: string | null, agora: number = Date.now()): string {
   if (!iso) return "ainda não";
-  const min = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  const min = Math.max(0, Math.round((agora - new Date(iso).getTime()) / 60000));
   if (min < 1) return "agora mesmo";
   if (min < 60) return `há ${min} min`;
   if (min < 1440) return `há ${Math.round(min / 60)} h`;
-  return `há ${Math.round(min / 1440)} dias`;
+  const dias = Math.round(min / 1440);
+  return `há ${dias} ${dias === 1 ? "dia" : "dias"}`;
+}
+
+const FUSO = "Europe/Lisbon";
+const horaLisboa = (d: Date) => new Intl.DateTimeFormat("pt-PT", { timeZone: FUSO, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(d);
+const diaLisboa = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: FUSO, year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+
+/**
+ * «Falha há 2 h · nova tentativa às 14:10» (hora de Lisboa). Só usa o que o servidor sabe: sem `falha_desde` não diz
+ * desde quando; sem `proxima_leitura_em` não diz a próxima tentativa; sem nenhum dos dois devolve null (não mostra nada).
+ * Uma tentativa já atrasada (o job corre de 5 em 5 min) diz «em breve» em vez de uma hora passada.
+ */
+export function textoFalha(e: { falha_desde?: string | null; proxima_leitura_em?: string | null } | null | undefined, agora: Date = new Date()): string | null {
+  if (!e) return null;
+  const partes: string[] = [];
+  const desde = e.falha_desde ? new Date(e.falha_desde) : null;
+  if (desde && !Number.isNaN(desde.getTime())) {
+    const q = haQuanto(desde.toISOString(), agora.getTime());
+    partes.push(q === "agora mesmo" ? "Falhou agora mesmo" : `Falha ${q}`);
+  }
+  const tentativa = "nova tentativa"; // a mesma frase em qualquer duração; a falha longa só ganha destaque na interface
+  const prox = e.proxima_leitura_em ? new Date(e.proxima_leitura_em) : null;
+  if (prox && !Number.isNaN(prox.getTime())) {
+    if (prox.getTime() <= agora.getTime()) partes.push(`${tentativa} em breve`);
+    else {
+      const hoje = diaLisboa(agora);
+      const dia = diaLisboa(prox);
+      const amanha = diaLisboa(new Date(agora.getTime() + 86400000));
+      const quando = dia === hoje ? "" : dia === amanha ? "amanhã " : `a ${diaMes(dia)} `;
+      partes.push(`${tentativa} ${quando}às ${horaLisboa(prox)}`);
+    }
+  }
+  return partes.length ? partes.join(" · ") : null;
+}
+
+/** A falha dura há 24 h ou mais (a interface dá-lhe mais destaque). Só com `falha_desde` conhecido. */
+export function falhaLonga(e: { falha_desde?: string | null } | null | undefined, agora: Date = new Date()): boolean {
+  const d = e?.falha_desde ? new Date(e.falha_desde).getTime() : NaN;
+  return !Number.isNaN(d) && agora.getTime() - d >= 86400000;
+}
+
+export interface CasaNomeavel {
+  _id: string;
+  nome: string;
+  morada_curta?: string | null;
+  morada_rua?: string | null;
+  morada_localidade?: string | null;
+}
+
+const norm = (t: string | null | undefined) => (t ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+/** «Rua Augusta 100» → «Rua Augusta» (sem o número da porta). */
+const ruaCurta = (r: string) => r.replace(/[\s,]+\d+[a-zA-Z]?(\s*[-–/].*)?$/, "").trim() || r;
+
+/** Rua e localidade de uma casa (os campos novos, ou a «Rua, Localidade» antiga). */
+function partesDaMorada(c: CasaNomeavel): { rua: string | null; localidade: string | null } {
+  if (c.morada_rua || c.morada_localidade) return { rua: c.morada_rua?.trim() || null, localidade: c.morada_localidade?.trim() || null };
+  const m = c.morada_curta?.trim();
+  if (!m) return { rua: null, localidade: null };
+  const i = m.lastIndexOf(",");
+  return i < 0 ? { rua: m, localidade: null } : { rua: m.slice(0, i).trim() || null, localidade: m.slice(i + 1).trim() || null };
+}
+
+/**
+ * A ÚNICA função que distingue casas com o mesmo nome (seletor, cabeçalhos, matriz, diálogo de bloqueio, cartões).
+ * Nome sozinho se é único; se repete, «(Localidade)»; se a localidade também colide (ou falta), a rua curta
+ * («Rua Augusta»); se ainda colide, a rua com o número; no fim «(1)», «(2)» por ordem estável do _id.
+ * Devolve o nome e o complemento separados (`extra` é null para nomes únicos).
+ */
+export function distinguirCasas(casas: CasaNomeavel[]): Map<string, { nome: string; extra: string | null }> {
+  const grupos = new Map<string, CasaNomeavel[]>();
+  for (const c of casas) { const k = norm(c.nome); grupos.set(k, [...(grupos.get(k) ?? []), c]); }
+  const out = new Map<string, { nome: string; extra: string | null }>();
+  for (const g of grupos.values()) {
+    if (g.length === 1) { out.set(g[0]._id, { nome: g[0].nome, extra: null }); continue; }
+    let pendentes = g.map((c) => ({ c, ...partesDaMorada(c) }));
+    const atribuir = (valor: (x: (typeof pendentes)[number]) => string | null) => {
+      const conta = new Map<string, number>();
+      for (const x of pendentes) { const v = norm(valor(x)); if (v) conta.set(v, (conta.get(v) ?? 0) + 1); }
+      pendentes = pendentes.filter((x) => {
+        const v = valor(x);
+        if (v && conta.get(norm(v)) === 1) { out.set(x.c._id, { nome: x.c.nome.trim(), extra: v }); return false; }
+        return true;
+      });
+    };
+    atribuir((x) => x.localidade);
+    atribuir((x) => (x.rua ? ruaCurta(x.rua) : null));
+    atribuir((x) => x.rua);
+    [...pendentes].sort((a, b) => (a.c._id < b.c._id ? -1 : 1)).forEach((x, i) => out.set(x.c._id, { nome: x.c.nome.trim(), extra: String(i + 1) }));
+  }
+  return out;
+}
+
+/** «Casa Azul (Lisboa)» — o nome já com o complemento, ou só o nome se é único. */
+export function nomesDistintos(casas: CasaNomeavel[]): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const [id, d] of distinguirCasas(casas)) out.set(id, d.extra ? `${d.nome} (${d.extra})` : d.nome);
+  return out;
+}
+
+/**
+ * Nome da casa para o seletor do assistente: o canal ligado em forma curta vem ANTES da desambiguação, para não ser
+ * cortado no telemóvel: «Apartamento T1 Baixa · Airbnb + Booking (Rua Augusta)», «Estoril Villa» (sem nada).
+ */
+export function rotulosDasCasas(casas: (CasaNomeavel & Pick<CasaResumo, "smoobu" | "airbnb" | "booking" | "outros">)[]): Map<string, string> {
+  const d = distinguirCasas(casas);
+  const out = new Map<string, string>();
+  for (const c of casas) {
+    const canais = [c.airbnb ? "Airbnb" : "", c.booking ? "Booking" : "", ...(c.outros ?? []).map((o) => o.canal_texto)].filter(Boolean);
+    const canal = c.smoobu ? " · Smoobu" : canais.length ? ` · ${canais.join(" + ")}` : "";
+    const x = d.get(c._id) ?? { nome: c.nome, extra: null };
+    out.set(c._id, `${x.nome}${canal}${x.extra ? ` (${x.extra})` : ""}`);
+  }
+  return out;
 }
 
 export function msgErro(e: unknown, omissao: string): string {

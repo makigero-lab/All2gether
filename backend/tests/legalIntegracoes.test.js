@@ -44,6 +44,7 @@ beforeAll(async () => {
   CHAVES_ENV.forEach((k) => { guardado[k] = process.env[k]; });
   mongod = await MongoMemoryServer.create();
   await mongoose.connect(mongod.getUri());
+  await WebhookLog.init(); // o índice TTL tem de existir antes de o teste o ler
 });
 afterAll(async () => {
   CHAVES_ENV.forEach((k) => { if (guardado[k] === undefined) delete process.env[k]; else process.env[k] = guardado[k]; });

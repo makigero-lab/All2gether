@@ -7,6 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { adminDelete, adminGet, adminPatch, adminPost, adminPut } from "@/lib/api";
 import { plural } from "@/lib/utils";
+import { falhaLonga, textoFalha } from "@/components/gestor/integracoes/tipos";
 
 export interface CasaParaCalendario {
   _id: string;
@@ -27,6 +28,8 @@ interface FonteDTO {
   ultima_leitura_em: string | null;
   ultimo_sucesso_em: string | null;
   ultimo_erro: { codigo: string; mensagem: string; em: string } | null;
+  falha_desde?: string | null;
+  proxima_leitura_em?: string | null;
   suspeitas_consecutivas: number;
   n_reservas?: number;
   n_por_confirmar?: number;
@@ -101,7 +104,8 @@ function EstadoFonte({ f }: { f: FonteDTO }) {
       <p role="status" className="flex items-start gap-1.5 text-sm text-destructive">
         <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
         <span>
-          Com problemas desde {haQuanto(f.ultimo_erro?.em ?? null)}: {f.ultimo_erro?.mensagem ?? "não foi possível ler o calendário."} As limpezas já marcadas continuam.
+          {f.ultimo_erro?.mensagem ?? "Não foi possível ler o calendário."} As limpezas já marcadas continuam.
+          {textoFalha(f) && <span className={`mt-0.5 block text-xs opacity-90 ${falhaLonga(f) ? "font-semibold" : ""}`} data-falha>{textoFalha(f)}</span>}
         </span>
       </p>
     );

@@ -9,7 +9,7 @@ const fonte = readFileSync(new URL("./tipos.ts", import.meta.url), "utf8");
 const { outputText } = ts.transpileModule(fonte, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } });
 const exp = {};
 new Function("exports", outputText)(exp);
-const { passaFiltro, ordenarLinhas, canalDoLink, diaMes, blocos, semCasasParaLigar, fraseDoTeste, resultadoLigar, resultadoAceitar, agruparFalhas, textoCorte, legendaCasas, enviarEmBlocos, REGRA_UMA_FONTE, TAMANHO_BLOCO } = exp;
+const { passaFiltro, ordenarLinhas, canalDoLink, diaMes, blocos, semCasasParaLigar, fraseDoTeste, resultadoLigar, resultadoAceitar, agruparFalhas, textoCorte, legendaCasas, enviarEmBlocos, REGRA_UMA_FONTE, TAMANHO_BLOCO, haQuanto, textoFalha, falhaLonga, nomesDistintos, rotulosDasCasas } = exp;
 
 const p = (o) => ({ n_erros: 0, n_por_confirmar: 0, estado: "ok", ...o });
 
@@ -143,4 +143,120 @@ test("lista cortada diz «a mostrar 500 de 612»", () => {
 test("legenda da mini-barra", () => {
   assert.equal(legendaCasas(["ligada", "com erro", "ligada"]), "3 casas · 1 com erro");
   assert.equal(legendaCasas(["em pausa"]), "1 casa · 1 em pausa");
+});
+
+const AGORA = new Date("2026-11-14T12:10:00Z");
+const em = (min) => new Date(AGORA.getTime() + min * 60000).toISOString();
+
+test("S1: «Falha há 2 h · nova tentativa às 14:10» (hora de Lisboa)", () => {
+  assert.equal(textoFalha({ falha_desde: em(-120), proxima_leitura_em: em(120) }, AGORA), "Falha há 2 h · nova tentativa às 14:10");
+  // verão: 13:10 UTC são 14:10 em Lisboa
+  assert.equal(textoFalha({ proxima_leitura_em: "2026-07-14T13:10:00Z" }, new Date("2026-07-14T10:00:00Z")), "nova tentativa às 14:10");
+});
+
+test("S1: só diz o que o servidor sabe; sem dados não mostra nada", () => {
+  assert.equal(textoFalha(null, AGORA), null);
+  assert.equal(textoFalha({}, AGORA), null);
+  assert.equal(textoFalha({ falha_desde: null, proxima_leitura_em: null }, AGORA), null);
+  assert.equal(textoFalha({ falha_desde: "lixo", proxima_leitura_em: "lixo" }, AGORA), null);
+  assert.equal(textoFalha({ falha_desde: em(-45) }, AGORA), "Falha há 45 min");
+  assert.equal(textoFalha({ proxima_leitura_em: em(30) }, AGORA), "nova tentativa às 12:40");
+  assert.equal(textoFalha({ falha_desde: em(-0.2) }, AGORA), "Falhou agora mesmo");
+});
+
+test("S1: tentativa em atraso diz «em breve»; amanhã e dias seguintes dizem o dia", () => {
+  assert.equal(textoFalha({ falha_desde: em(-300), proxima_leitura_em: em(-3) }, AGORA), "Falha há 5 h · nova tentativa em breve");
+  assert.equal(textoFalha({ proxima_leitura_em: em(60 * 6) }, new Date("2026-11-14T12:10:00Z")), "nova tentativa às 18:10");
+  assert.equal(textoFalha({ proxima_leitura_em: em(60 * 14) }, AGORA), "nova tentativa amanhã às 02:10");
+  assert.equal(textoFalha({ proxima_leitura_em: em(60 * 60) }, AGORA), "nova tentativa a 17 nov às 00:10");
+});
+
+test("haQuanto: 1 dia no singular", () => {
+  assert.equal(haQuanto(em(-1440), AGORA.getTime()), "há 1 dia");
+  assert.equal(haQuanto(em(-2 * 1440), AGORA.getTime()), "há 2 dias");
+  assert.equal(haQuanto(null), "ainda não");
+});
+
+test("S1: falha de 24 h ou mais usa a mesma frase («nova tentativa») e conta como longa", () => {
+  assert.equal(falhaLonga({ falha_desde: em(-60 * 25) }, AGORA), true);
+  assert.equal(falhaLonga({ falha_desde: em(-60 * 23) }, AGORA), false);
+  assert.equal(falhaLonga({}, AGORA), false);
+  assert.equal(textoFalha({ falha_desde: em(-60 * 72), proxima_leitura_em: em(120) }, AGORA), "Falha há 3 dias · nova tentativa às 14:10");
+  assert.equal(textoFalha({ falha_desde: em(-60 * 72), proxima_leitura_em: em(-2) }, AGORA), "Falha há 3 dias · nova tentativa em breve");
+});
+
+const casa = (_id, nome, m = {}) => ({ _id, nome, ...m });
+
+test("casas homónimas: nome único fica como está", () => {
+  const n = nomesDistintos([casa("1", "Casa Azul"), casa("2", "Estoril Villa", { morada_localidade: "Estoril" })]);
+  assert.equal(n.get("1"), "Casa Azul");
+  assert.equal(n.get("2"), "Estoril Villa");
+});
+
+test("casas homónimas em cidades diferentes: (Localidade)", () => {
+  const n = nomesDistintos([
+    casa("a", "Casa Azul", { morada_rua: "Rua do Ouro 10", morada_localidade: "Lisboa" }),
+    casa("b", "casa  azul ", { morada_rua: "Rua das Flores 5", morada_localidade: "Porto" }),
+  ]);
+  assert.equal(n.get("a"), "Casa Azul (Lisboa)");
+  assert.equal(n.get("b"), "casa  azul (Porto)");
+});
+
+test("casas homónimas na mesma cidade: rua curta (sem o número da porta)", () => {
+  const n = nomesDistintos([
+    casa("a", "Apartamento T1 Baixa", { morada_rua: "Rua Augusta 100", morada_localidade: "Lisboa" }),
+    casa("b", "Apartamento T1 Baixa", { morada_rua: "Rua do Ouro 10", morada_localidade: "Lisboa" }),
+    casa("c", "Apartamento T1 Baixa", { morada_rua: "Rua da Prata 3", morada_localidade: "Porto" }),
+  ]);
+  assert.equal(n.get("a"), "Apartamento T1 Baixa (Rua Augusta)");
+  assert.equal(n.get("b"), "Apartamento T1 Baixa (Rua do Ouro)");
+  assert.equal(n.get("c"), "Apartamento T1 Baixa (Porto)");
+});
+
+test("casas homónimas na mesma rua: rua com número; se nem assim, (1), (2) por _id", () => {
+  const n = nomesDistintos([
+    casa("a", "Loft", { morada_rua: "Rua Augusta 100", morada_localidade: "Lisboa" }),
+    casa("b", "Loft", { morada_rua: "Rua Augusta 120", morada_localidade: "Lisboa" }),
+  ]);
+  assert.equal(n.get("a"), "Loft (Rua Augusta 100)");
+  assert.equal(n.get("b"), "Loft (Rua Augusta 120)");
+  const m = nomesDistintos([
+    casa("z", "Loft", { morada_rua: "Rua Augusta 100", morada_localidade: "Lisboa" }),
+    casa("y", "Loft", { morada_rua: "Rua Augusta 100", morada_localidade: "Lisboa" }),
+  ]);
+  assert.equal(m.get("y"), "Loft (1)");
+  assert.equal(m.get("z"), "Loft (2)");
+});
+
+test("casas homónimas sem morada: (1), (2) por ordem estável; misturadas com casas com morada", () => {
+  const n = nomesDistintos([casa("b", "Sem Morada"), casa("a", "Sem Morada"), casa("c", "Sem Morada", { morada_localidade: "Faro" })]);
+  assert.equal(n.get("c"), "Sem Morada (Faro)");
+  assert.equal(n.get("a"), "Sem Morada (1)");
+  assert.equal(n.get("b"), "Sem Morada (2)");
+  // a ordem não depende da ordem da lista
+  assert.equal(nomesDistintos([casa("a", "Sem Morada"), casa("b", "Sem Morada")]).get("a"), "Sem Morada (1)");
+  // compatível com a morada_curta antiga «Rua, Localidade»
+  assert.equal(nomesDistintos([casa("1", "X", { morada_curta: "Rua A 1, Porto" }), casa("2", "X", { morada_curta: "Rua B 2, Lisboa" })]).get("1"), "X (Porto)");
+});
+
+test("S11: seletor com o canal ligado antes da desambiguação (cabe no telemóvel)", () => {
+  const c = (id, nome, o = {}) => ({ _id: id, nome, smoobu: false, airbnb: null, booking: null, outros: [], ...o });
+  const r = rotulosDasCasas([
+    c("1", "Baixa Pombalina", { airbnb: { canal_texto: "Airbnb" } }),
+    c("2", "Alfama", { smoobu: true }),
+    c("3", "Chiado"),
+    c("4", "Graça", { airbnb: {}, booking: {} }),
+    c("5", "Sé", { booking: {} }),
+  ]);
+  assert.equal(r.get("1"), "Baixa Pombalina · Airbnb");
+  assert.equal(r.get("2"), "Alfama · Smoobu");
+  assert.equal(r.get("3"), "Chiado");
+  assert.equal(r.get("4"), "Graça · Airbnb + Booking");
+  assert.equal(r.get("5"), "Sé · Booking");
+  const d = rotulosDasCasas([
+    c("a", "Apartamento T1 Baixa", { morada_rua: "Rua Augusta 100", morada_localidade: "Lisboa", airbnb: {}, booking: {} }),
+    c("b", "Apartamento T1 Baixa", { morada_rua: "Rua do Ouro 10", morada_localidade: "Lisboa" }),
+  ]);
+  assert.equal(d.get("a"), "Apartamento T1 Baixa · Airbnb + Booking (Rua Augusta)");
+  assert.equal(d.get("b"), "Apartamento T1 Baixa (Rua do Ouro)");
 });

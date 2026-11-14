@@ -4,12 +4,15 @@ import { useCallback, useEffect, useState } from "react";
 import { AlertCircle, CalendarClock, Check, Loader2, Ban } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { ConfirmarDialog } from "@/components/ui/confirmar-dialog";
 import { adminGet, adminPost } from "@/lib/api";
 import { plural } from "@/lib/utils";
+import { nomesDistintos } from "@/components/gestor/integracoes/tipos";
+import { emCurso, hojeLisboaISO, OPCOES_CHEGADA, ordenarPorChegada, passaFiltroChegada, periodoComAno, textoConfirmarBloqueio, type FiltroChegada } from "@/lib/reservas-externas";
 
 export interface ReservaExternaDTO {
   _id: string;
-  propriedade: { _id: string; nome: string };
+  propriedade: { _id: string; nome: string; morada_curta?: string | null; morada_rua?: string | null; morada_localidade?: string | null };
   canal: string;
   canal_texto: string;
   check_in: string;
@@ -18,8 +21,6 @@ export interface ReservaExternaDTO {
   motivo: "sobreposicao" | "periodo_longo" | "reapareceu" | null;
   estado: string;
 }
-
-const fmt = (iso: string) => iso.slice(8, 10) + "/" + iso.slice(5, 7);
 
 function mensagem(e: unknown, omissao: string): string {
   const m = (e as { message?: string })?.message;
@@ -47,6 +48,8 @@ export function ReservasPorConfirmar({
   const [erro, setErro] = useState<string | null>(null);
   const [aFazer, setAFazer] = useState<Record<string, boolean>>({});
   const [aviso, setAviso] = useState<string | null>(null);
+  const [filtro, setFiltro] = useState<FiltroChegada>("todas");
+  const [aConfirmarBloqueio, setAConfirmarBloqueio] = useState<ReservaExternaDTO[] | null>(null);
 
   const carregar = useCallback(async () => {
     try {
@@ -86,28 +89,38 @@ export function ReservasPorConfirmar({
   };
 
   if (lista.length === 0 && !erro) return null;
-  const normais = lista.filter((x) => x.motivo !== "periodo_longo");
-  const longos = lista.filter((x) => x.motivo === "periodo_longo");
+  // Por chegada (a mais próxima primeiro) e, se o proprietário quiser, só as desta semana ou dos próximos 7 dias.
+  const hoje = hojeLisboaISO();
+  const visiveis = ordenarPorChegada(lista).filter((x) => passaFiltroChegada(x, filtro, hoje));
+  const normais = visiveis.filter((x) => x.motivo !== "periodo_longo");
+  const longos = visiveis.filter((x) => x.motivo === "periodo_longo");
+  // Casas com o mesmo nome distinguem-se pela morada curta.
+  const nomes = nomesDistintos([...new Map(lista.map((x) => [x.propriedade._id, x.propriedade])).values()]);
+  const nomeDe = (x: ReservaExternaDTO) => nomes.get(x.propriedade._id) ?? x.propriedade.nome;
+  const bloqueioT = aConfirmarBloqueio ? textoConfirmarBloqueio(aConfirmarBloqueio.length, aConfirmarBloqueio.map(nomeDe)) : null;
+  // Marcar vários como bloqueio age já e não se desfaz: pede confirmação (um só decide-se logo).
+  const pedirBloqueioTodos = (itens: ReservaExternaDTO[]) => { if (itens.length > 1) setAConfirmarBloqueio(itens); else void bloquearTodos(itens); };
 
   const linha = (x: ReservaExternaDTO) => (
     <li key={x._id} className="flex flex-col gap-2 rounded-md border bg-background p-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0 text-sm">
         <p className="font-medium">
-          {x.propriedade.nome} · {fmt(x.check_in)} a {fmt(x.check_out)}{" "}
+          {nomeDe(x)} · {periodoComAno(x)}{" "}
           <span className="font-normal text-muted-foreground">({plural(x.noites, "noite")})</span>
         </p>
         <p className="text-xs text-muted-foreground">
-          {x.canal_texto}
+          <span className="rounded border px-1.5 py-0.5 text-foreground" data-plataforma>{x.canal_texto}</span>
+          {emCurso(x, hoje) && <span className="ml-1 rounded bg-muted px-1.5 py-0.5 text-foreground" data-em-curso>Em curso</span>}
           {x.motivo === "sobreposicao" && " · coincide com outra reserva"}
           {x.motivo === "reapareceu" && " · voltou a aparecer no calendário"}
           {" · É uma reserva?"}
         </p>
       </div>
       <div className="flex shrink-0 gap-2">
-        <Button size="sm" className="min-h-11 flex-1 gap-1 sm:min-h-9 sm:flex-none" disabled={!!aFazer[x._id]} onClick={() => decidir(x._id, "confirmar")} aria-label={`É uma reserva: ${x.propriedade.nome}, ${fmt(x.check_in)} a ${fmt(x.check_out)}`}>
+        <Button size="sm" className="min-h-11 flex-1 gap-1 sm:min-h-9 sm:flex-none" disabled={!!aFazer[x._id]} onClick={() => decidir(x._id, "confirmar")} aria-label={`É uma reserva: ${nomeDe(x)}, ${periodoComAno(x)}, ${x.canal_texto}`}>
           {aFazer[x._id] ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Confirmar
         </Button>
-        <Button size="sm" variant="outline" className="min-h-11 flex-1 gap-1 sm:min-h-9 sm:flex-none" disabled={!!aFazer[x._id]} onClick={() => decidir(x._id, "bloqueio")} aria-label={`É um bloqueio: ${x.propriedade.nome}, ${fmt(x.check_in)} a ${fmt(x.check_out)}`}>
+        <Button size="sm" variant="outline" className="min-h-11 flex-1 gap-1 sm:min-h-9 sm:flex-none" disabled={!!aFazer[x._id]} onClick={() => decidir(x._id, "bloqueio")} aria-label={`É um bloqueio: ${nomeDe(x)}, ${periodoComAno(x)}, ${x.canal_texto}`}>
           <Ban className="h-4 w-4" /> É um bloqueio
         </Button>
       </div>
@@ -133,6 +146,18 @@ export function ReservasPorConfirmar({
           </p>
         )}
         {aviso && <p role="status" className="text-sm text-muted-foreground">{aviso}</p>}
+        {(lista.length > 4 || filtro !== "todas") && (
+          <div role="group" aria-label="Filtrar por data de chegada" className="flex flex-wrap items-center gap-1.5" data-filtro-chegada>
+            <span className="mr-1 text-xs text-muted-foreground">Chegada:</span>
+            {OPCOES_CHEGADA.map((o) => (
+              <button key={o.valor} type="button" aria-pressed={filtro === o.valor} title={o.dica} onClick={() => setFiltro(o.valor)}
+                className={`min-h-11 rounded-md border px-3 text-sm font-medium sm:min-h-9 ${filtro === o.valor ? "border-primary bg-accent" : "border-input bg-background hover:bg-accent"}`}>
+                {o.texto}
+              </button>
+            ))}
+          </div>
+        )}
+        {visiveis.length === 0 && filtro !== "todas" && <p className="text-sm text-muted-foreground">Nenhum período chega neste intervalo. Escolhe «Todas» para veres os restantes.</p>}
         {normais.length > 0 && <ul className="space-y-2">{normais.map(linha)}</ul>}
         {longos.length > 0 && (
           <details className="rounded-md border bg-muted/30 p-3">
@@ -140,7 +165,7 @@ export function ReservasPorConfirmar({
               {plural(longos.length, "período")} com mais de 30 noites (normalmente são fechos do calendário)
             </summary>
             <div className="space-y-2 pt-2">
-              <Button size="sm" variant="outline" className="min-h-11 sm:min-h-9" onClick={() => bloquearTodos(longos)} disabled={Object.values(aFazer).some(Boolean)}>
+              <Button size="sm" variant="outline" className="min-h-11 sm:min-h-9" onClick={() => pedirBloqueioTodos(longos)} disabled={Object.values(aFazer).some(Boolean)}>
                 Marcar todos como bloqueio
               </Button>
               <ul className="space-y-2">{longos.map(linha)}</ul>
@@ -148,6 +173,10 @@ export function ReservasPorConfirmar({
           </details>
         )}
       </CardContent>
+      {aConfirmarBloqueio && bloqueioT && (
+        <ConfirmarDialog aberto destrutivo titulo={bloqueioT.titulo} descricao={bloqueioT.descricao} detalhe={bloqueioT.casas} textoConfirmar={bloqueioT.confirmar}
+          aoCancelar={() => setAConfirmarBloqueio(null)} aoConfirmar={() => { const itens = aConfirmarBloqueio; setAConfirmarBloqueio(null); void bloquearTodos(itens); }} />
+      )}
     </Card>
   );
 }

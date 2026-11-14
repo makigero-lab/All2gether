@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { adminDelete, adminGet, adminPatch, adminPost, adminPut } from "@/lib/api";
 import { plural } from "@/lib/utils";
-import { haQuanto, msgErro, REGRA_UMA_FONTE, resultadoAceitar, type CasaResumo, type CelulaCanal, type ProprietarioResumo } from "./tipos";
+import { falhaLonga, haQuanto, msgErro, nomesDistintos, textoFalha, REGRA_UMA_FONTE, resultadoAceitar, type CasaResumo, type CelulaCanal, type ProprietarioResumo } from "./tipos";
 import type { CanalAssistente } from "./assistente-ligar";
 
 /** true em ecrãs estreitos (< 640 px): a matriz passa a uma lista por casa, sem scroll horizontal. */
@@ -80,7 +80,7 @@ function CelulaLigada({ c, disponivel, aoMudar }: { c: CelulaCanal; disponivel: 
     <div className="space-y-1.5">
       {c.estado === "ativa" && !c.em_validacao && <p className="flex items-center gap-1.5 text-sm text-emerald-700 dark:text-emerald-400"><CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden /> A funcionar · {haQuanto(c.ultimo_sucesso_em)}</p>}
       {c.em_validacao && <p role="status" className="flex items-start gap-1.5 text-sm text-amber-700 dark:text-amber-400"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> {c.aviso_validacao}</p>}
-      {c.estado === "erro" && <p role="status" className={`flex items-start gap-1.5 text-sm ${temporario ? "text-amber-700 dark:text-amber-400" : "text-destructive"}`}><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> {c.erro?.mensagem ?? "Não foi possível ler o calendário."}</p>}
+      {c.estado === "erro" && <p role="status" className={`flex items-start gap-1.5 text-sm ${temporario ? "text-amber-700 dark:text-amber-400" : "text-destructive"}`}><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> <span>{c.erro?.mensagem ?? "Não foi possível ler o calendário."}{textoFalha(c.erro) && <span className={`mt-0.5 block text-xs opacity-90 ${falhaLonga(c.erro) ? "font-semibold" : "font-normal"}`} data-falha>{textoFalha(c.erro)}</span>}</span></p>}
       {(c.estado === "pausada" || c.estado === "suspensa") && <p className="flex items-start gap-1.5 text-sm text-muted-foreground"><PauseCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> {c.estado_texto ?? "Em pausa."}</p>}
       {c.url_mascara && <p className="break-all text-xs text-muted-foreground" title="Por segurança, o link nunca é mostrado por inteiro.">{c.url_mascara}</p>}
       {erroLocal && <p role="alert" className="text-xs text-destructive">{erroLocal}</p>}
@@ -105,7 +105,7 @@ function CelulaLigada({ c, disponivel, aoMudar }: { c: CelulaCanal; disponivel: 
         <DialogContent>
           <label className="flex flex-col gap-1 text-sm font-medium">
             Link novo do calendário
-            <input value={novoLink} onChange={(e) => { setNovoLink(e.target.value); setErroLink(null); }} autoComplete="off" spellCheck={false} placeholder="Cola aqui o link (https://…)" aria-label="Link novo do calendário" className="h-11 rounded-md border border-input bg-background px-3 text-base font-normal" />
+            <input data-autofocus value={novoLink} onChange={(e) => { setNovoLink(e.target.value); setErroLink(null); }} autoComplete="off" spellCheck={false} placeholder="Cola aqui o link (https://…)" aria-label="Link novo do calendário" className="h-11 rounded-md border border-input bg-background px-3 text-base font-normal" />
           </label>
           {erroLink && <p role="alert" className="mt-2 flex items-start gap-2 text-sm text-destructive"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> {erroLink}</p>}
         </DialogContent>
@@ -159,8 +159,8 @@ function CelulaSmoobu({ c }: { c: CasaResumo }) {
   return <p className="text-xs text-muted-foreground"><span className="font-medium">Em preparação</span></p>;
 }
 
-const NomeCasa = ({ c }: { c: CasaResumo }) => (
-  <>{c.nome}{!c.ativo && <span className="ml-1 text-xs font-normal text-muted-foreground">(inativa)</span>}
+const NomeCasa = ({ c, nome }: { c: CasaResumo; nome?: string }) => (
+  <>{nome ?? c.nome}{!c.ativo && <span className="ml-1 text-xs font-normal text-muted-foreground">(inativa)</span>}
     {c.por_confirmar > 0 && <span className="mt-0.5 block text-xs font-normal text-muted-foreground">{plural(c.por_confirmar, "período por confirmar", "períodos por confirmar")}</span>}</>
 );
 
@@ -175,14 +175,15 @@ export function MatrizProprietario({ p, disponivel, aoLigar, aoMudar }: {
   const estreito = useEcraEstreito();
   const motivoSemLigar = p.acordo === "por_aceitar" ? "Acordo por aceitar: o proprietário ainda não aceitou o acordo de dados." : null;
   if (p.casas.length === 0) return <p className="text-sm text-muted-foreground">Este proprietário ainda não tem casas{(p.n_casas_inativas ?? 0) > 0 ? " ativas (as casas inativas só aparecem em «Incluir inativos»)" : ""}.</p>;
+  const nomes = nomesDistintos(p.casas);
   const regra = <p className="text-sm text-muted-foreground" data-regra>{REGRA_UMA_FONTE}</p>;
   if (estreito) {
     return (
       <div className="space-y-3" data-matriz-lista>
         {regra}
         {p.casas.map((c) => (
-          <section key={c._id} aria-label={c.nome} className="space-y-3 rounded-md border p-3">
-            <h3 className="font-medium"><NomeCasa c={c} /></h3>
+          <section key={c._id} aria-label={nomes.get(c._id) ?? c.nome} className="space-y-3 rounded-md border p-3">
+            <h3 className="font-medium"><NomeCasa c={c} nome={nomes.get(c._id)} /></h3>
             {([["Airbnb", "airbnb"], ["Booking.com", "booking"]] as const).map(([nome, canal]) => (
               <div key={canal} className="space-y-1 border-t pt-2">
                 <p className="text-xs font-medium text-muted-foreground">{nome}</p>
@@ -214,7 +215,7 @@ export function MatrizProprietario({ p, disponivel, aoLigar, aoMudar }: {
           <tbody>
             {p.casas.map((c) => (
               <tr key={c._id} className="border-b align-top">
-                <th scope="row" className="py-3 pr-3 font-medium"><NomeCasa c={c} /></th>
+                <th scope="row" className="py-3 pr-3 font-medium"><NomeCasa c={c} nome={nomes.get(c._id)} /></th>
                 <td className="px-3 py-3"><CelulaCanalMatriz casa={c} canal="airbnb" disponivel={disponivel} motivoSemLigar={motivoSemLigar} aoLigar={aoLigar} aoMudar={aoMudar} /></td>
                 <td className="px-3 py-3"><CelulaCanalMatriz casa={c} canal="booking" disponivel={disponivel} motivoSemLigar={motivoSemLigar} aoLigar={aoLigar} aoMudar={aoMudar} /></td>
                 <td className="px-3 py-3"><CelulaSmoobu c={c} /></td>
