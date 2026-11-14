@@ -23,8 +23,8 @@ const { idsEquipa, comMembro, normalizarEquipa } = require('./equipaTarefa');
 
 const MOTIVO_SEM_EQUIPA = 'Sem equipa ativa';
 const MOTIVO_INDISPONIVEL = 'Toda a equipa ausente, de folga ou fora da equipa exclusiva neste dia';
-const MOTIVO_LOTACAO = 'Não cabe no horário de ninguém (09:00-18:00, com almoço e viagens)';
-const MOTIVO_SEM_HORA_COMUM = 'Sem hora comum para a equipa (09:00-18:00, com almoço e viagens)';
+const MOTIVO_LOTACAO = 'Não cabe no horário de ninguém (10:00-17:30, com almoço e viagens)';
+const MOTIVO_SEM_HORA_COMUM = 'Sem hora comum para a equipa (10:00-17:30, com almoço e viagens)';
 // Limites para não multiplicar chamadas de viagem (pagas): candidatos extra e combinações testadas.
 const MAX_CANDIDATOS_EXTRA = 4;
 const MAX_COMBINACOES = 6;
@@ -203,7 +203,7 @@ async function temSobreposicao(utilizadorId, data, duracaoMin, excluirTarefaId =
 }
 
 /**
- * A limpeza, na hora em que está, cumpre o horário desta pessoa (janela 09:00-18:00,
+ * A limpeza, na hora em que está, cumpre o horário desta pessoa (janela 10:00-17:30,
  * sem sobreposição com viagens, almoço possível)? Usa a agenda real; a própria
  * tarefa fica de fora. Sem hora real (meia-noite) devolve true (ainda não agendada).
  * @returns {Promise<boolean>}
@@ -214,7 +214,7 @@ async function cabeNaAgendaNaHora(utilizadorId, data, duracaoMin, excluirTarefaI
   const dur = Number(duracaoMin) || 45;
   const ini = H.minutosLocais(data);
   // Hora já fora da janela (dados antigos): não a «piora»; só recusa sobreposições.
-  if (ini < H.HORARIO.INICIO_DIA || ini >= H.HORARIO.FIM_DIA) {
+  if (ini < H.HORARIO.INICIO_DIA || ini >= H.HORARIO.FIM_DIA || ini + dur > H.HORARIO.FIM_MAXIMO_LIMPEZA) {
     return !(await temSobreposicao(utilizadorId, data, dur, excluirTarefaId));
   }
   const nova = { duracao: dur, coord, propId, nova: true, ini, fim: ini + dur };

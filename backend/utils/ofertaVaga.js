@@ -59,7 +59,7 @@ function diaAnterior(diaISO) {
   return new Date(Date.UTC(y, m - 1, d - 1)).toISOString().slice(0, 10);
 }
 
-/** Início previsto: a hora da tarefa, ou as 09:00 locais se ainda não tem hora real. */
+/** Início previsto: a hora da tarefa, ou as 10:00 locais se ainda não tem hora real. */
 function inicioPrevisto(tarefa) {
   return H.temHoraReal(tarefa.data) ? new Date(tarefa.data) : H.utcDeMinutosLocais(H.diaUTC(tarefa.data), H.HORARIO.INICIO_DIA);
 }

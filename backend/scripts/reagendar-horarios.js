@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
  * Reagenda as limpezas atribuídas cuja hora está fora do horário de trabalho
- * (antes das 09:00 -- incluindo a meia-noite -- ou a acabar depois das 18:00).
+ * (antes das 10:00 -- incluindo a meia-noite -- ou a acabar depois das 17:30).
  *
- * Regras (ver utils/horario.js): 09:00-17:30, uma limpeza acaba até às 18:00,
+ * Regras (ver utils/horario.js): 10:00-17:30, uma limpeza acaba até às 17:30,
  * almoço de 1 h (início entre 12:00 e 14:00), viagens contam.
  *
  * Só toca em tarefas FUTURAS (dia de hoje em diante), no estado `atribuida`.
@@ -27,6 +27,7 @@
 const mongoose = require('mongoose');
 
 const H = require('../utils/horario');
+const { eMarcadaPeloGestor } = require('../utils/diaMudadoGestor');
 
 const hh = (d) => (H.temHoraReal(d) ? H.hhmm(H.minutosLocais(d)) : '00:00 (sem hora)');
 
@@ -44,9 +45,10 @@ function foraDoHorario(t) {
  * @param {boolean} [o.avisar=false] - com aplicar: avisa só quem mudou (1x por pessoa) e os gestores se sobrar por atribuir
  * @param {Date} [o.agora=new Date()]
  * @param {*} [o.empresaId] - limita a uma empresa
+ * @param {boolean} [o.soAutomaticas=false] - ignora as limpezas marcadas à mão pelo gestor (ver eMarcadaPeloGestor)
  * @returns {Promise<{ aplicado, total, reagendadas, passadas, porAtribuir, linhas: object[], avisos: number }>}
  */
-async function reagendarHorarios({ aplicar = false, avisar = false, agora = new Date(), empresaId = null } = {}) {
+async function reagendarHorarios({ aplicar = false, avisar = false, agora = new Date(), empresaId = null, soAutomaticas = false } = {}) {
   const Tarefa = require('../models/Tarefa');
   const Utilizador = require('../models/Utilizador');
   const { idsEquipa } = require('../utils/equipaTarefa');
@@ -61,7 +63,7 @@ async function reagendarHorarios({ aplicar = false, avisar = false, agora = new 
     .populate({ path: 'propriedade_id', select: 'nome coordenadas staff_necessario empresa_id' })
     .sort({ data: 1, _id: 1 })
     .lean();
-  const afetadas = candidatas.filter((t) => foraDoHorario(t) && idsEquipa(t).length > 0);
+  const afetadas = candidatas.filter((t) => foraDoHorario(t) && idsEquipa(t).length > 0 && !(soAutomaticas && eMarcadaPeloGestor(t)));
 
   const nomes = new Map();
   const nomeDe = async (id) => {

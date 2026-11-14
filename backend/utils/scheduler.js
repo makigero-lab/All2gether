@@ -1,7 +1,7 @@
 /**
  * Scheduler — All2gether
  *
- * Carrega a agenda de cada pessoa e delega as regras de horário (09:00-18:00,
+ * Carrega a agenda de cada pessoa e delega as regras de horário (10:00-17:30,
  * almoço, viagens) em `horario.js`. Usado por: loadBalancer, atribuicaoAutomatica,
  * Smoobu, reatribuição do gestor, ausências e script de reparação.
  *
@@ -103,7 +103,7 @@ async function prepararViagens(itens, nova, dataRef) {
 
 /**
  * Agenda real de uma pessoa num dia: limpezas com hora real (não a meia-noite)
- * e que começam a partir das 09:00. Horas inválidas (ex.: 02:08) não contam
+ * e que começam a partir das 06:00 (o gestor pode pô-las antes das 10:00 e contam como ocupadas). Horas inválidas (ex.: 02:08) não contam
  * como base de cadeia. Cancelada nunca conta.
  */
 async function carregarAgenda(utilizadorId, dia, excluirTarefaId = null) {
@@ -120,12 +120,12 @@ async function carregarAgenda(utilizadorId, dia, excluirTarefaId = null) {
 
 /**
  * Tarefa (lean, com propriedade_id populado) -> item de agenda, ou null se não tem hora
- * real (meia-noite) ou começa antes das 09:00 (hora inválida: não serve de base de cadeia).
+ * real (meia-noite) ou começa antes das 06:00 (hora inválida: não serve de base de cadeia).
  */
 function itemDeTarefa(t) {
   if (!H.temHoraReal(t.data)) return null;
   const ini = H.minutosLocais(t.data);
-  if (ini < H.HORARIO.INICIO_DIA) return null;
+  if (ini < H.HORARIO.AGENDA_MINIMA) return null;
   return {
     ini,
     fim: ini + (Number(t.tempo_limpeza_minutos) || 45),
@@ -138,8 +138,8 @@ function itemDeTarefa(t) {
 
 function motivoNaoCabe(tempo) {
   return H.duracaoCabeNoHorario(tempo)
-    ? 'Não cabe no horário (09:00-18:00, com almoço e viagens)'
-    : `Limpeza de ${tempo} min demasiado longa para o horário (09:00-18:00, com almoço)`;
+    ? 'Não cabe no horário (10:00-17:30, com almoço e viagens)'
+    : `Limpeza de ${tempo} min demasiado longa para o horário (10:00-17:30, com almoço)`;
 }
 
 /**

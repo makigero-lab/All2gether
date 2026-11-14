@@ -141,7 +141,7 @@ async function main() {
   fs.mkdirSync(saida, { recursive: true });
   const marca = new Date().toISOString().replace(/[:.]/g, '-');
 
-  // 1) Cópia para memória e diagnóstico das horas antes das 09:00 (na cópia).
+  // 1) Cópia para memória e diagnóstico das horas antes das 10:00 (na cópia).
   const { MongoMemoryServer } = require('mongodb-memory-server');
   const mem = await MongoMemoryServer.create();
   const src = await mongoose.createConnection(SRC, { readPreference: 'secondaryPreferred' }).asPromise();
@@ -166,7 +166,7 @@ async function main() {
       criada: t.createdAt, alterada: t.updatedAt, inicio_origem: t.inicio_origem || null, data_ajustada_gestor: !!t.data_ajustada_gestor,
       reserva_smoobu: t.smoobu_reserva_id || t.reserva_id || null,
     }));
-  console.log(`Antes das 09:00 (hoje em diante, não canceladas/concluídas): ${diagnostico.length}`);
+  console.log(`Antes das 10:00 (hoje em diante, não canceladas/concluídas): ${diagnostico.length}`);
 
   const verifAntes = await verificar(desde);
 

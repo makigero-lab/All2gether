@@ -3,7 +3,7 @@
  *
  * Devolve só as pessoas que o motor automático também aceitaria para o dia:
  * ativas, sem ausência nem folga, dentro da equipa exclusiva da casa e a quem
- * a limpeza cabe no horário (09:00-18:00, com almoço e viagens), com a hora
+ * a limpeza cabe no horário (10:00-17:30, com almoço e viagens), com a hora
  * prevista de cada uma. Usa o mesmo cálculo de `scheduler.js`/`horario.js`;
  * as viagens do Google Maps passam pela cache de `distancia.js` (cada par de
  * coordenadas só é pedido uma vez por hora), por isso abrir o seletor não

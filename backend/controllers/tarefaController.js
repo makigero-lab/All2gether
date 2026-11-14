@@ -23,7 +23,7 @@ const { obterStaffDisponivel } = require('../utils/loadBalancer');
 const { cabeNaAgendaNaHora } = require('../utils/atribuicaoAutomatica');
 const { diaTexto, tipoDe: tipoDeTarefa } = require('../utils/tipoLimpeza');
 const { avisarGestores } = require('../utils/notificar');
-const { registarDiaMudadoPeloGestor } = require('../utils/diaMudadoGestor');
+const { registarDiaMudadoPeloGestor, diaDe } = require('../utils/diaMudadoGestor');
 const { estadoDaCasa, casaInativa } = require('../utils/casaAtiva');
 
 /**
@@ -54,7 +54,7 @@ async function horaDeAtribuicaoManual({ utilizadorId, data, tempo, propriedade }
   if (r.cabe) return { data: r.data, aviso: null, tempoViagem: Number(r.tempoViagem) || 0 };
   return {
     data: Horario.utcDeMinutosLocais(dia, Horario.HORARIO.INICIO_DIA),
-    aviso: `Fica fora do horário: ${r.motivo}. Ficou às 09:00; ajusta a hora se for preciso.`,
+    aviso: `Fica fora do horário: ${r.motivo}. Ficou às 10:00; ajusta a hora se for preciso.`,
     tempoViagem: 0,
   };
 }
@@ -743,7 +743,7 @@ exports.mudarDiaTarefa = async (req, res) => {
     }
     tarefa.data = dataNova;
     tarefa.data_ajustada_gestor = true;
-    registarDiaMudadoPeloGestor(tarefa, req.user); // data provisória (Smoobu sem saída): lembra o dia que o gestor pôs
+    registarDiaMudadoPeloGestor(tarefa, req.user); // data provisória (Smoobu sem saída): lembra o dia que o gestor pôs (mudar dia: pediu o dia)
     await tarefa.save();
 
     // Falta gente: tenta preencher a vaga sem mexer na hora.
@@ -955,7 +955,7 @@ exports.atribuirTarefa = async (req, res) => {
             tarefa.tempo_viagem_minutos = Number(r.tempoViagem) || 0;
           } else {
             tarefa.data = Horario.utcDeMinutosLocais(Horario.diaUTC(tarefa.data), Horario.HORARIO.INICIO_DIA);
-            avisoHorario = `Fica fora do horário: ${r.motivo}. Ficou às 09:00; ajusta a hora se for preciso.`;
+            avisoHorario = `Fica fora do horário: ${r.motivo}. Ficou às 10:00; ajusta a hora se for preciso.`;
           }
         } else {
           const fora = Horario.avisoForaDoHorario(tarefa.data, tempoT);
@@ -964,7 +964,7 @@ exports.atribuirTarefa = async (req, res) => {
       } catch (e) { /* mantém */ }
     }
 
-    registarDiaMudadoPeloGestor(tarefa, req.user); // data provisória: o gestor aceitou/pôs este dia
+    registarDiaMudadoPeloGestor(tarefa, req.user, diaDe(dataAntes)); // data provisória: o gestor aceitou/pôs este dia
     await tarefa.save();
     // O gestor mudou o dia/hora de uma limpeza de parceiro: aviso no sino do parceiro.
     if (new Date(tarefa.data).getTime() !== dataAntes) await avisarParceiro(tarefa, 'alterada');
@@ -1106,7 +1106,7 @@ exports.atualizarEstadoTarefa = async (req, res) => {
  *   2. Valida o novo utilizador (staff/gestor ativo da empresa).
  *   3. Verifica folga fixa semanal do novo utilizador nesse dia.
  *   4. (Removido) A atribuição à mão já não é bloqueada pela capacidade:
- *      se a limpeza não couber no horário (09:00-18:00, almoço, viagens)
+ *      se a limpeza não couber no horário (10:00-17:30, almoço, viagens)
  *      a resposta traz um `warning` e a tarefa fica na hora atual.
  *   5. Carrega a propriedade para obter coordenadas.
  *   6. Temporariamente desatribui a tarefa (utilizador_id = null) para que
@@ -1209,7 +1209,7 @@ exports.reatribuirTarefa = async (req, res) => {
       tarefa.propriedade_id
     );
     // A atribuição à mão nunca é bloqueada pelo horário: se não couber, mantém a hora
-    // da tarefa (ou as 09:00 se não tinha hora real) e AVISA o gestor.
+    // da tarefa (ou as 10:00 se não tinha hora real) e AVISA o gestor.
     let avisoHorario = null;
     if (!resultadoScheduler.cabe) {
       const diaT = Horario.diaUTC(tarefa.data);
@@ -1235,7 +1235,7 @@ exports.reatribuirTarefa = async (req, res) => {
     // Recalcula as vagas com o staff_necessario atual (a equipa pode ter encolhido,
     // p.ex. se o novo responsável já era membro).
     tarefa.pessoas_em_falta = Math.max(0, (Number(propriedade.staff_necessario) || 1) - eq.equipa_atribuida.length);
-    registarDiaMudadoPeloGestor(tarefa, req.user); // data provisória: o gestor pôs esta pessoa neste dia
+    registarDiaMudadoPeloGestor(tarefa, req.user, diaDe(dataAntesReatrib)); // data provisória: o gestor pôs esta pessoa neste dia
     await tarefa.save();
     if (new Date(tarefa.data).getTime() !== dataAntesReatrib) await avisarParceiro(tarefa, 'alterada');
 

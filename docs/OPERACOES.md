@@ -51,7 +51,7 @@ Fazer um backup antes (secção 1). Consulta só de leitura equivalente (mongosh
 `db.tarefas.countDocuments({ utilizador_id: null, "equipa_atribuida.0": { $exists: true }, estado: { $in: ["por_atribuir","nao_atribuida","cancelada"] } })`
 
 ## 5. Reagendar limpezas fora do horário (uma vez, depois do deploy)
-Corrige as limpezas futuras atribuídas com hora fora do horário (antes das 09:00, incluindo a meia-noite, ou a acabar depois das 18:00). Só toca em tarefas de hoje em diante no estado `atribuida`; nunca em `em_curso`, `concluida` ou `cancelada`. Recalcula pela ordem atual, respeitando 09:00-18:00, almoço (início entre 12:00 e 14:00) e viagens; o que não couber passa ao motor para outra pessoa; o que ninguém puder fica por atribuir com o motivo real. É idempotente.
+Corrige as limpezas futuras atribuídas com hora fora do horário (antes das 10:00, incluindo a meia-noite, ou a acabar depois das 17:30). Só toca em tarefas de hoje em diante no estado `atribuida`; nunca em `em_curso`, `concluida` ou `cancelada`. Recalcula pela ordem atual, respeitando 10:00-17:30, almoço (início entre 12:00 e 14:00) e viagens; o que não couber passa ao motor para outra pessoa; o que ninguém puder fica por atribuir com o motivo real. É idempotente.
 ```
 cd backend
 # 1) só mostra números e a lista (tarefa, dia, pessoa, propriedade, antes, depois; sem dados de hóspedes)

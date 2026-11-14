@@ -45,13 +45,13 @@ const tar = (c, p, pessoa, dia, hora, ex = {}) =>
   Tarefa.create({ empresa_id: c.e._id, propriedade_id: p._id, utilizador_id: pessoa._id, data: new Date(`${dia}T${hora}Z`), tempo_limpeza_minutos: 60, estado: 'atribuida', ...ex });
 
 describe('hora de início: cadeia', () => {
-  test('inverno: primeira limpeza às 09:00 (09:00 UTC); verão: 09:00 locais = 08:00 UTC', async () => {
+  test('inverno: primeira limpeza às 10:00 (10:00 UTC); verão: 10:00 locais = 09:00 UTC', async () => {
     const c = await cenario(app, { sn: 1 });
     const p = await casa(c, 38.7);
     const inv = await calcularInicioTarefaUtilizador(c.ana._id, new Date('2036-01-13T00:00:00Z'), p.coordenadas, 60);
-    expect(inv.data.toISOString()).toBe('2036-01-13T09:00:00.000Z');
+    expect(inv.data.toISOString()).toBe('2036-01-13T10:00:00.000Z');
     const ver = await calcularInicioTarefaUtilizador(c.ana._id, new Date('2036-07-14T00:00:00Z'), p.coordenadas, 60);
-    expect(ver.data.toISOString()).toBe('2036-07-14T08:00:00.000Z');
+    expect(ver.data.toISOString()).toBe('2036-07-14T09:00:00.000Z');
   });
 
   test('uma tarefa a 00:00 e outra a 02:08 (hora inválida) não servem de base à cadeia', async () => {
@@ -61,16 +61,16 @@ describe('hora de início: cadeia', () => {
     await tar(c, q, c.ana, '2036-01-14', '00:00:00');
     await tar(c, q, c.ana, '2036-01-14', '02:08:00');
     const r = await calcularInicioTarefaUtilizador(c.ana._id, new Date('2036-01-14T00:00:00Z'), p.coordenadas, 60);
-    expect(r.data.toISOString()).toBe('2036-01-14T09:00:00.000Z');
+    expect(r.data.toISOString()).toBe('2036-01-14T10:00:00.000Z');
   });
 
-  test('encadeia a partir da última real: 10:00 + 20 min de viagem (Maps simulado) = 10:20', async () => {
+  test('encadeia a partir da última real: 11:00 + 20 min de viagem (Maps simulado) = 11:20', async () => {
     const c = await cenario(app, { sn: 1 });
     const p1 = await casa(c, 38.7);
     const p2 = await casa(c, 38.9);
-    await tar(c, p1, c.ana, '2036-01-15', '09:00:00');
+    await tar(c, p1, c.ana, '2036-01-15', '10:00:00');
     const r = await calcularInicioTarefaUtilizador(c.ana._id, new Date('2036-01-15T00:00:00Z'), p2.coordenadas, 60);
-    expect(hhmmLocal(r.data)).toBe('10:20');
+    expect(hhmmLocal(r.data)).toBe('11:20');
     expect(r.tempoViagem).toBe(20);
     expect(r.origem).toBe('apos_ultima_tarefa');
   });
@@ -98,7 +98,7 @@ describe('Google Maps simulado', () => {
     const c = await cenario(app, { sn: 1 });
     const p1 = await casa(c, 38.7);
     const p2 = await casa(c, 38.9);
-    for (const h of ['09:00:00', '10:30:00', '12:00:00']) await tar(c, p1, c.ana, '2036-01-17', h, { tempo_limpeza_minutos: 30 });
+    for (const h of ['10:00:00', '11:30:00', '13:00:00']) await tar(c, p1, c.ana, '2036-01-17', h, { tempo_limpeza_minutos: 30 });
     await calcularInicioTarefaUtilizador(c.ana._id, new Date('2036-01-17T00:00:00Z'), p2.coordenadas, 30);
     expect(calcularTempoViagemReal).toHaveBeenCalledTimes(1); // 3 tarefas na mesma casa -> 1 par
   });
@@ -107,10 +107,10 @@ describe('Google Maps simulado', () => {
     const c = await cenario(app, { sn: 1 });
     const p1 = await casa(c, 38.7);
     const semCoord = await Propriedade.create({ nome: 'Sem' + ++n, empresa_id: c.e._id, smoobu_id: 's' + ++n, ativo: true, tempo_limpeza_minutos: 60 });
-    await tar(c, p1, c.ana, '2036-01-18', '09:00:00');
+    await tar(c, p1, c.ana, '2036-01-18', '10:00:00');
     const r = await calcularInicioTarefaUtilizador(c.ana._id, new Date('2036-01-18T00:00:00Z'), semCoord.coordenadas, 60);
     expect(r.tempoViagem).toBe(30);
-    expect(hhmmLocal(r.data)).toBe('10:30');
+    expect(hhmmLocal(r.data)).toBe('11:30');
   });
 });
 
@@ -118,21 +118,21 @@ describe('motor: outra pessoa, ninguém e equipa', () => {
   test('quando a primeira pessoa não tem lugar, o motor escolhe outra', async () => {
     const c = await cenario(app, { sn: 1, extra: 0 });
     const p = await casa(c, 38.7);
-    // Ana ocupada das 09:00 às 18:00 (com almoço): 4 h + almoço + 4 h
-    await tar(c, p, c.ana, '2036-01-20', '09:00:00', { tempo_limpeza_minutos: 240 });
-    await tar(c, p, c.ana, '2036-01-20', '14:00:00', { tempo_limpeza_minutos: 240 });
+    // Ana ocupada das 10:00 às 17:30 (com almoço): 4 h + almoço + 2 h30
+    await tar(c, p, c.ana, '2036-01-20', '10:00:00', { tempo_limpeza_minutos: 240 });
+    await tar(c, p, c.ana, '2036-01-20', '15:00:00', { tempo_limpeza_minutos: 150 });
     const plano = await planearAtribuicao({ empresaId: c.e._id, propriedade: p.toObject(), dia: new Date('2036-01-20T00:00:00Z'), tempoLimpeza: 60 });
     expect(plano.estado).toBe('atribuida');
     expect(String(plano.utilizador_id)).toBe(String(c.bia._id));
-    expect(hhmmLocal(plano.data)).toBe('09:00');
+    expect(hhmmLocal(plano.data)).toBe('10:00');
   });
 
   test('ninguém cabe: fica nao_atribuida com o motivo real', async () => {
     const c = await cenario(app, { sn: 1, extra: 0 });
     const p = await casa(c, 38.7);
     for (const u of [c.ana, c.bia]) {
-      await tar(c, p, u, '2036-01-21', '09:00:00', { tempo_limpeza_minutos: 240 });
-      await tar(c, p, u, '2036-01-21', '14:00:00', { tempo_limpeza_minutos: 240 });
+      await tar(c, p, u, '2036-01-21', '10:00:00', { tempo_limpeza_minutos: 240 });
+      await tar(c, p, u, '2036-01-21', '15:00:00', { tempo_limpeza_minutos: 150 });
     }
     const plano = await planearAtribuicao({ empresaId: c.e._id, propriedade: p.toObject(), dia: new Date('2036-01-21T00:00:00Z'), tempoLimpeza: 60 });
     expect(plano.estado).toBe('nao_atribuida');
@@ -152,7 +152,7 @@ describe('motor: outra pessoa, ninguém e equipa', () => {
     const c = await cenario(app, { sn: 2, extra: 0 });
     const p = await casa(c, 38.7, { staff_necessario: 2 });
     const q = await casa(c, 38.7);
-    await tar(c, q, c.bia, '2036-01-23', '09:00:00', { tempo_limpeza_minutos: 120 }); // Bia livre às 11:00
+    await tar(c, q, c.bia, '2036-01-23', '10:00:00', { tempo_limpeza_minutos: 60 }); // Bia livre às 11:00
     const plano = await planearAtribuicao({ empresaId: c.e._id, propriedade: p.toObject(), dia: new Date('2036-01-23T00:00:00Z'), tempoLimpeza: 60 });
     expect(plano.estado).toBe('atribuida');
     expect(plano.equipa_atribuida).toHaveLength(2);
@@ -176,7 +176,7 @@ describe('caminho do gestor (à mão): nunca fica à meia-noite e só avisa', ()
     const r = await request(app).post('/api/gestor/tarefas').set(auth(c.token))
       .send({ propriedade_id: String(p._id), data: '2036-07-15', utilizador_id: String(c.ana._id), tempo_limpeza_minutos: 60 });
     expect(r.status).toBe(201);
-    expect(new Date(r.body.tarefa.data).toISOString()).toBe('2036-07-15T08:00:00.000Z'); // 09:00 de verão
+    expect(new Date(r.body.tarefa.data).toISOString()).toBe('2036-07-15T09:00:00.000Z'); // 10:00 de verão
   });
 
   test('criar atribuída com hora explícita fora do horário: respeita e avisa (sem bloquear)', async () => {
@@ -190,20 +190,43 @@ describe('caminho do gestor (à mão): nunca fica à meia-noite e só avisa', ()
     expect(r.body.warning).toBeUndefined();
   });
 
+  test('o gestor põe à mão 08:00 e 19:00: aceita, avisa com as horas novas e o automático não mexe', async () => {
+    const c = await cenario(app, { sn: 1 });
+    const p = await casa(c, 38.7);
+    const cedo = await request(app).post('/api/gestor/tarefas').set(auth(c.token))
+      .send({ propriedade_id: String(p._id), data: '2036-01-28', hora: '08:00', utilizador_id: String(c.ana._id), tempo_limpeza_minutos: 60 });
+    expect(cedo.status).toBe(201);
+    expect(cedo.body.aviso_horario).toMatch(/começa antes das 10:00/);
+    expect(hhmmLocal(cedo.body.tarefa.data)).toBe('08:00');
+    const tarde = await request(app).post('/api/gestor/tarefas').set(auth(c.token))
+      .send({ propriedade_id: String(p._id), data: '2036-01-28', hora: '19:00', utilizador_id: String(c.bia._id), tempo_limpeza_minutos: 60 });
+    expect(tarde.status).toBe(201);
+    expect(tarde.body.aviso_horario).toMatch(/depois das 17:30/);
+    expect(hhmmLocal(tarde.body.tarefa.data)).toBe('19:00');
+    const justa = await request(app).post('/api/gestor/tarefas').set(auth(c.token))
+      .send({ propriedade_id: String(p._id), data: '2036-01-29', hora: '16:30', utilizador_id: String(c.ana._id), tempo_limpeza_minutos: 60 });
+    expect(justa.status).toBe(201);
+    expect(justa.body.aviso_horario).toBeUndefined(); // acaba às 17:30 certas
+    // A limpeza das 08:00 continua a ocupar a agenda da Ana: o automático não lhe passa por cima.
+    const r = await calcularInicioTarefaUtilizador(c.ana._id, new Date('2036-01-28T00:00:00Z'), p.coordenadas, 60, null, p._id);
+    expect(hhmmLocal(r.data)).toBe('10:00');
+    expect(String((await Tarefa.findById(cedo.body.tarefa._id)).data.toISOString())).toBe(new Date(cedo.body.tarefa.data).toISOString());
+  });
+
   test('atribuir à mão uma tarefa sem hora real (00:00) calcula a hora', async () => {
     const c = await cenario(app, { sn: 1 });
     const p = await casa(c, 38.7);
     const t = await Tarefa.create({ empresa_id: c.e._id, propriedade_id: p._id, data: new Date('2036-01-26T00:00:00Z'), tempo_limpeza_minutos: 60, estado: 'por_atribuir' });
     const r = await request(app).patch(`/api/gestor/tarefas/${t._id}/atribuir`).set(auth(c.token)).send({ utilizador_id: String(c.ana._id) });
     expect(r.status).toBe(200);
-    expect(new Date(r.body.tarefa.data).toISOString()).toBe('2036-01-26T09:00:00.000Z');
+    expect(new Date(r.body.tarefa.data).toISOString()).toBe('2036-01-26T10:00:00.000Z');
   });
 
   test('reatribuir já não dá 409 por capacidade: atribui e avisa que fica fora do horário', async () => {
     const c = await cenario(app, { sn: 1 });
     const p = await casa(c, 38.7);
-    await tar(c, p, c.bia, '2036-01-27', '09:00:00', { tempo_limpeza_minutos: 240 });
-    await tar(c, p, c.bia, '2036-01-27', '14:00:00', { tempo_limpeza_minutos: 240 });
+    await tar(c, p, c.bia, '2036-01-27', '10:00:00', { tempo_limpeza_minutos: 240 });
+    await tar(c, p, c.bia, '2036-01-27', '15:00:00', { tempo_limpeza_minutos: 150 });
     const t = await tar(c, p, c.ana, '2036-01-27', '10:00:00');
     const r = await request(app).patch(`/api/gestor/tarefas/${t._id}/reatribuir`).set(auth(c.token)).send({ utilizador_id: String(c.bia._id) });
     expect(r.status).toBe(200);
@@ -216,8 +239,8 @@ describe('Smoobu: alteração de data recalcula a hora', () => {
   test('o utilitário de dia novo nunca devolve meia-noite nem a hora do dia antigo', async () => {
     const c = await cenario(app, { sn: 1 });
     const p = await casa(c, 38.7);
-    await tar(c, p, c.ana, '2036-02-03', '09:00:00', { tempo_limpeza_minutos: 90 });
+    await tar(c, p, c.ana, '2036-02-03', '10:00:00', { tempo_limpeza_minutos: 90 });
     const r = await calcularInicioTarefaUtilizador(c.ana._id, new Date('2036-02-03T00:00:00Z'), p.coordenadas, 60, null, p._id);
-    expect(hhmmLocal(r.data)).toBe('10:30'); // mesma casa: sem viagem
+    expect(hhmmLocal(r.data)).toBe('11:30'); // mesma casa: sem viagem
   });
 });

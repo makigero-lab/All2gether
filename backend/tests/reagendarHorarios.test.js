@@ -45,7 +45,7 @@ test('Tâmara: a cadeia madrugada (00:00, 02:08, 03:42...) é reagendada pela or
   const seco = await reagendarHorarios({ aplicar: false, agora: AGORA, empresaId: c.e._id });
   expect(seco.total).toBe(4);
   expect(seco.reagendadas).toBe(4);
-  expect(seco.linhas.map((l) => l.depois)).toEqual(['09:00', '10:00', '11:00', '13:00']);
+  expect(seco.linhas.map((l) => l.depois)).toEqual(['10:00', '11:00', '13:00', '14:00']);
   expect((await Tarefa.findById(ts[0]._id)).data.toISOString()).toBe('2036-03-08T00:00:00.000Z');
   expect(JSON.stringify(seco.linhas)).not.toMatch(/hospede|nome_hospede/i);
 
@@ -53,7 +53,7 @@ test('Tâmara: a cadeia madrugada (00:00, 02:08, 03:42...) é reagendada pela or
   const r = await reagendarHorarios({ aplicar: true, agora: AGORA, empresaId: c.e._id });
   expect(r.reagendadas).toBe(4);
   const depois = (await Tarefa.find({ _id: { $in: ts.map((t) => t._id) } }).sort({ data: 1 })).map(hora);
-  expect(depois).toEqual(['09:00', '10:00', '11:00', '13:00']);
+  expect(depois).toEqual(['10:00', '11:00', '13:00', '14:00']);
 
   // Idempotente.
   const outra = await reagendarHorarios({ aplicar: true, agora: AGORA, empresaId: c.e._id });
@@ -74,7 +74,7 @@ test('só toca em futuras atribuidas: nunca em_curso, concluida, cancelada nem p
   }
 });
 
-test('a acabar depois das 18:00 também é corrigida; dentro do horário fica como está', async () => {
+test('a acabar depois das 17:30 também é corrigida; dentro do horário fica como está', async () => {
   const c = await cenario(app, { sn: 1, extra: 0 });
   const p = await casa(c);
   const boa = await tar(c, p, c.ana, '2036-03-10', '10:00:00');
@@ -82,27 +82,27 @@ test('a acabar depois das 18:00 também é corrigida; dentro do horário fica co
   const r = await reagendarHorarios({ aplicar: true, agora: AGORA, empresaId: c.e._id });
   expect(r.total).toBe(1);
   expect((await Tarefa.findById(boa._id)).data.toISOString()).toBe('2036-03-10T10:00:00.000Z');
-  expect(hora(await Tarefa.findById(tarde._id))).toBe('09:00'); // cabe antes da das 10:00
+  expect(hora(await Tarefa.findById(tarde._id))).toBe('11:00'); // cabe a seguir à das 10:00
 });
 
 test('o que não cabe à pessoa vai para outra; se ninguém puder fica por atribuir com motivo', async () => {
   const c = await cenario(app, { sn: 1, extra: 0 });
   const p = await casa(c);
-  // Ana tem o dia cheio (4 h + 4 h) e uma limpeza às 03:00.
-  await tar(c, p, c.ana, '2036-03-11', '09:00:00', { tempo_limpeza_minutos: 240 });
-  await tar(c, p, c.ana, '2036-03-11', '14:00:00', { tempo_limpeza_minutos: 240 });
+  // Ana tem o dia cheio (4 h + almoço + 2 h 30) e uma limpeza às 03:00.
+  await tar(c, p, c.ana, '2036-03-11', '10:00:00', { tempo_limpeza_minutos: 240 });
+  await tar(c, p, c.ana, '2036-03-11', '15:00:00', { tempo_limpeza_minutos: 150 });
   const t = await tar(c, p, c.ana, '2036-03-11', '03:00:00');
   const r1 = await reagendarHorarios({ aplicar: true, agora: AGORA, empresaId: c.e._id });
   expect(r1.passadas).toBe(1);
   const dep = await Tarefa.findById(t._id);
   expect(String(dep.utilizador_id)).toBe(String(c.bia._id));
-  expect(hora(dep)).toBe('09:00');
+  expect(hora(dep)).toBe('10:00');
 
   // Agora a Bia também fica cheia: a próxima não tem ninguém.
-  await tar(c, p, c.bia, '2036-03-12', '09:00:00', { tempo_limpeza_minutos: 240 });
-  await tar(c, p, c.bia, '2036-03-12', '14:00:00', { tempo_limpeza_minutos: 240 });
-  await tar(c, p, c.ana, '2036-03-12', '09:00:00', { tempo_limpeza_minutos: 240 });
-  await tar(c, p, c.ana, '2036-03-12', '14:00:00', { tempo_limpeza_minutos: 240 });
+  await tar(c, p, c.bia, '2036-03-12', '10:00:00', { tempo_limpeza_minutos: 240 });
+  await tar(c, p, c.bia, '2036-03-12', '15:00:00', { tempo_limpeza_minutos: 150 });
+  await tar(c, p, c.ana, '2036-03-12', '10:00:00', { tempo_limpeza_minutos: 240 });
+  await tar(c, p, c.ana, '2036-03-12', '15:00:00', { tempo_limpeza_minutos: 150 });
   const t2 = await tar(c, p, c.ana, '2036-03-12', '03:00:00');
   const r2 = await reagendarHorarios({ aplicar: true, agora: AGORA, empresaId: c.e._id });
   expect(r2.porAtribuir).toBe(1);

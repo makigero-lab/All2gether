@@ -36,7 +36,7 @@
  *   - Filtro de ausências aprovadas (bloqueiam atribuição)
  *   - Filtro de folgas fixas semanais (dias_folga) e rotativas
  *   - Algoritmo VIP (funcionário preferencial) — com SLA
- *   - Janela do dia (09:00-18:00, almoço e viagens, ver horario.js) — exclui quem não cabe
+ *   - Janela do dia (10:00-17:30, almoço e viagens, ver horario.js) — exclui quem não cabe
  *
  * Devolve { utilizadorId, tempoViagem } ou null se ninguém couber no SLA.
  */

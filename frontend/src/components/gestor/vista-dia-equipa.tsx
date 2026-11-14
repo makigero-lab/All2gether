@@ -202,8 +202,8 @@ export function VistaDiaEquipa({
       .map((u) => primeiro(u.nome));
 
     const todos = doDia.flatMap((x) => [x.ini - x.viagem, x.fim]);
-    const inicio = Math.min(8 * 60, ...(todos.length ? [Math.floor(Math.min(...todos) / 60) * 60] : []));
-    const fim = Math.max(19 * 60, ...(todos.length ? [Math.ceil(Math.max(...todos) / 60) * 60] : []));
+    const inicio = Math.min(10 * 60, ...(todos.length ? [Math.floor(Math.min(...todos) / 60) * 60] : []));
+    const fim = Math.max(18 * 60, ...(todos.length ? [Math.ceil(Math.max(...todos) / 60) * 60] : []));
     const lista = [...doDia].sort((a, b) => a.ini - b.ini || a.fim - b.fim).map((x) => x.t);
     return { ausentes, pessoas, porAtribuir, semHora, livres, inicio, fim, lista, total: doDia.length + semHora.length };
   }, [tarefas, equipa, dia]);
