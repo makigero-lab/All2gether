@@ -153,7 +153,7 @@ const localidade = (m: string) => m.split(",").pop()!.trim() || m;
  * acrescenta a morada curta («Casa Azul (Rua do Ouro 10, Lisboa)») ou, sem morada, um número. Com `max`, uma morada
  * que faria o nome passar desse tamanho encurta-se para a localidade.
  */
-export function nomesDistintos(casas: { _id: string; nome: string; morada_curta?: string | null }[], max = 40): Map<string, string> {
+export function nomesDistintos(casas: { _id: string; nome: string; morada_curta?: string | null }[], max: number | ((id: string) => number) = 40): Map<string, string> {
   const repetidos = new Map<string, number>();
   for (const c of casas) { const k = c.nome.trim().toLowerCase(); repetidos.set(k, (repetidos.get(k) ?? 0) + 1); }
   const contador = new Map<string, number>();
@@ -164,7 +164,7 @@ export function nomesDistintos(casas: { _id: string; nome: string; morada_curta?
     const n = (contador.get(k) ?? 0) + 1;
     if (!c.morada_curta) contador.set(k, n);
     const nome = c.nome.trim();
-    const morada = c.morada_curta ? (`${nome} (${c.morada_curta})`.length > max ? localidade(c.morada_curta) : c.morada_curta) : null;
+    const morada = c.morada_curta ? (`${nome} (${c.morada_curta})`.length > (typeof max === "function" ? max(c._id) : max) ? localidade(c.morada_curta) : c.morada_curta) : null;
     out.set(c._id, morada ? `${nome} (${morada})` : `${nome} (${n})`);
   }
   return out;
@@ -176,13 +176,15 @@ export function nomesDistintos(casas: { _id: string; nome: string; morada_curta?
  * (só a localidade se o rótulo passar dos ~40 caracteres).
  */
 export function rotulosDasCasas(casas: Pick<CasaResumo, "_id" | "nome" | "smoobu" | "airbnb" | "booking" | "outros" | "morada_curta">[]): Map<string, string> {
-  const nomes = nomesDistintos(casas);
-  const out = new Map<string, string>();
+  const sufixos = new Map<string, string>();
   for (const c of casas) {
     const canais = [c.airbnb ? "Airbnb" : "", c.booking ? "Booking" : "", ...(c.outros ?? []).map((o) => o.canal_texto)].filter(Boolean);
-    const sufixo = c.smoobu ? " — Smoobu" : canais.length ? ` — ${canais.join(" + ")}` : "";
-    out.set(c._id, (nomes.get(c._id) ?? c.nome) + sufixo);
+    sufixos.set(c._id, c.smoobu ? " — Smoobu" : canais.length ? ` — ${canais.join(" + ")}` : "");
   }
+  // O rótulo inteiro (nome, morada e canal) tem de caber numa linha do telemóvel: ~40 caracteres.
+  const nomes = nomesDistintos(casas, (id) => 40 - (sufixos.get(id)?.length ?? 0));
+  const out = new Map<string, string>();
+  for (const c of casas) out.set(c._id, (nomes.get(c._id) ?? c.nome) + (sufixos.get(c._id) ?? ""));
   return out;
 }
 

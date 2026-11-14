@@ -160,7 +160,7 @@ export function ReservasPorConfirmarGestor({ proprietariosComErro, disponivel, a
           {lista && lista.length > 0 && longos.length > 0 && (
             <p className="text-xs text-muted-foreground" data-longos-fora>
               {textoLongosDeFora(longos.length)}{" "}
-              <button type="button" onClick={verLongos} className="inline-flex min-h-11 items-center font-medium text-foreground underline underline-offset-2 sm:min-h-0">Ver abaixo.</button>
+              <button type="button" onClick={verLongos} className="inline py-2 font-medium text-foreground underline underline-offset-2">Ver abaixo.</button>
             </p>
           )}
         </div>

@@ -222,4 +222,8 @@ test("S11: o seletor de casas mostra o canal ligado em forma curta e distingue n
   ]);
   assert.equal(d.get("a"), "Casa do Mar (Rua A, Lisboa) — Airbnb");
   assert.equal(d.get("b"), "Casa do Mar (Rua B, Porto) — Booking");
+  // rótulo inteiro acima de 40 caracteres: a morada encurta para a localidade
+  const e = rotulosDasCasas([c("x", "Casa Azul", { morada_curta: "Rua do Ouro 10, Lisboa", airbnb: {} }), c("y", "Casa Azul", { morada_curta: "Rua das Flores 5, Porto", booking: {} })]);
+  assert.equal(e.get("x"), "Casa Azul (Lisboa) — Airbnb");
+  assert.equal(e.get("y"), "Casa Azul (Porto) — Booking");
 });
