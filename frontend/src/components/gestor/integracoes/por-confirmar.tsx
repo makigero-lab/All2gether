@@ -1,11 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, Ban, Check, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { ConfirmarDialog } from "@/components/ui/confirmar-dialog";
 import { adminGet, adminPost } from "@/lib/api";
 import { plural } from "@/lib/utils";
+import { hojeLisboaISO, OPCOES_CHEGADA, ordenarPorChegada, periodoComAno, textoConfirmarBloqueio, textoLongosDeFora, ultimoDiaDoFiltro, type FiltroChegada } from "@/lib/reservas-externas";
 import { agruparFalhas, enviarEmBlocos, msgErro, textoCorte, type RespostaLote } from "./tipos";
 
 interface Externa {
@@ -22,19 +24,21 @@ interface Externa {
 interface RespostaLista { reservas_externas: Externa[]; total?: number; limite?: number }
 type Resultado = { texto: string; falhas: { texto: string; n: number }[]; erro: boolean };
 
-const fmt = (iso: string) => iso.slice(8, 10) + "/" + iso.slice(5, 7);
-
-/** Agrupa por proprietário e depois por casa (função pura). */
+/**
+ * Agrupa por proprietário e depois por casa, tudo por data de chegada: dentro de cada casa os períodos vão do mais
+ * próximo para o mais distante, e as casas e os proprietários ficam pela primeira chegada (função pura).
+ */
 export function agrupar(lista: Externa[]): { parceiro: string; parceiroId: string; casas: { casa: string; itens: Externa[] }[] }[] {
   const mapa = new Map<string, { parceiro: string; parceiroId: string; casas: Map<string, Externa[]> }>();
-  for (const x of lista) {
+  // A lista entra já ordenada por chegada, por isso a ordem de inserção dos Map é a da primeira chegada de cada grupo.
+  for (const x of ordenarPorChegada(lista)) {
     const pid = x.parceiro?._id ?? "?";
     if (!mapa.has(pid)) mapa.set(pid, { parceiro: x.parceiro?.nome ?? "Sem proprietário", parceiroId: pid, casas: new Map() });
     const g = mapa.get(pid)!;
     if (!g.casas.has(x.propriedade.nome)) g.casas.set(x.propriedade.nome, []);
     g.casas.get(x.propriedade.nome)!.push(x);
   }
-  return [...mapa.values()].sort((a, b) => a.parceiro.localeCompare(b.parceiro, "pt")).map((g) => ({
+  return [...mapa.values()].map((g) => ({
     parceiro: g.parceiro, parceiroId: g.parceiroId, casas: [...g.casas.entries()].map(([casa, itens]) => ({ casa, itens })),
   }));
 }
@@ -43,6 +47,7 @@ export function agrupar(lista: Externa[]): { parceiro: string; parceiroId: strin
  * Separador «Reservas por confirmar»: a lista única da empresa, agrupada por proprietário e casa, com ações em lote
  * (Confirmar / É um bloqueio). Os períodos com mais de 30 noites (normalmente fechos do calendário) ficam agrupados e fechados.
  * Os lotes seguem em blocos de 25 com progresso e o resultado fica num aviso fixo, sempre visível.
+ * Marcar vários como bloqueio pede confirmação (age já e não se desfaz aqui).
  */
 export function ReservasPorConfirmarGestor({ proprietariosComErro, disponivel, aoMudar }: { proprietariosComErro: Set<string>; disponivel: boolean; aoMudar: () => void }) {
   const [lista, setLista] = useState<Externa[] | null>(null);
@@ -53,9 +58,16 @@ export function ReservasPorConfirmarGestor({ proprietariosComErro, disponivel, a
   const [aCarregarMais, setACarregarMais] = useState(false);
   const [progresso, setProgresso] = useState<string | null>(null);
   const [resultado, setResultado] = useState<Resultado | null>(null);
-  const [proximosDias, setProximosDias] = useState("");
+  // «Todas» por defeito: um filtro que esconde períodos sem o gestor o pedir deixaria reservas por decidir fora da vista.
+  const [filtro, setFiltro] = useState<FiltroChegada>("todas");
+  const [aConfirmarBloqueio, setAConfirmarBloqueio] = useState<string[] | null>(null);
+  const [longosAbertos, setLongosAbertos] = useState(false);
+  const longosRef = useRef<HTMLDetailsElement>(null);
 
-  const url = useCallback((pular = 0) => `/api/gestor/reservas-externas?estado=por_confirmar${proximosDias ? `&proximos_dias=${proximosDias}` : ""}${pular ? `&pular=${pular}` : ""}`, [proximosDias]);
+  const url = useCallback((pular = 0) => {
+    const ate = ultimoDiaDoFiltro(filtro, hojeLisboaISO());
+    return `/api/gestor/reservas-externas?estado=por_confirmar${ate ? `&ate=${ate}` : ""}${pular ? `&pular=${pular}` : ""}`;
+  }, [filtro]);
   // Carregar nunca apaga uma mensagem de erro que acabou de aparecer; só mostra a sua, se falhar.
   const carregar = useCallback(async () => {
     try {
@@ -96,12 +108,16 @@ export function ReservasPorConfirmarGestor({ proprietariosComErro, disponivel, a
     setOcupado(false);
   };
 
+  // «Marcar como bloqueio» em vários períodos age já e não se desfaz aqui: pede confirmação (um só período decide-se logo).
+  const pedirBloqueio = (ids: string[]) => { if (ids.length > 1) setAConfirmarBloqueio(ids); else void decidir(ids, "bloqueio"); };
+  const verLongos = () => { setLongosAbertos(true); requestAnimationFrame(() => longosRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" })); };
+
   const linha = (x: Externa) => (
     <li key={x._id} className="flex items-center gap-3 py-2">
-      <Checkbox checked={escolhidos.has(x._id)} onCheckedChange={(v) => alternar([x._id], v)} aria-label={`Escolher ${x.propriedade.nome}, ${fmt(x.check_in)} a ${fmt(x.check_out)}`} />
+      <Checkbox checked={escolhidos.has(x._id)} onCheckedChange={(v) => alternar([x._id], v)} aria-label={`Escolher ${x.propriedade.nome}, ${periodoComAno(x)}, ${x.canal_texto}`} />
       <div className="min-w-0 flex-1 text-sm">
-        <p className="font-medium">{fmt(x.check_in)} a {fmt(x.check_out)} <span className="font-normal text-muted-foreground">({plural(x.noites, "noite")})</span></p>
-        <p className="text-xs text-muted-foreground">{x.canal_texto}{x.motivo === "sobreposicao" && " · coincide com outra reserva"}{x.motivo === "reapareceu" && " · voltou a aparecer no calendário"}</p>
+        <p className="font-medium">{periodoComAno(x)} <span className="font-normal text-muted-foreground">({plural(x.noites, "noite")})</span></p>
+        <p className="text-xs text-muted-foreground"><span className="rounded border px-1.5 py-0.5 text-foreground" data-plataforma>{x.canal_texto}</span>{x.motivo === "sobreposicao" && " · coincide com outra reserva"}{x.motivo === "reapareceu" && " · voltou a aparecer no calendário"}</p>
       </div>
     </li>
   );
@@ -109,27 +125,30 @@ export function ReservasPorConfirmarGestor({ proprietariosComErro, disponivel, a
   if (!lista && !erro) return <p className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> A carregar…</p>;
   const grupos = agrupar(normais);
   const corte = textoCorte(lista?.length ?? 0, total);
+  const bloqueioT = aConfirmarBloqueio ? textoConfirmarBloqueio(aConfirmarBloqueio.length) : null;
 
   return (
     <div className="space-y-4">
       {erro && <p role="alert" className="flex items-center gap-2 text-sm text-destructive"><AlertCircle className="h-4 w-4" /> {erro}</p>}
-      {lista && lista.length === 0 && !resultado && <p className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">Não há períodos por confirmar{proximosDias ? " neste intervalo" : ""}. O Airbnb confirma-se sozinho; aqui aparecem os fechos do Booking.com.</p>}
-      {(lista && lista.length > 0) || resultado || progresso ? (
+      {lista && lista.length === 0 && !resultado && <p className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">Não há períodos por confirmar{filtro !== "todas" ? " neste intervalo" : ""}. O Airbnb confirma-se sozinho; aqui aparecem os fechos do Booking.com.</p>}
+      {(lista && lista.length > 0) || filtro !== "todas" || resultado || progresso ? (
         <div className="sticky top-0 z-10 space-y-2 rounded-md border bg-background p-2" data-barra-lote>
+          <div role="group" aria-label="Filtrar por data de chegada" className="flex flex-wrap items-center gap-1.5" data-filtro-chegada>
+            <span className="mr-1 text-xs text-muted-foreground">Chegada:</span>
+            {OPCOES_CHEGADA.map((o) => (
+              <button key={o.valor} type="button" aria-pressed={filtro === o.valor} title={o.dica} disabled={ocupado}
+                onClick={() => { setFiltro(o.valor); setEscolhidos(new Set()); }}
+                className={`min-h-11 rounded-md border px-3 text-sm font-medium disabled:opacity-60 sm:min-h-9 ${filtro === o.valor ? "border-primary bg-accent" : "border-input bg-background hover:bg-accent"}`}>
+                {o.texto}
+              </button>
+            ))}
+          </div>
           {lista && lista.length > 0 && (
             <div className="flex flex-wrap items-center gap-2" role="toolbar" aria-label="Ações em lote">
               <span className="text-sm">{escolhidos.size ? plural(escolhidos.size, "escolhido", "escolhidos") : `${total} por confirmar`}</span>
               <Button size="sm" variant="outline" className="min-h-11 sm:min-h-9" disabled={ocupado || !lista.length} onClick={() => setEscolhidos(new Set(normais.map((x) => x._id)))}>Escolher todos</Button>
               <Button size="sm" className="min-h-11 gap-1 sm:min-h-9" disabled={ocupado || !disponivel || escolhidos.size === 0} onClick={() => decidir([...escolhidos], "confirmar")}>{ocupado ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Confirmar</Button>
-              <Button size="sm" variant="outline" className="min-h-11 gap-1 sm:min-h-9" disabled={ocupado || escolhidos.size === 0} onClick={() => decidir([...escolhidos], "bloqueio")}><Ban className="h-4 w-4" /> É um bloqueio</Button>
-              <label className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground">
-                Entram nos próximos
-                <select value={proximosDias} onChange={(e) => { setProximosDias(e.target.value); setEscolhidos(new Set()); }} disabled={ocupado} aria-label="Filtrar por data de entrada" className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground">
-                  <option value="">Todos os períodos</option>
-                  <option value="7">7 dias</option>
-                  <option value="30">30 dias</option>
-                </select>
-              </label>
+              <Button size="sm" variant="outline" className="min-h-11 gap-1 sm:min-h-9" disabled={ocupado || escolhidos.size === 0} onClick={() => pedirBloqueio([...escolhidos])}><Ban className="h-4 w-4" /> É um bloqueio</Button>
             </div>
           )}
           {progresso && <p role="status" className="flex items-center gap-2 text-sm"><Loader2 className="h-4 w-4 animate-spin" aria-hidden /> {progresso}</p>}
@@ -142,7 +161,12 @@ export function ReservasPorConfirmarGestor({ proprietariosComErro, disponivel, a
               <button type="button" onClick={() => setResultado(null)} aria-label="Fechar o resultado" className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md hover:bg-black/5"><X className="h-4 w-4" aria-hidden /></button>
             </div>
           )}
-          {lista && lista.length > 0 && longos.length > 0 && <p className="text-xs text-muted-foreground">«Escolher todos» não inclui os {longos.length} períodos com mais de 30 noites (ver mais abaixo).</p>}
+          {lista && lista.length > 0 && longos.length > 0 && (
+            <p className="text-xs text-muted-foreground" data-longos-fora>
+              «Escolher todos»: {textoLongosDeFora(longos.length)}{" "}
+              <button type="button" onClick={verLongos} className="inline-flex min-h-11 items-center font-medium text-foreground underline underline-offset-2 sm:min-h-0">vê-as abaixo</button>.
+            </p>
+          )}
         </div>
       ) : null}
       {corte && (
@@ -163,7 +187,7 @@ export function ReservasPorConfirmarGestor({ proprietariosComErro, disponivel, a
                   <h3 className="text-sm font-medium">{c.casa} <span className="font-normal text-muted-foreground">· {c.itens.length}</span></h3>
                   <div className="flex flex-wrap gap-2">
                     <Button size="sm" variant="outline" className="min-h-11 sm:min-h-8" disabled={ocupado} onClick={() => alternar(ids, !ids.every((i) => escolhidos.has(i)))}>{ids.every((i) => escolhidos.has(i)) ? "Limpar" : "Escolher a casa"}</Button>
-                    <Button size="sm" variant="outline" className="min-h-11 sm:min-h-8" disabled={ocupado} onClick={() => decidir(ids, "bloqueio")}>Marcar todos como bloqueio</Button>
+                    <Button size="sm" variant="outline" className="min-h-11 sm:min-h-8" disabled={ocupado} onClick={() => pedirBloqueio(ids)}>Marcar todos como bloqueio</Button>
                   </div>
                 </div>
                 <ul className="mt-1 divide-y">{c.itens.map(linha)}</ul>
@@ -173,10 +197,10 @@ export function ReservasPorConfirmarGestor({ proprietariosComErro, disponivel, a
         </section>
       ))}
       {longos.length > 0 && (
-        <details className="rounded-md border bg-muted/30 p-3">
+        <details ref={longosRef} open={longosAbertos} onToggle={(e) => setLongosAbertos(e.currentTarget.open)} className="rounded-md border bg-muted/30 p-3">
           <summary className="flex min-h-11 cursor-pointer items-center text-sm font-medium sm:min-h-9">{plural(longos.length, "período")} com mais de 30 noites (normalmente são fechos do calendário)</summary>
           <div className="space-y-2 pt-2">
-            <Button size="sm" variant="outline" className="min-h-11 sm:min-h-9" disabled={ocupado} onClick={() => decidir(longos.map((x) => x._id), "bloqueio")}>Marcar todos como bloqueio</Button>
+            <Button size="sm" variant="outline" className="min-h-11 sm:min-h-9" disabled={ocupado} onClick={() => pedirBloqueio(longos.map((x) => x._id))}>Marcar todos como bloqueio</Button>
             {agrupar(longos).map((g) => (
               <div key={g.parceiroId}>
                 <p className="text-sm font-medium">{g.parceiro}</p>
@@ -185,6 +209,10 @@ export function ReservasPorConfirmarGestor({ proprietariosComErro, disponivel, a
             ))}
           </div>
         </details>
+      )}
+      {aConfirmarBloqueio && bloqueioT && (
+        <ConfirmarDialog aberto titulo={bloqueioT.titulo} descricao={bloqueioT.descricao} textoConfirmar={bloqueioT.confirmar}
+          aoCancelar={() => setAConfirmarBloqueio(null)} aoConfirmar={() => { const ids = aConfirmarBloqueio; setAConfirmarBloqueio(null); void decidir(ids, "bloqueio"); }} />
       )}
     </div>
   );
