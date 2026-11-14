@@ -86,6 +86,11 @@ async function enviarAvisoPorAtribuir(empresaId, itens) {
   }
 }
 
+// Reserva sem data de saída e sem como a consultar: a limpeza fica por atribuir no dia de chegada (provisório).
+const MSG_SAIDA_DESCONHECIDA = 'Data de saída desconhecida: o Smoobu não respondeu. Confirma a data.';
+const MSG_SAIDA_DESCONHECIDA_CHAVE = 'Data de saída desconhecida: o servidor não consegue ler a chave do Smoobu. Confirma a data.';
+const PREFIXO_SAIDA_DESCONHECIDA = 'Data de saída desconhecida';
+
 // Constantes de ações do Smoobu (com variantes legacy).
 const ACOES_CRIAR = [
   'newReservation',
@@ -697,8 +702,11 @@ async function criarTarefaPorReserva(
   let equipaCompleta = []; // membros da equipa quando staff_necessario > 1
   let vipSobrecarregado = false; // HF12: VIP só começava tarde → fallback ao LB
 
+  // Data de saída desconhecida: não se atribui nem se oferece a ninguém (o dia é provisório).
+  const saidaDesconhecida = opcoes.saidaDesconhecida || null;
+
   // (a) Tenta atribuir ao staff exclusivo se existir e não estiver de folga.
-  if (staffExclusivoId) {
+  if (staffExclusivoId && !saidaDesconhecida) {
     const staffExclusivo = await Utilizador.findById(staffExclusivoId).lean();
     if (!staffExclusivo || !staffExclusivo.ativo || staffExclusivo.eliminado_em) {
       // Staff exclusivo inativo/eliminado → fallback ao LB.
@@ -789,7 +797,7 @@ async function criarTarefaPorReserva(
   }
 
   // (b) Fallback ao Load Balancer se não há staff exclusivo ou ele está de folga/sobrecarregado.
-  if (!utilizadorAtribuido) {
+  if (!utilizadorAtribuido && !saidaDesconhecida) {
     tentouLoadBalancer = true;
     try {
       // HF21 — Se a propriedade exige múltiplos staff, usa determinarEquipaAtribuida.
@@ -994,7 +1002,11 @@ async function criarTarefaPorReserva(
     motivoNaoAtribuicao = motivoSemHorario || diag.motivo;
   }
 
-  if (alertaCancelamentoPrevio) {
+  if (saidaDesconhecida) {
+    estadoFinal = 'por_atribuir';
+    motivoNaoAtribuicao = saidaDesconhecida.motivo;
+    alertaTarefa = saidaDesconhecida.motivo;
+  } else if (alertaCancelamentoPrevio) {
     alertaTarefa = alertaTarefa
       ? `${alertaCancelamentoPrevio} | ${alertaTarefa}`
       : alertaCancelamentoPrevio;
@@ -1024,6 +1036,7 @@ async function criarTarefaPorReserva(
     pessoas_em_falta: pessoasEmFalta,
     alerta: alertaTarefa, // HF11: alerta se LB não encontrou substituto.
     motivo_nao_atribuicao: motivoNaoAtribuicao, // HF24: motivo detalhado
+    ...(saidaDesconhecida ? { data_saida_desconhecida: true } : {}),
     checklist: propriedade.checklist || [],
     ...(checklistDinamicaWebhook.length > 0
       ? { checklist_dinamica: checklistDinamicaWebhook }
@@ -1046,11 +1059,20 @@ async function criarTarefaPorReserva(
   await guardarContactoHospede(novaTarefa, contacto);
 
   // Só aqui (tarefa criada agora; reenvios e corridas devolvem antes): avisa o gestor.
-  if (['por_atribuir', 'nao_atribuida'].includes(novaTarefa.estado)) {
+  if (saidaDesconhecida) {
+    // Aviso próprio, uma vez por reserva (sino + push); sem oferta à equipa enquanto o dia é provisório.
+    await avisarGestores(
+      empresaId,
+      '⚠️ Limpeza com data de saída desconhecida',
+      `"${propriedade.nome}": chegou a reserva ${reservaId || ''} sem data de saída e não foi possível consultá-la. ${saidaDesconhecida.motivo} A limpeza ficou por atribuir no dia de chegada até haver a data certa.`,
+      saidaDesconhecida.url || '/gestor/tarefas',
+      { chave: `smoobu_saida_desconhecida:${empresaId}:${reservaId}` }
+    );
+  } else if (['por_atribuir', 'nao_atribuida'].includes(novaTarefa.estado)) {
     await avisarPorAtribuirSmoobu(empresaId, { nome: propriedade.nome, dia: dataAgendada, motivo: novaTarefa.motivo_nao_atribuicao }, opcoes);
   }
   // Sem ninguém disponível (ou equipa incompleta): oferece a vaga a toda a equipa não ausente.
-  if (['por_atribuir', 'nao_atribuida'].includes(novaTarefa.estado) || (Number(novaTarefa.pessoas_em_falta) || 0) > 0) {
+  if (!saidaDesconhecida && (['por_atribuir', 'nao_atribuida'].includes(novaTarefa.estado) || (Number(novaTarefa.pessoas_em_falta) || 0) > 0)) {
     await require('../utils/ofertaVaga').abrirOfertaMelhorEsforco(novaTarefa._id);
   }
 
@@ -1170,15 +1192,32 @@ async function atualizarTarefaPorReserva(
   if (tarefa.estado === 'concluida') return tarefa;
   // Uma limpeza cancelada (ex.: ao desativar o proprietário) não renasce numa casa inativa.
   if (tarefa.estado === 'cancelada' && (await casaInativa(tarefa.propriedade_id))) return tarefa;
-  const jaEstavaPorAtribuir = ['por_atribuir', 'nao_atribuida'].includes(tarefa.estado);
+  // Esta limpeza foi criada no dia de chegada porque não se soube a data de saída. Agora há a data real
+  // (nunca a de um update que também ficou sem ela): corrige o dia e segue o fluxo normal de atribuição.
+  const corrigeSaida = Boolean(tarefa.data_saida_desconhecida && dataTarefaRaw && !opcoes.saidaDesconhecida);
+  const jaEstavaPorAtribuir = !corrigeSaida && ['por_atribuir', 'nao_atribuida'].includes(tarefa.estado);
 
   let mudou = false;
   let mudouData = false;
   let novoRange = null;
   let avisoParceiroPendente = false;
 
-  // 1. Atualizar data.
-  if (dataTarefaRaw) {
+  if (corrigeSaida) {
+    tarefa.data_saida_desconhecida = false;
+    tarefa.motivo_nao_atribuicao = null;
+    if (String(tarefa.alerta || '').startsWith(PREFIXO_SAIDA_DESCONHECIDA)) tarefa.alerta = null;
+    mudou = true;
+    // Os avisos de «data desconhecida» deste webhook ficam resolvidos (já se sabe a data).
+    const ids = [String(reservaId)];
+    if (/^\d+$/.test(String(reservaId)) && Number.isSafeInteger(Number(reservaId))) ids.push(Number(reservaId));
+    await WebhookLog.updateMany(
+      { status: 'erro', erro_msg: { $regex: PREFIXO_SAIDA_DESCONHECIDA }, 'payload.data.id': { $in: ids } },
+      { $set: { status: 'processado', erro_msg: 'Data de saída entretanto confirmada: limpeza corrigida para o dia certo.' } }
+    ).catch(() => {});
+  }
+
+  // 1. Atualizar data. Um update sem data de saída conhecida nunca move uma limpeza que já tinha dia.
+  if (dataTarefaRaw && !opcoes.saidaDesconhecida) {
     novoRange = obterRangeDia(dataTarefaRaw);
     const diaAtual = obterRangeDia(tarefa.data);
     if (inicioAutomaticoSemToque(tarefa) && novoRange && diaAtual && diaAtual.start.getTime() !== novoRange.start.getTime()) {
@@ -1348,7 +1387,7 @@ async function atualizarTarefaPorReserva(
     // FIX (sync smoobu — reatribuição automática) — Se a data mudou e a
     // tarefa ficou 'por_atribuir' (staff desatribuído por indisponibilidade
     // na nova data), tenta reatribuir automaticamente via load balancer.
-    if ((mudouData || reativada) && tarefa.estado === 'por_atribuir') {
+    if ((mudouData || reativada || corrigeSaida) && tarefa.estado === 'por_atribuir') {
       try {
         const propriedade = await Propriedade.findById(tarefa.propriedade_id)
           .select('nome coordenadas empresa_id staff_necessario')
@@ -1385,6 +1424,7 @@ async function atualizarTarefaPorReserva(
               { $set: { estado: plano.estado, motivo_nao_atribuicao: plano.motivo_nao_atribuicao || 'Sem equipa disponível após update de data (Smoobu)' } }
             );
             // Só avisa na passagem para «por atribuir»; um reenvio sem mudança de data não chega aqui.
+            if (corrigeSaida) await require('../utils/ofertaVaga').abrirOfertaMelhorEsforco(tarefa._id).catch(() => {});
             if (!jaEstavaPorAtribuir) {
               await avisarPorAtribuirSmoobu(
                 propriedade.empresa_id,
@@ -1474,27 +1514,26 @@ async function processarReservaSmoobu(payload, empresaId, empresaRestrita = null
     (ACOES_CRIAR.includes(action) || ACOES_ATUALIZAR.includes(action)) &&
     (!dataCheckOutRaw || !detalhesReserva.nome_hospede);
 
+  // Sem departure e sem conseguir obter a data de saída (Smoobu em baixo, timeout, 401, chave ilegível...):
+  // a limpeza NUNCA fica em silêncio no dia de chegada. Cria-se por atribuir, com o motivo e sem oferta.
+  let saidaDesconhecida = null;
+
   if (precisaEnriquecimento) {
     let enriched = null;
+    let chaveIlegivel = false;
     try {
       enriched = await enriquecerReservaSmoobu(reservaId, empresaId);
     } catch (e) {
       if (!e || e.code !== 'CREDENCIAIS_ILEGIVEIS') throw e;
-      if (!dataCheckOutRaw) {
-        // Sem departure e sem como a consultar: NÃO se cria a limpeza no dia de chegada (data errada, em silêncio).
-        // O webhook fica com erro visível (e reprocessável) e o gestor é avisado.
-        if (empresaId) {
-          await avisarGestores(
-            empresaId,
-            '⚠️ Reserva do Smoobu por processar',
-            `Chegou uma reserva sem data de saída e o servidor não consegue ler a chave do Smoobu para a consultar. ${MSG_CREDENCIAIS_ILEGIVEIS}`,
-            '/gestor/configuracoes',
-            { chave: `smoobu_credenciais_ilegiveis:${empresaId}` }
-          );
-        }
-        throw new Error(`Reserva ${reservaId} sem data de saída (departure) e sem forma de a consultar: ${MSG_CREDENCIAIS_ILEGIVEIS}`);
-      }
-      // Já tem departure: segue só com os dados do webhook (falta apenas completar o nome).
+      chaveIlegivel = true; // falta apenas completar o nome se já tem departure
+    }
+    if (!dataCheckOutRaw && !(enriched && enriched.departure)) {
+      saidaDesconhecida = chaveIlegivel
+        ? { motivo: MSG_SAIDA_DESCONHECIDA_CHAVE, url: '/gestor/configuracoes' }
+        : { motivo: MSG_SAIDA_DESCONHECIDA, url: '/gestor/tarefas' };
+      opcoes.saidaDesconhecidaMsg =
+        `Reserva ${reservaId}: ${saidaDesconhecida.motivo}${chaveIlegivel ? ` ${MSG_CREDENCIAIS_ILEGIVEIS}` : ''} ` +
+        'Limpeza criada por atribuir no dia de chegada; corrige-se sozinha na próxima sincronização com a data certa.';
     }
     if (enriched) {
       dataCheckOutFinal = enriched.departure || dataCheckOutRaw || null;
@@ -1526,6 +1565,8 @@ async function processarReservaSmoobu(payload, empresaId, empresaRestrita = null
     );
   }
 
+  const opcoesFinal = saidaDesconhecida ? { ...opcoes, saidaDesconhecida } : opcoes;
+
   // 4. Atualização (se ação é update E existe tarefa).
   if (ACOES_ATUALIZAR.includes(action)) {
     const atualizada = await atualizarTarefaPorReserva(
@@ -1536,7 +1577,7 @@ async function processarReservaSmoobu(payload, empresaId, empresaRestrita = null
       content,
       empresaRestrita,
       contactoFinal,
-      opcoes
+      opcoesFinal
     );
     if (atualizada) return atualizada;
     // Sem tarefa existente → cai para criar (reserva pode ter sido criada
@@ -1553,7 +1594,7 @@ async function processarReservaSmoobu(payload, empresaId, empresaRestrita = null
       content,
       empresaRestrita,
       contactoFinal,
-      opcoes
+      opcoesFinal
     );
   }
 
@@ -1574,16 +1615,18 @@ async function processarReservaSmoobu(payload, empresaId, empresaRestrita = null
  */
 async function processarWebhookSmoobu(payload, webhookLogId, empresaId, empresaRestrita = null) {
   try {
-    const resultado = await processarReservaSmoobu(payload, empresaId, empresaRestrita, {
-      logId: webhookLogId,
-    });
+    const opcoesProc = { logId: webhookLogId };
+    const resultado = await processarReservaSmoobu(payload, empresaId, empresaRestrita, opcoesProc);
 
-    // Atualiza o WebhookLog para 'processado'.
+    // Atualiza o WebhookLog para 'processado'. Se a data de saída ficou desconhecida, fica 'erro' com a
+    // mensagem (a limpeza existe, por atribuir; corrige-se numa sincronização/webhook com a data certa).
     try {
-      await WebhookLog.findByIdAndUpdate(webhookLogId, {
-        status: 'processado',
-        empresa_id: empresaId || undefined,
-      });
+      await WebhookLog.findByIdAndUpdate(
+        webhookLogId,
+        opcoesProc.saidaDesconhecidaMsg
+          ? { status: 'erro', erro_msg: opcoesProc.saidaDesconhecidaMsg, empresa_id: empresaId || undefined }
+          : { status: 'processado', empresa_id: empresaId || undefined }
+      );
     } catch (logErr) {
       console.error(
         '⚠️  [Smoobu] falha ao marcar WebhookLog como processado:',
