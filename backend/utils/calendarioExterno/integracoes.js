@@ -21,6 +21,7 @@ const { notificarSino } = require('../notificar');
 const { semUrl } = require('./cifra');
 const D = require('./decisoes');
 const Rv = require('./reservas');
+const { moradaCurta } = require('./moradaCurta');
 
 const resp = (status, body) => ({ status, body });
 const MAX_LOTE = 200;
@@ -42,13 +43,6 @@ function celula(f, semAcordo) {
       ? { codigo: f.ultimo_erro.codigo, temporario: eErroTemporario(f.ultimo_erro.codigo), mensagem: semUrl(mensagemErro(f.ultimo_erro.codigo, { canal: canalTexto(f.canal, f.rotulo) })), em: f.ultimo_erro.em || null, falha_desde: f.falha_desde || null, proxima_leitura_em: f.proxima_leitura_em || null }
       : null,
   };
-}
-
-/** Morada curta para distinguir casas com o mesmo nome: «Rua X, Cidade» (estruturada) ou o início da morada livre. */
-function moradaCurta(c) {
-  const e = c.morada_estruturada || {};
-  const curta = e.rua ? [e.rua, e.cidade].filter(Boolean).join(', ') : String(c.morada || '').split(',').slice(0, 2).join(',').trim();
-  return curta ? curta.slice(0, 60) : null;
 }
 
 /** @returns {Promise<{status:number, body:object}>} */

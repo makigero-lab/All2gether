@@ -125,3 +125,13 @@ describe('S11: morada curta para distinguir casas com o mesmo nome', () => {
     expect(casas[0].morada_curta).toBeNull();
   });
 });
+
+describe('S11/ronda 2: a lista por confirmar traz o id e a morada curta da casa', () => {
+  test('propriedade._id e morada_curta no gestor', async () => {
+    const c = await cenario();
+    await Propriedade.updateOne({ _id: c.casa._id }, { $set: { morada_estruturada: { rua: 'Rua do Ouro 10', cidade: 'Lisboa' } } });
+    await ligar(c, urlBooking(), BOOKING([{ uid: 'b1', ci: 2, co: 4 }]));
+    const r = await Servico.listarReservasExternas({ escopo: c.escopoG, estado: 'por_confirmar' });
+    expect(r.body.reservas_externas[0].propriedade).toMatchObject({ _id: String(c.casa._id), morada_curta: 'Rua do Ouro 10, Lisboa' });
+  });
+});

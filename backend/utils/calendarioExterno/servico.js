@@ -26,6 +26,7 @@ const { tentarTeste, limparLimiteTestes } = require('./limiteTestes');
 const Empresa = require('../../models/Empresa');
 const Utilizador = require('../../models/Utilizador');
 const { avisarParceiro } = require('./avisos');
+const { moradaCurta } = require('./moradaCurta');
 const Rv = require('./reservas');
 
 const resp = (status, body) => ({ status, body });
@@ -384,6 +385,13 @@ async function inativosDaEmpresa(empresaId) {
  * `pular` pagina, `proximosDias` filtra pelos que entram nos próximos N dias e `incluirInativos` mostra os de
  * casas/proprietários inativos (que não se podem confirmar).
  */
+/** aaaa-mm-dd que existe de facto (rejeita 2026-02-31, 0000-00-00, 9999-99-99). */
+function dataIsoReal(v) {
+  if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+  const d = new Date(`${v}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === v;
+}
+
 async function listarReservasExternas({ escopo, estado = 'por_confirmar', parceiroId = null, pular = 0, proximosDias = null, ate = null, incluirInativos = false }) {
   const hoje = Rv.dataDe(H.hojeLisboa());
   const filtro = { empresa_id: escopo.empresaId, ...(escopo.parceiroId ? { parceiro_id: escopo.parceiroId } : {}), check_out: { $gte: hoje } };
@@ -394,7 +402,7 @@ async function listarReservasExternas({ escopo, estado = 'por_confirmar', parcei
   const dias = parseInt(proximosDias, 10);
   if (Number.isInteger(dias) && dias > 0 && dias <= 365) filtro.check_in = { $lte: Rv.dataDe(H.somarDiasISO(H.hojeLisboa(), dias)) };
   // `ate` (aaaa-mm-dd): chegadas até esse dia (ex.: «Esta semana» acaba no domingo). Datas inválidas ou fora de hoje..+365 d ignoram-se.
-  else if (typeof ate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(ate) && ate >= H.hojeLisboa() && ate <= H.somarDiasISO(H.hojeLisboa(), 365)) filtro.check_in = { $lte: Rv.dataDe(ate) };
+  else if (dataIsoReal(ate) && ate >= H.hojeLisboa() && ate <= H.somarDiasISO(H.hojeLisboa(), 365)) filtro.check_in = { $lte: Rv.dataDe(ate) };
   if (!incluirInativos && !escopo.parceiroId) {
     const ina = await inativosDaEmpresa(escopo.empresaId);
     if (ina.donos.length) filtro.parceiro_id = filtro.parceiro_id ? { $eq: filtro.parceiro_id, $nin: ina.donos } : { $nin: ina.donos };
@@ -403,13 +411,13 @@ async function listarReservasExternas({ escopo, estado = 'por_confirmar', parcei
   const saltar = Math.max(0, parseInt(pular, 10) || 0);
   const [total, lista] = await Promise.all([
     ReservaExterna.countDocuments(filtro),
-    ReservaExterna.find(filtro).populate('propriedade_id', 'nome').populate('parceiro_id', 'nome').sort({ check_in: 1, _id: 1 }).skip(saltar).limit(LIMITE_LISTA_EXTERNAS)
+    ReservaExterna.find(filtro).populate('propriedade_id', 'nome morada morada_estruturada').populate('parceiro_id', 'nome').sort({ check_in: 1, _id: 1 }).skip(saltar).limit(LIMITE_LISTA_EXTERNAS)
       .select('propriedade_id canal canal_chave check_in check_out noites classe estado motivo conflito decidido_por').lean(),
   ]);
   return resp(200, {
     total, limite: LIMITE_LISTA_EXTERNAS, desde: saltar, mostrando: lista.length,
     reservas_externas: lista.map((x) => ({
-      _id: String(x._id), propriedade: { _id: String(x.propriedade_id._id), nome: x.propriedade_id.nome },
+      _id: String(x._id), propriedade: { _id: String(x.propriedade_id._id), nome: x.propriedade_id.nome, morada_curta: moradaCurta(x.propriedade_id) },
       parceiro: x.parceiro_id ? { _id: String(x.parceiro_id._id), nome: x.parceiro_id.nome } : null,
       canal: x.canal, canal_texto: ({ airbnb: 'Airbnb', booking: 'Booking.com', vrbo: 'Vrbo' })[x.canal] || 'Outro canal',
       check_in: Rv.iso(x.check_in), check_out: Rv.iso(x.check_out), noites: x.noites, motivo: x.motivo, estado: x.estado, conflito: x.conflito, decidido_por: x.decidido_por,
