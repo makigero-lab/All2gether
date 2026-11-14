@@ -6,6 +6,7 @@
  * Regras (ver utils/horario.js): 10:00-18:00, uma limpeza acaba até às 18:00,
  * almoço de 1 h (início entre 12:00 e 14:00), viagens contam.
  *
+ * Não mexe nas que o gestor fixou à mão (data_ajustada_gestor).
  * Só toca em tarefas FUTURAS (dia de hoje em diante), no estado `atribuida`.
  * Nunca em `em_curso`, `concluida` ou `cancelada` (essas contam como agenda
  * fixa). Para cada tarefa afetada, pela ordem atual (data, id):
@@ -61,7 +62,7 @@ async function reagendarHorarios({ aplicar = false, avisar = false, agora = new 
     .populate({ path: 'propriedade_id', select: 'nome coordenadas staff_necessario empresa_id' })
     .sort({ data: 1, _id: 1 })
     .lean();
-  const afetadas = candidatas.filter((t) => foraDoHorario(t) && idsEquipa(t).length > 0);
+  const afetadas = candidatas.filter((t) => foraDoHorario(t) && idsEquipa(t).length > 0 && !t.data_ajustada_gestor);
 
   const nomes = new Map();
   const nomeDe = async (id) => {

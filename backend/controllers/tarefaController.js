@@ -36,6 +36,30 @@ function dataDeDiaEHora(dia, hhmm) {
   return Horario.utcDeMinutosLocais(dia, h * 60 + m);
 }
 
+const REGEX_HORA = /^([01]?\d|2[0-3]):[0-5]\d$/;
+
+/** Hora opcional («HH:MM», Lisboa) enviada ao atribuir/reatribuir. @returns {{ valida: boolean, hora: string|null }} */
+function lerHoraPedida(body) {
+  const h = body && body.hora;
+  if (h === undefined || h === null || h === '') return { valida: true, hora: null };
+  return typeof h === 'string' && REGEX_HORA.test(h.trim()) ? { valida: true, hora: h.trim() } : { valida: false, hora: null };
+}
+
+/**
+ * O gestor enviou uma hora DIFERENTE da atual (ou a limpeza não tinha hora real): grava-a no mesmo dia e marca-a
+ * como posta por ele (`data_ajustada_gestor`), e a automação deixa de lhe mexer. Sem hora, ou igual: não marca nada.
+ * @returns {boolean} true se mudou a hora.
+ */
+function aplicarHoraDoGestor(tarefa, hora) {
+  if (!hora) return false;
+  const [h, m] = hora.split(':').map(Number);
+  const nova = Horario.utcDeMinutosLocais(Horario.diaUTC(tarefa.data), h * 60 + m);
+  if (Horario.temHoraReal(tarefa.data) && nova.getTime() === new Date(tarefa.data).getTime()) return false;
+  tarefa.data = nova;
+  tarefa.data_ajustada_gestor = true;
+  return true;
+}
+
 /**
  * Hora de uma limpeza atribuída À MÃO pelo gestor. Sem hora real (meia-noite) calcula-a
  * pelo mesmo cálculo de todos os caminhos; com hora explícita respeita-a. Nunca bloqueia:
@@ -144,7 +168,7 @@ async function verificarDistanciaTarefasDia(utilizadorId, dataTarefa, propriedad
 const { determinarUtilizadorAtribuido } = require('../utils/loadBalancer');
 const {
   diagnosticarFaltaDeStaff, planearAtribuicao, preencherVagaTarefa,
-  FILTRO_SEM_PESSOA, semPessoa, recuperavelSemPessoa,
+  FILTRO_SEM_PESSOA, semPessoa, recuperavelSemPessoa, horaFixaDaTarefa,
 } = require('../utils/atribuicaoAutomatica');
 const { comMembro, idsEquipa, normalizarEquipa, retirarMembroDoc } = require('../utils/equipaTarefa');
 
@@ -850,6 +874,8 @@ exports.atribuirTarefa = async (req, res) => {
     }
 
     const { utilizador_id } = req.body || {};
+    const horaPedida = lerHoraPedida(req.body);
+    if (!horaPedida.valida) return res.status(400).json({ erro: 'Hora inválida (usa HH:MM).' });
     let equipaAntes = [];
     let avisoHorario = null;
     const dataAntes = new Date(tarefa.data).getTime();
@@ -946,7 +972,10 @@ exports.atribuirTarefa = async (req, res) => {
         // mesmo cálculo de todos os caminhos; com hora real respeita-se (o gestor manda) e
         // avisa-se, sem bloquear, se ficar fora do horário.
         const tempoT = tarefa.tempo_limpeza_minutos || 45;
-        if (!Horario.temHoraReal(tarefa.data)) {
+        if (aplicarHoraDoGestor(tarefa, horaPedida.hora)) {
+          const fora = Horario.avisoForaDoHorario(tarefa.data, tempoT);
+          if (fora) avisoHorario = `Fica fora do horário (${fora}).`;
+        } else if (!Horario.temHoraReal(tarefa.data)) {
           const r = await calcularInicioTarefaUtilizador(
             idsEquipa(tarefa), tarefa.data, pr && pr.coordenadas, tempoT, tarefa._id, tarefa.propriedade_id
           );
@@ -1135,6 +1164,8 @@ exports.reatribuirTarefa = async (req, res) => {
     if (!utilizador_id || !mongoose.isValidObjectId(utilizador_id)) {
       return res.status(400).json({ erro: 'utilizador_id inválido.' });
     }
+    const horaPedida = lerHoraPedida(req.body);
+    if (!horaPedida.valida) return res.status(400).json({ erro: 'Hora inválida (usa HH:MM).' });
 
     // 1. Carrega a tarefa.
     const tarefa = await Tarefa.findOne({ _id: id, empresa_id: empresaId });
@@ -1200,14 +1231,29 @@ exports.reatribuirTarefa = async (req, res) => {
     // A hora calcula-se para a equipa RESULTANTE (novo responsável + os membros que ficam).
     const eq = normalizarEquipa(novoUser._id, equipaAntes.filter((i) => i !== antigoResp));
     const idsResultantes = [...new Set([String(novoUser._id), ...eq.equipa_atribuida.map(String)])];
-    let resultadoScheduler = await calcularInicioTarefaUtilizador(
-      idsResultantes.length > 1 ? idsResultantes : utilizador_id,
-      tarefa.data,
-      propriedade.coordenadas,
-      tarefa.tempo_limpeza_minutos || 45,
-      tarefa._id,
-      tarefa.propriedade_id
-    );
+    // Hora posta à mão pelo gestor (agora ou antes): não se recalcula; avisa-se se a equipa não couber.
+    const dataOriginalReatrib = new Date(tarefa.data).getTime();
+    const horaMudouAgora = aplicarHoraDoGestor(tarefa, horaPedida.hora);
+    const horaFixa = horaMudouAgora || (tarefa.data_ajustada_gestor && Horario.temHoraReal(tarefa.data));
+    let resultadoScheduler;
+    if (horaFixa) {
+      let cabe = true;
+      for (const m of idsResultantes) {
+        if (!(await cabeNaAgendaNaHora(m, tarefa.data, tarefa.tempo_limpeza_minutos || 45, tarefa._id, propriedade.coordenadas, tarefa.propriedade_id))) cabe = false;
+      }
+      resultadoScheduler = cabe
+        ? { cabe: true, data: new Date(tarefa.data), tempoViagem: 0, origem: 'hora_do_gestor' }
+        : { cabe: false, motivo: 'não cabe na agenda à hora que o gestor fixou (a hora mantém-se)' };
+    } else {
+      resultadoScheduler = await calcularInicioTarefaUtilizador(
+        idsResultantes.length > 1 ? idsResultantes : utilizador_id,
+        tarefa.data,
+        propriedade.coordenadas,
+        tarefa.tempo_limpeza_minutos || 45,
+        tarefa._id,
+        tarefa.propriedade_id
+      );
+    }
     // A atribuição à mão nunca é bloqueada pelo horário: se não couber, mantém a hora
     // da tarefa (ou as 10:00 se não tinha hora real) e AVISA o gestor.
     let avisoHorario = null;
@@ -1227,7 +1273,7 @@ exports.reatribuirTarefa = async (req, res) => {
     // O novo responsável substitui o anterior; os outros membros mantêm-se.
     tarefa.utilizador_id = eq.utilizador_id;
     tarefa.equipa_atribuida = eq.equipa_atribuida.length > 1 || equipaAntes.length > 1 ? eq.equipa_atribuida : [];
-    const dataAntesReatrib = new Date(tarefa.data).getTime();
+    const dataAntesReatrib = dataOriginalReatrib;
     tarefa.data = resultadoScheduler.data;
     tarefa.estado = 'atribuida';
     tarefa.motivo_nao_atribuicao = null;
@@ -1553,6 +1599,7 @@ exports.autoAtribuirTarefas = async (req, res) => {
           propriedade,
           dia: tarefa.data,
           tempoLimpeza: tarefa.tempo_limpeza_minutos || 45,
+          ...horaFixaDaTarefa(tarefa),
         });
 
         if (plano.estado === 'atribuida') {
