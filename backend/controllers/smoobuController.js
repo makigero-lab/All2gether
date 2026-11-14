@@ -59,6 +59,7 @@ const {
 } = require('../utils/scheduler');
 const { minutosLocais, horaPadraoDoDia } = require('../utils/horario');
 const { avisarGestores } = require('../utils/notificar');
+const { diaDe } = require('../utils/diaMudadoGestor');
 const { MSG_CREDENCIAIS_ILEGIVEIS } = require('../utils/segredoEmpresa');
 const { inicioAutomaticoSemToque, avisarParceiro } = require('../utils/cicloTarefa');
 const { estadoDaCasa, casaInativa } = require('../utils/casaAtiva');
@@ -1223,8 +1224,14 @@ async function atualizarTarefaPorReserva(
   let novoRange = null;
   let avisoParceiroPendente = false;
 
+  // Dia que o gestor tinha posto à mão enquanto a data era provisória (mudar dia / atribuir / reatribuir).
+  const diaDoGestor = corrigeSaida && tarefa.dia_mudado_pelo_gestor ? tarefa.dia_mudado_pelo_gestor.dia || null : null;
+  const pessoaDoGestor = diaDoGestor && tarefa.utilizador_id ? String(tarefa.utilizador_id) : null;
+  const nomeCasaAviso = diaDoGestor ? ((await Propriedade.findById(tarefa.propriedade_id).select('nome').lean()) || {}).nome || 'Casa' : null;
+
   if (corrigeSaida) {
     tarefa.data_saida_desconhecida = false;
+    tarefa.dia_mudado_pelo_gestor = undefined;
     tarefa.motivo_nao_atribuicao = null;
     if (String(tarefa.alerta || '').startsWith(PREFIXO_SAIDA_DESCONHECIDA)) tarefa.alerta = null;
     mudou = true;
@@ -1462,6 +1469,33 @@ async function atualizarTarefaPorReserva(
         );
       }
     }
+  }
+  // A data do Smoobu manda: se o gestor tinha posto outro dia, avisa-o (uma vez; sino e push).
+  if (diaDoGestor) {
+    try {
+      const diaReal = novoRange ? diaDe(novoRange.start) : diaDe(tarefa.data);
+      if (diaReal && diaReal !== diaDoGestor) {
+        const atual = await Tarefa.findById(tarefa._id).select('utilizador_id equipa_atribuida estado').lean();
+        const fmt = (iso) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
+        const ficou = atual && atual.utilizador_id && atual.estado === 'atribuida';
+        let quem = '';
+        if (ficou && pessoaDoGestor && String(atual.utilizador_id) === pessoaDoGestor) {
+          const u = await Utilizador.findById(atual.utilizador_id).select('nome').lean();
+          quem = ` ${(u && u.nome) || 'A pessoa que escolheste'} mantém-se, está disponível nesse dia.`;
+        } else if (pessoaDoGestor) {
+          quem = ficou
+            ? ' A pessoa que escolheste não está disponível nesse dia: a limpeza foi atribuída automaticamente a outra pessoa.'
+            : ' A pessoa que escolheste não está disponível nesse dia: a limpeza ficou por atribuir (com oferta à equipa).';
+        }
+        await avisarGestores(
+          tarefa.empresa_id,
+          '📅 Limpeza passou para a data real do Smoobu',
+          `A limpeza de ${nomeCasaAviso}, que tinhas posto a ${fmt(diaDoGestor)}, passou para ${fmt(diaReal)}, a data de saída real do Smoobu.${quem}`,
+          '/gestor/calendario',
+          { chave: `smoobu_dia_gestor_corrigido:${tarefa._id}:${diaReal}` }
+        );
+      }
+    } catch (errAviso) { /* best-effort */ }
   }
   if (avisoParceiroPendente) {
     // Relê a limpeza: depois do save a hora pode ter sido recalculada pelo motor.
