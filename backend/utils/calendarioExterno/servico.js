@@ -57,7 +57,7 @@ function fonteParaApi(f, extra = {}, { paraGestor = false } = {}) {
     estado: f.estado, motivo_estado: f.motivo_estado || null,
     estado_texto: f.motivo_estado ? MENSAGENS_ESTADO[f.motivo_estado] || null : null,
     ultima_leitura_em: f.ultima_leitura_em || null, ultimo_sucesso_em: f.ultimo_sucesso_em || null, ultima_alteracao_em: f.ultima_alteracao_em || null,
-    proxima_leitura_em: f.proxima_leitura_em || null,
+    proxima_leitura_em: f.proxima_leitura_em || null, falha_desde: f.falha_desde || null,
     erros_consecutivos: f.erros_consecutivos || 0, suspeitas_consecutivas: f.suspeitas_consecutivas || 0,
     ultimo_erro: erro, createdAt: f.createdAt,
     em_validacao: !!f.aviso_muitos_novos_em,
@@ -228,7 +228,7 @@ async function substituirLigacao({ id, url, escopo, ator, transporte = pedir }) 
   const usada = await FonteCalendario.findOne({ url_hash: hash, removida: false, _id: { $ne: fonte._id } }).select('propriedade_id parceiro_id empresa_id').lean();
   if (usada) return resp(409, await corpoLinkUsado(usada, escopo.empresaId, 'LINK_REPETIDO'));
   fonte.url_cifrada = cifrar(analise.url.href, String(fonte._id)); fonte.url_hash = hash; fonte.url_mascara = mascara(analise.url); fonte.url_host = analise.host.slice(0, 120);
-  fonte.estado = 'ativa'; fonte.motivo_estado = null; fonte.erros_consecutivos = 0; fonte.etag = undefined; fonte.last_modified = undefined; fonte.ultimo_erro = undefined; fonte.aviso_falha_enviado_em = undefined;
+  fonte.estado = 'ativa'; fonte.motivo_estado = null; fonte.erros_consecutivos = 0; fonte.etag = undefined; fonte.last_modified = undefined; fonte.ultimo_erro = undefined; fonte.falha_desde = undefined; fonte.aviso_falha_enviado_em = undefined;
   fonte.proxima_leitura_em = new Date();
   await fonte.save();
   registarAuditoria({ utilizador_id: ator.id, utilizador_nome: ator.nome || '', empresa_id: escopo.empresaId, acao: 'atualizar', recurso: 'calendario_externo', recurso_id: String(fonte._id), descricao: `Link do calendário substituído (${fonte.url_mascara})` });
@@ -265,7 +265,7 @@ async function reativarLigacao({ id, escopo, transporte = pedir }) {
   } catch (e) {
     return resp(200, { ok: false, erro: mensagemErro(e.codigo || 'outro', { canal: canalTexto(fonte.canal, fonte.rotulo) }), codigo: e.codigo || 'outro', temporario: eErroTemporario(e.codigo || 'outro') });
   }
-  await FonteCalendario.updateOne({ _id: fonte._id }, { $set: { estado: 'ativa', motivo_estado: null, erros_consecutivos: 0, proxima_leitura_em: new Date() }, $unset: { ultimo_erro: 1, pausada_em: 1 } });
+  await FonteCalendario.updateOne({ _id: fonte._id }, { $set: { estado: 'ativa', motivo_estado: null, erros_consecutivos: 0, proxima_leitura_em: new Date() }, $unset: { ultimo_erro: 1, falha_desde: 1, pausada_em: 1 } });
   const l = await sincronizarFonte(fonte._id, { origem: 'retoma', transporte, esperaLockMs: 3000 });
   return resp(200, { ok: true, fonte: fonteParaApi(await FonteCalendario.findById(fonte._id).lean(), {}, { paraGestor: !escopo.parceiroId }), leitura: resumoLeitura(l) });
 }
@@ -329,7 +329,7 @@ async function mudarEstado({ id, acao, escopo, ator = null, transporte = pedir }
     fonte.estado = 'pausada'; fonte.motivo_estado = 'pelo_gestor'; fonte.pausada_em = new Date();
   } else if (acao === 'retomar') {
     if (fonte.motivo_estado === 'casa_ligada_smoobu') return resp(400, { erro: 'Esta casa recebe as reservas pelo Smoobu.' });
-    fonte.estado = 'ativa'; fonte.motivo_estado = null; fonte.pausada_em = undefined; fonte.erros_consecutivos = 0; fonte.proxima_leitura_em = new Date();
+    fonte.estado = 'ativa'; fonte.motivo_estado = null; fonte.pausada_em = undefined; fonte.erros_consecutivos = 0; fonte.falha_desde = undefined; fonte.proxima_leitura_em = new Date();
   } else if (acao === 'aceitar_calendario') {
     fonte.referencia_futuros = fonte.ultimo_n_futuros || 0; fonte.suspeitas_consecutivas = 0; fonte.aceitar_proxima = true; fonte.aviso_suspeita_enviado_em = undefined; fonte.proxima_leitura_em = new Date();
   } else return resp(400, { erro: 'Ação inválida.' });
@@ -384,7 +384,7 @@ async function inativosDaEmpresa(empresaId) {
  * `pular` pagina, `proximosDias` filtra pelos que entram nos próximos N dias e `incluirInativos` mostra os de
  * casas/proprietários inativos (que não se podem confirmar).
  */
-async function listarReservasExternas({ escopo, estado = 'por_confirmar', parceiroId = null, pular = 0, proximosDias = null, incluirInativos = false }) {
+async function listarReservasExternas({ escopo, estado = 'por_confirmar', parceiroId = null, pular = 0, proximosDias = null, ate = null, incluirInativos = false }) {
   const hoje = Rv.dataDe(H.hojeLisboa());
   const filtro = { empresa_id: escopo.empresaId, ...(escopo.parceiroId ? { parceiro_id: escopo.parceiroId } : {}), check_out: { $gte: hoje } };
   if (parceiroId && !escopo.parceiroId && mongoose.isValidObjectId(parceiroId)) filtro.parceiro_id = parceiroId;
@@ -393,6 +393,8 @@ async function listarReservasExternas({ escopo, estado = 'por_confirmar', parcei
   else return resp(400, { erro: 'Estado inválido.' });
   const dias = parseInt(proximosDias, 10);
   if (Number.isInteger(dias) && dias > 0 && dias <= 365) filtro.check_in = { $lte: Rv.dataDe(H.somarDiasISO(H.hojeLisboa(), dias)) };
+  // `ate` (aaaa-mm-dd): chegadas até esse dia (ex.: «Esta semana» acaba no domingo). Datas inválidas ou fora de hoje..+365 d ignoram-se.
+  else if (typeof ate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(ate) && ate >= H.hojeLisboa() && ate <= H.somarDiasISO(H.hojeLisboa(), 365)) filtro.check_in = { $lte: Rv.dataDe(ate) };
   if (!incluirInativos && !escopo.parceiroId) {
     const ina = await inativosDaEmpresa(escopo.empresaId);
     if (ina.donos.length) filtro.parceiro_id = filtro.parceiro_id ? { $eq: filtro.parceiro_id, $nin: ina.donos } : { $nin: ina.donos };

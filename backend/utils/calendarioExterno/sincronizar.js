@@ -175,6 +175,8 @@ async function tratarErro({ fonte, err, agora, origem, iniciada, cfg }) {
     ultima_leitura_em: agora, erros_consecutivos: erros,
     ultimo_erro: { em: agora, codigo, http_status: err.http_status, mensagem: semUrl(mensagemErro(codigo, { canal: canalTexto(fonte.canal, fonte.rotulo) })).slice(0, 300) },
   };
+  // Início da série de falhas: só se regista no 1.º erro depois de um sucesso (nunca se inventa para séries antigas).
+  if (!fonte.falha_desde && (fonte.erros_consecutivos || 0) === 0) set.falha_desde = agora;
   if (erros >= 3 && fonte.estado === 'ativa') set.estado = 'erro';
   fonte.erros_consecutivos = erros;
   set.proxima_leitura_em = proximaPorErro(fonte, codigo, agora, err);
@@ -276,7 +278,7 @@ async function sincronizarFonte(fonteId, { origem = 'agendada', transporte = ped
     if (eventos) set.ultimo_n_futuros = eventos.length;
     if (fonte.estado === 'erro') set.estado = 'ativa';
     set.suspeitas_consecutivas = suspeita ? (fonte.suspeitas_consecutivas || 0) + 1 : 0;
-    const unset = { ultimo_erro: 1, aviso_falha_enviado_em: 1 };
+    const unset = { ultimo_erro: 1, aviso_falha_enviado_em: 1, falha_desde: 1 };
     if (eventos) { if (fonte.vazio_desde) set.vazio_desde = fonte.vazio_desde; else unset.vazio_desde = 1; }
     delete set.ultimo_erro; delete set.aviso_falha_enviado_em;
     await FonteCalendario.updateOne({ _id: fonte._id }, { $set: set, $unset: unset });

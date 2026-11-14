@@ -39,6 +39,7 @@ const fonteSchema = new mongoose.Schema(
     ultimo_sucesso_em: Date,
     ultima_alteracao_em: Date,
     erros_consecutivos: { type: Number, default: 0, min: 0 },
+    falha_desde: Date, // início da série de erros seguidos (1.º erro depois do último sucesso); limpa-se ao ler bem
     suspeitas_consecutivas: { type: Number, default: 0, min: 0 },
     ultimo_erro: {
       em: Date,

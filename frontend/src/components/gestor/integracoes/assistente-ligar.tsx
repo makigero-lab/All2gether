@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { adminPatch, adminPost } from "@/lib/api";
 import { plural } from "@/lib/utils";
-import { canalDoLink, fraseDoTeste, msgErro, resultadoAceitar, resultadoLigar, semCasasParaLigar, type ProprietarioResumo, type RespostaLigar } from "./tipos";
+import { canalDoLink, fraseDoTeste, msgErro, resultadoAceitar, resultadoLigar, rotulosDasCasas, semCasasParaLigar, type ProprietarioResumo, type RespostaLigar } from "./tipos";
 
 export type CanalAssistente = "airbnb" | "booking";
 
@@ -85,6 +85,7 @@ export function AssistenteLigar({
   const [ocupado, setOcupado] = useState<"testar" | "ligar" | "aceitar" | null>(null);
   const [feito, setFeito] = useState<Feito | null>(null);
   const semCasas = useMemo(() => semCasasParaLigar(proprietario), [proprietario]);
+  const rotulos = useMemo(() => rotulosDasCasas(casasLivres), [casasLivres]);
 
   const casa = casasLivres.find((c) => c._id === casaId) ?? null;
   const bloqueioCasa = casa?.smoobu ? "Esta casa recebe as reservas do Smoobu; não pode ter também calendários Airbnb/Booking." : null;
@@ -134,6 +135,10 @@ export function AssistenteLigar({
   const trocarCanal = (novo: CanalAssistente) => { setCanal(novo); setTeste(null); setErro(null); };
 
   const bloqueado = !!bloqueioCasa || canalLigado;
+  // Foco ao abrir: no primeiro campo que falta preencher (Casa; se a casa já vem escolhida, o canal; com o canal, o link).
+  const focoCasa = !casa;
+  const focoCanal: CanalAssistente | null = casa && !canal ? (casa.airbnb ? "booking" : "airbnb") : null;
+  const focoLink = !!casa && !!canal;
 
   // Quando aparece um resultado, um aviso ou um erro, leva-o à vista (em ecrãs baixos ficava abaixo da dobra).
   const fimRef = useRef<HTMLDivElement>(null);
@@ -167,9 +172,9 @@ export function AssistenteLigar({
             <>
               <label className="flex flex-col gap-1 font-medium">
                 Casa
-                <select value={casaId} onChange={(e) => { setCasaId(e.target.value); setTeste(null); setErro(null); }} className="h-11 rounded-md border border-input bg-background px-3 text-base font-normal" aria-label="Casa">
+                <select data-autofocus={focoCasa ? "" : undefined} value={casaId} onChange={(e) => { setCasaId(e.target.value); setTeste(null); setErro(null); }} className="h-11 rounded-md border border-input bg-background px-3 text-base font-normal" aria-label="Casa">
                   <option value="">— Escolhe a casa —</option>
-                  {casasLivres.map((c) => <option key={c._id} value={c._id}>{c.nome}{c.smoobu ? " (Smoobu)" : ""}</option>)}
+                  {casasLivres.map((c) => <option key={c._id} value={c._id}>{rotulos.get(c._id) ?? c.nome}</option>)}
                 </select>
               </label>
               {bloqueioCasa && <p role="alert" className="flex items-start gap-2 text-destructive"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /> {bloqueioCasa}</p>}
@@ -180,7 +185,7 @@ export function AssistenteLigar({
                   {(["airbnb", "booking"] as CanalAssistente[]).map((k) => {
                     const ligado = casa ? !!casa[k] : false;
                     return (
-                      <button key={k} type="button" disabled={!casa || !!bloqueioCasa || ligado} aria-pressed={canal === k}
+                      <button key={k} type="button" data-autofocus={focoCanal === k ? "" : undefined} disabled={!casa || !!bloqueioCasa || ligado} aria-pressed={canal === k}
                         onClick={() => { setCanal(k); setTeste(null); setErro(null); }}
                         className={`flex min-h-11 items-center justify-center gap-1.5 rounded-md border px-3 text-sm font-medium disabled:opacity-60 ${canal === k ? "border-primary bg-accent" : "border-input bg-background hover:bg-accent"}`}>
                         {ligado && <Lock className="h-3.5 w-3.5" aria-hidden />} {PASSOS[k].nome}{ligado ? " (já ligado)" : ""}
@@ -207,7 +212,7 @@ export function AssistenteLigar({
                   </a>
                   <label className="flex flex-col gap-1 font-medium">
                     Link do calendário
-                    <input value={url} onChange={(e) => { setUrl(e.target.value); setTeste(null); setErro(null); }} autoComplete="off" spellCheck={false}
+                    <input data-autofocus={focoLink ? "" : undefined} value={url} onChange={(e) => { setUrl(e.target.value); setTeste(null); setErro(null); }} autoComplete="off" spellCheck={false}
                       placeholder="Cola aqui o link (https://…)" aria-label="Link do calendário" className="h-11 rounded-md border border-input bg-background px-3 text-base font-normal" />
                     <span className="text-xs font-normal text-muted-foreground">O link é privado: guardamo-lo cifrado e nunca o mostramos por inteiro.</span>
                   </label>

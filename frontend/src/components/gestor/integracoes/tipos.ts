@@ -15,7 +15,7 @@ export interface CelulaCanal {
   ultimo_sucesso_em: string | null;
   em_validacao: boolean;
   aviso_validacao: string | null;
-  erro: { codigo: string; mensagem: string; em: string | null; /** Passa sozinho (5xx, tempo esgotado): não pede «Corrigir». */ temporario?: boolean } | null;
+  erro: { codigo: string; mensagem: string; em: string | null; /** Passa sozinho (5xx, tempo esgotado): não pede «Corrigir». */ temporario?: boolean; /** Início da série de falhas seguidas (nunca inventado: null se o servidor não o sabe). */ falha_desde?: string | null; /** Quando o servidor volta a tentar ler. */ proxima_leitura_em?: string | null } | null;
 }
 
 export interface CasaResumo {
@@ -27,9 +27,11 @@ export interface CasaResumo {
   airbnb: CelulaCanal | null;
   booking: CelulaCanal | null;
   outros: CelulaCanal[];
+  /** Morada curta (rua e localidade) para distinguir casas com o mesmo nome. */
+  morada_curta?: string | null;
 }
 
-export interface ErroDaLigacao { casa: string; canal: string; fonte_id: string; codigo?: string; mensagem: string; em: string | null; temporario?: boolean }
+export interface ErroDaLigacao { casa: string; canal: string; fonte_id: string; codigo?: string; mensagem: string; em: string | null; temporario?: boolean; falha_desde?: string | null; proxima_leitura_em?: string | null }
 
 export interface ProprietarioResumo {
   _id: string;
@@ -93,13 +95,70 @@ export function diaMes(iso: string): string {
 }
 
 /** «há 20 min», «há 3 h», «há 2 dias». */
-export function haQuanto(iso: string | null): string {
+export function haQuanto(iso: string | null, agora: number = Date.now()): string {
   if (!iso) return "ainda não";
-  const min = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  const min = Math.max(0, Math.round((agora - new Date(iso).getTime()) / 60000));
   if (min < 1) return "agora mesmo";
   if (min < 60) return `há ${min} min`;
   if (min < 1440) return `há ${Math.round(min / 60)} h`;
-  return `há ${Math.round(min / 1440)} dias`;
+  const dias = Math.round(min / 1440);
+  return `há ${dias} ${dias === 1 ? "dia" : "dias"}`;
+}
+
+const FUSO = "Europe/Lisbon";
+const horaLisboa = (d: Date) => new Intl.DateTimeFormat("pt-PT", { timeZone: FUSO, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(d);
+const diaLisboa = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: FUSO, year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+
+/**
+ * «Falha há 2 h · nova tentativa às 14:10» (hora de Lisboa). Só usa o que o servidor sabe: sem `falha_desde` não diz
+ * desde quando; sem `proxima_leitura_em` não diz a próxima tentativa; sem nenhum dos dois devolve null (não mostra nada).
+ * Uma tentativa já atrasada (o job corre de 5 em 5 min) diz «em breve» em vez de uma hora passada.
+ */
+export function textoFalha(e: { falha_desde?: string | null; proxima_leitura_em?: string | null } | null | undefined, agora: Date = new Date()): string | null {
+  if (!e) return null;
+  const partes: string[] = [];
+  const desde = e.falha_desde ? new Date(e.falha_desde) : null;
+  if (desde && !Number.isNaN(desde.getTime())) {
+    const q = haQuanto(desde.toISOString(), agora.getTime());
+    partes.push(q === "agora mesmo" ? "Falhou agora mesmo" : `Falha ${q}`);
+  }
+  const prox = e.proxima_leitura_em ? new Date(e.proxima_leitura_em) : null;
+  if (prox && !Number.isNaN(prox.getTime())) {
+    if (prox.getTime() <= agora.getTime()) partes.push("nova tentativa em breve");
+    else {
+      const hoje = diaLisboa(agora);
+      const dia = diaLisboa(prox);
+      const amanha = diaLisboa(new Date(agora.getTime() + 86400000));
+      const quando = dia === hoje ? "" : dia === amanha ? "amanhã " : `a ${diaMes(dia)} `;
+      partes.push(`nova tentativa ${quando}às ${horaLisboa(prox)}`);
+    }
+  }
+  return partes.length ? partes.join(" · ") : null;
+}
+
+/**
+ * Nome da casa para o seletor do assistente, com o canal já ligado: «Baixa — Airbnb ligado», «— Airbnb e Booking.com
+ * ligados», «— Smoobu» e sem sufixo se nada. Se há nomes repetidos entre as casas, acrescenta a morada curta
+ * (ou, sem morada, um número) para se distinguirem.
+ */
+export function rotulosDasCasas(casas: Pick<CasaResumo, "_id" | "nome" | "smoobu" | "airbnb" | "booking" | "outros" | "morada_curta">[]): Map<string, string> {
+  const repetidos = new Map<string, number>();
+  for (const c of casas) repetidos.set(c.nome.trim().toLowerCase(), (repetidos.get(c.nome.trim().toLowerCase()) ?? 0) + 1);
+  const contador = new Map<string, number>();
+  const out = new Map<string, string>();
+  for (const c of casas) {
+    const chave = c.nome.trim().toLowerCase();
+    let nome = c.nome;
+    if ((repetidos.get(chave) ?? 0) > 1) {
+      const n = (contador.get(chave) ?? 0) + 1;
+      if (!c.morada_curta) contador.set(chave, n);
+      nome = c.morada_curta ? `${c.nome.trim()} (${c.morada_curta})` : `${c.nome.trim()} (${n})`;
+    }
+    const canais = [c.airbnb ? "Airbnb" : "", c.booking ? "Booking.com" : "", ...(c.outros ?? []).map((o) => o.canal_texto)].filter(Boolean);
+    const sufixo = c.smoobu ? " — Smoobu" : canais.length ? ` — ${canais.length === 1 ? `${canais[0]} ligado` : `${canais.slice(0, -1).join(", ")} e ${canais[canais.length - 1]} ligados`}` : "";
+    out.set(c._id, nome + sufixo);
+  }
+  return out;
 }
 
 export function msgErro(e: unknown, omissao: string): string {

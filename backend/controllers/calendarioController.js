@@ -51,7 +51,7 @@ function criarHandlers(papel) {
     remover: soGestor(corre('remover', async (req, res) => enviar(res, await S.removerLigacao({ id: req.params.id, escopo: escopo(req), ator: ator(req) })))),
     leituras: corre('leituras', async (req, res) => enviar(res, await S.listarLeituras({ id: req.params.id, escopo: escopo(req), limite: req.query.limite, completo: ehGestor }))),
     estado: corre('estado', async (req, res) => enviar(res, await S.mudarEstado({ id: req.params.id, acao: (req.body || {}).acao, escopo: escopo(req), ator: ator(req) }))),
-    listarExternas: corre('listarExternas', async (req, res) => enviar(res, await S.listarReservasExternas({ escopo: escopo(req), estado: req.query.estado || 'por_confirmar', parceiroId: req.query.parceiro_id, pular: req.query.pular, proximosDias: req.query.proximos_dias, incluirInativos: ehGestor && req.query.inativos === '1' }))),
+    listarExternas: corre('listarExternas', async (req, res) => enviar(res, await S.listarReservasExternas({ escopo: escopo(req), estado: req.query.estado || 'por_confirmar', parceiroId: req.query.parceiro_id, pular: req.query.pular, proximosDias: req.query.proximos_dias, ate: req.query.ate, incluirInativos: ehGestor && req.query.inativos === '1' }))),
     confirmar: corre('confirmar', async (req, res) => {
       const e = escopo(req);
       return enviar(res, await D.confirmarExterna({ externaId: req.params.id, empresaId: e.empresaId, parceiroId: e.parceiroId || null, ator: ator(req), dados: req.body }));
