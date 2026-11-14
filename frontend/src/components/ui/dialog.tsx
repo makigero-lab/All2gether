@@ -41,10 +41,11 @@ export function Dialog({ open, onOpenChange, children, ecraInteiroNoTelemovel = 
     const anterior = document.activeElement as HTMLElement | null;
     pilhaDialogs.push(id);
 
-    // Foca o painel (ou o 1.º elemento focável) ao abrir.
+    // Ao abrir, o foco vai para o campo marcado com data-autofocus (o primeiro que o utilizador vai usar);
+    // sem marca, vai para o próprio painel. Ao fechar, volta ao botão que abriu o diálogo (ver o cleanup).
     const painel = painelRef.current;
     if (painel && !painel.contains(document.activeElement)) {
-      painel.focus();
+      (painel.querySelector<HTMLElement>("[data-autofocus]") ?? painel).focus();
     }
 
     const handler = (e: KeyboardEvent) => {

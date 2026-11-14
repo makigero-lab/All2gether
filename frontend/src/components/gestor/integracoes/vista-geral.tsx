@@ -5,7 +5,7 @@ import { AlertCircle, CheckCircle2, ChevronRight, CircleDashed, FileWarning, Loa
 import { Button } from "@/components/ui/button";
 import { adminPatch } from "@/lib/api";
 import { plural } from "@/lib/utils";
-import { haQuanto, legendaCasas, msgErro, ordenarLinhas, passaFiltro, REGRA_UMA_FONTE, resultadoAceitar, type CasaResumo, type EstadoLinha, type Filtro, type ProprietarioResumo } from "./tipos";
+import { haQuanto, legendaCasas, msgErro, ordenarLinhas, passaFiltro, REGRA_UMA_FONTE, resultadoAceitar, textoFalha, type CasaResumo, type EstadoLinha, type Filtro, type ProprietarioResumo } from "./tipos";
 
 const ESTADOS: Record<EstadoLinha, { texto: string; classe: string; Icone: React.ComponentType<{ className?: string }> }> = {
   ok: { texto: "A funcionar", classe: "text-emerald-700 dark:text-emerald-400", Icone: CheckCircle2 },
@@ -88,7 +88,7 @@ export function VistaGeral({ lista, filtro, disponivel, aoAbrir, aoLigar, aoMuda
           <ul className="space-y-2">
             {linhasErro.map(({ p, e }) => (
               <li key={e.fonte_id} className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-                <p className="min-w-0 text-sm"><span className="font-medium">{p.nome}</span> · {e.casa} · {e.canal}: {e.mensagem}</p>
+                <p className="min-w-0 text-sm"><span className="font-medium">{p.nome}</span> · {e.casa} · {e.canal}: {e.mensagem}{e.codigo !== "muitos_novos" && textoFalha(e) && <span className="mt-0.5 block text-xs text-muted-foreground" data-falha>{textoFalha(e)}</span>}</p>
                 <div className="flex shrink-0 flex-wrap gap-2">
                   {e.codigo === "muitos_novos" && (
                     <Button size="sm" className="min-h-11 sm:min-h-9" disabled={!disponivel || aAceitar === e.fonte_id} onClick={() => aceitar(e.fonte_id)}>

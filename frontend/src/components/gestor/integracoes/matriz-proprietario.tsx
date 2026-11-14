@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { adminDelete, adminGet, adminPatch, adminPost, adminPut } from "@/lib/api";
 import { plural } from "@/lib/utils";
-import { haQuanto, msgErro, REGRA_UMA_FONTE, resultadoAceitar, type CasaResumo, type CelulaCanal, type ProprietarioResumo } from "./tipos";
+import { haQuanto, msgErro, textoFalha, REGRA_UMA_FONTE, resultadoAceitar, type CasaResumo, type CelulaCanal, type ProprietarioResumo } from "./tipos";
 import type { CanalAssistente } from "./assistente-ligar";
 
 /** true em ecrãs estreitos (< 640 px): a matriz passa a uma lista por casa, sem scroll horizontal. */
@@ -80,7 +80,7 @@ function CelulaLigada({ c, disponivel, aoMudar }: { c: CelulaCanal; disponivel: 
     <div className="space-y-1.5">
       {c.estado === "ativa" && !c.em_validacao && <p className="flex items-center gap-1.5 text-sm text-emerald-700 dark:text-emerald-400"><CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden /> A funcionar · {haQuanto(c.ultimo_sucesso_em)}</p>}
       {c.em_validacao && <p role="status" className="flex items-start gap-1.5 text-sm text-amber-700 dark:text-amber-400"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> {c.aviso_validacao}</p>}
-      {c.estado === "erro" && <p role="status" className={`flex items-start gap-1.5 text-sm ${temporario ? "text-amber-700 dark:text-amber-400" : "text-destructive"}`}><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> {c.erro?.mensagem ?? "Não foi possível ler o calendário."}</p>}
+      {c.estado === "erro" && <p role="status" className={`flex items-start gap-1.5 text-sm ${temporario ? "text-amber-700 dark:text-amber-400" : "text-destructive"}`}><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> <span>{c.erro?.mensagem ?? "Não foi possível ler o calendário."}{textoFalha(c.erro) && <span className="mt-0.5 block text-xs font-normal opacity-90" data-falha>{textoFalha(c.erro)}</span>}</span></p>}
       {(c.estado === "pausada" || c.estado === "suspensa") && <p className="flex items-start gap-1.5 text-sm text-muted-foreground"><PauseCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> {c.estado_texto ?? "Em pausa."}</p>}
       {c.url_mascara && <p className="break-all text-xs text-muted-foreground" title="Por segurança, o link nunca é mostrado por inteiro.">{c.url_mascara}</p>}
       {erroLocal && <p role="alert" className="text-xs text-destructive">{erroLocal}</p>}
@@ -105,7 +105,7 @@ function CelulaLigada({ c, disponivel, aoMudar }: { c: CelulaCanal; disponivel: 
         <DialogContent>
           <label className="flex flex-col gap-1 text-sm font-medium">
             Link novo do calendário
-            <input value={novoLink} onChange={(e) => { setNovoLink(e.target.value); setErroLink(null); }} autoComplete="off" spellCheck={false} placeholder="Cola aqui o link (https://…)" aria-label="Link novo do calendário" className="h-11 rounded-md border border-input bg-background px-3 text-base font-normal" />
+            <input data-autofocus value={novoLink} onChange={(e) => { setNovoLink(e.target.value); setErroLink(null); }} autoComplete="off" spellCheck={false} placeholder="Cola aqui o link (https://…)" aria-label="Link novo do calendário" className="h-11 rounded-md border border-input bg-background px-3 text-base font-normal" />
           </label>
           {erroLink && <p role="alert" className="mt-2 flex items-start gap-2 text-sm text-destructive"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> {erroLink}</p>}
         </DialogContent>

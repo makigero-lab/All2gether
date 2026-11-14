@@ -12,6 +12,9 @@ const porConfirmar = ler("./por-confirmar.tsx");
 const vista = ler("./vista-geral.tsx");
 const pagina = ler("../../../app/gestor/integracoes/page.tsx");
 const acordo = ler("../../parceiro/acordo-dados.tsx");
+const parceiroPorConfirmar = ler("../../parceiro/reservas-por-confirmar.tsx");
+const calendariosCasa = ler("../../parceiro/calendarios-casa.tsx");
+const confirmar = ler("../../ui/confirmar-dialog.tsx");
 
 test("D1: o corpo do diálogo faz scroll e o rodapé fica sempre visível (todos os diálogos do padrão)", () => {
   const corpo = dialog.slice(dialog.indexOf("export function DialogContent"), dialog.indexOf("export function DialogFooter"));
@@ -93,4 +96,44 @@ test("S5: «pode ter mudado» com a dica dos menus", () => {
   assert.match(assistente, /pode ter mudado/);
   assert.match(assistente, /Os menus do Airbnb\/Booking mudam às vezes; se não encontrares, diz-nos\./);
   assert.doesNotMatch(assistente, /menu por confirmar/);
+});
+
+test("S1: o tempo da falha aparece na matriz, no painel «Precisam de atenção» e na vista do proprietário", () => {
+  assert.match(matriz, /textoFalha\(c\.erro\)/);
+  assert.match(vista, /textoFalha\(e\)/);
+  assert.match(vista, /e\.codigo !== "muitos_novos"/);
+  assert.match(calendariosCasa, /textoFalha\(f\)/);
+});
+
+test("S4: filtro rápido, ordem por chegada, ano e plataforma, e confirmação antes de marcar bloqueios em lote", () => {
+  assert.match(porConfirmar, /useState<FiltroChegada>\("todas"\)/);
+  assert.match(porConfirmar, /data-filtro-chegada/);
+  assert.match(porConfirmar, /ordenarPorChegada\(lista\)/);
+  assert.match(porConfirmar, /periodoComAno\(x\)/);
+  assert.match(porConfirmar, /data-plataforma/);
+  assert.match(porConfirmar, /textoLongosDeFora\(longos\.length\)/);
+  // nenhum botão de bloqueio em lote age sem passar por pedirBloqueio, e nunca window.confirm
+  assert.doesNotMatch(porConfirmar, /window\.confirm|[^a-zA-Z]confirm\(/);
+  assert.doesNotMatch(porConfirmar, /onClick=\{\(\) => decidir\([^)]*"bloqueio"\)\}/);
+  assert.ok((porConfirmar.match(/pedirBloqueio\(/g) ?? []).length >= 3);
+  assert.match(porConfirmar, /<ConfirmarDialog/);
+  assert.match(parceiroPorConfirmar, /<ConfirmarDialog/);
+  assert.match(parceiroPorConfirmar, /periodoComAno\(x\)/);
+  assert.doesNotMatch(parceiroPorConfirmar, /onClick=\{\(\) => bloquearTodos\(/);
+  assert.match(confirmar, /from "@\/components\/ui\/dialog"/);
+  assert.match(confirmar, /data-autofocus/);
+});
+
+test("S8: o diálogo foca o campo marcado com data-autofocus; o assistente marca Casa, canal ou Link; o foco volta ao botão ao fechar", () => {
+  assert.match(dialog, /querySelector<HTMLElement>\("\[data-autofocus\]"\) \?\? painel/);
+  assert.match(dialog, /anterior\?\.focus\?\.\(\)/);
+  assert.match(assistente, /data-autofocus=\{focoCasa \? "" : undefined\}/);
+  assert.match(assistente, /data-autofocus=\{focoLink \? "" : undefined\}/);
+  assert.match(assistente, /focoCanal === k/);
+  assert.match(dialog, /e\.key === "Tab"/); // o foco continua preso no diálogo
+});
+
+test("S11: as opções do seletor «Casa» usam o rótulo com o canal ligado", () => {
+  assert.match(assistente, /rotulosDasCasas\(casasLivres\)/);
+  assert.match(assistente, /rotulos\.get\(c\._id\)/);
 });
