@@ -1227,6 +1227,7 @@ async function atualizarTarefaPorReserva(
   // Dia que o gestor tinha posto à mão enquanto a data era provisória (mudar dia / atribuir / reatribuir).
   const diaDoGestor = corrigeSaida && tarefa.dia_mudado_pelo_gestor ? tarefa.dia_mudado_pelo_gestor.dia || null : null;
   const pessoaDoGestor = diaDoGestor && tarefa.utilizador_id ? String(tarefa.utilizador_id) : null;
+  const soAtribuiu = !!(diaDoGestor && tarefa.dia_mudado_pelo_gestor && tarefa.dia_mudado_pelo_gestor.so_pessoa === true);
   const nomeCasaAviso = diaDoGestor ? ((await Propriedade.findById(tarefa.propriedade_id).select('nome').lean()) || {}).nome || 'Casa' : null;
 
   if (corrigeSaida) {
@@ -1490,7 +1491,7 @@ async function atualizarTarefaPorReserva(
         await avisarGestores(
           tarefa.empresa_id,
           '📅 Limpeza passou para a data real do Smoobu',
-          `A limpeza de ${nomeCasaAviso}, que tinhas posto a ${fmt(diaDoGestor)}, passou para ${fmt(diaReal)}, a data de saída real do Smoobu.${quem}`,
+          `A limpeza de ${nomeCasaAviso}, que tinhas ${soAtribuiu ? 'atribuído para' : 'posto a'} ${fmt(diaDoGestor)}, passou para ${fmt(diaReal)}, a data de saída real do Smoobu.${quem}`,
           '/gestor/calendario',
           { chave: `smoobu_dia_gestor_corrigido:${tarefa._id}:${diaReal}` }
         );
