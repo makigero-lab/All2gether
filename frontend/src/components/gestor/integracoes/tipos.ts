@@ -110,8 +110,8 @@ export function msgErro(e: unknown, omissao: string): string {
 /** A regra «uma só fonte por casa», dita uma única vez no topo da matriz e da lista. */
 export const REGRA_UMA_FONTE = "Cada casa recebe reservas de uma só origem automática: Smoobu, ou os calendários Airbnb/Booking, que podem coexistir.";
 
-/** Tamanho de cada pedido do lote «Confirmar / É um bloqueio» (o servidor aceita no máximo 200). */
-export const TAMANHO_BLOCO = 200;
+/** Tamanho de cada pedido do lote «Confirmar / É um bloqueio» (blocos pequenos para o progresso andar; o servidor aceita até 200). */
+export const TAMANHO_BLOCO = 25;
 
 /** Parte uma lista em blocos de `n` (função pura, testável). */
 export function blocos<T>(lista: T[], n: number = TAMANHO_BLOCO): T[][] {
@@ -197,7 +197,7 @@ export function legendaCasas(estados: string[]): string {
 export interface RespostaLote { ok: number; falhas: number; resultados?: ResultadoItemLote[]; nao_tratados?: string[]; incompleto?: boolean }
 
 /**
- * Envia as decisões em blocos de 200, em sequência, e junta o resultado. O servidor pode parar mais cedo para não
+ * Envia as decisões em blocos de 25, em sequência, e junta o resultado. O servidor pode parar mais cedo para não
  * demorar demasiado (`nao_tratados`): o que ficou por tratar segue no bloco seguinte. `aoProgresso(feitos)` é chamado
  * antes de cada bloco e no fim. Devolve o que foi feito, as falhas e, se parou por erro, a mensagem e os ids por tratar.
  */

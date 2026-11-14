@@ -42,7 +42,7 @@ export function agrupar(lista: Externa[]): { parceiro: string; parceiroId: strin
 /**
  * Separador «Reservas por confirmar»: a lista única da empresa, agrupada por proprietário e casa, com ações em lote
  * (Confirmar / É um bloqueio). Os períodos com mais de 30 noites (normalmente fechos do calendário) ficam agrupados e fechados.
- * Os lotes seguem em blocos de 200 com progresso e o resultado fica num aviso fixo, sempre visível.
+ * Os lotes seguem em blocos de 25 com progresso e o resultado fica num aviso fixo, sempre visível.
  */
 export function ReservasPorConfirmarGestor({ proprietariosComErro, disponivel, aoMudar }: { proprietariosComErro: Set<string>; disponivel: boolean; aoMudar: () => void }) {
   const [lista, setLista] = useState<Externa[] | null>(null);
@@ -83,8 +83,8 @@ export function ReservasPorConfirmarGestor({ proprietariosComErro, disponivel, a
     if (ids.length === 0) return;
     const verbo = acao === "confirmar" ? "confirmar" : "marcar como bloqueio";
     setOcupado(true); setErro(null); setResultado(null);
-    setProgresso(`A ${verbo} ${ids.length}: 0/${ids.length}…`);
-    const r = await enviarEmBlocos(ids, acao, (corpo) => adminPost<RespostaLote>("/api/gestor/reservas-externas/lote", corpo), (feitos) => setProgresso(`A ${verbo} ${ids.length}: ${feitos}/${ids.length}…`));
+    setProgresso(`A ${verbo} ${ids.length}: 0/${ids.length}… isto pode demorar até 1 minuto.`);
+    const r = await enviarEmBlocos(ids, acao, (corpo) => adminPost<RespostaLote>("/api/gestor/reservas-externas/lote", corpo), (feitos) => setProgresso(`A ${verbo} ${ids.length}: ${feitos}/${ids.length}… isto pode demorar até 1 minuto.`));
     setProgresso(null);
     const feitos = r.ok;
     const base = `${acao === "confirmar" ? "Confirmados" : "Marcados como bloqueio"}: ${feitos} de ${ids.length}.`;
