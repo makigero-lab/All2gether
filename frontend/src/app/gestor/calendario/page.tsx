@@ -64,7 +64,8 @@ import { textoEquipaGestor, textoFalta } from "@/lib/equipa";
 import { mapaCoresEquipa } from "@/lib/cores-equipa";
 import { VistaDiaEquipa, type TarefaDia } from "@/components/gestor/vista-dia-equipa";
 import { SemanaLista } from "@/components/gestor/semana-lista";
-import { AusentesLinha, primeiroNome, type AusenteDia } from "@/components/gestor/pessoa-estado";
+import { AusentesLinha, AvisoSaidaPorConfirmar, MotivoSaida, primeiroNome, type AusenteDia } from "@/components/gestor/pessoa-estado";
+import { ROTULO_SAIDA_POR_CONFIRMAR, rotuloSubstituiEstado, textoSaidaPorConfirmar } from "@/lib/saida-desconhecida";
 import { DetalheTarefaModal, type TarefaDetalheGestor } from "@/components/gestor/detalhe-tarefa-modal";
 
 /* ------------------------------------------------------------------ */
@@ -664,7 +665,7 @@ export default function CalendarioOperacionalPage() {
           {pontoTipo}
           <span className="fc-evt-month__time">{arg.timeText}</span>
           {glifo && <span className="fc-evt-glifo" aria-hidden="true">{glifo}</span>}
-          <span className="fc-evt-month__title" title={[titulo, textoFalta(t.pessoas_em_falta), isPorAtribuir ? t.motivo_nao_atribuicao : null].filter(Boolean).join(" · ")}>
+          <span className="fc-evt-month__title" title={[titulo, textoFalta(t.pessoas_em_falta), textoSaidaPorConfirmar(t) ?? (isPorAtribuir ? t.motivo_nao_atribuicao : null)].filter(Boolean).join(" · ")}>
             {tituloMes}{(t.pessoas_em_falta ?? 0) > 0 ? " ⚠" : ""}
           </span>
         </div>
@@ -686,7 +687,7 @@ export default function CalendarioOperacionalPage() {
     if (arg.view.type.startsWith("timeGrid") && minutos <= 30) {
       const quem = t.alerta_orfao ? "Órfã" : staff ? (equipaTexto ?? primeiroNome(staff)) : rotuloEstado;
       return (
-        <div className={`${blockClass} fc-evt-block--curto${riscada}`} title={[`${arg.timeText} · ${titulo} · ${quem}`, isPorAtribuir ? t.motivo_nao_atribuicao : null].filter(Boolean).join(" · ")}>
+        <div className={`${blockClass} fc-evt-block--curto${riscada}`} title={[`${arg.timeText} · ${titulo} · ${quem}`, textoSaidaPorConfirmar(t) ?? (isPorAtribuir ? t.motivo_nao_atribuicao : null)].filter(Boolean).join(" · ")}>
           {pontoTipo}
           {glifo && <span className="fc-evt-glifo" aria-hidden="true">{glifo}</span>}
           <span className="fc-evt-block__time">{arg.timeText.split(" - ")[0]}</span>
@@ -718,7 +719,7 @@ export default function CalendarioOperacionalPage() {
             </>
           ) : (
             <span className="fc-evt-block__unassigned" title={t.motivo_nao_atribuicao ?? undefined}>
-              ⚠️ {t.data_saida_desconhecida ? "Data de saída por confirmar" : rotuloEstado}
+              ⚠️ {rotuloSubstituiEstado(t) ? ROTULO_SAIDA_POR_CONFIRMAR : rotuloEstado}
             </span>
           )}
         </div>
@@ -1254,8 +1255,9 @@ export default function CalendarioOperacionalPage() {
             {!ausencia && x.tipo === "manutencao" && <EtiquetaManutencao className="mt-0.5" />}
           </span>
           <span className="block truncate text-xs text-muted-foreground">
-            {ausencia ? "" : `${temHoraReal(x.data) ? horaTarefa(x.data) : "sem hora"} · ${x.utilizador_id?.nome ?? "Por atribuir"}`}
+            {ausencia ? "" : `${temHoraReal(x.data) ? horaTarefa(x.data) : "sem hora"} · ${x.utilizador_id?.nome ?? (rotuloSubstituiEstado(x) ? ROTULO_SAIDA_POR_CONFIRMAR : "Por atribuir")}`}
           </span>
+          {!ausencia && <MotivoSaida t={x} className="block" />}
         </span>
         {!ausencia && <EstadoTarefaBadge estado={x.estado} className="shrink-0" />}
         {!ausencia && <OfertaVagaBadge tarefa={x} className="basis-full" />}
@@ -1838,6 +1840,9 @@ export default function CalendarioOperacionalPage() {
                 {tarefaSelecionada.propriedade_id?.nome ?? "—"}
               </span>
             </div>
+
+            {/* Limpeza provisória (reserva sem data de saída): rótulo e motivo à mão, ao lado de «Mudar dia». */}
+            <AvisoSaidaPorConfirmar t={tarefaSelecionada} />
 
             {/* Data + tempo */}
             <div className="space-y-2 rounded-md bg-muted/40 p-3 text-sm">

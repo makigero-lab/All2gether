@@ -20,8 +20,9 @@ import { Button } from "@/components/ui/button";
 import { infoEstadoTarefa } from "@/lib/estados";
 import { extrairHoraISO, plural, temHoraReal } from "@/lib/utils";
 import { rotuloTipoLimpeza } from "@/components/tipo-limpeza-badge";
-import { AusentesLinha, AvatarPessoa, AvisosLimpeza, EtiquetaEstado, GrupoAvatares, COR_SEM_MAPA, textoAvisos, tokenDoCartao } from "@/components/gestor/pessoa-estado";
+import { AusentesLinha, AvatarPessoa, AvisosLimpeza, EtiquetaEstado, GrupoAvatares, MotivoSaida, COR_SEM_MAPA, textoAvisos, tokenDoCartao } from "@/components/gestor/pessoa-estado";
 import { LinhaLimpeza } from "@/components/gestor/semana-lista";
+import { saidaPorConfirmar } from "@/lib/saida-desconhecida";
 import type { UtilizadorDTO } from "@/lib/api";
 
 export interface TarefaDia {
@@ -40,6 +41,9 @@ export interface TarefaDia {
   oferta_expira_em?: string | null;
   alerta_orfao?: boolean;
   alerta_mensagem?: string;
+  // Reserva do Smoobu sem data de saída: limpeza provisória no dia de chegada, com o motivo.
+  data_saida_desconhecida?: boolean;
+  motivo_nao_atribuicao?: string | null;
   title?: string;
   start?: string;
   end?: string;
@@ -234,7 +238,8 @@ export function VistaDiaEquipa({
     const todos = membros(t);
     const colegas = todos.filter((m) => m._id !== colId).map((m) => primeiro(m.nome));
     const top = (b.ini - dados.inicio) * PX_POR_MIN;
-    const h = Math.max(22, (b.fim - b.ini) * PX_POR_MIN - 2);
+    // Uma limpeza provisória precisa de espaço para «Data de saída por confirmar» e o motivo.
+    const h = Math.max(saidaPorConfirmar(t) ? 96 : 22, (b.fim - b.ini) * PX_POR_MIN - 2);
     const baixo = h < 70;
     // Cartões lado a lado (sobreposição): só cabe o círculo, o ícone do estado e a casa; o resto vai no title.
     const estreitoCard = b.faixas > 1;
@@ -273,17 +278,18 @@ export function VistaDiaEquipa({
             <GrupoAvatares membros={todos} cores={cores} pequeno />
             {manut && <Wrench className="h-3 w-3 shrink-0" aria-hidden="true" />}
             {!estreitoCard && <span className="vista-dia__hora">{hhmm(b.ini)}–{hhmm(b.fim)}</span>}
-            {baixo && !estreitoCard && <EtiquetaEstado estado={t.estado} className="ml-auto" />}
+            {baixo && !estreitoCard && <EtiquetaEstado estado={t.estado} saida={t} className="ml-auto" />}
           </span>
-          {estreitoCard && <EtiquetaEstado estado={t.estado} soIcone className="shrink-0" />}
+          {estreitoCard && <EtiquetaEstado estado={t.estado} saida={t} soIcone className="shrink-0" />}
           <span className="vista-dia__casa">{especial ? `${especial} - ` : ""}{casa}</span>
           {!estreitoCard && (
             <span className="vista-dia__selos">
-              {!baixo && <EtiquetaEstado estado={t.estado} />}
+              {!baixo && <EtiquetaEstado estado={t.estado} saida={t} />}
               <AvisosLimpeza t={t} />
               {!baixo && extra}
             </span>
           )}
+          {!estreitoCard && !baixo && <MotivoSaida t={t} />}
           {estreitoCard && avisos && <AlertTriangle className="h-3.5 w-3.5 shrink-0" style={{ color: "hsl(var(--status-naoat))" }} aria-hidden="true" />}
         </button>
       </div>
