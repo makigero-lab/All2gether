@@ -7,11 +7,12 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ConfirmarDialog } from "@/components/ui/confirmar-dialog";
 import { adminGet, adminPost } from "@/lib/api";
 import { plural } from "@/lib/utils";
-import { hojeLisboaISO, OPCOES_CHEGADA, ordenarPorChegada, passaFiltroChegada, periodoComAno, textoConfirmarBloqueio, type FiltroChegada } from "@/lib/reservas-externas";
+import { nomesDistintos } from "@/components/gestor/integracoes/tipos";
+import { emCurso, hojeLisboaISO, OPCOES_CHEGADA, ordenarPorChegada, passaFiltroChegada, periodoComAno, textoConfirmarBloqueio, type FiltroChegada } from "@/lib/reservas-externas";
 
 export interface ReservaExternaDTO {
   _id: string;
-  propriedade: { _id: string; nome: string };
+  propriedade: { _id: string; nome: string; morada_curta?: string | null };
   canal: string;
   canal_texto: string;
   check_in: string;
@@ -93,7 +94,10 @@ export function ReservasPorConfirmar({
   const visiveis = ordenarPorChegada(lista).filter((x) => passaFiltroChegada(x, filtro, hoje));
   const normais = visiveis.filter((x) => x.motivo !== "periodo_longo");
   const longos = visiveis.filter((x) => x.motivo === "periodo_longo");
-  const bloqueioT = aConfirmarBloqueio ? textoConfirmarBloqueio(aConfirmarBloqueio.length) : null;
+  // Casas com o mesmo nome distinguem-se pela morada curta.
+  const nomes = nomesDistintos([...new Map(lista.map((x) => [x.propriedade._id, x.propriedade])).values()]);
+  const nomeDe = (x: ReservaExternaDTO) => nomes.get(x.propriedade._id) ?? x.propriedade.nome;
+  const bloqueioT = aConfirmarBloqueio ? textoConfirmarBloqueio(aConfirmarBloqueio.length, aConfirmarBloqueio.map(nomeDe)) : null;
   // Marcar vários como bloqueio age já e não se desfaz: pede confirmação (um só decide-se logo).
   const pedirBloqueioTodos = (itens: ReservaExternaDTO[]) => { if (itens.length > 1) setAConfirmarBloqueio(itens); else void bloquearTodos(itens); };
 
@@ -101,21 +105,22 @@ export function ReservasPorConfirmar({
     <li key={x._id} className="flex flex-col gap-2 rounded-md border bg-background p-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0 text-sm">
         <p className="font-medium">
-          {x.propriedade.nome} · {periodoComAno(x)}{" "}
+          {nomeDe(x)} · {periodoComAno(x)}{" "}
           <span className="font-normal text-muted-foreground">({plural(x.noites, "noite")})</span>
         </p>
         <p className="text-xs text-muted-foreground">
           <span className="rounded border px-1.5 py-0.5 text-foreground" data-plataforma>{x.canal_texto}</span>
+          {emCurso(x, hoje) && <span className="ml-1 rounded bg-muted px-1.5 py-0.5 text-foreground" data-em-curso>Em curso</span>}
           {x.motivo === "sobreposicao" && " · coincide com outra reserva"}
           {x.motivo === "reapareceu" && " · voltou a aparecer no calendário"}
           {" · É uma reserva?"}
         </p>
       </div>
       <div className="flex shrink-0 gap-2">
-        <Button size="sm" className="min-h-11 flex-1 gap-1 sm:min-h-9 sm:flex-none" disabled={!!aFazer[x._id]} onClick={() => decidir(x._id, "confirmar")} aria-label={`É uma reserva: ${x.propriedade.nome}, ${periodoComAno(x)}, ${x.canal_texto}`}>
+        <Button size="sm" className="min-h-11 flex-1 gap-1 sm:min-h-9 sm:flex-none" disabled={!!aFazer[x._id]} onClick={() => decidir(x._id, "confirmar")} aria-label={`É uma reserva: ${nomeDe(x)}, ${periodoComAno(x)}, ${x.canal_texto}`}>
           {aFazer[x._id] ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Confirmar
         </Button>
-        <Button size="sm" variant="outline" className="min-h-11 flex-1 gap-1 sm:min-h-9 sm:flex-none" disabled={!!aFazer[x._id]} onClick={() => decidir(x._id, "bloqueio")} aria-label={`É um bloqueio: ${x.propriedade.nome}, ${periodoComAno(x)}, ${x.canal_texto}`}>
+        <Button size="sm" variant="outline" className="min-h-11 flex-1 gap-1 sm:min-h-9 sm:flex-none" disabled={!!aFazer[x._id]} onClick={() => decidir(x._id, "bloqueio")} aria-label={`É um bloqueio: ${nomeDe(x)}, ${periodoComAno(x)}, ${x.canal_texto}`}>
           <Ban className="h-4 w-4" /> É um bloqueio
         </Button>
       </div>
@@ -169,7 +174,7 @@ export function ReservasPorConfirmar({
         )}
       </CardContent>
       {aConfirmarBloqueio && bloqueioT && (
-        <ConfirmarDialog aberto titulo={bloqueioT.titulo} descricao={bloqueioT.descricao} textoConfirmar={bloqueioT.confirmar}
+        <ConfirmarDialog aberto destrutivo titulo={bloqueioT.titulo} descricao={bloqueioT.descricao} detalhe={bloqueioT.casas} textoConfirmar={bloqueioT.confirmar}
           aoCancelar={() => setAConfirmarBloqueio(null)} aoConfirmar={() => { const itens = aConfirmarBloqueio; setAConfirmarBloqueio(null); void bloquearTodos(itens); }} />
       )}
     </Card>

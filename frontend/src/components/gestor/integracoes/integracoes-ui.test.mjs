@@ -15,6 +15,7 @@ const acordo = ler("../../parceiro/acordo-dados.tsx");
 const parceiroPorConfirmar = ler("../../parceiro/reservas-por-confirmar.tsx");
 const calendariosCasa = ler("../../parceiro/calendarios-casa.tsx");
 const confirmar = ler("../../ui/confirmar-dialog.tsx");
+const paginaCalendariosParceiro = ler("../../../app/parceiro/calendarios/page.tsx");
 
 test("D1: o corpo do diálogo faz scroll e o rodapé fica sempre visível (todos os diálogos do padrão)", () => {
   const corpo = dialog.slice(dialog.indexOf("export function DialogContent"), dialog.indexOf("export function DialogFooter"));
@@ -136,4 +137,19 @@ test("S8: o diálogo foca o campo marcado com data-autofocus; o assistente marca
 test("S11: as opções do seletor «Casa» usam o rótulo com o canal ligado", () => {
   assert.match(assistente, /rotulosDasCasas\(casasLivres\)/);
   assert.match(assistente, /rotulos\.get\(c\._id\)/);
+});
+
+test("ronda 2: a página real do proprietário mostra o tempo da falha; casas homónimas não se fundem; só a barra de ações é fixa", () => {
+  assert.match(paginaCalendariosParceiro, /textoFalha\(f\)/);
+  assert.match(paginaCalendariosParceiro, /falha_desde\?: string \| null/);
+  assert.match(porConfirmar, /g\.casas\.set\(x\.propriedade\._id/);
+  assert.match(porConfirmar, /key=\{c\.casaId\}/);
+  assert.match(matriz, /nomesDistintos\(p\.casas\)/);
+  assert.match(parceiroPorConfirmar, /nomesDistintos\(/);
+  // o bloco sticky só tem a barra de ações: filtro e aviso dos 30 noites ficam fora dele
+  const sticky = porConfirmar.slice(porConfirmar.indexOf("data-barra-lote"), porConfirmar.indexOf("{corte && ("));
+  assert.doesNotMatch(sticky, /data-filtro-chegada|data-longos-fora|Escolher todos/);
+  assert.match(porConfirmar, /data-em-curso/);
+  assert.match(confirmar, /variant=\{destrutivo \? "destructive" : "default"\}/);
+  assert.match(porConfirmar, /<ConfirmarDialog aberto destrutivo/);
 });

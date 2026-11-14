@@ -5,17 +5,18 @@ import Link from "next/link";
 import { AlertCircle, ArrowLeft, CalendarDays, CheckCircle2, CircleDashed, Loader2, PauseCircle } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { adminGet } from "@/lib/api";
+import { falhaLonga, textoFalha } from "@/components/gestor/integracoes/tipos";
 
 interface Casa { _id: string; nome: string; smoobu_id?: string | null }
 interface Fonte {
   propriedade_id: string; canal_texto: string; estado: "ativa" | "erro" | "pausada" | "suspensa";
-  estado_texto: string | null; ultimo_erro: { mensagem: string } | null; em_validacao?: boolean; aviso_validacao?: string | null; n_por_confirmar?: number;
+  estado_texto: string | null; ultimo_erro: { mensagem: string } | null; falha_desde?: string | null; proxima_leitura_em?: string | null; em_validacao?: boolean; aviso_validacao?: string | null; n_por_confirmar?: number;
 }
 
 function EstadoDaFonte({ f }: { f: Fonte }) {
   if (f.em_validacao) return <p className="flex items-start gap-1.5 text-sm text-muted-foreground"><PauseCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> {f.canal_texto}: {f.aviso_validacao}</p>;
   if (f.estado === "ativa") return <p className="flex items-center gap-1.5 text-sm text-emerald-700 dark:text-emerald-400"><CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden /> {f.canal_texto}: ligado</p>;
-  if (f.estado === "erro") return <p className="flex items-start gap-1.5 text-sm text-destructive"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> {f.canal_texto}: com erro. {f.ultimo_erro?.mensagem ?? ""} A All2gether já foi avisada.</p>;
+  if (f.estado === "erro") return <p className="flex items-start gap-1.5 text-sm text-destructive"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> <span>{f.canal_texto}: com erro. {f.ultimo_erro?.mensagem ?? ""} A All2gether já foi avisada.{textoFalha(f) && <span className={`mt-0.5 block text-xs ${falhaLonga(f) ? "font-semibold" : ""}`} data-falha>{textoFalha(f)}</span>}</span></p>;
   return <p className="flex items-start gap-1.5 text-sm text-muted-foreground"><PauseCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /> {f.canal_texto}: {f.estado_texto ?? "em pausa"}</p>;
 }
 

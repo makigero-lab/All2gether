@@ -118,45 +118,70 @@ export function textoFalha(e: { falha_desde?: string | null; proxima_leitura_em?
   if (!e) return null;
   const partes: string[] = [];
   const desde = e.falha_desde ? new Date(e.falha_desde) : null;
+  const longa = falhaLonga(e, agora);
   if (desde && !Number.isNaN(desde.getTime())) {
     const q = haQuanto(desde.toISOString(), agora.getTime());
     partes.push(q === "agora mesmo" ? "Falhou agora mesmo" : `Falha ${q}`);
   }
+  // Falha de um dia ou mais: «a tentar de novo» (o servidor continua a tentar sozinho) em vez de «nova tentativa».
+  const tentativa = longa ? "a tentar de novo" : "nova tentativa";
   const prox = e.proxima_leitura_em ? new Date(e.proxima_leitura_em) : null;
   if (prox && !Number.isNaN(prox.getTime())) {
-    if (prox.getTime() <= agora.getTime()) partes.push("nova tentativa em breve");
+    if (prox.getTime() <= agora.getTime()) partes.push(`${tentativa} em breve`);
     else {
       const hoje = diaLisboa(agora);
       const dia = diaLisboa(prox);
       const amanha = diaLisboa(new Date(agora.getTime() + 86400000));
       const quando = dia === hoje ? "" : dia === amanha ? "amanhã " : `a ${diaMes(dia)} `;
-      partes.push(`nova tentativa ${quando}às ${horaLisboa(prox)}`);
+      partes.push(`${tentativa} ${quando}às ${horaLisboa(prox)}`);
     }
   }
   return partes.length ? partes.join(" · ") : null;
 }
 
+/** A falha dura há 24 h ou mais (a interface dá-lhe mais destaque). Só com `falha_desde` conhecido. */
+export function falhaLonga(e: { falha_desde?: string | null } | null | undefined, agora: Date = new Date()): boolean {
+  const d = e?.falha_desde ? new Date(e.falha_desde).getTime() : NaN;
+  return !Number.isNaN(d) && agora.getTime() - d >= 86400000;
+}
+
+/** Localidade de uma morada curta («Rua do Ouro 10, Lisboa» → «Lisboa»). */
+const localidade = (m: string) => m.split(",").pop()!.trim() || m;
+
 /**
- * Nome da casa para o seletor do assistente, com o canal já ligado: «Baixa — Airbnb ligado», «— Airbnb e Booking.com
- * ligados», «— Smoobu» e sem sufixo se nada. Se há nomes repetidos entre as casas, acrescenta a morada curta
- * (ou, sem morada, um número) para se distinguirem.
+ * Nomes das casas que se distinguem uns dos outros: se um nome se repete (sem diferenças de maiúsculas ou espaços),
+ * acrescenta a morada curta («Casa Azul (Rua do Ouro 10, Lisboa)») ou, sem morada, um número. Com `max`, uma morada
+ * que faria o nome passar desse tamanho encurta-se para a localidade.
  */
-export function rotulosDasCasas(casas: Pick<CasaResumo, "_id" | "nome" | "smoobu" | "airbnb" | "booking" | "outros" | "morada_curta">[]): Map<string, string> {
+export function nomesDistintos(casas: { _id: string; nome: string; morada_curta?: string | null }[], max = 40): Map<string, string> {
   const repetidos = new Map<string, number>();
-  for (const c of casas) repetidos.set(c.nome.trim().toLowerCase(), (repetidos.get(c.nome.trim().toLowerCase()) ?? 0) + 1);
+  for (const c of casas) { const k = c.nome.trim().toLowerCase(); repetidos.set(k, (repetidos.get(k) ?? 0) + 1); }
   const contador = new Map<string, number>();
   const out = new Map<string, string>();
   for (const c of casas) {
-    const chave = c.nome.trim().toLowerCase();
-    let nome = c.nome;
-    if ((repetidos.get(chave) ?? 0) > 1) {
-      const n = (contador.get(chave) ?? 0) + 1;
-      if (!c.morada_curta) contador.set(chave, n);
-      nome = c.morada_curta ? `${c.nome.trim()} (${c.morada_curta})` : `${c.nome.trim()} (${n})`;
-    }
-    const canais = [c.airbnb ? "Airbnb" : "", c.booking ? "Booking.com" : "", ...(c.outros ?? []).map((o) => o.canal_texto)].filter(Boolean);
-    const sufixo = c.smoobu ? " — Smoobu" : canais.length ? ` — ${canais.length === 1 ? `${canais[0]} ligado` : `${canais.slice(0, -1).join(", ")} e ${canais[canais.length - 1]} ligados`}` : "";
-    out.set(c._id, nome + sufixo);
+    const k = c.nome.trim().toLowerCase();
+    if ((repetidos.get(k) ?? 0) <= 1) { out.set(c._id, c.nome); continue; }
+    const n = (contador.get(k) ?? 0) + 1;
+    if (!c.morada_curta) contador.set(k, n);
+    const nome = c.nome.trim();
+    const morada = c.morada_curta ? (`${nome} (${c.morada_curta})`.length > max ? localidade(c.morada_curta) : c.morada_curta) : null;
+    out.set(c._id, morada ? `${nome} (${morada})` : `${nome} (${n})`);
+  }
+  return out;
+}
+
+/**
+ * Nome da casa para o seletor do assistente, com o canal já ligado em forma curta para caber no telemóvel:
+ * «Baixa — Airbnb + Booking», «— Airbnb», «— Smoobu» e sem sufixo se nada. Nomes repetidos levam a morada curta
+ * (só a localidade se o rótulo passar dos ~40 caracteres).
+ */
+export function rotulosDasCasas(casas: Pick<CasaResumo, "_id" | "nome" | "smoobu" | "airbnb" | "booking" | "outros" | "morada_curta">[]): Map<string, string> {
+  const nomes = nomesDistintos(casas);
+  const out = new Map<string, string>();
+  for (const c of casas) {
+    const canais = [c.airbnb ? "Airbnb" : "", c.booking ? "Booking" : "", ...(c.outros ?? []).map((o) => o.canal_texto)].filter(Boolean);
+    const sufixo = c.smoobu ? " — Smoobu" : canais.length ? ` — ${canais.join(" + ")}` : "";
+    out.set(c._id, (nomes.get(c._id) ?? c.nome) + sufixo);
   }
   return out;
 }

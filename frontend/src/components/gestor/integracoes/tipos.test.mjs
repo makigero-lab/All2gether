@@ -9,7 +9,7 @@ const fonte = readFileSync(new URL("./tipos.ts", import.meta.url), "utf8");
 const { outputText } = ts.transpileModule(fonte, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } });
 const exp = {};
 new Function("exports", outputText)(exp);
-const { passaFiltro, ordenarLinhas, canalDoLink, diaMes, blocos, semCasasParaLigar, fraseDoTeste, resultadoLigar, resultadoAceitar, agruparFalhas, textoCorte, legendaCasas, enviarEmBlocos, REGRA_UMA_FONTE, TAMANHO_BLOCO, haQuanto, textoFalha, rotulosDasCasas } = exp;
+const { passaFiltro, ordenarLinhas, canalDoLink, diaMes, blocos, semCasasParaLigar, fraseDoTeste, resultadoLigar, resultadoAceitar, agruparFalhas, textoCorte, legendaCasas, enviarEmBlocos, REGRA_UMA_FONTE, TAMANHO_BLOCO, haQuanto, textoFalha, falhaLonga, nomesDistintos, rotulosDasCasas } = exp;
 
 const p = (o) => ({ n_erros: 0, n_por_confirmar: 0, estado: "ok", ...o });
 
@@ -177,7 +177,32 @@ test("haQuanto: 1 dia no singular", () => {
   assert.equal(haQuanto(null), "ainda não");
 });
 
-test("S11: o seletor de casas mostra o canal ligado e distingue nomes repetidos", () => {
+test("S1: falha de 24 h ou mais diz «a tentar de novo» e conta como longa", () => {
+  assert.equal(falhaLonga({ falha_desde: em(-60 * 25) }, AGORA), true);
+  assert.equal(falhaLonga({ falha_desde: em(-60 * 23) }, AGORA), false);
+  assert.equal(falhaLonga({}, AGORA), false);
+  assert.equal(textoFalha({ falha_desde: em(-60 * 72), proxima_leitura_em: em(120) }, AGORA), "Falha há 3 dias · a tentar de novo às 14:10");
+  assert.equal(textoFalha({ falha_desde: em(-60 * 72), proxima_leitura_em: em(-2) }, AGORA), "Falha há 3 dias · a tentar de novo em breve");
+});
+
+test("S11: nomes iguais distinguem-se pela morada curta (só a localidade se ficar comprido) ou por número", () => {
+  const n = nomesDistintos([
+    { _id: "a", nome: "Casa Azul", morada_curta: "Rua do Ouro 10, Lisboa" },
+    { _id: "b", nome: "casa azul ", morada_curta: "Rua das Flores 5, Porto" },
+    { _id: "c", nome: "Única" },
+    { _id: "d", nome: "Apartamento Vista Mar Cascais", morada_curta: "Avenida Marginal 1234, Cascais" },
+    { _id: "e", nome: "Apartamento Vista Mar Cascais", morada_curta: "Rua Curta 2, Estoril" },
+    { _id: "f", nome: "Sem Morada" }, { _id: "g", nome: "Sem Morada" },
+  ]);
+  assert.equal(n.get("a"), "Casa Azul (Rua do Ouro 10, Lisboa)");
+  assert.equal(n.get("b"), "casa azul (Rua das Flores 5, Porto)");
+  assert.equal(n.get("c"), "Única");
+  assert.equal(n.get("d"), "Apartamento Vista Mar Cascais (Cascais)");
+  assert.equal(n.get("f"), "Sem Morada (1)");
+  assert.equal(n.get("g"), "Sem Morada (2)");
+});
+
+test("S11: o seletor de casas mostra o canal ligado em forma curta e distingue nomes repetidos", () => {
   const c = (id, nome, o = {}) => ({ _id: id, nome, smoobu: false, airbnb: null, booking: null, outros: [], ...o });
   const r = rotulosDasCasas([
     c("1", "Baixa Pombalina", { airbnb: { canal_texto: "Airbnb" } }),
@@ -186,19 +211,15 @@ test("S11: o seletor de casas mostra o canal ligado e distingue nomes repetidos"
     c("4", "Graça", { airbnb: {}, booking: {} }),
     c("5", "Sé", { booking: {} }),
   ]);
-  assert.equal(r.get("1"), "Baixa Pombalina — Airbnb ligado");
+  assert.equal(r.get("1"), "Baixa Pombalina — Airbnb");
   assert.equal(r.get("2"), "Alfama — Smoobu");
   assert.equal(r.get("3"), "Chiado");
-  assert.equal(r.get("4"), "Graça — Airbnb e Booking.com ligados");
-  assert.equal(r.get("5"), "Sé — Booking.com ligado");
+  assert.equal(r.get("4"), "Graça — Airbnb + Booking");
+  assert.equal(r.get("5"), "Sé — Booking");
   const d = rotulosDasCasas([
     c("a", "Casa do Mar", { morada_curta: "Rua A, Lisboa", airbnb: {} }),
-    c("b", "casa do mar ", { morada_curta: "Rua B, Porto" }),
-    c("c", "Casa do Mar"),
-    c("d", "Casa do Mar"),
+    c("b", "Casa do Mar", { morada_curta: "Rua B, Porto", booking: {} }),
   ]);
-  assert.equal(d.get("a"), "Casa do Mar (Rua A, Lisboa) — Airbnb ligado");
-  assert.equal(d.get("b"), "casa do mar (Rua B, Porto)");
-  assert.equal(d.get("c"), "Casa do Mar (1)");
-  assert.equal(d.get("d"), "Casa do Mar (2)");
+  assert.equal(d.get("a"), "Casa do Mar (Rua A, Lisboa) — Airbnb");
+  assert.equal(d.get("b"), "Casa do Mar (Rua B, Porto) — Booking");
 });

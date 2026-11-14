@@ -7,11 +7,10 @@
 export interface PeriodoExterno { check_in: string; check_out: string; noites: number; motivo?: string | null; canal_texto?: string }
 
 /** Filtro rápido por data de chegada. «todas» é o valor por defeito: nada fica escondido sem o gestor escolher. */
-export type FiltroChegada = "todas" | "semana" | "7dias";
+export type FiltroChegada = "todas" | "7dias";
 
 export const OPCOES_CHEGADA: { valor: FiltroChegada; texto: string; dica: string }[] = [
   { valor: "todas", texto: "Todas", dica: "Todos os períodos por confirmar" },
-  { valor: "semana", texto: "Esta semana", dica: "Chegadas até domingo (e períodos já em curso)" },
   { valor: "7dias", texto: "Próximos 7 dias", dica: "Chegadas nos próximos 7 dias (e períodos já em curso)" },
 ];
 
@@ -27,15 +26,13 @@ export function somarDiasISO(iso: string, dias: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** Último dia a incluir no filtro (aaaa-mm-dd), ou null para «todas». A semana acaba no domingo; no domingo é só hoje. */
+/** Último dia a incluir no filtro (aaaa-mm-dd), ou null para «todas». */
 export function ultimoDiaDoFiltro(f: FiltroChegada, hoje: string): string | null {
-  if (f === "7dias") return somarDiasISO(hoje, 7);
-  if (f === "semana") {
-    const diaSemana = new Date(`${hoje}T00:00:00Z`).getUTCDay(); // 0 = domingo
-    return somarDiasISO(hoje, diaSemana === 0 ? 0 : 7 - diaSemana);
-  }
-  return null;
+  return f === "7dias" ? somarDiasISO(hoje, 7) : null;
 }
+
+/** O período já começou (chegou antes de hoje) e ainda não acabou: a lista traz-lo mesmo com o filtro por chegada. */
+export const emCurso = (x: Pick<PeriodoExterno, "check_in" | "check_out">, hoje: string): boolean => x.check_in < hoje && x.check_out >= hoje;
 
 /** Aplica o filtro no ecrã (o gestor filtra no servidor; o proprietário tem listas curtas e filtra aqui). */
 export function passaFiltroChegada(x: Pick<PeriodoExterno, "check_in">, f: FiltroChegada, hoje: string): boolean {
@@ -57,14 +54,22 @@ export const periodoComAno = (x: Pick<PeriodoExterno, "check_in" | "check_out">)
 /** Frase junto de «Escolher todos» quando há períodos longos que ficam de fora; null se não há. */
 export function textoLongosDeFora(n: number): string | null {
   if (n <= 0) return null;
-  return n === 1 ? "1 de mais de 30 noites fica de fora:" : `${n} de mais de 30 noites ficam de fora:`;
+  return `«Escolher todos» não inclui ${n === 1 ? "1 período" : `${n} períodos`} com mais de 30 noites.`;
+}
+
+/** «De: Casa A, Casa B» (até 3 casas) ou «De 5 casas». */
+export function textoDeCasas(casas: string[]): string {
+  const unicas = [...new Set(casas)];
+  if (unicas.length === 0) return "";
+  return unicas.length <= 3 ? `De: ${unicas.join(", ")}` : `De ${unicas.length} casas`;
 }
 
 /** Texto do diálogo de confirmação de «Marcar como bloqueio» em lote. */
-export function textoConfirmarBloqueio(n: number): { titulo: string; descricao: string; confirmar: string } {
+export function textoConfirmarBloqueio(n: number, casas: string[] = []): { titulo: string; descricao: string; casas: string; confirmar: string } {
   return {
     titulo: n === 1 ? "Marcar 1 período como bloqueio?" : `Marcar ${n} períodos como bloqueio?`,
-    descricao: `${n === 1 ? "Fica ignorado" : "Ficam ignorados"}: não ${n === 1 ? "cria" : "criam"} limpezas e não voltamos a perguntar. Acontece já e não se desfaz aqui.`,
+    descricao: `${n === 1 ? "Fica ignorado" : "Ficam ignorados"}: não ${n === 1 ? "cria" : "criam"} limpezas e não voltamos a perguntar por ${n === 1 ? "ele" : "eles"}. Não dá para desfazer.`,
+    casas: textoDeCasas(casas),
     confirmar: n === 1 ? "Marcar como bloqueio" : `Marcar ${n} como bloqueio`,
   };
 }

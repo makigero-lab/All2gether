@@ -7,7 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { adminDelete, adminGet, adminPatch, adminPost, adminPut } from "@/lib/api";
 import { plural } from "@/lib/utils";
-import { textoFalha } from "@/components/gestor/integracoes/tipos";
+import { falhaLonga, textoFalha } from "@/components/gestor/integracoes/tipos";
 
 export interface CasaParaCalendario {
   _id: string;
@@ -105,7 +105,7 @@ function EstadoFonte({ f }: { f: FonteDTO }) {
         <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
         <span>
           {f.ultimo_erro?.mensagem ?? "Não foi possível ler o calendário."} As limpezas já marcadas continuam.
-          {textoFalha(f) && <span className="mt-0.5 block text-xs opacity-90" data-falha>{textoFalha(f)}</span>}
+          {textoFalha(f) && <span className={`mt-0.5 block text-xs opacity-90 ${falhaLonga(f) ? "font-semibold" : ""}`} data-falha>{textoFalha(f)}</span>}
         </span>
       </p>
     );
