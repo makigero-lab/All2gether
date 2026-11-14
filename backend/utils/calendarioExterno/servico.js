@@ -92,7 +92,7 @@ async function validarPedido({ propriedadeId, url, escopo, rotulo }) {
   if (rotulo !== undefined && rotulo !== null && typeof rotulo !== 'string') return { erro: resp(400, { erro: 'O nome do canal é inválido.' }) };
   const c = await casaDoEscopo(propriedadeId, escopo);
   if (c.erro) return c;
-  if (c.casa.smoobu_id) return { erro: resp(400, { erro: 'Esta casa já recebe as reservas pelo Smoobu. Só pode haver uma ligação automática por casa.', codigo: 'CASA_SMOOBU' }) };
+  if (c.casa.smoobu_id) return { erro: resp(400, { erro: 'Esta casa recebe as reservas do Smoobu; não pode ter também calendários Airbnb/Booking.', codigo: 'CASA_SMOOBU' }) };
   const est = await estadoDaCasa(c.casa);
   if (est.inativa) return { erro: resp(409, { erro: est.mensagem, codigo: 'CASA_INATIVA' }) };
   if (!(await acordoPermiteLigar(c.casa.parceiro_id))) return { erro: resp(409, { erro: MSG_POR_ACEITAR, codigo: 'ACORDO_POR_ACEITAR' }) };
@@ -111,9 +111,9 @@ async function corpoLinkUsado(outra, empresaId, codigo) {
     Propriedade.findById(outra.propriedade_id).select('nome').lean(),
     Utilizador.findById(outra.parceiro_id).select('nome').lean(),
   ]);
-  const onde = casa && casa.nome ? `a casa ${casa.nome}${dono && dono.nome ? `, de ${dono.nome}` : ''}` : 'outra casa';
+  const onde = casa && casa.nome ? `na casa ${casa.nome}${dono && dono.nome ? `, de ${dono.nome}` : ''}` : 'noutra casa';
   return {
-    erro: `Este link já está a ser usado em ${onde}. Confirma que copiaste o da casa certa.`, codigo,
+    erro: `Este link já está a ser usado ${onde}. Confirma que copiaste o da casa certa.`, codigo,
     ...(casa ? { casa: { nome: casa.nome }, proprietario: dono ? { nome: dono.nome } : null } : {}),
   };
 }

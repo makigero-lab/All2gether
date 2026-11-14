@@ -118,6 +118,8 @@ describe('link já usado (D7)', () => {
     expect(t.body.codigo).toBe('LINK_USADO');
     expect(t.body.erro).toContain(c.casa.nome);
     expect(t.body.erro).toContain('de Dono');
+    expect(t.body.erro).toContain(`usado na casa ${c.casa.nome}`);
+    expect(t.body.erro).not.toMatch(/\bem a\b/);
     const cr = await request(app).post('/api/gestor/calendarios').set(auth(c.tokG)).send({ propriedade_id: String(casa2._id), url });
     expect(cr.status).toBe(409);
     expect(cr.body.erro).toContain(c.casa.nome);
@@ -297,5 +299,20 @@ describe('acordo (M5, M6, L2)', () => {
     expect(new Date(depois.ultima_leitura_em).getTime()).toBeGreaterThan(antes ? new Date(antes).getTime() : 0);
     const g = (await request(app).get('/api/gestor/calendarios').set(auth(c.tokG))).body.fontes[0];
     expect(g.estado).toBe('ativa');
+  });
+});
+
+describe('por confirmar com a fonte em erro ou pausada (N3)', () => {
+  test('o proprietário continua a ver e a poder responder aos períodos por confirmar', async () => {
+    const c = await cen();
+    usar(BOOKING([{ uid: 'b1', ci: 10, co: 13 }]));
+    const cr = await request(app).post('/api/gestor/calendarios').set(auth(c.tokG)).send({ propriedade_id: String(c.casa._id), url: urlBooking() });
+    for (const estado of ['erro', 'pausada']) {
+      await FonteCalendario.updateOne({ _id: cr.body.fonte._id }, { estado, ultimo_erro: { em: new Date(), codigo: 'http_404_410' } });
+      const p = (await request(app).get('/api/parceiro/calendarios').set(auth(c.tokP))).body;
+      expect(p.fontes[0]).toMatchObject({ estado, n_por_confirmar: 1 });
+      const l = (await request(app).get('/api/parceiro/reservas-externas?estado=por_confirmar').set(auth(c.tokP))).body;
+      expect(l.reservas_externas).toHaveLength(1);
+    }
   });
 });
