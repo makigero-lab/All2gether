@@ -62,6 +62,8 @@ test("S4: o diálogo de «Marcar como bloqueio» diz quantos, de que casas e que
   assert.equal(t.confirmar, "Marcar 14 como bloqueio");
   assert.equal(textoConfirmarBloqueio(1, ["X"]).titulo, "Marcar 1 período como bloqueio?");
   assert.match(textoConfirmarBloqueio(1, ["X"]).descricao, /^Fica ignorado: não cria limpezas/);
-  assert.equal(textoDeCasas(["A", "B", "C", "D"]), "De 4 casas");
+  assert.equal(textoDeCasas(["A", "B", "C", "D"]), "De: A, B, C e mais 1");
+  assert.equal(textoDeCasas(["Casa A", "Casa B (Rua Augusta)", "Casa C", "Casa A", "D", "E"]), "De: Casa A, Casa B (Rua Augusta), Casa C e mais 2");
+  assert.equal(textoDeCasas(["A", "B", "C"]), "De: A, B, C");
   assert.equal(textoDeCasas([]), "");
 });

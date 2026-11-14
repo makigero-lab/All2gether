@@ -57,11 +57,12 @@ export function textoLongosDeFora(n: number): string | null {
   return `«Escolher todos» não inclui ${n === 1 ? "1 período" : `${n} períodos`} com mais de 30 noites.`;
 }
 
-/** «De: Casa A, Casa B» (até 3 casas) ou «De 5 casas». */
+/** «De: Casa A, Casa B» (até 3 nomes distintos) ou «De: Casa A, Casa B, Casa C e mais 1». */
 export function textoDeCasas(casas: string[]): string {
   const unicas = [...new Set(casas)];
   if (unicas.length === 0) return "";
-  return unicas.length <= 3 ? `De: ${unicas.join(", ")}` : `De ${unicas.length} casas`;
+  if (unicas.length <= 3) return `De: ${unicas.join(", ")}`;
+  return `De: ${unicas.slice(0, 3).join(", ")} e mais ${unicas.length - 3}`;
 }
 
 /** Texto do diálogo de confirmação de «Marcar como bloqueio» em lote. */
