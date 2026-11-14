@@ -384,7 +384,7 @@ export function CalendariosCasas({ apiBase, casas, gestor = false }: { apiBase: 
             <CardContent className="space-y-3 p-4">
               <h2 className="flex items-center gap-2 text-base font-semibold"><CalendarDays className="h-5 w-5 text-brand-text" /> {c.nome}</h2>
               {c.smoobu_id ? (
-                <p className="text-sm text-muted-foreground">Esta casa recebe as reservas pelo Smoobu: não precisa de calendários externos (só pode haver uma ligação automática por casa).</p>
+                <p className="text-sm text-muted-foreground">Esta casa recebe as reservas do Smoobu; não pode ter também calendários Airbnb/Booking.</p>
               ) : (
                 <>
                   {daCasa.map((f) => <CartaoFonte key={f._id} f={f} apiBase={apiBase} gestor={gestor} aoMudar={carregar} />)}
