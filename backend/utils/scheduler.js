@@ -1,7 +1,7 @@
 /**
  * Scheduler — All2gether
  *
- * Carrega a agenda de cada pessoa e delega as regras de horário (10:00-17:30,
+ * Carrega a agenda de cada pessoa e delega as regras de horário (10:00-18:00,
  * almoço, viagens) em `horario.js`. Usado por: loadBalancer, atribuicaoAutomatica,
  * Smoobu, reatribuição do gestor, ausências e script de reparação.
  *
@@ -138,8 +138,8 @@ function itemDeTarefa(t) {
 
 function motivoNaoCabe(tempo) {
   return H.duracaoCabeNoHorario(tempo)
-    ? 'Não cabe no horário (10:00-17:30, com almoço e viagens)'
-    : `Limpeza de ${tempo} min demasiado longa para o horário (10:00-17:30, com almoço)`;
+    ? 'Não cabe no horário (10:00-18:00, com almoço e viagens)'
+    : `Limpeza de ${tempo} min demasiado longa para o horário (10:00-18:00, com almoço)`;
 }
 
 /**

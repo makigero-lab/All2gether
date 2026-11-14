@@ -2,9 +2,9 @@
  * Horário de trabalho — All2gether (UM só sítio para as regras e o cálculo).
  *
  * Regras (hora de Lisboa, com hora de verão):
- *   - Dia de trabalho das 10:00 às 17:30: uma limpeza começa às 10:00 ou depois e TEM de
- *     acabar até às 17:30 (decisão de 14/11). O gestor pode, à mão, pôr limpezas noutro
- *     horário (nunca se bloqueia: só se avisa, ver `avisoForaDoHorario`).
+ *   - Dia de trabalho das 10:00 às 18:00 (decisão de 14/11: o início passou das 09:00 para as 10:00);
+ *     nenhuma limpeza começa a partir das 17:30 e pode acabar até às 18:00. O gestor pode, à mão,
+ *     pôr limpezas noutro horário (nunca se bloqueia: só se avisa, ver `avisoForaDoHorario`).
  *   - Almoço de 1 h depois da limpeza que acabar a partir das 12:00; começa
  *     entre as 12:00 e as 14:00 (nenhuma limpeza empurra o início para depois).
  *   - Domingo é um dia normal (só contam folgas e ausências).
@@ -15,7 +15,7 @@
  * `distancia.js` calcula as viagens (Google Maps com cache e fallback).
  *
  * Os instantes são Date UTC; as horas do dia são «minutos desde a meia-noite
- * de Lisboa». O «dia» de uma tarefa é o dia UTC de `data` (10:00-17:30 locais
+ * de Lisboa». O «dia» de uma tarefa é o dia UTC de `data` (10:00-18:00 locais
  * caem sempre no mesmo dia UTC).
  */
 
@@ -25,8 +25,8 @@ const MIN = (h, m = 0) => h * 60 + m;
 
 const HORARIO = Object.freeze({
   INICIO_DIA: MIN(10, 0), // nenhuma limpeza (automática) começa antes
-  FIM_DIA: MIN(17, 30), // fim do dia de trabalho: nenhuma limpeza começa se não acabar até aqui
-  FIM_MAXIMO_LIMPEZA: MIN(17, 30), // uma limpeza acaba, no máximo, às 17:30
+  FIM_DIA: MIN(17, 30), // nenhuma limpeza começa a partir daqui
+  FIM_MAXIMO_LIMPEZA: MIN(18, 0), // uma limpeza acaba, no máximo, às 18:00
   AGENDA_MINIMA: MIN(6, 0), // limpezas à mão antes disto são horas inválidas (ex.: 02:08): não contam na agenda
   ALMOCO_DURACAO: 60,
   ALMOCO_JANELA_INICIO: MIN(12, 0), // o almoço nunca começa antes
@@ -34,10 +34,10 @@ const HORARIO = Object.freeze({
   HORA_PADRAO_SEM_ATRIBUICAO: MIN(10, 0), // placeholder (hora de Lisboa) de tarefas ainda sem pessoa
 });
 
-/** Janela do dia (10:00-17:30) em minutos. */
+/** Janela do dia (10:00-18:00) em minutos. */
 const JANELA_DIA_MINUTOS = HORARIO.FIM_MAXIMO_LIMPEZA - HORARIO.INICIO_DIA;
 /**
- * Pré-filtro barato de carga (janela menos almoço = 390 min). A decisão real é
+ * Pré-filtro barato de carga (janela menos almoço = 420 min). A decisão real é
  * `cabeNoDia` (que conta início, fim, almoço e viagens); isto só serve para
  * perguntas simples como «esta duração alguma vez cabe?».
  */
@@ -128,7 +128,7 @@ function dentroDaJanela(ini, dur) {
 /** Uma limpeza desta duração cabe alguma vez num dia (com o almoço)? */
 function duracaoCabeNoHorario(dur) {
   const d = Number(dur) || 0;
-  // Antes do almoço: de 10:00 até ao fim máximo do início do almoço; depois: das 13:00 às 17:30.
+  // Antes do almoço: de 10:00 até ao fim máximo do início do almoço; depois: das 13:00 às 18:00.
   const antes = HORARIO.ALMOCO_INICIO_MAXIMO - HORARIO.INICIO_DIA;
   const depois = HORARIO.FIM_MAXIMO_LIMPEZA - (HORARIO.ALMOCO_JANELA_INICIO + HORARIO.ALMOCO_DURACAO);
   return d > 0 && d <= Math.max(antes, depois);

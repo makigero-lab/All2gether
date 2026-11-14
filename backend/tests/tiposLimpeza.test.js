@@ -388,11 +388,11 @@ describe('gestor configura tempo e checklist por tipo', () => {
 });
 
 describe('o tempo do tipo chega ao limite de 8h', () => {
-  it('duas profundas de 240 min no mesmo dia: a segunda já não cabe (lotação)', async () => {
+  it('duas profundas de 300 min no mesmo dia: a segunda já não cabe (lotação)', async () => {
     const parceiro = await Utilizador.findOne({ email: 'p@tipos.pt' });
     const mkCasa = (nome) => Propriedade.create({
       nome, empresa_id: empresa._id, ativo: true, capacidade_hospedes: 2, parceiro_id: parceiro._id,
-      tempo_limpeza_minutos: 60, tempos_limpeza_por_tipo: { profunda: 240 },
+      tempo_limpeza_minutos: 60, tempos_limpeza_por_tipo: { profunda: 300 },
     });
     const c1 = await mkCasa('Grande 1');
     const c2 = await mkCasa('Grande 2');
@@ -400,7 +400,7 @@ describe('o tempo do tipo chega ao limite de 8h', () => {
     const r2 = await reservar({ check_in: '2047-01-01', check_out: '2047-01-05', tipo_limpeza: 'profunda' }, c2);
     expect([r1.status, r2.status]).toEqual([201, 201]);
     expect(r1.body.tarefa.estado).toBe('atribuida');
-    expect(r1.body.tarefa.tempo_limpeza_minutos).toBe(240);
+    expect(r1.body.tarefa.tempo_limpeza_minutos).toBe(300);
     expect(r2.body.tarefa.estado).toBe('nao_atribuida');
   });
 });

@@ -74,7 +74,7 @@ test('só toca em futuras atribuidas: nunca em_curso, concluida, cancelada nem p
   }
 });
 
-test('a acabar depois das 17:30 também é corrigida; dentro do horário fica como está', async () => {
+test('a acabar depois das 18:00 também é corrigida; dentro do horário fica como está', async () => {
   const c = await cenario(app, { sn: 1, extra: 0 });
   const p = await casa(c);
   const boa = await tar(c, p, c.ana, '2036-03-10', '10:00:00');

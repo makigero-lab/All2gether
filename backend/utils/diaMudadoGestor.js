@@ -33,15 +33,4 @@ function registarDiaMudadoPeloGestor(tarefa, utilizador, diaAntes = undefined) {
   return true;
 }
 
-/**
- * A hora/dia desta limpeza foi posta à mão pelo gestor (e por isso a automação não lhe mexe)?
- * Sinais que existem hoje: «mudar dia/hora» (`data_ajustada_gestor`), dia posto numa data provisória
- * (`dia_mudado_pelo_gestor`) e limpeza criada à mão (`origem: 'manual'`). Atribuir pessoa a uma limpeza que já
- * tinha hora NÃO deixa marca (a hora fica, mas não se sabe se era a do motor).
- */
-function eMarcadaPeloGestor(t) {
-  if (!t) return false;
-  return !!(t.data_ajustada_gestor || (t.dia_mudado_pelo_gestor && t.dia_mudado_pelo_gestor.dia) || t.origem === 'manual');
-}
-
-module.exports = { registarDiaMudadoPeloGestor, diaDe, eMarcadaPeloGestor };
+module.exports = { registarDiaMudadoPeloGestor, diaDe };

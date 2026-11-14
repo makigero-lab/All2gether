@@ -206,7 +206,7 @@ Tarefa (consulta/agendamento).
 Um só sítio para as regras e para o cálculo; `planearAtribuicao`, Smoobu (criação e mudança de data), reatribuição do gestor, atribuição manual, preenchimento de vagas, ausências, cão de guarda e o script `scripts/reagendar-horarios.js` usam o mesmo.
 
 **Regras** (constantes em `HORARIO`, fuso `Europe/Lisbon` com hora de verão):
-- dia de trabalho 10:00-17:30 (decisão de 14/11); nenhuma limpeza (automática) começa antes das 10:00 e TEM de acabar até às 17:30; o gestor pode pôr limpezas noutro horário à mão (só avisa; nunca bloqueia);
+- dia de trabalho 10:00-17:30 (decisão de 14/11: o início passou das 09:00 às 10:00); nenhuma limpeza (automática) começa antes das 10:00 nem a partir das 17:30; uma limpeza acaba às 18:00 no máximo; o gestor pode pôr limpezas noutro horário à mão (só avisa; nunca bloqueia);
 - almoço de 1 h depois da primeira limpeza que acabe a partir das 12:00 (acabou às 12:00, almoça logo); o **início** do almoço é, no máximo, às 14:00 (a limpeza antes do almoço pode acabar às 14:00 e o almoço às 15:00); nenhuma limpeza empurra o almoço para depois das 14:00. Só há almoço se alguma limpeza acabar a partir das 12:00;
 - domingo é um dia normal (só contam folgas e ausências);
 - as viagens contam na agenda; a capacidade passa a ser a janela do dia (início, fim, almoço e viagens), já não os 480 min fixos. `CAPACIDADE_MAXIMA_MINUTOS` (480 = janela menos almoço) fica só como pré-filtro derivado; a decisão é `cabeNoDia`;
@@ -1042,7 +1042,7 @@ Lista os utilizadores com `role: 'parceiro'` da empresa do gestor.
 | Data       | Versão | Alteração                                                            |
 |------------|--------|---------------------------------------------------------------------|
 | 2026-11-06 | horário | Horário de trabalho 09:00-18:00 com almoço e viagens num só módulo (`utils/horario.js`), cálculo partilhado com Google Maps, tarefas nunca à meia-noite, script `reagendar-horarios.js`; validação de hóspedes e de datas (-2/+3 anos, 365 noites) nas reservas do parceiro; coluna «Tipo de limpeza» no Excel do parceiro; testes com `maxWorkers: 4` e arranque do mongod com 60 s. |
-| 2026-11-14 | horário | Novo horário 10:00-17:30 (a limpeza acaba até às 17:30; almoço 12:00-14:00 como antes), `scripts/simular-horario-10h.js`, filtro rápido Hoje/Amanhã nas tarefas do gestor. |
+| 2026-11-14 | horário | Início das limpezas às 10:00 (fim igual: começam até às 17:30, acabam até às 18:00; almoço igual), regenerar limpezas futuras (ver OPERACOES), filtro rápido Hoje/Amanhã nas tarefas do gestor. |
 | Inicial    | 1.0.0  | Criação da estrutura base: `package.json`, `server.js`, `.env.example`, `.gitignore`. Ligação ao MongoDB e rota de teste `GET /`. |
 | v1.1.0     | 1.1.0  | Lógica central: modelos `Propriedade`, `Utilizador`, `Ausencia`, `Tarefa`; fluxo estrito de atribuição com filtro de ausências + load balancing; resposta 200 imediata + processamento assíncrono; tratamento de erros robusto. |
 | v1.2.0     | 1.2.0  | Painel de Administração: modelo `Empresa` (nome, nif, plano_ativo); `controllers/adminController.js` (`getPropriedades`, `criarPropriedade`, `setupClienteZero`); `routes/adminRoutes.js` (`GET/POST /api/admin/propriedades`, `GET /api/admin/setup`); montagem em `server.js`. `empresa_id` via header `x-empresa-id` (sem JWT ainda). |

@@ -325,7 +325,7 @@ async function replanearSeNaoCabe(tarefa, propriedade, tempoNovo) {
   const membros = idsEquipa(tarefa);
   let cabe = true;
   for (const id of membros) {
-    // Janela do dia (10:00-17:30), almoço, viagens e sobreposições (horario.js).
+    // Janela do dia (10:00-18:00), almoço, viagens e sobreposições (horario.js).
     if (!(await cabeNaAgendaNaHora(id, tarefa.data, tempoNovo, tarefa._id, propriedade.coordenadas, propriedade._id))) {
       cabe = false;
       break;

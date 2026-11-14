@@ -23,8 +23,8 @@ const { idsEquipa, comMembro, normalizarEquipa } = require('./equipaTarefa');
 
 const MOTIVO_SEM_EQUIPA = 'Sem equipa ativa';
 const MOTIVO_INDISPONIVEL = 'Toda a equipa ausente, de folga ou fora da equipa exclusiva neste dia';
-const MOTIVO_LOTACAO = 'Não cabe no horário de ninguém (10:00-17:30, com almoço e viagens)';
-const MOTIVO_SEM_HORA_COMUM = 'Sem hora comum para a equipa (10:00-17:30, com almoço e viagens)';
+const MOTIVO_LOTACAO = 'Não cabe no horário de ninguém (10:00-18:00, com almoço e viagens)';
+const MOTIVO_SEM_HORA_COMUM = 'Sem hora comum para a equipa (10:00-18:00, com almoço e viagens)';
 // Limites para não multiplicar chamadas de viagem (pagas): candidatos extra e combinações testadas.
 const MAX_CANDIDATOS_EXTRA = 4;
 const MAX_COMBINACOES = 6;
@@ -203,7 +203,7 @@ async function temSobreposicao(utilizadorId, data, duracaoMin, excluirTarefaId =
 }
 
 /**
- * A limpeza, na hora em que está, cumpre o horário desta pessoa (janela 10:00-17:30,
+ * A limpeza, na hora em que está, cumpre o horário desta pessoa (janela 10:00-18:00,
  * sem sobreposição com viagens, almoço possível)? Usa a agenda real; a própria
  * tarefa fica de fora. Sem hora real (meia-noite) devolve true (ainda não agendada).
  * @returns {Promise<boolean>}

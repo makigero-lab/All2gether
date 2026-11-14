@@ -1106,7 +1106,7 @@ exports.atualizarEstadoTarefa = async (req, res) => {
  *   2. Valida o novo utilizador (staff/gestor ativo da empresa).
  *   3. Verifica folga fixa semanal do novo utilizador nesse dia.
  *   4. (Removido) A atribuição à mão já não é bloqueada pela capacidade:
- *      se a limpeza não couber no horário (10:00-17:30, almoço, viagens)
+ *      se a limpeza não couber no horário (10:00-18:00, almoço, viagens)
  *      a resposta traz um `warning` e a tarefa fica na hora atual.
  *   5. Carrega a propriedade para obter coordenadas.
  *   6. Temporariamente desatribui a tarefa (utilizador_id = null) para que

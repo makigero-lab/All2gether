@@ -1,6 +1,6 @@
 /**
  * Regras de horário (utils/horario.js), sem base de dados:
- * 10:00-17:30 (a limpeza acaba até às 17:30), almoço de 1 h (início entre 12:00 e 14:00),
+ * início às 10:00, começa até às 17:30 e acaba até às 18:00, almoço de 1 h (início entre 12:00 e 14:00),
  * viagens, hora de verão/inverno, equipas e durações que nunca cabem.
  */
 const H = require('../utils/horario');
@@ -14,12 +14,12 @@ describe('constantes num só sítio', () => {
   test('janela do dia, almoço e capacidade derivada', () => {
     expect(H.HORARIO.INICIO_DIA).toBe(m(10));
     expect(H.HORARIO.FIM_DIA).toBe(m(17, 30));
-    expect(H.HORARIO.FIM_MAXIMO_LIMPEZA).toBe(m(17, 30));
+    expect(H.HORARIO.FIM_MAXIMO_LIMPEZA).toBe(m(18));
     expect(H.HORARIO.ALMOCO_DURACAO).toBe(60);
     expect(H.HORARIO.ALMOCO_JANELA_INICIO).toBe(m(12));
     expect(H.HORARIO.ALMOCO_INICIO_MAXIMO).toBe(m(14));
-    expect(H.JANELA_DIA_MINUTOS).toBe(450);
-    expect(H.CAPACIDADE_MAXIMA_MINUTOS).toBe(390);
+    expect(H.JANELA_DIA_MINUTOS).toBe(480);
+    expect(H.CAPACIDADE_MAXIMA_MINUTOS).toBe(420);
     expect(H.HORARIO.HORA_PADRAO_SEM_ATRIBUICAO).toBe(m(10));
   });
 });
@@ -66,27 +66,28 @@ describe('almoço', () => {
   });
 });
 
-describe('janela 10:00-17:30 (a limpeza acaba até às 17:30)', () => {
+describe('janela: começa às 10:00 ou depois, até às 17:30, e acaba até às 18:00', () => {
   test('a primeira limpeza do dia começa às 10:00, nunca antes', () => {
     expect(H.primeiroInicio([], { duracao: 60 }, sem)).toBe(m(10));
   });
 
-  test('pode acabar exatamente às 17:30', () => {
+  test('pode acabar exatamente às 18:00', () => {
     const ag = [it(m(10), m(12)), it(m(13), m(14))]; // almoço 12:00-13:00
-    expect(H.primeiroInicio(ag, { duracao: 210 }, sem)).toBe(m(14));
-    expect(H.cabeNoDia(ag, { ini: m(14), fim: m(17, 30), nova: true }, sem)).toBe(true);
+    expect(H.primeiroInicio(ag, { duracao: 240 }, sem)).toBe(m(14));
+    expect(H.cabeNoDia(ag, { ini: m(14), fim: m(18), nova: true }, sem)).toBe(true);
   });
 
-  test('acabar às 17:31 não cabe', () => {
+  test('acabar às 18:01 não cabe', () => {
     const ag = [it(m(10), m(12)), it(m(13), m(14))];
-    expect(H.primeiroInicio(ag, { duracao: 211 }, sem)).toBeNull();
-    expect(H.dentroDaJanela(m(16), 91)).toBe(false);
-    expect(H.dentroDaJanela(m(16), 90)).toBe(true);
+    expect(H.primeiroInicio(ag, { duracao: 241 }, sem)).toBeNull();
+    expect(H.dentroDaJanela(m(16), 121)).toBe(false);
+    expect(H.dentroDaJanela(m(16), 120)).toBe(true);
   });
 
-  test('começar antes das 10:00 ou acabar depois das 17:30 não cabe (o automático)', () => {
-    expect(H.dentroDaJanela(m(17, 29), 30)).toBe(false);
-    expect(H.dentroDaJanela(m(17, 0), 30)).toBe(true);
+  test('começar antes das 10:00, a partir das 17:30 ou acabar depois das 18:00 não cabe (o automático)', () => {
+    expect(H.dentroDaJanela(m(17, 30), 10)).toBe(false);
+    expect(H.dentroDaJanela(m(17, 29), 30)).toBe(true);
+    expect(H.dentroDaJanela(m(17, 29), 32)).toBe(false);
     expect(H.dentroDaJanela(m(9, 59), 30)).toBe(false);
     expect(H.dentroDaJanela(m(10), 30)).toBe(true);
   });
@@ -97,10 +98,10 @@ describe('janela 10:00-17:30 (a limpeza acaba até às 17:30)', () => {
     expect(H.primeiroInicio([it(m(10), m(11))], { duracao: 480 }, sem)).toBeNull();
   });
 
-  test('uma limpeza de 270 min cabe (13:00-17:30, depois do almoço); 271 não', () => {
-    expect(H.duracaoCabeNoHorario(270)).toBe(true);
-    expect(H.duracaoCabeNoHorario(271)).toBe(false);
-    expect(H.primeiroInicio([], { duracao: 270 }, sem)).toBe(m(13));
+  test('uma limpeza de 300 min cabe (13:00-18:00, depois do almoço); 301 não', () => {
+    expect(H.duracaoCabeNoHorario(300)).toBe(true);
+    expect(H.duracaoCabeNoHorario(301)).toBe(false);
+    expect(H.primeiroInicio([], { duracao: 300 }, sem)).toBe(m(13));
   });
 
   test('uma limpeza de 240 min cabe às 10:00 e o almoço fica às 14:00', () => {
@@ -203,9 +204,10 @@ describe('«sem hora real» e hora errada', () => {
   test('aviso de fora do horário (atribuição à mão): não bloqueia, só avisa', () => {
     expect(H.avisoForaDoHorario(new Date('2031-01-15T07:12:00Z'), 60)).toMatch(/antes das 10:00/);
     expect(H.avisoForaDoHorario(new Date('2031-01-15T09:00:00Z'), 60)).toMatch(/antes das 10:00/); // 09:00 já é antes
-    expect(H.avisoForaDoHorario(new Date('2031-01-15T17:00:00Z'), 60)).toMatch(/depois das 17:30/); // acaba às 18:00
-    expect(H.avisoForaDoHorario(new Date('2031-01-15T19:00:00Z'), 60)).toMatch(/depois das 17:30/);
-    expect(H.avisoForaDoHorario(new Date('2031-01-15T16:30:00Z'), 60)).toBeNull(); // acaba às 17:30 certas
+    expect(H.avisoForaDoHorario(new Date('2031-01-15T17:15:00Z'), 60)).toBe('acaba depois das 18:00');
+    expect(H.avisoForaDoHorario(new Date('2031-01-15T17:30:00Z'), 10)).toBe('começa depois das 17:30');
+    expect(H.avisoForaDoHorario(new Date('2031-01-15T19:00:00Z'), 60)).toBe('começa depois das 17:30');
+    expect(H.avisoForaDoHorario(new Date('2031-01-15T17:00:00Z'), 60)).toBeNull(); // acaba às 18:00 certas
     expect(H.avisoForaDoHorario(new Date('2031-01-15T10:00:00Z'), 60)).toBeNull();
     expect(H.avisoForaDoHorario(new Date('2031-01-15T00:00:00Z'), 60)).toBeNull();
   });
