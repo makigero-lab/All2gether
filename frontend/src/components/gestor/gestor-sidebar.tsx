@@ -21,6 +21,7 @@ import {
   Handshake,
   UserRound,
   CalendarCheck,
+  Plug,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -28,6 +29,7 @@ import { Button } from "@/components/ui/button";
 import { fazerLogout, lerUtilizador, type Role } from "@/lib/auth";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { NotificationBell } from "@/components/notification-bell";
+import { adminGet } from "@/lib/api";
 
 interface NavItem {
   label: string;
@@ -66,6 +68,8 @@ const gestorNavItems: NavItem[] = [
   { label: "Equipa", href: "/gestor/equipa", icon: Users },
   { label: "Proprietários", href: "/gestor/parceiros", icon: Handshake },
   { label: "Reservas", href: "/gestor/reservas", icon: CalendarCheck },
+  // Integrações (calendários do Airbnb e da Booking.com): só o gestor liga; selo vermelho com o n.º de erros.
+  { label: "Integrações", href: "/gestor/integracoes", icon: Plug },
   { label: "Ausências / Férias", href: "/gestor/ausencias", icon: CalendarOff },
   { label: "Relatórios", href: "/gestor/relatorios", icon: BarChart3 },
   { label: "Notificações", href: "/gestor/notificacoes", icon: Bell },
@@ -128,8 +132,22 @@ function useUserRole(): Role | null {
   return role;
 }
 
+/** N.º de ligações com erro (selo vermelho de «Integrações»). Atualiza ao mudar de página e quando a área avisa. */
+function useErrosIntegracoes(pathname: string): number {
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    let vivo = true;
+    const ler = () => { adminGet<{ erros: number }>("/api/gestor/integracoes/contagem").then((r) => vivo && setN(r.erros || 0)).catch(() => undefined); };
+    ler();
+    window.addEventListener("integracoes-mudou", ler);
+    return () => { vivo = false; window.removeEventListener("integracoes-mudou", ler); };
+  }, [pathname]);
+  return n;
+}
+
 export function GestorSidebar() {
   const pathname = usePathname();
+  const errosIntegracoes = useErrosIntegracoes(pathname);
   const [open, setOpen] = useState(false);
   const roleLabel = useRoleLabel();
   const userRole = useUserRole();
@@ -170,6 +188,9 @@ export function GestorSidebar() {
           >
             <Icon className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
             {item.label}
+            {item.href === "/gestor/integracoes" && errosIntegracoes > 0 && (
+              <span className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-destructive px-1.5 text-xs font-semibold text-destructive-foreground" aria-label={`${errosIntegracoes} com erro`}>{errosIntegracoes}</span>
+            )}
           </Link>
         );
       })}

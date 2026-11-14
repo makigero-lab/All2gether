@@ -46,7 +46,7 @@ const coleccoesCobertas = () => [...new Set([...modelosDaEmpresa(), ...modelosPo
 /* Exportação                                                          */
 /* ------------------------------------------------------------------ */
 
-const CHAVES_SECRETAS = /^(password(_hash)?|push_?subscription|api[_-]?key|token|access_token|refresh_token|secret|authorization)$/i;
+const CHAVES_SECRETAS = /^(password(_hash)?|push_?subscription|api[_-]?key(_hmac)?|api[_-]?secret|token|access_token|refresh_token|secret|authorization)$/i;
 
 /** Remove (em profundidade) palavras-passe, tokens e chaves. */
 function limparSegredos(v) {
@@ -70,7 +70,7 @@ async function exportarEmpresa(empresaId, escrever) {
 
   await escrever(
     `{"formato":"all2gether-exportacao-empresa","versao":1,"gerado_em":${JSON.stringify(new Date().toISOString())},` +
-    `"nota":${JSON.stringify('Todos os dados da empresa. Palavras-passe, tokens e chaves de integração não estão incluídos.')},` +
+    `"nota":${JSON.stringify('Todos os dados da empresa. Palavras-passe, tokens e chaves, segredos e HMAC de integração não estão incluídos.')},` +
     `"empresa":${JSON.stringify(limparSegredos(empresa))},"colecoes":{`
   );
   let primeira = true;

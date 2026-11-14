@@ -15,12 +15,13 @@ const Empresa = require('../../models/Empresa');
 const H = require('../horario');
 const { obterLock, libertarLock, renovarLock } = require('../lockEmpresa');
 const { estadoDaCasa } = require('../casaAtiva');
+const { acordoPermiteLigar } = require('../acordoRgpd');
 const { chavesConfiguradas, decifrar, hmac, semUrl } = require('./cifra');
 const { buscarFeed, ErroFeed, pedir } = require('./buscar');
 const { analisarIcal, hashNormalizado, amostraRedigida } = require('./parser');
 const { reconciliar } = require('./reconciliar');
 const { enviarAvisosDaLeitura, avisarParceiro, avisarGestor } = require('./avisos');
-const { mensagemErro } = require('./mensagens');
+const { mensagemErro, canalTexto } = require('./mensagens');
 const { removerFonte } = require('./decisoes');
 const Rv = require('./reservas');
 
@@ -36,6 +37,12 @@ function configDoAmbiente(env = process.env) {
     limiteFontesCasa: n(env.ICAL_MAX_FONTES_CASA, 3, 1, 10),
     limiteFontesParceiro: n(env.ICAL_MAX_FONTES_PARCEIRO, 60, 1, 1000),
     limiteFontesEmpresa: n(env.ICAL_MAX_FONTES_EMPRESA, 500, 1, 10000),
+    // Calendário VAZIO: só cancela depois de tantas horas seguidas vazio (em vez das horasMinimasFalta normais).
+    horasFeedVazio: Number.isFinite(Number(env.ICAL_HORAS_FEED_VAZIO)) && env.ICAL_HORAS_FEED_VAZIO !== undefined && env.ICAL_HORAS_FEED_VAZIO !== '' ? Math.max(0, Number(env.ICAL_HORAS_FEED_VAZIO)) : 24,
+    // Reservas novas por leitura: acima disto a leitura é anómala e não cria nada até o gestor aceitar.
+    maxNovosPorLeitura: n(env.ICAL_MAX_NOVOS_LEITURA, 60, 5, 1000),
+    // Teto de bytes do registo de leituras por fonte.
+    tetoBytesLeituras: n(env.ICAL_TETO_BYTES_LEITURAS, 512 * 1024, 16 * 1024, 20 * 1024 * 1024),
   };
 }
 
@@ -75,11 +82,12 @@ async function elegibilidade(fonte) {
   if (!empresa || empresa.ativa === false || empresa.eliminacao_agendada_para) return { ok: false, estado: 'pausada', motivo: 'empresa_inativa', propriedade: p };
   const est = await estadoDaCasa(p);
   if (est.inativa) return { ok: false, estado: 'pausada', motivo: est.motivo === 'proprietario' ? 'parceiro_inativo' : 'casa_inativa', propriedade: p };
+  if (!(await acordoPermiteLigar(p.parceiro_id))) return { ok: false, estado: 'pausada', motivo: 'acordo_por_aceitar', propriedade: p };
   return { ok: true, propriedade: p };
 }
 
 /** Regra de sanidade: devolve a lista de motivos de suspeita (vazia = leitura normal). */
-async function motivosDeSuspeita({ fonte, eventos, prodid, hoje }) {
+async function motivosDeSuspeita({ fonte, eventos, prodid, hoje, cfg = configDoAmbiente() }) {
   const motivos = [];
   const R = fonte.referencia_futuros || 0;
   const F = eventos.length;
@@ -92,6 +100,11 @@ async function motivosDeSuspeita({ fonte, eventos, prodid, hoje }) {
   // Só conta o desaparecimento SÚBITO (as que já vinham a faltar foram aceites ou já estão em contagem).
   const faltariam = externas.filter((x) => !uids.has(x.uid) && !(x.leituras_em_falta > 0)).length;
   if (externas.length && faltariam > Math.max(3, Math.ceil(0.4 * externas.length))) motivos.push('muitas_ausencias');
+  // Reservas novas a mais de uma só vez (feed hostil ou com erro): não cria 200 limpezas de uma vez.
+  if (eventos.length > cfg.maxNovosPorLeitura) {
+    const conhecidos = new Set((await ReservaExterna.find({ propriedade_id: fonte.propriedade_id, canal_chave: fonte.canal_chave, uid: { $in: eventos.map((e) => e.uid) } }).select('uid').lean()).map((x) => x.uid));
+    if (eventos.filter((e) => !conhecidos.has(e.uid)).length > cfg.maxNovosPorLeitura) motivos.push('muitos_novos');
+  }
   const p = String(prodid || '');
   if (fonte.canal === 'airbnb' && !/airbnb/i.test(p)) motivos.push('prodid_diferente');
   else if (fonte.canal === 'booking' && !/booking\.com/i.test(p)) motivos.push('prodid_diferente');
@@ -110,7 +123,7 @@ async function motivosDeSuspeita({ fonte, eventos, prodid, hoje }) {
  * Regista a leitura de forma MÍNIMA. Leituras iguais seguidas fundem-se numa só (`repetidas`); os UID e a amostra
  * só ficam quando o calendário muda ou há erro de formato/anomalia; amostras só nas 3 mais recentes; teto por fonte.
  */
-async function registarLeitura({ fonte, origem, iniciada, duracao, resultado, http_status, n_eventos, n_futuros, hash, prodid, erro, motivoSuspeita, eventos, amostra }) {
+async function registarLeitura({ tetoBytes = 512 * 1024, fonte, origem, iniciada, duracao, resultado, http_status, n_eventos, n_futuros, hash, prodid, erro, motivoSuspeita, eventos, amostra }) {
   const base = { empresa_id: fonte.empresa_id, propriedade_id: fonte.propriedade_id, fonte_id: fonte._id };
   const ultima = await LeituraCalendario.findOne({ fonte_id: fonte._id }).sort({ iniciada_em: -1 }).select('resultado erro.codigo http_status').lean();
   // Fusão: leituras «sem alterações» seguidas, ou o mesmo erro repetido, ficam num só documento.
@@ -134,16 +147,24 @@ async function registarLeitura({ fonte, origem, iniciada, duracao, resultado, ht
     if (eventos.length > MAX_EVENTOS_REGISTO) doc.eventos_truncados = true;
     if (amostra) doc.amostra_redigida = amostra;
   }
+  doc.bytes = Buffer.byteLength(JSON.stringify(doc));
   await LeituraCalendario.create(doc);
   // Só as 3 amostras mais recentes
   const comAmostra = await LeituraCalendario.find({ fonte_id: fonte._id, amostra_redigida: { $exists: true } }).sort({ iniciada_em: -1 }).skip(3).select('_id').lean();
   if (comAmostra.length) await LeituraCalendario.updateMany({ _id: { $in: comAmostra.map((x) => x._id) } }, { $unset: { amostra_redigida: 1 } });
-  // Teto de documentos por fonte
-  const total = await LeituraCalendario.countDocuments({ fonte_id: fonte._id });
-  if (total > LeituraCalendario.TETO_POR_FONTE) {
-    const excesso = await LeituraCalendario.find({ fonte_id: fonte._id }).sort({ iniciada_em: 1 }).limit(total - LeituraCalendario.TETO_POR_FONTE).select('_id').lean();
-    await LeituraCalendario.deleteMany({ _id: { $in: excesso.map((x) => x._id) } });
-  }
+  await aplicarTetos(fonte._id, tetoBytes);
+}
+
+/** Tetos por fonte: no máximo TETO_POR_FONTE documentos E `tetoBytes` bytes. Apaga as leituras mais antigas; guarda sempre a mais recente. */
+async function aplicarTetos(fonteId, tetoBytes) {
+  const todas = await LeituraCalendario.find({ fonte_id: fonteId }).sort({ iniciada_em: -1 }).select('_id bytes').lean();
+  let soma = 0;
+  const apagar = [];
+  todas.forEach((l, i) => {
+    soma += l.bytes || 1500; // documentos antigos sem tamanho: estimativa
+    if (i > 0 && (i >= LeituraCalendario.TETO_POR_FONTE || soma > tetoBytes)) apagar.push(l._id);
+  });
+  if (apagar.length) await LeituraCalendario.deleteMany({ _id: { $in: apagar } });
 }
 
 /** Trata um erro de leitura: conta, agenda a próxima tentativa, avisa ao fim de 24 h e suspende ao fim de 14 dias. Nunca mexe em reservas. */
@@ -152,7 +173,7 @@ async function tratarErro({ fonte, err, agora, origem, iniciada, cfg }) {
   const erros = (fonte.erros_consecutivos || 0) + 1;
   const set = {
     ultima_leitura_em: agora, erros_consecutivos: erros,
-    ultimo_erro: { em: agora, codigo, http_status: err.http_status, mensagem: semUrl(mensagemErro(codigo)).slice(0, 300) },
+    ultimo_erro: { em: agora, codigo, http_status: err.http_status, mensagem: semUrl(mensagemErro(codigo, { canal: canalTexto(fonte.canal, fonte.rotulo) })).slice(0, 300) },
   };
   if (erros >= 3 && fonte.estado === 'ativa') set.estado = 'erro';
   fonte.erros_consecutivos = erros;
@@ -165,11 +186,11 @@ async function tratarErro({ fonte, err, agora, origem, iniciada, cfg }) {
   if (horas >= 24 && !fonte.aviso_falha_enviado_em) {
     await FonteCalendario.updateOne({ _id: fonte._id }, { $set: { aviso_falha_enviado_em: agora } });
     const p = await Propriedade.findById(fonte.propriedade_id).select('nome').lean();
-    const txt = `O calendário ${fonte.rotulo || Rv.plataformaDe(fonte.canal)} de ${(p && p.nome) || 'uma casa'} não responde há mais de 24 horas. ${mensagemErro(codigo)} As limpezas já marcadas continuam.`;
+    const txt = `O calendário ${fonte.rotulo || Rv.plataformaDe(fonte.canal)} de ${(p && p.nome) || 'uma casa'} não responde há mais de 24 horas. ${mensagemErro(codigo, { canal: canalTexto(fonte.canal, fonte.rotulo) })} As limpezas já marcadas continuam.`;
     await avisarParceiro(fonte.parceiro_id, fonte.empresa_id, txt);
     await avisarGestor(fonte.empresa_id, 'Calendário externo com erro', txt);
   }
-  return { resultado: 'erro', codigo, mensagem: mensagemErro(codigo) };
+  return { resultado: 'erro', codigo, mensagem: mensagemErro(codigo, { canal: canalTexto(fonte.canal, fonte.rotulo) }) };
 }
 
 /**
@@ -192,7 +213,7 @@ async function sincronizarFonte(fonteId, { origem = 'agendada', transporte = ped
     }
     return { resultado: el.estado, motivo: el.motivo };
   }
-  if (fonte.estado === 'pausada' && ['casa_inativa', 'parceiro_inativo', 'empresa_inativa'].includes(fonte.motivo_estado)) {
+  if (fonte.estado === 'pausada' && ['casa_inativa', 'parceiro_inativo', 'empresa_inativa', 'acordo_por_aceitar'].includes(fonte.motivo_estado)) {
     // A causa passou: retoma sozinha (nada é recriado; só se volta a ler).
     fonte.estado = 'ativa'; fonte.motivo_estado = null; fonte.pausada_em = undefined; origem = 'retoma';
     await FonteCalendario.updateOne({ _id: fonte._id }, { $set: { estado: 'ativa', motivo_estado: null }, $unset: { pausada_em: 1 } });
@@ -223,20 +244,22 @@ async function sincronizarFonte(fonteId, { origem = 'agendada', transporte = ped
   if (!dono) return { resultado: 'ocupado' };
   try {
     const hoje = H.hojeLisboa(agora);
-    const fresca = await FonteCalendario.findById(fonte._id).select('referencia_futuros prodid_esperado uid_instavel aceitar_proxima suspeitas_consecutivas aviso_suspeita_enviado_em erros_consecutivos');
-    Object.assign(fonte, { referencia_futuros: fresca.referencia_futuros, prodid_esperado: fresca.prodid_esperado, uid_instavel: fresca.uid_instavel, aceitar_proxima: fresca.aceitar_proxima, suspeitas_consecutivas: fresca.suspeitas_consecutivas, aviso_suspeita_enviado_em: fresca.aviso_suspeita_enviado_em });
+    const fresca = await FonteCalendario.findById(fonte._id).select('referencia_futuros prodid_esperado uid_instavel aceitar_proxima suspeitas_consecutivas aviso_suspeita_enviado_em aviso_muitos_novos_em vazio_desde erros_consecutivos');
+    Object.assign(fonte, { referencia_futuros: fresca.referencia_futuros, prodid_esperado: fresca.prodid_esperado, uid_instavel: fresca.uid_instavel, aceitar_proxima: fresca.aceitar_proxima, suspeitas_consecutivas: fresca.suspeitas_consecutivas, aviso_suspeita_enviado_em: fresca.aviso_suspeita_enviado_em, aviso_muitos_novos_em: fresca.aviso_muitos_novos_em, vazio_desde: fresca.vazio_desde });
     const propriedade = el.propriedade;
     let motivos = [];
     let eventos = null; let hash = fonte.ultimo_hash_normalizado;
     if (!feed.notModified) {
       eventos = parsed.eventos;
       hash = hashNormalizado(eventos);
-      if (!fonte.aceitar_proxima) motivos = await motivosDeSuspeita({ fonte, eventos, prodid: parsed.prodid, hoje });
+      if (!fonte.aceitar_proxima) motivos = await motivosDeSuspeita({ fonte, eventos, prodid: parsed.prodid, hoje, cfg });
+      // Desde quando o calendário vem vazio (leituras seguidas): conta as 24 h antes de cancelar o que faltar.
+      if (eventos.length === 0) fonte.vazio_desde = fonte.vazio_desde || agora; else fonte.vazio_desde = undefined;
       if (motivos.includes('uids_todos_novos')) await FonteCalendario.updateOne({ _id: fonte._id }, { $set: { uid_instavel: true } });
     }
     const suspeita = motivos.length > 0;
     await renovarLock(chaveLock, dono);
-    const r = await reconciliar({ fonte, propriedade, eventos, suspeita, hoje, agora, cfg });
+    const r = await reconciliar({ fonte, propriedade, eventos, suspeita, hoje, agora, cfg, semNovos: motivos.includes('muitos_novos') });
     const mudou = !!eventos && hash !== fonte.ultimo_hash_normalizado;
     const resultado = suspeita ? 'suspeita' : (feed.notModified || (!mudou && !Object.values(r.alteracoes).some(Boolean))) ? 'sem_alteracoes' : 'ok';
 
@@ -254,14 +277,21 @@ async function sincronizarFonte(fonteId, { origem = 'agendada', transporte = ped
     if (fonte.estado === 'erro') set.estado = 'ativa';
     set.suspeitas_consecutivas = suspeita ? (fonte.suspeitas_consecutivas || 0) + 1 : 0;
     const unset = { ultimo_erro: 1, aviso_falha_enviado_em: 1 };
+    if (eventos) { if (fonte.vazio_desde) set.vazio_desde = fonte.vazio_desde; else unset.vazio_desde = 1; }
     delete set.ultimo_erro; delete set.aviso_falha_enviado_em;
     await FonteCalendario.updateOne({ _id: fonte._id }, { $set: set, $unset: unset });
     await registarLeitura({
       fonte, origem, iniciada, duracao: Date.now() - iniciada.getTime(), resultado, http_status: feed.status,
       n_eventos: eventos ? eventos.length : undefined, n_futuros: eventos ? eventos.length : undefined, hash, prodid: parsed && parsed.prodid,
-      motivoSuspeita: motivos, eventos: (mudou || suspeita) ? eventos : null, amostra: (mudou || suspeita) && parsed ? amostraRedigida(parsed.prodid, eventos) : null,
+      tetoBytes: cfg.tetoBytesLeituras, motivoSuspeita: motivos, eventos: (mudou || suspeita) ? eventos : null, amostra: (mudou || suspeita) && parsed ? amostraRedigida(parsed.prodid, eventos) : null,
     });
     await enviarAvisosDaLeitura({ fonte, avisos: r.avisos });
+    if (motivos.includes('muitos_novos') && !fonte.aviso_muitos_novos_em) {
+      await FonteCalendario.updateOne({ _id: fonte._id }, { $set: { aviso_muitos_novos_em: agora } });
+      await avisarGestor(fonte.empresa_id, 'Calendário externo com reservas a mais', `O calendário ${fonte.rotulo || Rv.plataformaDe(fonte.canal)} de ${propriedade.nome} trouxe mais de ${cfg.maxNovosPorLeitura} reservas novas de uma só vez. Não criámos nenhuma limpeza: confirma o calendário e, se estiver certo, aceita-o.`);
+    } else if (!motivos.includes('muitos_novos') && fonte.aviso_muitos_novos_em) {
+      await FonteCalendario.updateOne({ _id: fonte._id }, { $unset: { aviso_muitos_novos_em: 1 } });
+    }
     if (suspeita && set.suspeitas_consecutivas >= 6 && !fonte.aviso_suspeita_enviado_em) {
       await FonteCalendario.updateOne({ _id: fonte._id }, { $set: { aviso_suspeita_enviado_em: agora } });
       const txt = `O calendário ${fonte.rotulo || Rv.plataformaDe(fonte.canal)} de ${propriedade.nome} está vazio ou diferente do normal há várias horas. Nada foi cancelado.`;

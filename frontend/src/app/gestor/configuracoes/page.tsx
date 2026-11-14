@@ -79,6 +79,7 @@ export default function ConfiguracoesPage() {
   // Segredo HMAC da chave (o Smoobu exige pedidos assinados desde 31/10/2026).
   const [apiSecretInput, setApiSecretInput] = useState("");
   const [temSegredo, setTemSegredo] = useState(false);
+  const [mensagemIlegivel, setMensagemIlegivel] = useState<string | null>(null);
   const [ultimoResultado, setUltimoResultado] = useState<{ em: string; ok: boolean; mensagem: string } | null>(null);
   const [testando, setTestando] = useState(false);
 
@@ -111,6 +112,7 @@ export default function ConfiguracoesPage() {
         setApiKeyMascarada(data.smoobu_api_key_mascarada || "");
         setTemApiKey(data.tem_api_key || false);
         setTemSegredo(data.tem_segredo || false);
+        setMensagemIlegivel(data.ilegivel ? data.mensagem_ilegivel || "A chave do Smoobu está guardada mas não se consegue ler." : null);
         setUltimoResultado(data.ultimo_resultado || null);
         setSmoobuAtivo(data.smoobu_ativo || false);
       }
@@ -159,6 +161,7 @@ export default function ConfiguracoesPage() {
       setApiKeyMascarada(data.smoobu_api_key_mascarada || "");
       setTemApiKey(data.tem_api_key || false);
       setTemSegredo(data.tem_segredo || false);
+      setMensagemIlegivel(data.ilegivel ? data.mensagem_ilegivel || "A chave do Smoobu está guardada mas não se consegue ler." : null);
       setSmoobuAtivo(data.smoobu_ativo || false);
       setEditApiKey(false);
       setApiKeyInput("");
@@ -431,6 +434,9 @@ export default function ConfiguracoesPage() {
                     Testar ligação
                   </Button>
                 </div>
+                {mensagemIlegivel && (
+                  <p role="alert" className="text-xs text-destructive">{mensagemIlegivel}</p>
+                )}
                 {ultimoResultado && (
                   <p className={`text-xs ${ultimoResultado.ok ? "text-emerald-700 dark:text-emerald-400" : "text-destructive"}`}>
                     Última sincronização ({new Date(ultimoResultado.em).toLocaleString("pt-PT", { dateStyle: "short", timeStyle: "short" })}): {ultimoResultado.mensagem}

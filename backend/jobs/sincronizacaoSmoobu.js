@@ -69,7 +69,8 @@ async function executarSincronizacaoSmoobuInterno() {
     .select('_id nome rotinas integracoes.smoobu')
     .lean();
 
-  const { obterApiKeySmoobu } = require('../controllers/smoobuController');
+  const { obterApiKeySmoobu, guardarResultadoSincronizacao } = require('../controllers/smoobuController');
+  const { MSG_CREDENCIAIS_ILEGIVEIS } = require('../utils/segredoEmpresa');
   const empresas = [];
   for (const emp of candidatas) {
     const smoobu = emp.integracoes?.smoobu;
@@ -77,7 +78,14 @@ async function executarSincronizacaoSmoobuInterno() {
       console.log(`ℹ️  [Sincronização Smoobu] empresa ${emp._id} ("${emp.nome}"): integração desativada — saltada.`);
       continue;
     }
-    const { chave } = await obterApiKeySmoobu(emp._id);
+    const { chave, ilegivel } = await obterApiKeySmoobu(emp._id);
+    if (ilegivel) {
+      // Chave cifrada que o servidor não consegue ler (ICAL_* perdidas/erradas): regista o erro na empresa para o
+      // ecrã deixar de mostrar o último "sucesso".
+      console.error(`❌ [Sincronização Smoobu] empresa ${emp._id} ("${emp.nome}"): ${MSG_CREDENCIAIS_ILEGIVEIS}`);
+      await guardarResultadoSincronizacao(emp._id, false, MSG_CREDENCIAIS_ILEGIVEIS);
+      continue;
+    }
     if (!chave) {
       console.warn(
         `⚠️  [Sincronização Smoobu] empresa ${emp._id} ("${emp.nome}") tem a sincronização automática ligada mas NÃO há chave Smoobu (nem na BD nem em SMOOBU_API_KEY) — saltada.`
@@ -151,6 +159,11 @@ async function executarSincronizacaoSmoobuInterno() {
         `✅ [Sincronização Smoobu] empresa ${empresaId} ("${empresa.nome}") sincronizada: ${summary}.`
       );
       processadas++;
+      // Limpa um erro anterior no ecrã (senão ficaria para sempre depois de uma falha).
+      try {
+        const { guardarResultadoSincronizacao } = require('../controllers/smoobuController');
+        await guardarResultadoSincronizacao(empresaId, true, `Sincronização automática: ${summary}.`);
+      } catch { /* best-effort */ }
     } catch (err) {
       erros++;
       console.error(
@@ -158,6 +171,11 @@ async function executarSincronizacaoSmoobuInterno() {
         err.message
       );
       // Não atualiza ultima_sincronizacao — será tentada novamente no próximo tick.
+      // Mas o ecrã deve mostrar o erro, não o último "sucesso".
+      try {
+        const { guardarResultadoSincronizacao } = require('../controllers/smoobuController');
+        await guardarResultadoSincronizacao(empresaId, false, `Sincronização automática falhou: ${err.message}`);
+      } catch { /* best-effort */ }
     }
   }
 

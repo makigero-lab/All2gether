@@ -59,6 +59,7 @@ const {
 } = require('../utils/scheduler');
 const { minutosLocais, horaPadraoDoDia } = require('../utils/horario');
 const { avisarGestores } = require('../utils/notificar');
+const { MSG_CREDENCIAIS_ILEGIVEIS } = require('../utils/segredoEmpresa');
 const { inicioAutomaticoSemToque, avisarParceiro } = require('../utils/cicloTarefa');
 const { estadoDaCasa, casaInativa } = require('../utils/casaAtiva');
 
@@ -359,10 +360,17 @@ async function guardarContactoHospede(tarefa, contacto) {
  * @param {string} reservaId - ID da reserva no Smoobu.
  * @param {import('mongoose').Types.ObjectId} [empresaId] - para ler a chave da BD (HF6).
  * @returns {Promise<object|null>} { departure, arrival, pax, nome_hospede } ou null.
+ * @throws {Error} com code 'CREDENCIAIS_ILEGIVEIS' se a chave/segredo estão cifrados e o servidor não os decifra.
  */
 async function enriquecerReservaSmoobu(reservaId, empresaId) {
   const cred = await obterApiKeySmoobu(empresaId);
   const apiKey = cred.chave;
+  if (cred.ilegivel && reservaId) {
+    // Distingue "não consegui ler a chave" de "falhou a consulta": quem precisa da data de saída trata-o.
+    const e = new Error(MSG_CREDENCIAIS_ILEGIVEIS);
+    e.code = 'CREDENCIAIS_ILEGIVEIS';
+    throw e;
+  }
   if (!apiKey || !reservaId) {
     console.warn(
       '⚠️  [Smoobu] enriquecerReservaSmoobu: API key em falta ou reservaId vazio — fallback para dados do webhook.'
@@ -605,7 +613,11 @@ async function criarTarefaPorReserva(
   //     - consulta falhou: CRIA com alerta (uma limpeza a mais é melhor que uma em falta).
   let alertaCancelamentoPrevio = null;
   if (reservaId && (await existeCancelamentoAnterior(reservaId, empresaId, opcoes.logId))) {
-    const confirmado = await enriquecerReservaSmoobu(reservaId, empresaId);
+    // Chave ilegível = consulta impossível: cai no ramo "não foi possível confirmar" (cria com alerta).
+    const confirmado = await enriquecerReservaSmoobu(reservaId, empresaId).catch((e) => {
+      if (e && e.code === 'CREDENCIAIS_ILEGIVEIS') return null;
+      throw e;
+    });
     const consultaOk = Boolean(confirmado && (confirmado.arrival || confirmado.departure));
     if (consultaOk && (confirmado.cancelada || confirmado.bloqueada)) {
       const nota = `Ignorada: cancelamento recebido antes da reserva e confirmado no Smoobu (reserva ${reservaId}).`;
@@ -1463,7 +1475,27 @@ async function processarReservaSmoobu(payload, empresaId, empresaRestrita = null
     (!dataCheckOutRaw || !detalhesReserva.nome_hospede);
 
   if (precisaEnriquecimento) {
-    const enriched = await enriquecerReservaSmoobu(reservaId, empresaId);
+    let enriched = null;
+    try {
+      enriched = await enriquecerReservaSmoobu(reservaId, empresaId);
+    } catch (e) {
+      if (!e || e.code !== 'CREDENCIAIS_ILEGIVEIS') throw e;
+      if (!dataCheckOutRaw) {
+        // Sem departure e sem como a consultar: NÃO se cria a limpeza no dia de chegada (data errada, em silêncio).
+        // O webhook fica com erro visível (e reprocessável) e o gestor é avisado.
+        if (empresaId) {
+          await avisarGestores(
+            empresaId,
+            '⚠️ Reserva do Smoobu por processar',
+            `Chegou uma reserva sem data de saída e o servidor não consegue ler a chave do Smoobu para a consultar. ${MSG_CREDENCIAIS_ILEGIVEIS}`,
+            '/gestor/configuracoes',
+            { chave: `smoobu_credenciais_ilegiveis:${empresaId}` }
+          );
+        }
+        throw new Error(`Reserva ${reservaId} sem data de saída (departure) e sem forma de a consultar: ${MSG_CREDENCIAIS_ILEGIVEIS}`);
+      }
+      // Já tem departure: segue só com os dados do webhook (falta apenas completar o nome).
+    }
     if (enriched) {
       dataCheckOutFinal = enriched.departure || dataCheckOutRaw || null;
       detalhesFinal = {
@@ -1612,6 +1644,7 @@ const { obterCoordenadas } = require('../utils/geocoding');
  *   Devolve `origem` para logging/diagnóstico (de onde veio a chave).
  */
 async function obterApiKeySmoobu(empresaId) {
+  let chaveIlegivel = false;
   // 1. Tenta ler da empresa (se integracao ativa e chave preenchida).
   if (empresaId) {
     try {
@@ -1622,7 +1655,16 @@ async function obterApiKeySmoobu(empresaId) {
       const smoobu = empresa?.integracoes?.smoobu;
       if (smoobu?.ativo && smoobu.api_key && smoobu.api_key.trim()) {
         // Segredo HMAC (obrigatório no Smoobu desde 31/10/2026).
-        return { chave: smoobu.api_key.trim(), segredo: String(smoobu.api_secret || '').trim(), origem: 'empresa' };
+        const cred = require('../utils/segredoEmpresa').estadoCredenciaisSmoobu(smoobu, empresaId);
+        if (cred.chave) {
+          const r = { chave: cred.chave, segredo: cred.segredo, origem: 'empresa' };
+          // Segredo guardado cifrado e ilegível: a ligação falharia (401) sem explicação.
+          if (cred.ilegivel) r.ilegivel = true;
+          return r;
+        }
+        // Chave guardada cifrada e ilegível (chaves ICAL_* perdidas/erradas): sem env var de recurso,
+        // diz-se isso mesmo em vez de "falta a chave".
+        if (cred.chave_ilegivel) chaveIlegivel = true;
       }
     } catch {
       // Se falhar a leitura da empresa, continua para o fallback.
@@ -1633,7 +1675,7 @@ async function obterApiKeySmoobu(empresaId) {
   if (envKey && envKey.trim()) {
     return { chave: envKey.trim(), segredo: String(process.env.SMOOBU_API_SECRET || '').trim(), origem: 'env' };
   }
-  return { chave: null, segredo: '', origem: null };
+  return chaveIlegivel ? { chave: null, segredo: '', origem: null, ilegivel: true } : { chave: null, segredo: '', origem: null };
 }
 
 /**
@@ -1763,10 +1805,11 @@ async function getPropriedadesSmoobu(req, res) {
     const empresaId = req.user && req.user.empresa_id;
     const credSmoobu = await obterApiKeySmoobu(empresaId);
     const apiKey = credSmoobu.chave;
-    if (!apiKey) {
+    if (!apiKey || credSmoobu.ilegivel) {
       return res.status(400).json({
-        erro:
-          'API Key do Smoobu não configurada. Define-a em Configurações → Integrações, ou via env var SMOOBU_API_KEY.',
+        erro: credSmoobu.ilegivel
+          ? MSG_CREDENCIAIS_ILEGIVEIS
+          : 'API Key do Smoobu não configurada. Define-a em Configurações → Integrações, ou via env var SMOOBU_API_KEY.',
       });
     }
 
@@ -1819,10 +1862,11 @@ async function importarPropriedades(req, res) {
 
     const credSmoobu = await obterApiKeySmoobu(empresaId);
     const apiKey = credSmoobu.chave;
-    if (!apiKey) {
+    if (!apiKey || credSmoobu.ilegivel) {
       return res.status(400).json({
-        erro:
-          'API Key do Smoobu não configurada. Define-a em Configurações → Integrações, ou via env var SMOOBU_API_KEY.',
+        erro: credSmoobu.ilegivel
+          ? MSG_CREDENCIAIS_ILEGIVEIS
+          : 'API Key do Smoobu não configurada. Define-a em Configurações → Integrações, ou via env var SMOOBU_API_KEY.',
       });
     }
 
@@ -2092,10 +2136,11 @@ async function sincronizarReservas(req, res) {
 
     const credSmoobu = await obterApiKeySmoobu(empresaId);
     const apiKey = credSmoobu.chave;
-    if (!apiKey) {
+    if (!apiKey || credSmoobu.ilegivel) {
       return res.status(400).json({
-        erro:
-          'API Key do Smoobu não configurada. Define-a em Configurações → Integrações, ou via env var SMOOBU_API_KEY.',
+        erro: credSmoobu.ilegivel
+          ? MSG_CREDENCIAIS_ILEGIVEIS
+          : 'API Key do Smoobu não configurada. Define-a em Configurações → Integrações, ou via env var SMOOBU_API_KEY.',
       });
     }
 
@@ -2171,6 +2216,9 @@ async function sincronizarReservas(req, res) {
  */
 async function testarLigacaoSmoobu(empresaId) {
   const cred = await obterApiKeySmoobu(empresaId);
+  if (cred.ilegivel) {
+    return { ok: false, status: null, assinado: false, ilegivel: true, mensagem: MSG_CREDENCIAIS_ILEGIVEIS };
+  }
   if (!cred.chave) {
     return { ok: false, status: null, assinado: false, mensagem: 'Falta a chave do Smoobu em Configurações → Integrações.' };
   }
@@ -2727,4 +2775,5 @@ module.exports = {
   testarLigacaoSmoobu, // usado por Configurações → Integrações e antes de apagar as futuras
   extrairMoradaSmoobu, // exportado para testes
   obterApiKeySmoobu, // exportado para reutilização
+  guardarResultadoSincronizacao,
 };

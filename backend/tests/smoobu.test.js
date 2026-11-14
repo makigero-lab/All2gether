@@ -234,13 +234,13 @@ describe('Email e telefone do hóspede — só admin', () => {
     expect(Math.abs(new Date(c.expira_em).getTime() - esperado)).toBeLessThan(24 * 3600 * 1000);
   });
 
-  it('os logs de webhooks escondem email/telefone ao gestor e mostram ao admin', async () => {
+  it('os logs de webhooks processados já não guardam email/telefone (nem para o admin)', async () => {
     const gestor = await request(app).get('/api/gestor/webhooks?limit=200').set('Authorization', `Bearer ${tokens.gestor}`);
     expect(gestor.status).toBe(200);
     expect(JSON.stringify(gestor.body)).not.toContain('maria@exemplo.pt');
-    expect(JSON.stringify(gestor.body)).toContain('[oculto]');
     const admin = await request(app).get('/api/gestor/webhooks?limit=200').set('Authorization', `Bearer ${tokens.admin}`);
-    expect(JSON.stringify(admin.body)).toContain('maria@exemplo.pt');
+    expect(JSON.stringify(admin.body)).not.toContain('maria@exemplo.pt');
+    expect(JSON.stringify(admin.body)).not.toContain('+351910000000');
   });
 });
 

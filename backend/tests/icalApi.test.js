@@ -66,8 +66,8 @@ describe('API: acesso e o link nunca aparece', () => {
     const respostas = [];
     const guardar = (r) => { respostas.push(JSON.stringify(r.body)); return r; };
 
-    guardar(await request(app).post('/api/parceiro/calendarios/testar').set(auth(c.tokP)).send({ propriedade_id: String(c.casa._id), url }));
-    const cr = guardar(await request(app).post('/api/parceiro/calendarios').set(auth(c.tokP)).send({ propriedade_id: String(c.casa._id), url }));
+    guardar(await request(app).post('/api/gestor/calendarios/testar').set(auth(c.tokG)).send({ propriedade_id: String(c.casa._id), url }));
+    const cr = guardar(await request(app).post('/api/gestor/calendarios').set(auth(c.tokG)).send({ propriedade_id: String(c.casa._id), url }));
     expect(cr.status).toBe(201);
     expect(cr.body.fonte.url_mascara).toMatch(/airbnb\.pt\/calendar\/…/);
     expect(cr.body.fonte.url_mascara).not.toContain(segredo);
@@ -78,7 +78,7 @@ describe('API: acesso e o link nunca aparece', () => {
     guardar(await request(app).get('/api/gestor/calendarios').set(auth(c.tokG)));
     guardar(await request(app).get(`/api/gestor/calendarios/${id}/leituras`).set(auth(c.tokG)));
     guardar(await request(app).post(`/api/parceiro/calendarios/${id}/atualizar`).set(auth(c.tokP)));
-    guardar(await request(app).post('/api/parceiro/calendarios').set(auth(c.tokP)).send({ propriedade_id: String(c.casa._id), url })); // 409
+    guardar(await request(app).post('/api/gestor/calendarios').set(auth(c.tokG)).send({ propriedade_id: String(c.casa._id), url })); // 409
     guardar(await request(app).get('/api/parceiro/reservas').set(auth(c.tokP)));
     const todo = respostas.join('\n');
     expect(todo).not.toContain(segredo);
@@ -96,10 +96,10 @@ describe('API: acesso e o link nunca aparece', () => {
     for (const tok of [c.tokO]) {
       expect((await request(app).get('/api/parceiro/calendarios').set(auth(tok))).body.fontes).toHaveLength(0);
       expect((await request(app).post(`/api/parceiro/calendarios/${id}/atualizar`).set(auth(tok))).status).toBe(404);
-      expect((await request(app).delete(`/api/parceiro/calendarios/${id}`).set(auth(tok))).status).toBe(404);
-      expect((await request(app).put(`/api/parceiro/calendarios/${id}`).set(auth(tok)).send({ url: urlAirbnb() })).status).toBe(404);
+      expect((await request(app).delete(`/api/parceiro/calendarios/${id}`).set(auth(tok))).status).toBe(403);
+      expect((await request(app).put(`/api/parceiro/calendarios/${id}`).set(auth(tok)).send({ url: urlAirbnb() })).status).toBe(403);
       expect((await request(app).get(`/api/parceiro/calendarios/${id}/leituras`).set(auth(tok))).status).toBe(404);
-      expect((await request(app).post('/api/parceiro/calendarios').set(auth(tok)).send({ propriedade_id: String(c.casa._id), url: urlAirbnb() })).status).toBe(404);
+      expect((await request(app).post('/api/parceiro/calendarios').set(auth(tok)).send({ propriedade_id: String(c.casa._id), url: urlAirbnb() })).status).toBe(403);
     }
     expect((await request(app).get('/api/gestor/calendarios').set(auth(outra.tokG))).body.fontes).toHaveLength(0);
     expect((await request(app).delete(`/api/gestor/calendarios/${id}`).set(auth(outra.tokG))).status).toBe(404);
@@ -111,19 +111,19 @@ describe('API: acesso e o link nunca aparece', () => {
     expect((await request(app).get('/api/gestor/calendarios').set(auth(c.tokP))).status).toBe(403);
     expect((await request(app).get('/api/parceiro/calendarios')).status).toBe(401);
     // validação de tipos
-    expect((await request(app).post('/api/parceiro/calendarios').set(auth(c.tokP)).send({ propriedade_id: String(c.casa._id), url: { href: url } })).status).toBe(400);
-    expect((await request(app).post('/api/parceiro/calendarios').set(auth(c.tokP)).send({ propriedade_id: 'xx', url })).status).toBe(400);
-    expect((await request(app).post('/api/parceiro/calendarios').set(auth(c.tokP)).send({ propriedade_id: String(c.casa._id), url: 'http://www.airbnb.pt/calendar/ical/1.ics' })).status).toBe(400);
+    expect((await request(app).post('/api/gestor/calendarios').set(auth(c.tokG)).send({ propriedade_id: String(c.casa._id), url: { href: url } })).status).toBe(400);
+    expect((await request(app).post('/api/gestor/calendarios').set(auth(c.tokG)).send({ propriedade_id: 'xx', url })).status).toBe(400);
+    expect((await request(app).post('/api/gestor/calendarios').set(auth(c.tokG)).send({ propriedade_id: String(c.casa._id), url: 'http://www.airbnb.pt/calendar/ical/1.ics' })).status).toBe(400);
     // casa de outro proprietário
-    expect((await request(app).post('/api/parceiro/calendarios').set(auth(c.tokP)).send({ propriedade_id: String(c.alheia._id), url: urlAirbnb() })).status).toBe(404);
+    expect((await request(app).post('/api/gestor/calendarios').set(auth(outra.tokG)).send({ propriedade_id: String(c.alheia._id), url: urlAirbnb() })).status).toBe(404);
   });
 
   test('sem as chaves configuradas: 503, a funcionalidade fica desligada e o job não corre', async () => {
     const c = await cen();
     delete process.env.ICAL_CHAVES;
-    const r = await request(app).post('/api/parceiro/calendarios').set(auth(c.tokP)).send({ propriedade_id: String(c.casa._id), url: urlAirbnb() });
+    const r = await request(app).post('/api/gestor/calendarios').set(auth(c.tokG)).send({ propriedade_id: String(c.casa._id), url: urlAirbnb() });
     expect(r.status).toBe(503);
-    expect((await request(app).post('/api/parceiro/calendarios/testar').set(auth(c.tokP)).send({ propriedade_id: String(c.casa._id), url: urlAirbnb() })).status).toBe(503);
+    expect((await request(app).post('/api/gestor/calendarios/testar').set(auth(c.tokG)).send({ propriedade_id: String(c.casa._id), url: urlAirbnb() })).status).toBe(503);
     expect((await job.executarTique()).ligado).toBe(false);
     const lst = await request(app).get('/api/parceiro/calendarios').set(auth(c.tokP));
     expect(lst.body.ligado).toBe(false);
@@ -178,7 +178,7 @@ describe('API: acesso e o link nunca aparece', () => {
     const c = await cen();
     usar(AIRBNB([{ uid: 'a1', ci: 20, co: 23 }, { uid: 'n', ci: 30, co: 33, summary: 'Airbnb (Not available)' }]));
     const url = urlAirbnb();
-    const t = await request(app).post('/api/parceiro/calendarios/testar').set(auth(c.tokP)).send({ propriedade_id: String(c.casa._id), url });
+    const t = await request(app).post('/api/gestor/calendarios/testar').set(auth(c.tokG)).send({ propriedade_id: String(c.casa._id), url });
     expect(t.status).toBe(200);
     expect(t.body).toMatchObject({ ok: true, canal: 'airbnb', reservas: 1, bloqueios: 1, prodid_ok: true });
     expect(t.body.amostra).toHaveLength(2);
@@ -186,12 +186,16 @@ describe('API: acesso e o link nunca aparece', () => {
     expect(await ReservaManual.countDocuments({ empresa_id: c.e._id })).toBe(0);
     // erro do canal em linguagem simples
     usar({ 'www.airbnb.pt': { status: 404, corpo: '' } });
-    const e = await request(app).post('/api/parceiro/calendarios/testar').set(auth(c.tokP)).send({ propriedade_id: String(c.casa._id), url: urlAirbnb() });
+    const e = await request(app).post('/api/gestor/calendarios/testar').set(auth(c.tokG)).send({ propriedade_id: String(c.casa._id), url: urlAirbnb() });
     expect(e.body.ok).toBe(false);
     expect(e.body.erro).toMatch(/deixou de funcionar/);
-    // 10 por hora (já gastámos 2)
-    for (let i = 0; i < 8; i++) expect((await request(app).post('/api/parceiro/calendarios/testar').set(auth(c.tokP)).send({ propriedade_id: String(c.casa._id), url: urlAirbnb() })).status).toBe(200);
-    expect((await request(app).post('/api/parceiro/calendarios/testar').set(auth(c.tokP)).send({ propriedade_id: String(c.casa._id), url: urlAirbnb() })).status).toBe(429);
+    // limite por hora configurável (ICAL_TESTES_POR_HORA; por omissão 60): com 5, já gastámos 2
+    process.env.ICAL_TESTES_POR_HORA = '5';
+    for (let i = 0; i < 3; i++) expect((await request(app).post('/api/gestor/calendarios/testar').set(auth(c.tokG)).send({ propriedade_id: String(c.casa._id), url: urlAirbnb() })).status).toBe(200);
+    const sexto = await request(app).post('/api/gestor/calendarios/testar').set(auth(c.tokG)).send({ propriedade_id: String(c.casa._id), url: urlAirbnb() });
+    delete process.env.ICAL_TESTES_POR_HORA;
+    expect(sexto.status).toBe(429);
+    expect(sexto.body.erro).toMatch(/às \d{2}:\d{2}/);
   });
 });
 
@@ -199,7 +203,7 @@ describe('limites', () => {
   test('29) 4.ª fonte na casa, mesmo link em duas casas, mesmo canal duas vezes, «Atualizar agora» duas vezes em 10 min', async () => {
     const c = await cen();
     usar({ ...AIRBNB([]), ...BOOKING([]), ...VRBO, ...GOOGLE });
-    const post = (b) => request(app).post('/api/parceiro/calendarios').set(auth(c.tokP)).send({ propriedade_id: String(c.casa._id), ...b });
+    const post = (b) => request(app).post('/api/gestor/calendarios').set(auth(c.tokG)).send({ propriedade_id: String(c.casa._id), ...b });
     const a = await post({ url: urlAirbnb() });
     expect(a.status).toBe(201);
     expect((await post({ url: urlAirbnb() })).status).toBe(409); // o mesmo canal duas vezes
@@ -212,8 +216,8 @@ describe('limites', () => {
     const casa2 = await Propriedade.create({ nome: 'Casa B', empresa_id: c.e._id, ativo: true, origem: 'manual', parceiro_id: c.dono._id, capacidade_hospedes: 2 });
     const url = urlAirbnb();
     const casa3 = await Propriedade.create({ nome: 'Casa C', empresa_id: c.e._id, ativo: true, origem: 'manual', parceiro_id: c.dono._id, capacidade_hospedes: 2 });
-    expect((await request(app).post('/api/parceiro/calendarios').set(auth(c.tokP)).send({ propriedade_id: String(casa2._id), url })).status).toBe(201);
-    const rep = await request(app).post('/api/parceiro/calendarios').set(auth(c.tokP)).send({ propriedade_id: String(casa3._id), url });
+    expect((await request(app).post('/api/gestor/calendarios').set(auth(c.tokG)).send({ propriedade_id: String(casa2._id), url })).status).toBe(201);
+    const rep = await request(app).post('/api/gestor/calendarios').set(auth(c.tokG)).send({ propriedade_id: String(casa3._id), url });
     expect(rep.status).toBe(409);
     expect(rep.body.codigo).toBe('LINK_REPETIDO');
     // atualizar agora: 1 vez em 10 min
@@ -224,7 +228,7 @@ describe('limites', () => {
     expect(dois.body.erro).toMatch(/Já atualizaste/);
     // limites configuráveis por variável
     process.env.ICAL_MAX_FONTES_PARCEIRO = '3';
-    const mais = await request(app).post('/api/parceiro/calendarios').set(auth(c.tokP)).send({ propriedade_id: String(casa3._id), url: urlAirbnb() });
+    const mais = await request(app).post('/api/gestor/calendarios').set(auth(c.tokG)).send({ propriedade_id: String(casa3._id), url: urlAirbnb() });
     expect(mais.status).toBe(400);
     delete process.env.ICAL_MAX_FONTES_PARCEIRO;
   });
@@ -234,7 +238,7 @@ describe('tabela de Reservas: reservas sincronizadas', () => {
   test('28) as reservas iCal aparecem com a origem; PUT recusa datas e aceita hóspedes/tipo; DELETE cancela a limpeza e marca bloqueio; o gestor vê o mesmo', async () => {
     const c = await cen();
     usar(AIRBNB([{ uid: 'a1', ci: 20, co: 23 }, { uid: 'a2', ci: 30, co: 32 }]));
-    const cr = await request(app).post('/api/parceiro/calendarios').set(auth(c.tokP)).send({ propriedade_id: String(c.casa._id), url: urlAirbnb() });
+    const cr = await request(app).post('/api/gestor/calendarios').set(auth(c.tokG)).send({ propriedade_id: String(c.casa._id), url: urlAirbnb() });
     expect(cr.status).toBe(201);
     const lista = await request(app).get('/api/parceiro/reservas').set(auth(c.tokP));
     expect(lista.body.reservas).toHaveLength(2);
@@ -280,7 +284,7 @@ describe('tabela de Reservas: reservas sincronizadas', () => {
   test('o gestor de uma casa recebe o aviso das 48 h para limpezas novas do calendário (e não para as de datas distantes)', async () => {
     const c = await cen();
     usar(AIRBNB([{ uid: 'perto', ci: -1, co: 1 }, { uid: 'longe', ci: 30, co: 33 }]));
-    const cr = await request(app).post('/api/parceiro/calendarios').set(auth(c.tokP)).send({ propriedade_id: String(c.casa._id), url: urlAirbnb() });
+    const cr = await request(app).post('/api/gestor/calendarios').set(auth(c.tokG)).send({ propriedade_id: String(c.casa._id), url: urlAirbnb() });
     expect(cr.status).toBe(201);
     expect(await noticias(c.g, /O calendário Airbnb criou uma reserva/)).toBe(1);
   });
@@ -290,7 +294,7 @@ describe('job, lembretes e RGPD', () => {
   test('o job lê as fontes devidas (rede falsa), 1 por servidor de cada vez, e manda os lembretes d3/d1 sem repetir', async () => {
     const c = await cen();
     usar(BOOKING([{ uid: 'b1', ci: 10, co: 13 }, { uid: 'b2', ci: 20, co: 21 }]));
-    const cr = await request(app).post('/api/parceiro/calendarios').set(auth(c.tokP)).send({ propriedade_id: String(c.casa._id), url: urlBooking() });
+    const cr = await request(app).post('/api/gestor/calendarios').set(auth(c.tokG)).send({ propriedade_id: String(c.casa._id), url: urlBooking() });
     const id = cr.body.fonte._id;
     await FonteCalendario.updateOne({ _id: id }, { $set: { proxima_leitura_em: new Date(Date.now() - 1000) } });
     const t = usar(BOOKING([{ uid: 'b1', ci: 10, co: 13 }, { uid: 'b2', ci: 20, co: 21 }]));
@@ -313,7 +317,7 @@ describe('job, lembretes e RGPD', () => {
     for (const nome of ['fontecalendarios', 'reservaexternas', 'leituracalendarios']) expect(cobertas).toContain(nome);
     const c = await cen();
     usar(AIRBNB([{ uid: 'a1', ci: 20, co: 23, desc: 'Reservation URL: https://www.airbnb.com/reservation/itinerary?code=ABC123' }]));
-    const cr = await request(app).post('/api/parceiro/calendarios').set(auth(c.tokP)).send({ propriedade_id: String(c.casa._id), url: urlAirbnb() });
+    const cr = await request(app).post('/api/gestor/calendarios').set(auth(c.tokG)).send({ propriedade_id: String(c.casa._id), url: urlAirbnb() });
     expect(cr.status).toBe(201);
     expect((await ReservaExterna.findOne({ propriedade_id: c.casa._id })).codigo_ref_hash).toBeTruthy();
     const exp = await exportarDadosPessoa(await Utilizador.findById(c.dono._id).lean());
@@ -328,7 +332,7 @@ describe('job, lembretes e RGPD', () => {
     // apagar a empresa leva as 3 coleções
     const c2 = await cen();
     usar(AIRBNB([{ uid: 'z1', ci: 20, co: 23 }]));
-    await request(app).post('/api/parceiro/calendarios').set(auth(c2.tokP)).send({ propriedade_id: String(c2.casa._id), url: urlAirbnb() });
+    await request(app).post('/api/gestor/calendarios').set(auth(c2.tokG)).send({ propriedade_id: String(c2.casa._id), url: urlAirbnb() });
     expect(await FonteCalendario.countDocuments({ empresa_id: c2.e._id })).toBe(1);
     await rgpdEmpresa.apagarEmpresaDefinitivo(c2.e._id);
     for (const M of [FonteCalendario, ReservaExterna, LeituraCalendario, ReservaManual]) expect(await M.countDocuments({ empresa_id: c2.e._id })).toBe(0);

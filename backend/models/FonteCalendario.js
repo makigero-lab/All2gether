@@ -26,7 +26,7 @@ const fonteSchema = new mongoose.Schema(
     estado: { type: String, enum: ['ativa', 'erro', 'pausada', 'suspensa'], default: 'ativa' },
     motivo_estado: {
       type: String,
-      enum: ['casa_inativa', 'parceiro_inativo', 'empresa_inativa', 'casa_ligada_smoobu', 'erros_persistentes', 'pelo_gestor', 'pelo_parceiro', null],
+      enum: ['casa_inativa', 'parceiro_inativo', 'empresa_inativa', 'casa_ligada_smoobu', 'erros_persistentes', 'acordo_por_aceitar', 'pelo_gestor', 'pelo_parceiro', null],
       default: null,
     },
     pausada_em: Date,
@@ -57,6 +57,8 @@ const fonteSchema = new mongoose.Schema(
     uid_instavel: { type: Boolean, default: false },
     aviso_falha_enviado_em: Date,
     aviso_suspeita_enviado_em: Date,
+    aviso_muitos_novos_em: Date, // aviso ao gestor de uma leitura com reservas novas a mais (enviado uma vez)
+    vazio_desde: Date, // desde quando o calendário vem VAZIO (leituras seguidas); só então se começa a contar as 24 h
     pedido_manual_em: Date,
   },
   { timestamps: true }

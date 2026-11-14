@@ -71,23 +71,41 @@ function codigoDeErroRede(e) {
   return new ErroFeed('outro', 'Não foi possível ligar ao calendário.');
 }
 
-/** Transporte real: um pedido GET, sem seguir redirects. Devolve { status, headers, corpo, ip }. */
+/**
+ * Transporte real: um pedido GET, sem seguir redirects. Devolve { status, headers, corpo, ip }.
+ * `timeoutMs` é o prazo TOTAL do pedido (ligação + cabeçalhos + corpo): um temporizador global corta o pedido
+ * mesmo que o servidor vá pingando 1 byte de cada vez nos cabeçalhos (o `timeout` do socket só mede inatividade).
+ */
 function pedir(url, { headers, timeoutMs = LIMITES.tempoMs, maxBytes = LIMITES.corpo, env = process.env }) {
   const teste = modoTesteAtivo(env);
   const lib = url.protocol === 'http:' && teste ? http : https;
   const lookup = criarLookupSeguro({ permitirLocal: teste });
+  const limite = Date.now() + timeoutMs;
   return new Promise((resolve, reject) => {
     let ip = null;
+    let fim = false;
+    const terminar = (fn, v) => { if (fim) return; fim = true; clearTimeout(prazo); fn(v); };
     const req = lib.request(url, { method: 'GET', headers, lookup, timeout: LIMITES.ligacaoMs, rejectUnauthorized: true }, (res) => {
-      lerCorpo(res, { maxBytes, timeoutMs })
-        .then((corpo) => resolve({ status: res.statusCode, headers: res.headers, corpo, ip }))
-        .catch(reject);
+      lerCorpo(res, { maxBytes, timeoutMs: Math.max(1, limite - Date.now()) })
+        .then((corpo) => terminar(resolve, { status: res.statusCode, headers: res.headers, corpo, ip }))
+        .catch((e) => terminar(reject, e));
     });
+    const prazo = setTimeout(() => {
+      terminar(reject, new ErroFeed('timeout', 'O calendário demorou demasiado a responder.'));
+      req.destroy();
+    }, timeoutMs);
     req.on('socket', (s) => { s.once('connect', () => { ip = s.remoteAddress || null; }); });
     req.on('timeout', () => req.destroy(Object.assign(new Error('timeout'), { code: 'ETIMEDOUT' })));
-    req.on('error', reject);
+    req.on('error', (e) => terminar(reject, e));
     req.end();
   });
+}
+
+/** Corre uma promessa com prazo: se o transporte (qualquer um) não responder a tempo, falha com `timeout`. */
+function comPrazo(promessa, ms) {
+  let t;
+  const prazo = new Promise((_, reject) => { t = setTimeout(() => reject(new ErroFeed('timeout', 'O calendário demorou demasiado a responder.')), ms); });
+  return Promise.race([promessa, prazo]).finally(() => clearTimeout(t));
 }
 
 const sha = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
@@ -118,7 +136,7 @@ async function buscarFeed(urlTexto, {
     };
     let r;
     try {
-      r = await transporte(url, { headers, timeoutMs: restante, maxBytes: LIMITES.corpo, env });
+      r = await comPrazo(Promise.resolve(transporte(url, { headers, timeoutMs: restante, maxBytes: LIMITES.corpo, env })), restante);
     } catch (e) {
       throw codigoDeErroRede(e);
     }
@@ -146,4 +164,4 @@ async function buscarFeed(urlTexto, {
   }
 }
 
-module.exports = { buscarFeed, lerCorpo, descomprimir, ErroFeed, codigoDeErroRede, LIMITES, pedir };
+module.exports = { buscarFeed, comPrazo, lerCorpo, descomprimir, ErroFeed, codigoDeErroRede, LIMITES, pedir };

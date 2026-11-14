@@ -88,14 +88,17 @@ export async function adminDelete<T>(path: string): Promise<T> {
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let mensagem = `${res.status} ${res.statusText}`;
+    let codigo: string | undefined;
     try {
       const data = await res.json();
       if (data?.erro) mensagem = data.erro;
+      if (typeof data?.codigo === "string") codigo = data.codigo;
     } catch {
       /* corpo não-JSON, manter mensagem padrão */
     }
-    const err = new Error(mensagem) as Error & { status?: number };
+    const err = new Error(mensagem) as Error & { status?: number; codigo?: string };
     err.status = res.status;
+    err.codigo = codigo;
     throw err;
   }
   return (await res.json()) as T;

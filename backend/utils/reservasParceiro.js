@@ -103,6 +103,24 @@ function erroObservacoes(valor) {
   return null;
 }
 
+/** Limites do número de hóspedes e do nome do hóspede (reservas manuais e vindas dos calendários). */
+const MAX_HOSPEDES_RESERVA = 50;
+const MAX_NOME_HOSPEDE = 120;
+
+/** Erro (pt-PT) se o n.º de hóspedes ou o nome estão fora dos limites; nunca corta em silêncio. Vazio é válido. */
+function erroHospedesENome(corpo) {
+  const b = corpo || {};
+  if (b.hospedes !== undefined && b.hospedes !== null && b.hospedes !== '') {
+    const n = typeof b.hospedes === 'number' || typeof b.hospedes === 'string' ? Number(b.hospedes) : NaN;
+    if (!Number.isInteger(n) || n < 0 || n > MAX_HOSPEDES_RESERVA) return `O número de hóspedes tem de ser um número inteiro entre 0 e ${MAX_HOSPEDES_RESERVA} (0 = usar a capacidade da casa).`;
+  }
+  if (b.nome_hospede !== undefined && b.nome_hospede !== null) {
+    if (typeof b.nome_hospede !== 'string') return 'O nome do hóspede é inválido.';
+    if (b.nome_hospede.trim().length > MAX_NOME_HOSPEDE) return `O nome do hóspede pode ter no máximo ${MAX_NOME_HOSPEDE} caracteres.`;
+  }
+  return null;
+}
+
 /** Campos da reserva que se refletem em tarefa.detalhes_reserva. */
 function detalhesDaReserva(extras) {
   const d = {};
@@ -375,7 +393,7 @@ async function respostaReservaRepetida(reserva) {
  *   tipo_limpeza: normal|intermedia|profunda|preparacao (opcional; omissão = normal)
  * O dia da limpeza é automático; `data_limpeza`, se vier, é ignorado.
  */
-async function criarReservaComLimpeza({ parceiroId, empresaId, body: corpo = {}, ator = ATOR_PARCEIRO, camposReserva = {} }) {
+async function criarReservaComLimpeza({ parceiroId, empresaId, body: corpo = {}, ator = ATOR_PARCEIRO, camposReserva = {}, semAvisoDono = false }) {
   try {
     if (!parceiroId || !empresaId) {
       return resp(401, { erro: 'Não autenticado.' });
@@ -385,6 +403,8 @@ async function criarReservaComLimpeza({ parceiroId, empresaId, body: corpo = {},
     const extras = lerCamposExtra(corpo);
     const erroObs = erroObservacoes(observacoes);
     if (erroObs) return resp(400, { erro: erroObs });
+    const erroHN = erroHospedesENome(corpo);
+    if (erroHN) return resp(400, { erro: erroHN });
 
     if (!propriedade_id || !mongoose.isValidObjectId(propriedade_id)) {
       return resp(400, { erro: 'propriedade_id é obrigatório.' });
@@ -533,7 +553,8 @@ async function criarReservaComLimpeza({ parceiroId, empresaId, body: corpo = {},
     }
     if (deOutraOrigem) await avisarGestorDuasLimpezas(empresaId, propriedade, inicioDiaSaida);
     // Sino ao gestor se a limpeza nova cai nas próximas 48 h.
-    await avisarAcaoReserva({ ator, parceiroId, empresaId, propriedadeId: propriedade._id, acao: 'criou', datas: [novaTarefa.data] });
+    // Num lote o gestor avisa o proprietário uma só vez no fim (semAvisoDono), em vez de um aviso por reserva.
+    if (!semAvisoDono) await avisarAcaoReserva({ ator, parceiroId, empresaId, propriedadeId: propriedade._id, acao: 'criou', datas: [novaTarefa.data] });
 
     console.log(
       `📅 [Parceiro] reserva criada por parceiro ${parceiroId} para "${propriedade.nome}" ` +
@@ -621,6 +642,8 @@ async function atualizarReservaServico({ parceiroId, id, body: corpo = {}, ator 
     const extras = lerCamposExtra(body);
     const erroObs = erroObservacoes(body.observacoes);
     if (erroObs) return resp(400, { erro: erroObs });
+    const erroHN = erroHospedesENome(body);
+    if (erroHN) return resp(400, { erro: erroHN });
     const novoCheckIn = body.check_in ?? reserva.check_in;
     const novoCheckOut = body.check_out ?? reserva.check_out;
     // Reservas antigas: os limites só se verificam se as datas mudarem (editar notas não bloqueia).
@@ -853,6 +876,7 @@ async function eliminarReservaServico({ parceiroId, id, ator = ATOR_PARCEIRO }) 
 }
 
 module.exports = {
+  erroHospedesENome,
   limpezasDoDia,
   textoDuplicada,
   validarDatas,

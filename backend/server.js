@@ -280,6 +280,13 @@ if (require.main === module) {
         console.warn('⚠️  [HF11] Não foi possível verificar/remover índice legacy de Propriedades:', propIdxErr.message);
       }
 
+      // Credenciais Smoobu cifradas: avisa (log) se estão ilegíveis ou se o HMAC não corresponde à chave atual.
+      try {
+        await require('./utils/verificarCredenciaisSmoobu').verificarCredenciaisSmoobu();
+      } catch (e) {
+        console.error('⚠️  Falha na verificação das credenciais Smoobu (não bloqueia):', e.message);
+      }
+
       app.listen(PORT, () => {
         console.log(`🚀 Servidor a correr na porta ${PORT}.`);
       });

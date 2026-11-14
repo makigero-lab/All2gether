@@ -17,6 +17,7 @@
  *   - Auditoria do payload bruto recebido.
  */
 const mongoose = require('mongoose');
+const { minimizarPayload } = require('../utils/minimizarPayloadWebhook');
 
 const webhookLogSchema = new mongoose.Schema(
   {
@@ -41,6 +42,10 @@ const webhookLogSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    // true quando o payload já foi reduzido ao mínimo (sem dados de hóspedes). Enquanto o log está
+    // 'recebido' guarda a cópia completa, só para a retoma de webhooks presos; ao ficar 'processado' ou
+    // 'erro' (ou ao passar o prazo da retoma) reduz-se. Ver utils/minimizarPayloadWebhook.js.
+    payload_minimo: { type: Boolean, default: false },
     // Data a partir da qual o log é apagado automaticamente (ver índice TTL abaixo).
     expira_em: { type: Date },
     // Mensagem de erro (preenchida se status === 'erro').
@@ -79,8 +84,31 @@ webhookLogSchema.pre('validate', function definirExpiracao(next) {
     const base = dep ? Math.max(dep.getTime(), agora) : agora;
     this.expira_em = new Date(base + RETENCAO_DIAS * MS_DIA);
   }
+  // RGPD: só um log 'recebido' (à espera de processar) guarda a cópia completa.
+  if (this.status !== 'recebido' && !this.payload_minimo) {
+    this.payload = minimizarPayload(this.payload);
+    this.payload_minimo = true;
+  }
   next();
 });
+
+// RGPD: quando uma atualização fecha o log (status 'processado' ou 'erro'), o payload é reduzido ao mínimo
+// na mesma operação. O processamento já usou a cópia completa que tem em memória.
+async function minimizarAoFechar(next) {
+  try {
+    const upd = this.getUpdate() || {};
+    const status = upd.status !== undefined ? upd.status : upd.$set && upd.$set.status;
+    if (status === 'processado' || status === 'erro') {
+      const doc = await this.model.findOne(this.getQuery()).select('payload payload_minimo').lean();
+      if (doc && !doc.payload_minimo) this.set({ payload: minimizarPayload(doc.payload), payload_minimo: true });
+    }
+  } catch (err) {
+    console.error('⚠️  [WebhookLog] falha ao minimizar o payload:', err.message);
+  }
+  next();
+}
+webhookLogSchema.pre('findOneAndUpdate', minimizarAoFechar);
+webhookLogSchema.pre('updateOne', minimizarAoFechar);
 
 /**
  * Migração (idempotente, corre no arranque):

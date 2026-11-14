@@ -10,6 +10,9 @@ const ReservaExterna = require('../../models/ReservaExterna');
 const ReservaManual = require('../../models/ReservaManual');
 const H = require('../horario');
 const Rv = require('./reservas');
+const Tarefa = require('../../models/Tarefa');
+const { dentroDas48h } = require('../avisoGestorReserva');
+const { promoverDuplicada, perguntarIncertas } = require('./promocao');
 
 const NOITES_PERIODO_LONGO = 30;
 const DIAS_RETENCAO = 90;
@@ -29,13 +32,14 @@ function hist(ex, evento, de = '', para = '') {
  * @param {object} c.propriedade { _id, nome, empresa_id, parceiro_id }
  * @param {Array|null} c.eventos eventos lidos (null = 304: sem conteúdo novo)
  * @param {boolean} c.suspeita leitura suspeita: não conta faltas
+ * @param {boolean} [c.semNovos] leitura com reservas novas a mais: não cria nenhuma reserva/período novo
  * @param {string} c.hoje 'aaaa-mm-dd'
  * @param {Date} c.agora
- * @param {{leiturasParaCancelar:number, horasMinimasFalta:number}} c.cfg
+ * @param {{leiturasParaCancelar:number, horasMinimasFalta:number, horasFeedVazio?:number}} c.cfg
  * @returns {Promise<{alteracoes: object, avisos: {parceiro: string[], gestor: string[]}}>}
  */
-async function reconciliar({ fonte, propriedade, eventos, suspeita, hoje, agora, cfg }) {
-  const alt = { criadas: 0, confirmadas_auto: 0, por_confirmar: 0, datas_alteradas: 0, faltas_contadas: 0, canceladas: 0, reaparecidas: 0, duplicadas: 0, uid_trocados: 0, conflitos: 0 };
+async function reconciliar({ fonte, propriedade, eventos, suspeita, hoje, agora, cfg, semNovos = false }) {
+  const alt = { criadas: 0, confirmadas_auto: 0, por_confirmar: 0, datas_alteradas: 0, faltas_contadas: 0, canceladas: 0, promovidas: 0, reaparecidas: 0, duplicadas: 0, uid_trocados: 0, conflitos: 0 };
   const avisos = { parceiro: [], gestor: [] };
   const casa = propriedade.nome || 'a casa';
   const rotulo = fonte.canal === 'outro' ? (fonte.rotulo || 'Outro canal') : Rv.plataformaDe(fonte.canal);
@@ -142,7 +146,19 @@ async function reconciliar({ fonte, propriedade, eventos, suspeita, hoje, agora,
         ex.motivo_cancelamento = null; ex.conflito = null;
         hist(ex, 'reapareceu', 'cancelada', antes);
         alt.reaparecidas += 1;
-        if (antes === 'confirmada') {
+        if (antes === 'duplicada') {
+          // Era só a cópia de outra reserva: volta a ver-se se continua coberta; se sim, não se pergunta nada.
+          const d = decidirNovo(ev, ex._id);
+          hist(ex, 'reapareceu', 'cancelada', d.estado);
+          if (d.estado === 'duplicada') { await aplicar(ex, ev, d); alt.reaparecidas -= 1; continue; }
+          await aplicar(ex, ev, d);
+        } else if (antes === 'confirmada' && decidirNovo(ev, ex._id).estado === 'duplicada') {
+          // A estadia já está coberta por outra reserva viva (ex.: o Airbnb herdou a limpeza): é só uma cópia, sem limpeza nem linha nova.
+          const d = decidirNovo(ev, ex._id);
+          ex.reserva_manual_id = undefined; // a reserva e a limpeza já são da outra reserva
+          hist(ex, 'reapareceu', 'cancelada', 'duplicada');
+          await aplicar(ex, ev, d); alt.reaparecidas -= 1; alt.duplicadas += 1; continue;
+        } else if (antes === 'confirmada') {
           if (ex.reserva_manual_id) await ReservaManual.updateOne({ _id: ex.reserva_manual_id }, { $unset: { reserva_externa_id: 1 } });
           ex.reserva_manual_id = undefined;
           ex.estado = 'confirmada';
@@ -193,15 +209,23 @@ async function reconciliar({ fonte, propriedade, eventos, suspeita, hoje, agora,
 
     // UID novo ----------------------------------------------------------------------------------------
     // Troca de UID: mesmas datas de uma externa desta fonte ausente neste calendário (ou fonte com UID instável).
-    const trocada = externas.find((x) => !vistos.has(x.uid) && !uidsDoFeed.has(x.uid)
-      && x.estado !== 'substituida' && Rv.iso(x.check_in) === ev.ci && Rv.iso(x.check_out) === ev.co);
-    if (trocada || (fonte.uid_instavel && externas.find((x) => x.estado !== 'substituida' && Rv.iso(x.check_in) === ev.ci && Rv.iso(x.check_out) === ev.co && x.uid !== ev.uid))) {
-      const antiga = trocada || externas.find((x) => x.estado !== 'substituida' && Rv.iso(x.check_in) === ev.ci && Rv.iso(x.check_out) === ev.co && x.uid !== ev.uid);
+    const mesmasDatas = (x) => x.estado !== 'substituida' && Rv.iso(x.check_in) === ev.ci && Rv.iso(x.check_out) === ev.co;
+    let antiga = externas.find((x) => !vistos.has(x.uid) && !uidsDoFeed.has(x.uid) && mesmasDatas(x));
+    if (!antiga && fonte.uid_instavel) antiga = externas.find((x) => mesmasDatas(x) && x.uid !== ev.uid);
+    let herdarBloqueio = false;
+    if (antiga && antiga.estado === 'cancelada' && antiga.motivo_cancelamento === 'faltou') {
+      // Reserva nova nas datas de uma que tinha desaparecido: não herda «cancelada» (nem espera outra leitura).
+      // Só um bloqueio já decidido pelo proprietário/gestor continua a valer.
+      if (antiga.estado_antes_cancelar === 'bloqueio' && antiga.decidido_por !== 'automatico') herdarBloqueio = true;
+      else antiga = null;
+    }
+    if (antiga) {
       const nova = new ReservaExterna({
         empresa_id: fonte.empresa_id, propriedade_id: propriedade._id, parceiro_id: fonte.parceiro_id, fonte_id: fonte._id,
         canal: fonte.canal, canal_chave: fonte.canal_chave, uid: ev.uid, codigo_ref_hash: ev.codigo_ref_hash,
         check_in: Rv.dataDe(ev.ci), check_out: Rv.dataDe(ev.co), noites: ev.noites, classe: ev.classe, resumo_tipo: ev.resumo_tipo,
-        estado: antiga.estado, motivo: antiga.motivo, motivo_cancelamento: antiga.motivo_cancelamento, estado_antes_cancelar: antiga.estado_antes_cancelar,
+        estado: herdarBloqueio ? 'bloqueio' : antiga.estado, motivo: herdarBloqueio ? null : antiga.motivo,
+        motivo_cancelamento: herdarBloqueio ? null : antiga.motivo_cancelamento, estado_antes_cancelar: herdarBloqueio ? null : antiga.estado_antes_cancelar,
         decidido_por: antiga.decidido_por, decidido_por_id: antiga.decidido_por_id, decidido_em: antiga.decidido_em,
         presente_no_feed: true, leituras_em_falta: 0, primeiro_visto_em: antiga.primeiro_visto_em, visto_em: agora,
         reserva_manual_id: antiga.reserva_manual_id, duplicada_de: antiga.duplicada_de, conflito: antiga.conflito,
@@ -213,10 +237,13 @@ async function reconciliar({ fonte, propriedade, eventos, suspeita, hoje, agora,
       await antiga.save();
       await nova.save();
       if (nova.reserva_manual_id) await ReservaManual.updateOne({ _id: nova.reserva_manual_id }, { $set: { reserva_externa_id: nova._id } });
+      // as duplicadas que apontavam para a antiga passam a apontar para a nova
+      await ReservaExterna.updateMany({ propriedade_id: propriedade._id, estado: 'duplicada', 'duplicada_de.id': antiga._id }, { $set: { 'duplicada_de.id': nova._id } });
       porUid.set(ev.uid, nova);
       alt.uid_trocados += 1;
       continue;
     }
+    if (semNovos) continue; // leitura anómala (reservas novas a mais): não cria nada até o gestor aceitar
 
     const d = decidirNovo(ev);
     const ex = new ReservaExterna({
@@ -228,6 +255,27 @@ async function reconciliar({ fonte, propriedade, eventos, suspeita, hoje, agora,
     porUid.set(ev.uid, ex);
     hist(ex, 'criada', '', d.estado);
     await aplicar(ex, ev, d);
+  }
+
+  /* ---------------- Calendário vazio ---------------- */
+  // Vazio (incluindo o caso de 1 só reserva futura): nada se cancela antes de `horasFeedVazio` seguidas vazio.
+  const vazio = eventos ? eventos.length === 0 : !!fonte.vazio_desde;
+  if (eventos && eventos.length === 0) {
+    // Limpeza a começar nas próximas 48 h: avisa já o gestor e o proprietário, que confirmam à mão (sem esperar).
+    const datas = [];
+    for (const x of externas) {
+      if (x.estado !== 'confirmada' || !x.reserva_manual_id || Rv.iso(x.check_out) < hoje || (x.avisos_enviados || []).includes('vazio_48h')) continue;
+      const reserva = await ReservaManual.findById(x.reserva_manual_id).select('tarefa_gerada_id').lean();
+      const tarefa = reserva && reserva.tarefa_gerada_id ? await Tarefa.findById(reserva.tarefa_gerada_id).select('data estado').lean() : null;
+      if (!tarefa || ['cancelada', 'concluida', 'em_curso'].includes(tarefa.estado) || !dentroDas48h(tarefa.data, agora)) continue;
+      x.avisos_enviados.push('vazio_48h');
+      await x.save();
+      datas.push(`${Rv.iso(tarefa.data).slice(8)}/${Rv.iso(tarefa.data).slice(5, 7)}`);
+    }
+    if (datas.length) {
+      const txt = `O calendário ${rotulo} de ${casa} ficou vazio e há ${datas.length === 1 ? 'uma limpeza' : 'limpezas'} a ${datas.join(', ')} (próximas 48 h). Não cancelámos nada: confirma à mão se a${datas.length === 1 ? '' : 's'} reserva${datas.length === 1 ? '' : 's'} ainda existe${datas.length === 1 ? '' : 'm'}.`;
+      avisos.parceiro.push(txt); avisos.gestor.push(txt);
+    }
   }
 
   /* ---------------- Faltas e cancelamento ---------------- */
@@ -252,7 +300,9 @@ async function reconciliar({ fonte, propriedade, eventos, suspeita, hoje, agora,
       alt.faltas_contadas += 1;
       hist(ex, 'falta', String(ex.leituras_em_falta), '');
       const horas = (agora.getTime() - ex.primeira_falta_em.getTime()) / 3600000;
-      const limite = ex.leituras_em_falta >= cfg.leiturasParaCancelar && horas >= cfg.horasMinimasFalta;
+      let limite = ex.leituras_em_falta >= cfg.leiturasParaCancelar && horas >= cfg.horasMinimasFalta;
+      // Calendário vazio: além disso, só depois de `horasFeedVazio` horas SEGUIDAS vazio.
+      if (limite && vazio && (agora.getTime() - (fonte.vazio_desde ? new Date(fonte.vazio_desde).getTime() : agora.getTime())) / 3600000 < (cfg.horasFeedVazio || 0)) limite = false;
       if (!limite) { await ex.save(); continue; }
 
       const periodo = `${ci.slice(8)}/${ci.slice(5, 7)} a ${co.slice(8)}/${co.slice(5, 7)}`;
@@ -267,7 +317,9 @@ async function reconciliar({ fonte, propriedade, eventos, suspeita, hoje, agora,
         continue;
       }
       if (ex.estado === 'confirmada') {
-        const r = await Rv.cancelarReservaDaExterna(ex, { motivo: 'canal', textoMotivo: `foi cancelada (a reserva foi cancelada no ${rotulo}).` });
+        // A mesma estadia noutro canal (duplicada) que ainda está viva herda a reserva e a limpeza, sem cancelar e recriar.
+        const promovida = await promoverDuplicada(ex, { hoje });
+        const r = promovida ? { cancelada: true, conflito: null } : await Rv.cancelarReservaDaExterna(ex, { motivo: 'canal', textoMotivo: `foi cancelada (a reserva foi cancelada no ${rotulo}).` });
         if (!r.cancelada) {
           ex.conflito = r.conflito; alt.conflitos += 1;
           if (!ex.avisos_enviados.includes('cancel_conflito')) {
@@ -285,8 +337,17 @@ async function reconciliar({ fonte, propriedade, eventos, suspeita, hoje, agora,
         if (viraB) ex.classe = 'bloqueio';
         hist(ex, 'cancelada', 'confirmada', ex.estado);
         alt.canceladas += 1;
-        const txt = `A reserva ${periodo} em ${casa} foi cancelada no ${rotulo}: a limpeza também foi cancelada.`;
-        avisos.parceiro.push(txt); avisos.gestor.push(txt);
+        if (promovida) {
+          alt.promovidas += 1;
+          const outro = Rv.plataformaDe(promovida.canal);
+          const txt = `A reserva ${periodo} em ${casa} deixou de aparecer no ${rotulo}, mas a estadia continua no ${outro}: a limpeza foi mantida.`;
+          avisos.parceiro.push(txt); avisos.gestor.push(txt);
+        } else {
+          const incerta = viraB ? null : await perguntarIncertas(ex, { hoje });
+          if (incerta) alt.por_confirmar += 1;
+          const txt = `A reserva ${periodo} em ${casa} foi cancelada no ${rotulo}: a limpeza também foi cancelada.${incerta ? ` Há um período com as mesmas datas no ${Rv.plataformaDe(incerta.canal)}: diz se é uma reserva.` : ''}`;
+          avisos.parceiro.push(txt); avisos.gestor.push(txt);
+        }
       } else if (ex.estado === 'por_confirmar') {
         ex.estado_antes_cancelar = 'por_confirmar'; ex.estado = 'cancelada'; ex.motivo_cancelamento = 'faltou';
         hist(ex, 'cancelada', 'por_confirmar', 'cancelada');

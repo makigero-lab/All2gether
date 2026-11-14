@@ -20,10 +20,11 @@ const plataformaDe = (canal, rotulo) => (canal === 'airbnb' ? 'Airbnb' : canal =
  * Cria a reserva e a limpeza de uma ReservaExterna. Devolve { ok, reserva, tarefa } ou { ok:false, erro }.
  * Idempotente: se o evento já tem reserva (índice único), liga-se a ela.
  */
-async function criarReservaDaExterna(ex, { rotulo = null, extras = {}, ator = null } = {}) {
+async function criarReservaDaExterna(ex, { rotulo = null, extras = {}, ator = null, semAvisoDono = false } = {}) {
   const r = await R.criarReservaComLimpeza({
     parceiroId: ex.parceiro_id,
     empresaId: ex.empresa_id,
+    semAvisoDono,
     ator: ator || { tipo: 'ical', canalRotulo: plataformaDe(ex.canal, rotulo) },
     camposReserva: { origem: 'ical', reserva_externa_id: ex._id, sincronizada: true },
     body: {
