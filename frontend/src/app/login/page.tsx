@@ -113,7 +113,14 @@ function LoginConteudo() {
       }
 
       // Redireciona conforme o role.
-      const destino = from || rotaPorRole(data.utilizador.role);
+      const propria = rotaPorRole(data.utilizador.role);
+      // Veio de uma página da gestão mas é proprietário: vai para o seu portal e o aviso fica guardado (o mesmo
+      // cookie curto do middleware), para sobreviver ao redirecionamento do início de sessão.
+      const deOutraArea = !!from && data.utilizador.role === "parceiro" && (from === "/gestor" || from.startsWith("/gestor/"));
+      if (deOutraArea) {
+        try { document.cookie = "a2g_aviso=outra-area; path=/; max-age=30; samesite=lax"; } catch { /* sem cookies: sem aviso */ }
+      }
+      const destino = deOutraArea ? propria : from || propria;
       router.push(destino);
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Erro ao iniciar sessão.");

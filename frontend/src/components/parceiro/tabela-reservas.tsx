@@ -612,7 +612,7 @@ export interface TabelaReservasProps {
   apiBase?: string;
   /** Chave extra do rascunho (o id do proprietário, quando é o gestor): cada proprietário tem o seu rascunho. */
   escopoRascunho?: string;
-  /** Título do ecrã (por omissão «Minhas reservas»). */
+  /** Título do ecrã (por omissão «As minhas reservas»). */
   titulo?: string;
   /** O Excel só existe no portal do proprietário. */
   mostrarExportar?: boolean;
@@ -626,7 +626,7 @@ export interface TabelaReservasProps {
 export function TabelaReservas({
   apiBase = "/api/parceiro",
   escopoRascunho = "",
-  titulo = "Minhas reservas",
+  titulo = "As minhas reservas",
   mostrarExportar = true,
   externasListaUrl = "/api/parceiro/reservas-externas?estado=por_confirmar",
   externasDecisaoBase = "/api/parceiro/reservas-externas",
