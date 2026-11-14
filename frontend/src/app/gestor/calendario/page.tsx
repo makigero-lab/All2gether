@@ -93,6 +93,10 @@ interface TarefaCalendario {
   // HF26 — tarefa órfã (staff de férias com tarefa atribuída).
   alerta_orfao?: boolean;
   alerta_mensagem?: string;
+  // Porque ficou sem pessoa (por atribuir / não atribuída), ex.: «Data de saída desconhecida: ...».
+  motivo_nao_atribuicao?: string | null;
+  // Reserva do Smoobu sem data de saída conhecida: a limpeza está provisória no dia de chegada.
+  data_saida_desconhecida?: boolean;
   // Prompt 99 — Detalhes da reserva (para a coluna Reserva da Vista Tabela).
   detalhes_reserva?: {
     checkin?: string | null;
@@ -660,7 +664,7 @@ export default function CalendarioOperacionalPage() {
           {pontoTipo}
           <span className="fc-evt-month__time">{arg.timeText}</span>
           {glifo && <span className="fc-evt-glifo" aria-hidden="true">{glifo}</span>}
-          <span className="fc-evt-month__title" title={textoFalta(t.pessoas_em_falta) ? `${titulo} · ${textoFalta(t.pessoas_em_falta)}` : titulo}>
+          <span className="fc-evt-month__title" title={[titulo, textoFalta(t.pessoas_em_falta), isPorAtribuir ? t.motivo_nao_atribuicao : null].filter(Boolean).join(" · ")}>
             {tituloMes}{(t.pessoas_em_falta ?? 0) > 0 ? " ⚠" : ""}
           </span>
         </div>
@@ -682,7 +686,7 @@ export default function CalendarioOperacionalPage() {
     if (arg.view.type.startsWith("timeGrid") && minutos <= 30) {
       const quem = t.alerta_orfao ? "Órfã" : staff ? (equipaTexto ?? primeiroNome(staff)) : rotuloEstado;
       return (
-        <div className={`${blockClass} fc-evt-block--curto${riscada}`} title={`${arg.timeText} · ${titulo} · ${quem}`}>
+        <div className={`${blockClass} fc-evt-block--curto${riscada}`} title={[`${arg.timeText} · ${titulo} · ${quem}`, isPorAtribuir ? t.motivo_nao_atribuicao : null].filter(Boolean).join(" · ")}>
           {pontoTipo}
           {glifo && <span className="fc-evt-glifo" aria-hidden="true">{glifo}</span>}
           <span className="fc-evt-block__time">{arg.timeText.split(" - ")[0]}</span>
@@ -713,7 +717,9 @@ export default function CalendarioOperacionalPage() {
               {faltaTexto && <span className="fc-evt-block__unassigned"> · {faltaTexto}</span>}
             </>
           ) : (
-            <span className="fc-evt-block__unassigned">⚠️ {rotuloEstado}</span>
+            <span className="fc-evt-block__unassigned" title={t.motivo_nao_atribuicao ?? undefined}>
+              ⚠️ {t.data_saida_desconhecida ? "Data de saída por confirmar" : rotuloEstado}
+            </span>
           )}
         </div>
       </div>

@@ -132,6 +132,12 @@ const tarefaSchema = new mongoose.Schema(
       default: null,
       trim: true,
     },
+    // true: a reserva do Smoobu chegou sem data de saída e a consulta falhou; a limpeza ficou provisória no
+    // dia de chegada, por atribuir. A sincronização seguinte com a data real corrige o dia e limpa a marca.
+    data_saida_desconhecida: {
+      type: Boolean,
+      default: false,
+    },
     // Data em que a tarefa foi concluída (para relatórios).
     concluida_em: {
       type: Date,
