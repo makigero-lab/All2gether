@@ -225,7 +225,14 @@ export function VistaDiaEquipa({
 
   // O cabeçalho das colunas fica fora da área que rola na horizontal e acompanha-a (a página rola na vertical).
   const cabRef = useRef<HTMLDivElement | null>(null);
-  const modelo = `3.25rem repeat(${colunas.length}, minmax(9.5rem, 1fr))`;
+  // Uma coluna com limpezas provisórias alarga-se (até 4 cartões lado a lado) para o cartão caber com
+  // «Data de saída por confirmar»; sem isso só havia espaço para o ícone quando duas se sobrepõem.
+  const larguraColuna = (c: { itens: { t: TarefaDia }[] }) => {
+    if (!c.itens.some((x) => saidaPorConfirmar(x.t))) return 1;
+    return Math.min(4, Math.max(1, ...dispor(c.itens as Parameters<typeof dispor>[0]).map((b) => b.faixas)));
+  };
+  const larguras = new Map(colunas.map((c) => [c.id, larguraColuna(c)]));
+  const modelo = `3.25rem ${colunas.map((c) => `minmax(${9.5 * (larguras.get(c.id) ?? 1)}rem, ${larguras.get(c.id) ?? 1}fr)`).join(" ")}`;
 
   const cartao = (b: Bloco, colId: string) => {
     const { t } = b;
@@ -239,10 +246,10 @@ export function VistaDiaEquipa({
     const colegas = todos.filter((m) => m._id !== colId).map((m) => primeiro(m.nome));
     const top = (b.ini - dados.inicio) * PX_POR_MIN;
     // Uma limpeza provisória precisa de espaço para «Data de saída por confirmar» e o motivo.
-    const h = Math.max(saidaPorConfirmar(t) ? 96 : 22, (b.fim - b.ini) * PX_POR_MIN - 2);
+    const h = Math.max(saidaPorConfirmar(t) ? 116 : 22, (b.fim - b.ini) * PX_POR_MIN - 2);
     const baixo = h < 70;
     // Cartões lado a lado (sobreposição): só cabe o círculo, o ícone do estado e a casa; o resto vai no title.
-    const estreitoCard = b.faixas > 1;
+    const estreitoCard = b.faixas > 1 && (larguras.get(colId) ?? 1) < b.faixas;
     const largura = 100 / b.faixas;
     const manut = t.tipo === "manutencao";
     const avisos = textoAvisos(t);
