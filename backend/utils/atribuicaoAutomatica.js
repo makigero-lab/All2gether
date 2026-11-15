@@ -135,12 +135,12 @@ async function planearAtribuicao({ empresaId, propriedade, dia, tempoLimpeza, ho
     const escolher = async (excl) => {
       if (staffNecessario > 1) {
         const r = await determinarEquipaAtribuida(
-          empresaId, range, propriedade.coordenadas, tempo, propriedade._id, staffNecessario, excl
+          empresaId, range, propriedade.coordenadas, tempo, propriedade._id, staffNecessario, excl, !!horaFixa
         );
         return { ids: (r?.equipa || []).map((m) => m.utilizadorId), viagem: 0 };
       }
       const r = await determinarUtilizadorAtribuido(
-        empresaId, range, propriedade.coordenadas, tempo, propriedade._id, excl
+        empresaId, range, propriedade.coordenadas, tempo, propriedade._id, excl, !!horaFixa
       );
       return { ids: r?.utilizadorId ? [r.utilizadorId] : [], viagem: Number(r?.tempoViagem) || 0 };
     };

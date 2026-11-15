@@ -71,6 +71,8 @@ Caminho recomendado: **não apagar nada**. `backend/scripts/reatribuir-futuras.j
 2. Aplicar (depois de aprovado): `SRC_URI=... node scripts/reatribuir-futuras.js --aplicar` (guarda uma cópia de segurança em `trabalho-local/reatribuicao-<dia>/`, escreve só o que não mudou desde a cópia e valida no fim). Com `--avisar` avisa quem mudou (1 aviso por pessoa).
 3. Se sobrarem limpezas antigas fora do horário (por exemplo as do passo anterior): `node scripts/reagendar-horarios.js` (simula) e `--aplicar`.
 
+**Convergência:** o desempate do motor depende da carga e da rotação, por isso um `--aplicar` pode não ficar estável à primeira. Depois de aplicar, volta a simular: se ainda houver mudanças, corre `--aplicar` uma segunda vez (à 2.ª passagem estabiliza). Corre sempre a simulação antes de cada `--aplicar`.
+
 `DELETE /api/gestor/tarefas/futuras` **não é o caminho certo para isto**: apaga de HOJE em diante (UTC) em vez de amanhã, apaga as avulsas e as manutenções sem as recriar, e só poupa as que estão ligadas a uma reserva de proprietário. A sincronização do Smoobu recria as do Smoobu e as reservas de proprietários/iCal que tenham ficado sem limpeza, mas não as avulsas.
 
 ## 6. Verificação em produção dos índices novos (só leitura)

@@ -355,8 +355,11 @@ async function determinarUtilizadorAtribuido(
   coordenadasNovaPropriedade,
   tempoNovaTarefa,
   propriedadeId = null,
-  excluirStaffIds = null
+  excluirStaffIds = null,
+  semLibertar = false
 ) {
+  // `semLibertar`: nunca desatribui limpezas de ninguém para abrir espaço (decisões que ainda podem ser rejeitadas,
+  // como a escolha para uma hora fixada pelo gestor): escolhe só entre quem já cabe.
   const { staff, disponiveis, setAusentes, setExcluidos, diaSemana } = await obterStaffDisponivel(
     empresaId,
     range,
@@ -420,7 +423,7 @@ async function determinarUtilizadorAtribuido(
         return { utilizadorId: v.vip._id, tempoViagem: 0 };
       }
       // Nenhum preferido cabe: tenta libertar capacidade, pela ordem da lista.
-      for (const vip of membros) {
+      for (const vip of semLibertar ? [] : membros) {
         const equipaIdStr = String(vip._id);
         // FIX (prioridade equipa) — desatribui a última limpeza ainda não
         // iniciada desse dia do preferido e volta a ver se cabe.
@@ -433,6 +436,8 @@ async function determinarUtilizadorAtribuido(
           // dia não reduz a carga deste e libertar 'em_curso' tira trabalho a quem já está a fazê-lo.
           data: { $gte: range.start, $lt: range.end },
           estado: 'atribuida',
+          // Nunca liberta uma limpeza cuja hora o gestor fixou à mão.
+          data_ajustada_gestor: { $ne: true },
         }, vip._id)).sort({ data: -1 });
         if (!tarefaParaLibertar) continue;
 
@@ -608,7 +613,8 @@ async function determinarEquipaAtribuida(
   tempoNovaTarefa,
   propriedadeId = null,
   numStaffNecessario = 1,
-  excluirInicial = null
+  excluirInicial = null,
+  semLibertar = false
 ) {
   // `excluirInicial` (Set de ids string): pessoas que não podem entrar (ex.:
   // o ausente e os membros que já estão na tarefa).
@@ -620,7 +626,8 @@ async function determinarEquipaAtribuida(
       coordenadasNovaPropriedade,
       tempoNovaTarefa,
       propriedadeId,
-      excluirInicial instanceof Set ? excluirInicial : null
+      excluirInicial instanceof Set ? excluirInicial : null,
+      semLibertar
     );
     if (!resultado) return null;
     return { equipa: [resultado], insuficiente: false };
@@ -646,7 +653,8 @@ async function determinarEquipaAtribuida(
       coordenadasNovaPropriedade,
       tempoNovaTarefa,
       propriedadeId,
-      staffExcluidos // ← FIX: exclui os já escolhidos + filtra folgas/férias
+      staffExcluidos, // ← FIX: exclui os já escolhidos + filtra folgas/férias
+      semLibertar
     );
 
     if (!resultado) {
