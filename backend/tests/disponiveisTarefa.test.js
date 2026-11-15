@@ -45,7 +45,7 @@ describe('disponíveis para atribuir à mão', () => {
     const fred = await mk('Fred', 'staff');
     await ausente(e, bia);
     const outra = await Propriedade.create({ nome: 'Outra', empresa_id: e._id, smoobu_id: 'o1', ativo: true, capacidade_hospedes: 2, tempo_limpeza_minutos: 60 });
-    await limpeza(e, outra, { utilizador_id: fred._id, data: new Date(`${DIA}T09:00:00Z`), tempo_limpeza_minutos: 500, estado: 'atribuida' });
+    await limpeza(e, outra, { utilizador_id: fred._id, data: new Date(`${DIA}T10:00:00Z`), tempo_limpeza_minutos: 500, estado: 'atribuida' });
     const t = await limpeza(e, p);
 
     const r = await lista(token, t._id);
@@ -53,7 +53,7 @@ describe('disponíveis para atribuir à mão', () => {
     expect(r.body.modo).toBe('responsavel');
     expect(nomes(r)).toEqual(['Ana', 'Sub0']);
     expect(r.body.motivo).toBeNull();
-    for (const d of r.body.disponiveis) expect(d.hora_prevista).toBe(`${DIA}T09:00:00.000Z`);
+    for (const d of r.body.disponiveis) expect(d.hora_prevista).toBe(`${DIA}T10:00:00.000Z`);
     // PATCH /atribuir mantém a hora que a limpeza já tem: a prevista é essa.
     const ra = await lista(token, t._id, '?acao=atribuir');
     expect(nomes(ra)).toEqual(['Ana', 'Sub0']);

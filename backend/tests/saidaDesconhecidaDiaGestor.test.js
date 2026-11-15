@@ -145,8 +145,22 @@ describe('A5: o gestor mexeu na limpeza provisória e chega a data real', () => 
     expect(t2.estado).toBe('atribuida');
     const avisos = await aviso(t._id, '2031-09-14');
     expect(avisos).toHaveLength(1);
-    expect(avisos[0].mensagem).toMatch(/tinhas posto a 10\/09, passou para 14\/09/);
+    expect(t1.dia_mudado_pelo_gestor.so_pessoa).toBe(true);
+    expect(avisos[0].mensagem).toMatch(/tinhas atribuído para 10\/09, passou para 14\/09/);
+    expect(avisos[0].mensagem).not.toMatch(/tinhas posto a/);
     expect(avisos[0].mensagem).toMatch(/Ana mantém-se, está disponível nesse dia/);
+  });
+
+  it('mudou o dia e depois atribuiu: o aviso mantém «posto a» (o dia foi escolha dele)', async () => {
+    const t = await provisoria(9907);
+    await mudarDiaTarefa(reqGestor(t, { data: '2031-09-12' }), res());
+    await atribuirTarefa(reqGestor(t, { utilizador_id: String(ana._id) }), res());
+    const t1 = await Tarefa.findById(t._id);
+    expect(t1.dia_mudado_pelo_gestor.so_pessoa).toBe(false);
+    await chegaDataReal([dados(9907)]);
+    const avisos = await aviso(t._id, '2031-09-14');
+    expect(avisos).toHaveLength(1);
+    expect(avisos[0].mensagem).toMatch(/tinhas posto a 12\/09, passou para 14\/09/);
   });
 
   it('pessoa escolhida indisponível no dia real (folga ao domingo): segue o fluxo normal e o aviso diz isso', async () => {

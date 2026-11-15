@@ -40,7 +40,7 @@ export function paraIsoMeiaNoiteLocal(dataYYYYMMDD: string): string {
  * uma "hora real" de trabalho atribuída pelo load balancer.
  *
  * Tarefas criadas manualmente (só com data) são guardadas à meia-noite local
- * (00:00). Tarefas atribuídas pelo load balancer têm horas reais (09:00+).
+ * (00:00). Tarefas atribuídas pelo load balancer têm horas reais (10:00+).
  * No calendário, as primeiras devem aparecer como "todo o dia" (all-day)
  * para não ficarem abaixo do slotMinTime 08:00 (invisíveis).
  *

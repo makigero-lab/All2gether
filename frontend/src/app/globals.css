@@ -1024,6 +1024,16 @@
   border-left: 1px solid hsl(var(--border));
   background-image: linear-gradient(to bottom, hsl(var(--border) / 0.7) 1px, transparent 1px);
 }
+.vista-dia__fora {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: hsl(var(--foreground) / 0.05);
+  pointer-events: none;
+}
+.dark .vista-dia__fora {
+  background: hsl(var(--foreground) / 0.08);
+}
 .vista-dia__agora {
   position: absolute;
   left: 0;

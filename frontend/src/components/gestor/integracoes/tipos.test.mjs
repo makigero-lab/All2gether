@@ -239,7 +239,7 @@ test("casas homónimas sem morada: (1), (2) por ordem estável; misturadas com c
   assert.equal(nomesDistintos([casa("1", "X", { morada_curta: "Rua A 1, Porto" }), casa("2", "X", { morada_curta: "Rua B 2, Lisboa" })]).get("1"), "X (Porto)");
 });
 
-test("S11: seletor com o canal ligado antes da desambiguação (cabe no telemóvel)", () => {
+test("S11: seletor com a desambiguação antes do canal ligado (homónimas com o mesmo canal ficam diferentes)", () => {
   const c = (id, nome, o = {}) => ({ _id: id, nome, smoobu: false, airbnb: null, booking: null, outros: [], ...o });
   const r = rotulosDasCasas([
     c("1", "Baixa Pombalina", { airbnb: { canal_texto: "Airbnb" } }),
@@ -257,6 +257,12 @@ test("S11: seletor com o canal ligado antes da desambiguação (cabe no telemóv
     c("a", "Apartamento T1 Baixa", { morada_rua: "Rua Augusta 100", morada_localidade: "Lisboa", airbnb: {}, booking: {} }),
     c("b", "Apartamento T1 Baixa", { morada_rua: "Rua do Ouro 10", morada_localidade: "Lisboa" }),
   ]);
-  assert.equal(d.get("a"), "Apartamento T1 Baixa · Airbnb + Booking (Rua Augusta)");
+  assert.equal(d.get("a"), "Apartamento T1 Baixa (Rua Augusta) · Airbnb + Booking");
   assert.equal(d.get("b"), "Apartamento T1 Baixa (Rua do Ouro)");
+  const h = rotulosDasCasas([
+    c("x", "Casa Azul", { morada_rua: "Rua Augusta 1", airbnb: {}, booking: {} }),
+    c("y", "Casa Azul", { morada_rua: "Rua do Ouro 2", airbnb: {}, booking: {} }),
+  ]);
+  assert.equal(h.get("x"), "Casa Azul (Rua Augusta) · Airbnb + Booking");
+  assert.equal(h.get("y"), "Casa Azul (Rua do Ouro) · Airbnb + Booking");
 });

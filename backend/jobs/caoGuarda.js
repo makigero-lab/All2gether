@@ -153,7 +153,7 @@ async function retomarAtribuicoesPresas(minutos = 45) {
     .lean();
   if (presas.length === 0) return { encontradas: 0, atribuidas: 0 };
 
-  const { planearAtribuicao } = require('../utils/atribuicaoAutomatica');
+  const { planearAtribuicao, horaFixaDaTarefa } = require('../utils/atribuicaoAutomatica');
   const { notificarUtilizador } = require('../utils/notificar');
   let atribuidas = 0;
   for (const t of presas) {
@@ -163,6 +163,7 @@ async function retomarAtribuicoesPresas(minutos = 45) {
         propriedade: t.propriedade_id || {},
         dia: t.data,
         tempoLimpeza: t.tempo_limpeza_minutos || 45,
+        ...horaFixaDaTarefa(t),
       });
       const set = plano.estado === 'atribuida'
         ? {

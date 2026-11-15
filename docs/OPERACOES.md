@@ -51,7 +51,7 @@ Fazer um backup antes (secção 1). Consulta só de leitura equivalente (mongosh
 `db.tarefas.countDocuments({ utilizador_id: null, "equipa_atribuida.0": { $exists: true }, estado: { $in: ["por_atribuir","nao_atribuida","cancelada"] } })`
 
 ## 5. Reagendar limpezas fora do horário (uma vez, depois do deploy)
-Corrige as limpezas futuras atribuídas com hora fora do horário (antes das 09:00, incluindo a meia-noite, ou a acabar depois das 18:00). Só toca em tarefas de hoje em diante no estado `atribuida`; nunca em `em_curso`, `concluida` ou `cancelada`. Recalcula pela ordem atual, respeitando 09:00-18:00, almoço (início entre 12:00 e 14:00) e viagens; o que não couber passa ao motor para outra pessoa; o que ninguém puder fica por atribuir com o motivo real. É idempotente.
+Corrige as limpezas futuras atribuídas com hora fora do horário (antes das 10:00, incluindo a meia-noite, ou a acabar depois das 18:00). Só toca em tarefas de hoje em diante no estado `atribuida`; nunca em `em_curso`, `concluida` ou `cancelada`. Recalcula pela ordem atual, respeitando 10:00-18:00, almoço (início entre 12:00 e 14:00) e viagens; o que não couber passa ao motor para outra pessoa; o que ninguém puder fica por atribuir com o motivo real. É idempotente.
 ```
 cd backend
 # 1) só mostra números e a lista (tarefa, dia, pessoa, propriedade, antes, depois; sem dados de hóspedes)
@@ -62,6 +62,18 @@ MONGODB_URI="<uri de produção>" node scripts/reagendar-horarios.js --aplicar
 MONGODB_URI="<uri de produção>" node scripts/reagendar-horarios.js --aplicar --avisar
 ```
 `--empresa <id>` limita a uma empresa. Sem `--aplicar`, as passagens para outra pessoa são uma estimativa (o motor vê a base como está). Fazer um backup antes (secção 1) e correr primeiro sem `--aplicar`.
+
+## 5b. Refazer as limpezas futuras com o horário novo (início às 10:00)
+
+Caminho recomendado: **não apagar nada**. `backend/scripts/reatribuir-futuras.js` recalcula hora e pessoa de TODAS as limpezas futuras (de amanhã em diante) com o motor e o horário novos, e respeita o que o gestor fixou à mão. Cobre as cinco origens: Smoobu, proprietário, gestor em nome do proprietário, iCal e avulsas. Ficam de fora (nunca mudam): em curso, concluídas, canceladas, manutenções, as desatribuídas à mão e as **fixadas pelo gestor** (hora mudada à mão, dia posto numa data provisória, dia da reserva do proprietário mudado por ele, avulsa com hora ou pessoa). Limite: atribuir uma pessoa a uma limpeza que já tinha hora não deixa marca, por isso essa hora conta como automática.
+
+1. Simular (não escreve; faz a cópia em memória): `SRC_URI=<uri de produção, só leitura> node scripts/reatribuir-futuras.js`. Lê o `resumo` impresso: por origem, `total`, `fixadas_pelo_gestor`, `recalculadas` e `mudam`; confirma `plano.fora_do_horario` e `plano.sobrepostas` a 0.
+2. Aplicar (depois de aprovado): `SRC_URI=... node scripts/reatribuir-futuras.js --aplicar` (guarda uma cópia de segurança em `trabalho-local/reatribuicao-<dia>/`, escreve só o que não mudou desde a cópia e valida no fim). Com `--avisar` avisa quem mudou (1 aviso por pessoa).
+3. Se sobrarem limpezas antigas fora do horário (por exemplo as do passo anterior): `node scripts/reagendar-horarios.js` (simula) e `--aplicar`.
+
+**Convergência:** o desempate do motor depende da carga e da rotação, por isso um `--aplicar` pode não ficar estável à primeira. Depois de aplicar, volta a simular: se ainda houver mudanças, corre `--aplicar` uma segunda vez (à 2.ª passagem estabiliza). Corre sempre a simulação antes de cada `--aplicar`.
+
+`DELETE /api/gestor/tarefas/futuras` **não é o caminho certo para isto**: apaga de HOJE em diante (UTC) em vez de amanhã, apaga as avulsas e as manutenções sem as recriar, e só poupa as que estão ligadas a uma reserva de proprietário. A sincronização do Smoobu recria as do Smoobu e as reservas de proprietários/iCal que tenham ficado sem limpeza, mas não as avulsas.
 
 ## 6. Verificação em produção dos índices novos (só leitura)
 Os índices novos são parciais e só abrangem documentos que tenham o campo novo, por isso não falham com dados antigos. Para confirmar depois do arranque:
