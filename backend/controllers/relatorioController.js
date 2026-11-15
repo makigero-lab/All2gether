@@ -106,11 +106,13 @@ exports.getRelatorioProdutividade = async (req, res) => {
       tempoMedioAgg,
       porEstadoAgg,
       tempoRealAgg,
+      fechadasSistema,
+      confirmadasDepois,
     ] = await Promise.all([
       // Total (exclui canceladas).
       Tarefa.countDocuments({ ...matchBase, estado: { $ne: 'cancelada' } }),
-      // Concluídas.
-      Tarefa.countDocuments({ ...matchBase, estado: 'concluida' }),
+      // Concluídas pela pessoa (ou pelo gestor). As fechadas pelo sistema às 20:00 contam à parte.
+      Tarefa.countDocuments({ ...matchBase, estado: 'concluida', conclusao_origem: { $ne: 'automatica' } }),
       // Em atraso: não concluídas nem canceladas cuja data já passou.
       Tarefa.countDocuments({
         ...matchBase,
@@ -140,7 +142,8 @@ exports.getRelatorioProdutividade = async (req, res) => {
           $match: {
             ...matchBase,
             estado: 'concluida',
-            fechada_automaticamente_em: null, // fecho automático nunca conta no tempo real
+            conclusao_origem: { $ne: 'automatica' }, // fecho automático (ou confirmado depois) nunca conta no tempo real
+            confirmada_depois_em: null,
             hora_conclusao: { $ne: null, $type: 'date' },
           },
         },
@@ -158,6 +161,8 @@ exports.getRelatorioProdutividade = async (req, res) => {
           },
         },
       ]),
+      Tarefa.countDocuments({ ...matchBase, estado: 'concluida', conclusao_origem: 'automatica' }),
+      Tarefa.countDocuments({ ...matchBase, estado: 'concluida', confirmada_depois_em: { $ne: null } }),
     ]);
 
     const cargaTotalMinutos = cargaTotal[0]?.total || 0;
@@ -181,7 +186,10 @@ exports.getRelatorioProdutividade = async (req, res) => {
           _id: '$_membros',
           total: { $sum: 1 },
           concluidas: {
-            $sum: { $cond: [{ $eq: ['$estado', 'concluida'] }, 1, 0] },
+            $sum: { $cond: [{ $and: [{ $eq: ['$estado', 'concluida'] }, { $ne: ['$conclusao_origem', 'automatica'] }] }, 1, 0] },
+          },
+          fechadas_sistema: {
+            $sum: { $cond: [{ $and: [{ $eq: ['$estado', 'concluida'] }, { $eq: ['$conclusao_origem', 'automatica'] }] }, 1, 0] },
           },
           carga_minutos: { $sum: '$tempo_limpeza_minutos' },
         },
@@ -203,6 +211,7 @@ exports.getRelatorioProdutividade = async (req, res) => {
       nome: s._id ? staffMap.get(String(s._id)) ?? 'Desconhecido' : 'Por atribuir',
       total: s.total,
       concluidas: s.concluidas,
+      fechadas_sistema: s.fechadas_sistema,
       carga_minutos: s.carga_minutos,
       taxaConclusao: s.total > 0 ? round1(s.concluidas / s.total) : 0,
     }));
@@ -217,7 +226,10 @@ exports.getRelatorioProdutividade = async (req, res) => {
           },
           total: { $sum: 1 },
           concluidas: {
-            $sum: { $cond: [{ $eq: ['$estado', 'concluida'] }, 1, 0] },
+            $sum: { $cond: [{ $and: [{ $eq: ['$estado', 'concluida'] }, { $ne: ['$conclusao_origem', 'automatica'] }] }, 1, 0] },
+          },
+          fechadas_sistema: {
+            $sum: { $cond: [{ $and: [{ $eq: ['$estado', 'concluida'] }, { $eq: ['$conclusao_origem', 'automatica'] }] }, 1, 0] },
           },
           carga_minutos: { $sum: '$tempo_limpeza_minutos' },
         },
@@ -229,6 +241,7 @@ exports.getRelatorioProdutividade = async (req, res) => {
       data: d._id,
       total: d.total,
       concluidas: d.concluidas,
+      fechadas_sistema: d.fechadas_sistema,
       carga_minutos: d.carga_minutos,
     }));
 
@@ -266,6 +279,10 @@ exports.getRelatorioProdutividade = async (req, res) => {
       resumo: {
         totalTarefas,
         concluidas,
+        // Fechadas pelo sistema às 20:00 sem confirmação: à parte, não contam como concluídas pela pessoa.
+        fechadasSistema,
+        // Das concluídas pela pessoa, as que ela confirmou depois de o sistema as fechar (já contadas em `concluidas`).
+        confirmadasDepois,
         taxaConclusao: totalTarefas > 0 ? round1(concluidas / totalTarefas) : 0,
         emAtraso,
         taxaAtraso: totalTarefas > 0 ? round1(emAtraso / totalTarefas) : 0,
@@ -310,7 +327,7 @@ exports.getRelatorioTempoReal = async (req, res) => {
       estado: 'concluida',
       data: { $gte: inicio, $lt: fim },
     })
-      .select('propriedade_id tempo_limpeza_minutos tipo_limpeza hora_conclusao concluida_em iniciada_em inicio_origem primeiro_item_checklist_em conclusao_origem fechada_automaticamente_em')
+      .select('propriedade_id tempo_limpeza_minutos tipo_limpeza hora_conclusao concluida_em iniciada_em inicio_origem primeiro_item_checklist_em conclusao_origem confirmada_depois_em')
       .lean();
 
     const props = await Propriedade.find({ empresa_id: empresaId }).select('nome tempo_limpeza_minutos').lean();
@@ -319,7 +336,7 @@ exports.getRelatorioTempoReal = async (req, res) => {
 
     const inicios = { botao: 0, automatico: 0, sem_registo: 0 };
     for (const t of concluidas) {
-      if (t.fechada_automaticamente_em) continue; // fechadas pelo sistema: não entram nesta contagem
+      if (t.conclusao_origem === 'automatica' || t.confirmada_depois_em) continue; // fechadas pelo sistema: não entram nesta contagem
       if (t.inicio_origem === 'botao') inicios.botao++;
       else if (t.inicio_origem === 'automatico') inicios.automatico++;
       else inicios.sem_registo++;

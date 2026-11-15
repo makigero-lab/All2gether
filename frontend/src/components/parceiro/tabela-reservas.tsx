@@ -119,7 +119,7 @@ const CELULA_CARTAO =
 /** Marca visual de "por gravar" (não depende só da cor: leva também um traço e o aviso da linha). */
 // Colunas «Limpeza» (estado) e apagar coladas à direita ao fazer scroll na tabela larga (desktop).
 const FIXO_ACOES = "max-[1365px]:sticky right-0 z-[1] w-12 min-w-[3rem]";
-const FIXO_ESTADO = "max-[1365px]:sticky right-12 z-[1] w-[9rem] min-w-[9rem] max-[1365px]:shadow-[-8px_0_8px_-8px_rgba(0,0,0,0.25)]";
+const FIXO_ESTADO = "max-[1365px]:sticky right-12 z-[1] w-[9rem] min-w-[9rem] min-[1366px]:min-w-[11rem] max-[1365px]:shadow-[-8px_0_8px_-8px_rgba(0,0,0,0.25)]";
 const PENDENTE_TABELA = "bg-amber-100 dark:bg-amber-900/40 shadow-[inset_3px_0_0_0_rgb(217_119_6)]";
 const PENDENTE_CARTAO = "border-amber-600 bg-amber-50 dark:bg-amber-950/30";
 
@@ -183,6 +183,10 @@ function corDaLinha(l: Linha): { tr: string; faixa: string; cartao: string; fixo
   if (l.nova || l.pendentes.size > 0) {
     return { tr: "bg-amber-50/70 dark:bg-amber-950/25", fixo: "bg-background bg-gradient-to-r from-amber-50/70 to-amber-50/70 dark:from-amber-950/25 dark:to-amber-950/25", faixa: "border-l-4 border-l-amber-600", cartao: "border-l-4 border-l-amber-600 bg-amber-50 dark:bg-amber-950/30" };
   }
+  // Fechada pelo sistema, por confirmar: neutra (não é «concluída» com prova).
+  if (l.estado === "concluida" && l.reserva?.tarefa_gerada_id?.fechada_automaticamente) {
+    return { tr: "bg-muted/30", fixo: "bg-background bg-gradient-to-r from-muted/30 to-muted/30", faixa: "border-l-4 border-l-muted-foreground/40", cartao: "border-l-4 border-l-muted-foreground/40 bg-muted/30" };
+  }
   if (l.estado === "concluida") {
     return { tr: "bg-emerald-50/60 dark:bg-emerald-950/20", fixo: "bg-background bg-gradient-to-r from-emerald-50/60 to-emerald-50/60 dark:from-emerald-950/20 dark:to-emerald-950/20", faixa: "border-l-4 border-l-emerald-600", cartao: "border-l-4 border-l-emerald-600 bg-emerald-50/50 dark:bg-emerald-950/20" };
   }
@@ -215,6 +219,7 @@ function LegendaCores() {
         {item("bg-amber-600", "Por gravar")}
         {item("bg-destructive", "Erro / a eliminar")}
         {item("bg-emerald-600", "Concluída")}
+        {item("bg-muted-foreground/40", "Por confirmar (fechada pelo sistema)")}
         {item("bg-muted-foreground/50", "Cancelada")}
       </div>
     </div>

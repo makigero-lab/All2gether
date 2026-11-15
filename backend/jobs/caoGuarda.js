@@ -216,7 +216,7 @@ async function alertasTarefasIncompletas() {
   })
     .populate({
       path: 'propriedade_id',
-      select: 'nome',
+      select: 'nome morada morada_estruturada',
     })
     .populate({
       path: 'utilizador_id',
@@ -245,17 +245,25 @@ async function alertasTarefasIncompletas() {
   // enviar um único webhook agregado ao Autocell no final.
   const tarefasIdsNotificadas = [];
 
+  const { rotulosDeCasas } = require('../utils/rotuloCasa');
+  const rotulos = await rotulosDeCasas(tarefas.filter((t) => t.propriedade_id).map((t) => ({ ...t.propriedade_id, empresa_id: t.empresa_id })));
+
   for (const t of tarefas) {
     // Ignora membros entretanto desativados/eliminados; todos os outros são avisados.
     const membros = membrosPopulados(t).filter((u) => !u.eliminado_em && u.ativo);
     if (membros.length === 0) continue;
 
-    const nomePropriedade = t.propriedade_id?.nome ?? 'propriedade';
+    // Rótulo da casa com a rua só se houver casas homónimas.
+    const nomePropriedade = (t.propriedade_id && rotulos.get(String(t.propriedade_id._id))) || t.propriedade_id?.nome || 'propriedade';
+    // Ainda 'atribuida' = nunca começou (o job das 20:00 não a fecha): não se promete o fecho.
+    const texto = t.estado === 'atribuida'
+      ? `Ainda não começaste a limpeza da ${nomePropriedade}.`
+      : `Ainda não fechaste a limpeza da ${nomePropriedade}. Fecha-a na app antes das 20:00; depois disso o sistema fecha-a sem confirmação da equipa.`;
     for (const u of membros) {
       notificarUtilizador(
         String(u._id),
-        '⚠️ Tarefa Incompleta',
-        `Ainda não fechaste a limpeza da ${nomePropriedade}. Fecha-a na app antes das 20:00; depois disso o sistema fecha-a sem confirmação da equipa.`,
+        'Falta fechar a limpeza',
+        texto,
         '/staff',
         // Prompt 115 — Alerta de tarefa incompleta é "principal" → cria in-app.
         { criarInApp: true, tipo: 'aviso' }

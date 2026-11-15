@@ -33,6 +33,7 @@ import { NotificationBell } from "@/components/notification-bell";
 // Prompt Extra — parsearDataSegura para compatibilidade Safari/iOS.
 import { dataPorExtenso, parsearDataSegura } from "@/lib/utils";
 import { mensagemErro } from "@/lib/rascunho-staff";
+import { eFechadaPeloSistema } from "@/lib/estados";
 
 /**
  * Interface para a tarefa real vinda da API.
@@ -46,6 +47,9 @@ interface TarefaReal {
   estado: string;
   tempo_limpeza_minutos: number;
   tipo_limpeza?: string | null;
+  // Fechada pelo sistema às 20:00 sem confirmação (a pessoa ainda a pode confirmar).
+  conclusao_origem?: "staff" | "gestor" | "automatica" | null;
+  fechada_automaticamente_em?: string | null;
   // Prompt 136 — detalhes_reserva (para mostrar nome_hospede no cartão).
   detalhes_reserva?: {
     checkin?: string | null;
@@ -74,6 +78,7 @@ function adaptarTarefa(t: TarefaReal) {
     tempo_estimado_minutos: t.tempo_limpeza_minutos,
     tipo_limpeza: t.tipo_limpeza ?? null,
     estado: t.estado as "por_atribuir" | "atribuida" | "em_curso" | "concluida" | "cancelada",
+    conclusao_origem: t.conclusao_origem ?? null,
     tipo: t.tipo as "limpeza" | "check_in" | "check_out" | "manutencao" | "outro",
     endereco: t.propriedade_id?.morada,
     // v1.56.0 (Prompt 78) — data ISO real para extrair hora de início no TaskCard.
@@ -253,7 +258,19 @@ export default function StaffPage() {
   const tarefasAtivasDia = tarefasDoDia.filter((t) => t.estado !== "concluida");
   // Resumo do cabeçalho: só tarefas por fazer do dia selecionado.
   const totalMinutos = tarefasAtivasDia.reduce((acc, t) => acc + t.tempo_limpeza_minutos, 0);
-  const tarefasConcluidasDia = tarefasDoDia.filter((t) => t.estado === "concluida");
+  // Fechadas pelo sistema e ainda por confirmar (até 3 dias): aparecem no topo de «Hoje» até a pessoa confirmar.
+  const porConfirmar = useMemo(() => {
+    if (!mounted) return [];
+    const limite = Date.now() - 3 * 24 * 60 * 60 * 1000;
+    return tarefas.filter((t) => {
+      if (!eFechadaPeloSistema(t)) return false;
+      const em = parsearDataSegura(t.fechada_automaticamente_em ?? t.data);
+      return !!em && em.getTime() >= limite;
+    });
+  }, [tarefas, mounted]);
+  const idsPorConfirmar = new Set(porConfirmar.map((t) => t._id));
+  // Em «Hoje» as por confirmar vão para a sua secção; nos outros dias ficam no dia a que pertencem.
+  const tarefasConcluidasDia = tarefasDoDia.filter((t) => t.estado === "concluida" && !(offsetDia === 0 && idsPorConfirmar.has(t._id)));
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-md flex-col bg-muted/20 md:max-w-2xl md:border-x">
@@ -387,6 +404,21 @@ export default function StaffPage() {
               </Button>
             </div>
 
+            {/* Fechadas pelo sistema às 20:00 e ainda por confirmar */}
+            {offsetDia === 0 && porConfirmar.length > 0 && (
+              <section aria-labelledby="por-confirmar" className="space-y-3 rounded-lg border border-status-porat/40 bg-status-porat-bg/50 p-3">
+                <h2 id="por-confirmar" className="text-sm font-semibold uppercase tracking-wide text-status-porat">
+                  Por confirmar ({porConfirmar.length})
+                </h2>
+                <p className="text-xs text-muted-foreground">
+                  O sistema fechou estas limpezas às 20:00 sem a tua confirmação. Abre cada uma, tica a checklist, junta fotos e confirma.
+                </p>
+                {porConfirmar.map((t) => (
+                  <TaskCard key={t._id} tarefa={adaptarTarefa(t)} />
+                ))}
+              </section>
+            )}
+
             {/* Tarefas ativas do dia selecionado */}
             {tarefasAtivasDia.length > 0 && (
               <div className="space-y-4">
@@ -408,9 +440,11 @@ export default function StaffPage() {
                   </h2>
                   <div className="h-px flex-1 bg-border" />
                 </div>
-                <div className="space-y-4 opacity-60">
+                <div className="space-y-4">
                   {tarefasConcluidasDia.map((t) => (
-                    <TaskCard key={t._id} tarefa={adaptarTarefa(t)} />
+                    <div key={t._id} className={eFechadaPeloSistema(t) ? "" : "opacity-60"}>
+                      <TaskCard tarefa={adaptarTarefa(t)} />
+                    </div>
                   ))}
                 </div>
               </div>

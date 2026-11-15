@@ -23,6 +23,7 @@ import { pt } from "date-fns/locale";
 import { cn, parsearDataSegura, googleMapsUrl, extrairHoraISO } from "@/lib/utils";
 import { textoEquipa } from "@/lib/equipa";
 import { EstadoTarefaBadge } from "@/components/ui/estado-tarefa-badge";
+import { eFechadaPeloSistema } from "@/lib/estados";
 import { buttonVariants } from "@/components/ui/button";
 import {
   Card,
@@ -135,7 +136,7 @@ export function TaskCard({ tarefa, onAtualizar }: { tarefa: TarefaMock; onAtuali
               </div>
             </div>
           </div>
-          <EstadoTarefaBadge estado={tarefa.estado} className="shrink-0" />
+          <EstadoTarefaBadge estado={tarefa.estado} fechadaPeloSistema={eFechadaPeloSistema(tarefa)} perfil="staff" className="shrink-0" />
         </CardHeader>
 
         <CardContent className="space-y-3">

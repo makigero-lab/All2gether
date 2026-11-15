@@ -27,6 +27,10 @@
 const cron = require('node-cron');
 const Tarefa = require('../models/Tarefa');
 const H = require('../utils/horario');
+const { idsEquipa } = require('../utils/equipaTarefa');
+const { horaLisboa } = require('../utils/cicloTarefa');
+const { rotulosDeCasas } = require('../utils/rotuloCasa');
+const Propriedade = require('../models/Propriedade');
 
 const HORA_FECHO = 20; // Lisboa
 const JANELA_RECUPERACAO_DIAS = 3;
@@ -38,6 +42,28 @@ function diasParaFechar(agora) {
   if (H.minutosLocais(agora) >= HORA_FECHO * 60) dias.push(hoje);
   for (let i = 1; i <= JANELA_RECUPERACAO_DIAS; i++) dias.push(H.somarDiasISO(hoje, -i));
   return dias;
+}
+
+/**
+ * Aviso no sino (e push, se a pessoa a tiver) a cada pessoa da limpeza fechada, com link para a confirmar.
+ * Uma só vez por pessoa e limpeza (`chave`), por isso repetir/recuperar não duplica. Best-effort: nunca lança.
+ * A hora dita é a real do fecho (20:00 no caso normal, a da recuperação se o servidor estava a dormir).
+ */
+async function avisarPessoas(t, agora) {
+  try {
+    const { notificarUtilizador } = require('../utils/notificar');
+    const casa = await Propriedade.findById(t.propriedade_id).select('nome morada morada_estruturada empresa_id').lean();
+    const rotulo = casa ? (await rotulosDeCasas([casa])).get(String(casa._id)) : 'casa';
+    const msg = `O sistema fechou a limpeza da ${rotulo} às ${horaLisboa(agora)}. Podes confirmá-la com fotos.`;
+    for (const id of idsEquipa(t)) {
+      await notificarUtilizador(id, 'Limpeza fechada pelo sistema', msg, `/staff/tarefas/${t._id}`, {
+        criarInApp: true, tipo: 'aviso', mensagem: msg, tarefa_id: t._id, empresa_id: t.empresa_id ? String(t.empresa_id) : undefined,
+        chave: `fecho_automatico:${t._id}`,
+      });
+    }
+  } catch (e) {
+    console.error('⚠️  [Fecho automático] aviso à equipa:', e.message);
+  }
 }
 
 /**
@@ -57,7 +83,7 @@ async function executarFechoAutomatico(agora = new Date()) {
       fechada_automaticamente_em: null, // fechada uma vez: se o gestor a reabrir, não volta a fechar
       data: { $gte: desde, $lt: ate },
     })
-      .select('data')
+      .select('data empresa_id propriedade_id utilizador_id equipa_atribuida')
       .lean();
 
     let fechadas = 0;
@@ -67,7 +93,10 @@ async function executarFechoAutomatico(agora = new Date()) {
         { _id: t._id, tipo: 'limpeza', estado: 'em_curso', utilizador_id: { $ne: null }, fechada_automaticamente_em: null },
         { $set: { estado: 'concluida', conclusao_origem: 'automatica', concluida_em: agora, data_conclusao: agora, fechada_automaticamente_em: agora } }
       );
-      if (r.modifiedCount > 0) fechadas++;
+      if (r.modifiedCount > 0) {
+        fechadas++;
+        await avisarPessoas(t, agora);
+      }
     }
     if (fechadas > 0) {
       console.log(`🔒 [Fecho automático] ${fechadas} limpeza(s) fechadas pelo sistema.`);
@@ -95,9 +124,9 @@ function iniciarFechoAutomatico() {
   };
   cron.schedule(`0 ${HORA_FECHO} * * *`, correr, { timezone: 'Europe/Lisbon' });
   const t0 = setTimeout(correr, 30 * 1000);
-  const t1 = setInterval(correr, 60 * 60 * 1000);
+  // De hora a hora, à hora certa (recuperação; o guarda `aCorrer` evita sobrepor-se ao das 20:00).
+  cron.schedule('0 * * * *', correr, { timezone: 'Europe/Lisbon' });
   if (t0.unref) t0.unref();
-  if (t1.unref) t1.unref();
   return { executarFechoAutomatico };
 }
 

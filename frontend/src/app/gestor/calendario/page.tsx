@@ -48,7 +48,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { OfertaVagaBadge } from "@/components/gestor/oferta-vaga-badge";
 import { EstadoTarefaBadge } from "@/components/ui/estado-tarefa-badge";
-import { ESTADOS_TAREFA, infoEstadoTarefa } from "@/lib/estados";
+import { ESTADOS_TAREFA, infoEstadoTarefa, eFechadaPeloSistema } from "@/lib/estados";
 import { cn, temHoraReal } from "@/lib/utils";
 import {
   Dialog,
@@ -1271,7 +1271,7 @@ export default function CalendarioOperacionalPage() {
           </span>
           {!ausencia && <MotivoSaida t={x} className="block" />}
         </span>
-        {!ausencia && <EstadoTarefaBadge estado={x.estado} className="shrink-0" />}
+        {!ausencia && <EstadoTarefaBadge estado={x.estado} fechadaPeloSistema={eFechadaPeloSistema(x)} className="shrink-0" />}
         {!ausencia && <OfertaVagaBadge tarefa={x} className="basis-full" />}
       </button>
     );
@@ -1733,7 +1733,7 @@ export default function CalendarioOperacionalPage() {
                         {formatarHorario(t)}
                       </td>
                       <td className="px-4 py-3">
-                        <EstadoTarefaBadge estado={t.estado} />
+                        <EstadoTarefaBadge estado={t.estado} fechadaPeloSistema={eFechadaPeloSistema(t)} />
                       </td>
                     </tr>
                   ))}
@@ -1834,7 +1834,7 @@ export default function CalendarioOperacionalPage() {
             )}
             {/* Estado + tipo + propriedade */}
             <div className="flex flex-wrap items-center gap-2">
-              <EstadoTarefaBadge estado={tarefaSelecionada.estado} />
+              <EstadoTarefaBadge estado={tarefaSelecionada.estado} fechadaPeloSistema={eFechadaPeloSistema(tarefaSelecionada)} />
               {tarefaSelecionada.tipo === "limpeza" && podeMudarDia(tarefaSelecionada) && (
                 <Button type="button" variant="outline" size="sm" className="ml-auto h-9 gap-1.5" onClick={() => setMudarDiaAberto(true)}>
                   <CalendarClock className="h-4 w-4" aria-hidden="true" />

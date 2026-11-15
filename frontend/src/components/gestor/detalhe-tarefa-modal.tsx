@@ -40,6 +40,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EstadoTarefaBadge } from "@/components/ui/estado-tarefa-badge";
+import { eFechadaPeloSistema } from "@/lib/estados";
 import { OfertaVagaBadge } from "@/components/gestor/oferta-vaga-badge";
 import {
   Card,
@@ -92,18 +93,30 @@ export interface TarefaDetalheGestor {
   hora_conclusao?: string | null;
   concluida_em?: string | null;
   conclusao_origem?: "staff" | "gestor" | "automatica" | null;
+  fechada_automaticamente_em?: string | null;
 }
 
 /** Prova da limpeza (GET /api/gestor/tarefas/:id/prova): carrega-se só ao abrir o modal. */
 interface ProvaDTO {
   hora_conclusao: string | null;
   fechada_automaticamente?: boolean;
+  fechada_automaticamente_em?: string | null;
   confirmada_depois?: boolean;
   confirmada_depois_em?: string | null;
   fotos: string[];
   fotos_expiradas: boolean;
   checklist: { feitos: number; total: number };
   avarias: { _id: string | null; descricao: string; fotos: string[]; resolvido: boolean; data_registo: string | null }[];
+}
+
+/** «10/05 às 09:12» (Lisboa). */
+function diaEHora(iso?: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  const dia = d.toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit", timeZone: "Europe/Lisbon" });
+  const hora = d.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Lisbon" });
+  return `${dia} às ${hora}`;
 }
 
 function horaCurta(iso?: string | null): string {
@@ -313,7 +326,7 @@ export function DetalheTarefaModal({
                 {tarefa.propriedade_id?.nome ?? "Propriedade"}
               </h3>
               <Badge variant="outline">{tipoLabel[tarefa.tipo] ?? tarefa.tipo}</Badge>
-              <EstadoTarefaBadge estado={tarefa.estado} />
+              <EstadoTarefaBadge estado={tarefa.estado} fechadaPeloSistema={eFechadaPeloSistema(tarefa)} />
               <OfertaVagaBadge tarefa={tarefa} />
               {tarefa.tipo === "limpeza" && podeMudarDia(tarefa) && (
                 <Button type="button" variant="outline" size="sm" className="ml-auto h-9 gap-1.5" onClick={() => setMudarDiaAberto(true)}>
@@ -439,11 +452,11 @@ export function DetalheTarefaModal({
                   )}
                   {fechadaAuto ? (
                     <p className="rounded-md bg-status-porat-bg px-3 py-2 text-sm font-medium text-status-porat">
-                      Fechada pelo sistema às {horaCurta(tarefa.concluida_em)}, sem confirmação da equipa. Não há hora de conclusão nem fotos.
+                      Fechada pelo sistema às {horaCurta(prova?.fechada_automaticamente_em ?? tarefa.fechada_automaticamente_em ?? tarefa.concluida_em)}, sem confirmação da equipa. Não há hora de conclusão nem fotos.
                     </p>
                   ) : confirmadaTarde ? (
                     <p className="text-sm">
-                      <strong>Confirmada pela equipa depois do fecho automático</strong> ({horaCurta(prova?.confirmada_depois_em ?? tarefa.concluida_em)} de outro momento; não é a hora do trabalho).
+                      <strong>Confirmada pela equipa a {diaEHora(prova?.confirmada_depois_em ?? tarefa.concluida_em)}, depois do fecho automático.</strong> Não é a hora em que o trabalho terminou.
                     </p>
                   ) : null}
                   <p className="text-sm">
@@ -472,7 +485,7 @@ export function DetalheTarefaModal({
                       ))}
                     </ul>
                   )}
-                  {prova && prova.fotos.length === 0 && (
+                  {prova && prova.fotos.length === 0 && !fechadaAuto && (
                     <p className="text-sm text-muted-foreground">
                       {prova.fotos_expiradas
                         ? "As fotos já foram apagadas (guardam-se durante 7 dias)."

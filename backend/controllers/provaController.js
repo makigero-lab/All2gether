@@ -135,6 +135,8 @@ exports.getLimpezaDoParceiro = async (req, res) => {
       // Fechada pelo sistema, sem confirmação da equipa: o proprietário não vê hora nem «concluída».
       fechada_automaticamente: fechadaAutomaticamente(t),
       confirmada_depois: confirmadaDepois(t),
+      // Quando o SISTEMA a fechou (não é a hora em que o trabalho terminou).
+      fechada_em: fechadaAutomaticamente(t) ? t.concluida_em || null : null,
       fotos,
       fotos_expiradas: concluida && fotos.length === 0 && !fechadaAutomaticamente(t),
     });

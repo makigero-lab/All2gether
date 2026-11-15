@@ -6,6 +6,7 @@ import { Camera, CheckCircle2, Loader2 } from "lucide-react";
 import { adminGet } from "@/lib/api";
 import { mensagemErro } from "@/lib/rascunho-staff";
 import { Button } from "@/components/ui/button";
+import { EstadoTarefaBadge } from "@/components/ui/estado-tarefa-badge";
 import {
   Dialog,
   DialogHeader,
@@ -22,6 +23,7 @@ interface LimpezaDTO {
   estado: string;
   hora_conclusao: string | null;
   fechada_automaticamente?: boolean;
+  fechada_em?: string | null;
   confirmada_depois?: boolean;
   fotos: string[];
   fotos_expiradas: boolean;
@@ -78,11 +80,16 @@ export function LimpezaConcluida({
   const h = horaDe(hora);
   return (
     <>
-      <span className="inline-flex flex-nowrap items-center gap-1 whitespace-nowrap">
-        <span className="inline-flex items-center gap-1 rounded bg-status-conc-bg px-1.5 py-0.5 text-xs font-medium text-status-conc">
-          <CheckCircle2 className="h-3 w-3 shrink-0" aria-hidden="true" />
-          {fechadaPeloSistema ? "Fechada pelo sistema" : h ? `Concluída às ${h}` : "Concluída"}
-        </span>
+      {/* Quebra de linha quando o selo e o botão «Ver» não cabem (a 1366 px passavam por cima dos ícones ao lado). */}
+      <span className="inline-flex flex-wrap items-center gap-1">
+        {fechadaPeloSistema ? (
+          <EstadoTarefaBadge estado="concluida" fechadaPeloSistema perfil="proprietario" className="px-1.5 py-0.5 font-medium" />
+        ) : (
+          <span className="inline-flex items-center gap-1 whitespace-nowrap rounded bg-status-conc-bg px-1.5 py-0.5 text-xs font-medium text-status-conc">
+            <CheckCircle2 className="h-3 w-3 shrink-0" aria-hidden="true" />
+            {h ? `Concluída às ${h}` : "Concluída"}
+          </span>
+        )}
         <Button
           variant="ghost"
           size="sm"
@@ -98,7 +105,7 @@ export function LimpezaConcluida({
       <Dialog open={aberto} onOpenChange={setAberto}>
         <DialogHeader>
           <div>
-            <DialogTitle>{fechadaPeloSistema ? "Limpeza fechada pelo sistema" : "Limpeza concluída"}</DialogTitle>
+            <DialogTitle>{fechadaPeloSistema ? "Limpeza por confirmar" : "Limpeza concluída"}</DialogTitle>
             <DialogDescription>{casa}</DialogDescription>
           </div>
           <DialogClose onClick={() => setAberto(false)} />
@@ -118,7 +125,7 @@ export function LimpezaConcluida({
             <>
               {dados.fechada_automaticamente ? (
                 <p className="rounded-md bg-muted/50 p-3 text-sm">
-                  <strong>Fechada pelo sistema, sem confirmação da equipa.</strong> Não há hora de conclusão nem fotos desta limpeza.
+                  A equipa ainda não confirmou esta limpeza na app, por isso o sistema fechou-a às {horaDe(dados.fechada_em) ?? "20:00"}. Não há hora de conclusão nem fotos. Se precisares, fala com o gestor.
                 </p>
               ) : dados.confirmada_depois ? (
                 <p className="text-sm">

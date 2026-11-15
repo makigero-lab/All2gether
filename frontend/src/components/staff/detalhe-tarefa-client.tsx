@@ -356,7 +356,8 @@ export function DetalheTarefaClient({
           observacoes_staff: observacoes,
           fotos_conclusao: concluirFotos,
           // FIX (portal lavandaria) — Sacos de roupa suja recolhidos.
-          sacos_roupa_suja: sacosRoupaSuja === "" ? 0 : Number(sacosRoupaSuja),
+          // Na confirmação tardia não se pergunta (e não se sobrepõe o que já estava registado).
+          ...(fechadaPeloSistema ? {} : { sacos_roupa_suja: sacosRoupaSuja === "" ? 0 : Number(sacosRoupaSuja) }),
         }),
       });
       const data = await res.json();
@@ -364,8 +365,12 @@ export function DetalheTarefaClient({
       setConcluida(true);
       limparRascunho(dono, String(tarefa.id));
       setMostrarConcluir(false);
-      // Mostra a mensagem verde durante 1.2s antes de redirecionar.
-      setTimeout(() => router.push("/staff"), 1200);
+      // Mostra a mensagem verde durante 1.2s antes de redirecionar. Uma limpeza confirmada depois do fecho
+      // automático volta ao sítio de onde veio (lista, calendário ou aviso), não ao início.
+      setTimeout(() => {
+        if (fechadaPeloSistema && typeof window !== "undefined" && window.history.length > 1) router.back();
+        else router.push("/staff");
+      }, 1200);
     } catch (e) {
       setErroConcluir(mensagemErro(e, "Erro ao concluir tarefa."));
     } finally {
@@ -614,7 +619,7 @@ export function DetalheTarefaClient({
         {fechadaPeloSistema && !concluida && (
           <p role="status" className="flex items-start gap-2 rounded-md bg-status-porat-bg px-3 py-2.5 text-sm font-medium text-status-porat">
             <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-            O sistema fechou esta limpeza às 20:00 sem a tua confirmação. Junta fotos e notas e conclui-a para ficar registada.
+            O sistema fechou esta limpeza às {horaCurta(tarefa.fechada_automaticamente_em ?? null) ?? "20:00"} sem a tua confirmação. Tica a checklist, junta pelo menos 1 foto e confirma.
           </p>
         )}
 
@@ -853,7 +858,7 @@ export function DetalheTarefaClient({
         {concluida && (
           <div className="flex items-center justify-center gap-2 rounded-lg bg-status-conc p-3 text-center text-status-foreground">
             <CheckCircle2 className="h-5 w-5" />
-            <span className="font-semibold">Limpeza Concluída!</span>
+            <span className="font-semibold">{fechadaPeloSistema ? "Limpeza confirmada!" : "Limpeza Concluída!"}</span>
           </div>
         )}
 
@@ -1160,8 +1165,9 @@ export function DetalheTarefaClient({
               Confirmar conclusão
             </DialogTitle>
             <DialogDescription>
-              Tira pelo menos 1 foto da propriedade limpa para confirmar a
-              conclusão. (Máx. 5 fotos)
+              {fechadaPeloSistema
+                ? "Junta pelo menos 1 foto desta limpeza (podes anexar da galeria). Máx. 5 fotos."
+                : "Tira pelo menos 1 foto da propriedade limpa para confirmar a conclusão. (Máx. 5 fotos)"}
             </DialogDescription>
           </div>
           <DialogClose onClick={() => !concluindo && setMostrarConcluir(false)} />
@@ -1202,7 +1208,7 @@ export function DetalheTarefaClient({
             >
               <Camera className="h-4 w-4" />
               {concluirFotos.length === 0
-                ? "Tirar foto / Anexar (obrigatório)"
+                ? fechadaPeloSistema ? "Anexar da galeria ou tirar foto (obrigatório)" : "Tirar foto / Anexar (obrigatório)"
                 : `Adicionar mais (${concluirFotos.length}/5)`}
               <input
                 id="concluir-fotos"
@@ -1231,6 +1237,7 @@ export function DetalheTarefaClient({
           </p>
 
           {/* FIX (portal lavandaria) — Input de sacos de roupa suja recolhidos. */}
+          {!fechadaPeloSistema && (
           <div className="space-y-1.5 rounded-md border border-input p-3">
             <label htmlFor="sacos-roupa-suja" className="text-sm font-medium flex items-center gap-1.5">
               <Shirt className="h-4 w-4 text-brand-text" />
@@ -1249,6 +1256,7 @@ export function DetalheTarefaClient({
               Nº de sacos de roupa suja recolhidos nesta limpeza (para a lavandaria).
             </p>
           </div>
+          )}
 
           {erroConcluir && (
             <p className="flex items-center gap-2 text-sm text-destructive">

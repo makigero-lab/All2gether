@@ -27,7 +27,9 @@ function inicioFiavel(t) {
  * de conclusão deixa de ser a do trabalho).
  */
 function duracaoRealMinutos(t) {
-  if (t.fechada_automaticamente_em || t.conclusao_origem === 'automatica') return null;
+  // Fechada pelo sistema e ainda por confirmar, ou confirmada depois: a hora de conclusão não é a do trabalho.
+  // (Reaberta e concluída de verdade conta: `fechada_automaticamente_em` sozinho já não exclui.)
+  if (t.conclusao_origem === 'automatica' || t.confirmada_depois_em) return null;
   const fim = t.hora_conclusao || t.concluida_em;
   const ini = inicioFiavel(t);
   if (!fim || !ini) return null;

@@ -208,7 +208,7 @@ describe('Proprietário e tempo real', () => {
     };
     expect(duracaoRealMinutos(base)).toBe(60);
     expect(duracaoRealMinutos({ ...base, conclusao_origem: 'automatica', concluida_em: new Date('2040-05-10T19:00:00Z') })).toBeNull();
-    expect(duracaoRealMinutos({ ...base, conclusao_origem: 'staff', fechada_automaticamente_em: new Date('2040-05-10T19:00:00Z') })).toBeNull();
+    expect(duracaoRealMinutos({ ...base, conclusao_origem: 'staff', confirmada_depois_em: new Date('2040-05-11T09:00:00Z') })).toBeNull();
     const { casas, excluidas } = calcularPorCasa([{ ...base, conclusao_origem: 'automatica' }], new Map());
     expect(casas).toHaveLength(0);
     expect(excluidas).toBe(1);
@@ -315,5 +315,81 @@ describe('Cão de Guarda: fases em horas diferentes', () => {
     require('../jobs/fechoAutomatico').iniciarFechoAutomatico();
     expect(espiao.mock.calls[0][0]).toBe('0 20 * * *');
     expect(espiao.mock.calls[0][2].timezone).toBe('Europe/Lisbon');
+    expect(espiao.mock.calls[1][0]).toBe('0 * * * *'); // recuperação de hora a hora, à hora certa
+  });
+});
+
+describe('Ronda 2: aviso à equipa, reaberta, presas e rótulos', () => {
+  test('o fecho avisa cada pessoa no sino, com link para confirmar, uma só vez', async () => {
+    const c = await cenario();
+    const t = await c.tarefa(T_HOJE);
+    await executarFechoAutomatico(AGORA);
+    await executarFechoAutomatico(new Date(AGORA.getTime() + 3600000));
+    const n1 = await Notificacao.find({ utilizador_id: c.ana._id, chave: `fecho_automatico:${t._id}` }).lean();
+    expect(n1).toHaveLength(1);
+    expect(n1[0].url).toBe(`/staff/tarefas/${t._id}`);
+    expect(n1[0].mensagem).toMatch(/O sistema fechou a limpeza da Casa\d+ às 20:00\. Podes confirmá-la com fotos\./);
+  });
+
+  test('reaberta pelo gestor e concluída de verdade: sai da lista e conta no tempo real', async () => {
+    const c = await cenario();
+    const t = await c.tarefa(T_HOJE);
+    await executarFechoAutomatico(AGORA);
+    await request(app).patch(`/api/gestor/tarefas/${t._id}/estado`).set(auth(c.tokG)).send({ estado: 'em_curso' });
+    const dia = new Date();
+    const ini = new Date(dia.getTime() - 3600000);
+    await Tarefa.updateOne({ _id: t._id }, { $set: { inicio_origem: 'botao', iniciada_em: ini, fechada_automaticamente_em: dia } });
+    const r = await request(app).patch(`/api/staff/tarefas/${t._id}/concluir`).set(auth(c.tokAna)).send({ fotos_conclusao: [FOTO] });
+    expect(r.status).toBe(200);
+    const d = await Tarefa.findById(t._id).lean();
+    expect(duracaoRealMinutos(d)).toBeGreaterThanOrEqual(5);
+    const l = await request(app).get('/api/gestor/limpezas/fechadas-automaticamente').set(auth(c.tokG));
+    expect(l.body.limpezas.map((x) => x._id)).not.toContain(String(t._id));
+  });
+
+  test('em_curso há mais de 3 dias aparece em «presas» (sem ser fechada) e só da empresa', async () => {
+    const c = await cenario();
+    const outra = await cenario();
+    const hoje = new Date();
+    const dia = (n) => new Date(Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth(), hoje.getUTCDate() - n, 10));
+    const velha = await c.tarefa(dia(5));
+    await c.tarefa(dia(1)); // dentro da janela de recuperação: não é «presa»
+    await outra.tarefa(dia(5));
+    const r = await request(app).get('/api/gestor/limpezas/fechadas-automaticamente').set(auth(c.tokG));
+    expect(r.body.presas.map((x) => x._id)).toEqual([String(velha._id)]);
+    expect((await Tarefa.findById(velha._id).lean()).estado).toBe('em_curso');
+  });
+
+  test('relatório de produtividade: fechadas pelo sistema à parte; confirmadas depois contam como concluídas pela pessoa', async () => {
+    const c = await cenario();
+    const agora = new Date();
+    const dia = new Date(Date.UTC(agora.getUTCFullYear(), agora.getUTCMonth(), agora.getUTCDate(), 10));
+    await c.tarefa(dia, { estado: 'concluida', conclusao_origem: 'staff', concluida_em: agora, hora_conclusao: agora });
+    await c.tarefa(dia, { estado: 'concluida', conclusao_origem: 'staff', confirmada_depois_em: agora, fechada_automaticamente_em: agora, concluida_em: agora });
+    await c.tarefa(dia, { estado: 'concluida', conclusao_origem: 'automatica', fechada_automaticamente_em: agora, concluida_em: agora });
+    const r = await request(app).get('/api/gestor/relatorios/produtividade').set(auth(c.tokG));
+    expect(r.status).toBe(200);
+    expect(r.body.resumo.totalTarefas).toBe(3);
+    expect(r.body.resumo.concluidas).toBe(2);
+    expect(r.body.resumo.fechadasSistema).toBe(1);
+    expect(r.body.resumo.confirmadasDepois).toBe(1);
+    const ana = r.body.porStaff.find((s) => s.nome === 'Ana');
+    expect(ana.concluidas).toBe(2);
+    expect(ana.fechadas_sistema).toBe(1);
+    expect(ana.taxaConclusao).toBeCloseTo(0.7, 1);
+  });
+
+  test('rótulo da casa leva a rua só quando há casas homónimas na mesma empresa', async () => {
+    const { rotulosDeCasas } = require('../utils/rotuloCasa');
+    const e = await Empresa.create({ nome: 'E' + ++n });
+    const outraE = await Empresa.create({ nome: 'E' + ++n });
+    const mk = (emp, nome, rua) => Propriedade.create({ nome, empresa_id: emp._id, smoobu_id: String(++n), ativo: true, capacidade_hospedes: 2, tempo_limpeza_minutos: 60, morada_estruturada: { rua, cidade: 'Lisboa' } });
+    const a1 = await mk(e, 'Casa Azul', 'Rua Augusta');
+    await mk(e, 'Casa Azul', 'Rua do Ouro');
+    const so = await mk(e, 'Casa Verde', 'Rua X');
+    await mk(outraE, 'Casa Verde', 'Rua Y'); // outra empresa não conta
+    const m = await rotulosDeCasas([a1, so].map((p) => p.toObject()));
+    expect(m.get(String(a1._id))).toBe('Casa Azul (Rua Augusta)');
+    expect(m.get(String(so._id))).toBe('Casa Verde');
   });
 });
