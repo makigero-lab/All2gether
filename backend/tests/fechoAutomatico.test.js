@@ -385,7 +385,7 @@ describe('Ronda 2: aviso à equipa, reaberta, presas e rótulos', () => {
     const outraE = await Empresa.create({ nome: 'E' + ++n });
     const mk = (emp, nome, rua) => Propriedade.create({ nome, empresa_id: emp._id, smoobu_id: String(++n), ativo: true, capacidade_hospedes: 2, tempo_limpeza_minutos: 60, morada_estruturada: { rua, cidade: 'Lisboa' } });
     const a1 = await mk(e, 'Casa Azul', 'Rua Augusta');
-    await mk(e, 'Casa Azul', 'Rua do Ouro');
+    await mk(e, 'casa azul ', 'Rua do Ouro'); // maiúsculas/espaços diferentes: continua homónima
     const so = await mk(e, 'Casa Verde', 'Rua X');
     await mk(outraE, 'Casa Verde', 'Rua Y'); // outra empresa não conta
     const m = await rotulosDeCasas([a1, so].map((p) => p.toObject()));

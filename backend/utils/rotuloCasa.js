@@ -17,7 +17,8 @@ async function rotulosDeCasas(casas) {
   if (lista.length === 0) return out;
   const homonimas = await Propriedade.find({
     empresa_id: { $in: [...new Set(lista.map((c) => String(c.empresa_id)))] },
-    nome: { $in: [...new Set(lista.map((c) => c.nome))] },
+    // Insensível a maiúsculas (como `norm`): regex ancorada com escape, uma por nome.
+    $or: [...new Set(lista.map((c) => norm(c.nome)))].map((n) => ({ nome: new RegExp(`^\\s*${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i') })),
   }).select('nome empresa_id').lean();
   const contagem = new Map();
   for (const h of homonimas) {

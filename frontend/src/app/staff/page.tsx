@@ -34,6 +34,7 @@ import { NotificationBell } from "@/components/notification-bell";
 import { dataPorExtenso, parsearDataSegura } from "@/lib/utils";
 import { mensagemErro } from "@/lib/rascunho-staff";
 import { eFechadaPeloSistema } from "@/lib/estados";
+import { rotulosDeCasas } from "@/lib/casas-rotulo";
 
 /**
  * Interface para a tarefa real vinda da API.
@@ -41,7 +42,7 @@ import { eFechadaPeloSistema } from "@/lib/estados";
  */
 interface TarefaReal {
   _id: string;
-  propriedade_id?: { nome: string; morada?: string; fornecedor_id?: string | null } | null;
+  propriedade_id?: { _id?: string; nome: string; morada?: string; fornecedor_id?: string | null } | null;
   data: string;
   tipo: string;
   estado: string;
@@ -70,9 +71,10 @@ interface TarefaReal {
  * Adapta a tarefa real da API para o formato que o TaskCard espera
  *
  */
-function adaptarTarefa(t: TarefaReal) {
+function adaptarTarefa(t: TarefaReal, rotulos?: Map<string, string>) {
   return {
     id: t._id,
+    rotulo_casa: (t.propriedade_id?._id && rotulos?.get(t.propriedade_id._id)) || undefined,
     propriedade_nome: t.propriedade_id?.nome ?? "Propriedade",
     hora_limite: "",
     tempo_estimado_minutos: t.tempo_limpeza_minutos,
@@ -268,6 +270,12 @@ export default function StaffPage() {
       return !!em && em.getTime() >= limite;
     });
   }, [tarefas, mounted]);
+  // Rótulo das casas (a rua só nas homónimas).
+  const rotulos = useMemo(() => {
+    const vistas = new Map<string, { _id: string; nome: string; morada?: string }>();
+    for (const t of tarefas) if (t.propriedade_id?._id) vistas.set(t.propriedade_id._id, { _id: t.propriedade_id._id, nome: t.propriedade_id.nome, morada: t.propriedade_id.morada });
+    return rotulosDeCasas([...vistas.values()]);
+  }, [tarefas]);
   const idsPorConfirmar = new Set(porConfirmar.map((t) => t._id));
   // Em «Hoje» as por confirmar vão para a sua secção; nos outros dias ficam no dia a que pertencem.
   const tarefasConcluidasDia = tarefasDoDia.filter((t) => t.estado === "concluida" && !(offsetDia === 0 && idsPorConfirmar.has(t._id)));
@@ -414,7 +422,7 @@ export default function StaffPage() {
                   O sistema fechou estas limpezas às 20:00 sem a tua confirmação. Abre cada uma, tica a checklist, junta fotos e confirma.
                 </p>
                 {porConfirmar.map((t) => (
-                  <TaskCard key={t._id} tarefa={adaptarTarefa(t)} />
+                  <TaskCard key={t._id} tarefa={adaptarTarefa(t, rotulos)} mostrarDia />
                 ))}
               </section>
             )}
@@ -443,7 +451,7 @@ export default function StaffPage() {
                 <div className="space-y-4">
                   {tarefasConcluidasDia.map((t) => (
                     <div key={t._id} className={eFechadaPeloSistema(t) ? "" : "opacity-60"}>
-                      <TaskCard tarefa={adaptarTarefa(t)} />
+                      <TaskCard tarefa={adaptarTarefa(t, rotulos)} />
                     </div>
                   ))}
                 </div>

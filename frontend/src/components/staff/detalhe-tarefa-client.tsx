@@ -370,7 +370,7 @@ export function DetalheTarefaClient({
       setTimeout(() => {
         if (fechadaPeloSistema && typeof window !== "undefined" && window.history.length > 1) router.back();
         else router.push("/staff");
-      }, 1200);
+      }, fechadaPeloSistema ? 3000 : 1200);
     } catch (e) {
       setErroConcluir(mensagemErro(e, "Erro ao concluir tarefa."));
     } finally {
@@ -856,7 +856,7 @@ export function DetalheTarefaClient({
 
         {/* Mensagem de sucesso verde vibrante */}
         {concluida && (
-          <div className="flex items-center justify-center gap-2 rounded-lg bg-status-conc p-3 text-center text-status-foreground">
+          <div role="status" className="flex items-center justify-center gap-2 rounded-lg bg-status-conc p-3 text-center text-status-foreground">
             <CheckCircle2 className="h-5 w-5" />
             <span className="font-semibold">{fechadaPeloSistema ? "Limpeza confirmada!" : "Limpeza Concluída!"}</span>
           </div>

@@ -127,6 +127,8 @@ export type TipoTarefa =
 export interface TarefaMock {
   id: string;
   propriedade_nome: string;
+  /** Nome com a rua entre parênteses só se há casas homónimas (se faltar, usa `propriedade_nome`). */
+  rotulo_casa?: string;
   hora_limite: string;
   tempo_estimado_minutos: number;
   estado: EstadoTarefa;
