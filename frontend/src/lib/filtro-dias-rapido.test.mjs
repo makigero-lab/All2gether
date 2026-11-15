@@ -47,7 +47,22 @@ test("escolha guardada: sem localStorage nunca lanca", () => {
   globalThis.window = { localStorage: { getItem: (k) => mem[k] ?? null, setItem: (k, v) => { mem[k] = v; } } };
   f.guardarEscolha("u1", ["hoje", "amanha"]);
   assert.deepEqual(f.lerEscolhaGuardada("u1"), ["hoje", "amanha"]);
-  mem["all2gether_tarefas_filtro_dias:u2"] = '["x",1,"hoje"]';
+  mem["all2gether_tarefas_filtro_dias:u2"] = JSON.stringify({ dia: f.hojeLisboaISO(new Date()), escolha: ["x", 1, "hoje"] });
   assert.deepEqual(f.lerEscolhaGuardada("u2"), ["hoje"]);
+  mem["all2gether_tarefas_filtro_dias:u3"] = '["hoje"]'; // formato antigo, sem dia: caduca
+  assert.deepEqual(f.lerEscolhaGuardada("u3"), []);
+  delete globalThis.window;
+});
+
+test("a escolha só vale no mesmo dia de Lisboa; no dia seguinte começa sem filtro", () => {
+  const mem = {};
+  globalThis.window = { localStorage: { getItem: (k) => mem[k] ?? null, setItem: (k, v) => { mem[k] = v; } } };
+  const segunda = new Date("2026-11-16T10:00:00Z");
+  f.guardarEscolha("u1", ["hoje", "amanha"], segunda);
+  assert.deepEqual(f.lerEscolhaGuardada("u1", new Date("2026-11-16T22:00:00Z")), ["hoje", "amanha"]);
+  assert.deepEqual(f.lerEscolhaGuardada("u1", new Date("2026-11-17T09:00:00Z")), []);
+  // Lisboa: 23:30 UTC de verão já é o dia seguinte.
+  f.guardarEscolha("u1", ["hoje"], new Date("2026-07-14T20:00:00Z"));
+  assert.deepEqual(f.lerEscolhaGuardada("u1", new Date("2026-07-14T23:30:00Z")), []);
   delete globalThis.window;
 });

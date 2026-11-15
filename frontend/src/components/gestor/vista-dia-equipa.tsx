@@ -56,6 +56,9 @@ function horasTexto(min: number): string {
   return `${(Math.round((min / 60) * 100) / 100).toLocaleString("pt-PT")} h`;
 }
 const PX_POR_MIN = 1.4;
+// Dia de trabalho (hora de Lisboa): o que fica antes das 10:00 ou a partir das 17:30 sombreia-se levemente.
+const INICIO_TRABALHO = 10 * 60;
+const FIM_TRABALHO = 17 * 60 + 30;
 
 function minutosDe(hhmm: string): number | null {
   const m = /^(\d{2}):(\d{2})$/.exec(hhmm);
@@ -387,6 +390,12 @@ export function VistaDiaEquipa({
                   role="group"
                   aria-label={`${c.nome}: ${plural(c.itens.length, "limpeza")}`}
                 >
+                  {dados.inicio < INICIO_TRABALHO && (
+                    <div className="vista-dia__fora" style={{ top: 0, height: (INICIO_TRABALHO - dados.inicio) * PX_POR_MIN }} aria-hidden="true" data-testid="fora-antes" />
+                  )}
+                  {dados.fim > FIM_TRABALHO && (
+                    <div className="vista-dia__fora" style={{ top: (FIM_TRABALHO - dados.inicio) * PX_POR_MIN, height: (dados.fim - FIM_TRABALHO) * PX_POR_MIN }} aria-hidden="true" data-testid="fora-depois" />
+                  )}
                   {hoje && minAgora >= dados.inicio && minAgora <= dados.fim && (
                     <div className="vista-dia__agora" style={{ top: (minAgora - dados.inicio) * PX_POR_MIN }} aria-hidden="true" />
                   )}

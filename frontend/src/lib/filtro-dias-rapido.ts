@@ -28,19 +28,21 @@ export function passaFiltroRapido(dataISO: string | null | undefined, dias: stri
 const CHAVE = "all2gether_tarefas_filtro_dias";
 
 /** Escolha lembrada por utilizador (opcional; nunca lança). */
-export function lerEscolhaGuardada(utilizadorId: string | null | undefined): DiaRapido[] {
+export function lerEscolhaGuardada(utilizadorId: string | null | undefined, agora: Date = new Date()): DiaRapido[] {
   try {
     const bruto = window.localStorage.getItem(`${CHAVE}:${utilizadorId || "anon"}`);
-    const arr = bruto ? JSON.parse(bruto) : [];
-    return Array.isArray(arr) ? arr.filter((x): x is DiaRapido => x === "hoje" || x === "amanha") : [];
+    const o = bruto ? JSON.parse(bruto) : null;
+    // Só vale no mesmo dia de Lisboa em que foi escolhida: no dia seguinte começa sem filtro (e o formato antigo, sem dia, caduca).
+    if (!o || Array.isArray(o) || o.dia !== hojeLisboaISO(agora) || !Array.isArray(o.escolha)) return [];
+    return o.escolha.filter((x: unknown): x is DiaRapido => x === "hoje" || x === "amanha");
   } catch {
     return [];
   }
 }
 
-export function guardarEscolha(utilizadorId: string | null | undefined, escolha: DiaRapido[]): void {
+export function guardarEscolha(utilizadorId: string | null | undefined, escolha: DiaRapido[], agora: Date = new Date()): void {
   try {
-    window.localStorage.setItem(`${CHAVE}:${utilizadorId || "anon"}`, JSON.stringify(escolha));
+    window.localStorage.setItem(`${CHAVE}:${utilizadorId || "anon"}`, JSON.stringify({ dia: hojeLisboaISO(agora), escolha }));
   } catch {
     /* sem armazenamento: continua a funcionar sem lembrar */
   }

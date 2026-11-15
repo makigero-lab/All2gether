@@ -60,6 +60,8 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { adminGet, adminPost, adminPatch, type PropriedadeDTO, type UtilizadorDTO } from "@/lib/api";
+import { avisoComAcao } from "@/lib/aviso-horario";
+import { rotulosDeCasas, rotuloDaCasa } from "@/lib/casas-rotulo";
 import { textoEquipaGestor, textoFalta } from "@/lib/equipa";
 import { mapaCoresEquipa } from "@/lib/cores-equipa";
 import { VistaDiaEquipa, type TarefaDia } from "@/components/gestor/vista-dia-equipa";
@@ -324,7 +326,16 @@ export default function CalendarioOperacionalPage() {
     estado: "",
   });
 
-  const [tarefas, setTarefas] = useState<TarefaCalendario[]>([]);
+  const [tarefasBrutas, setTarefas] = useState<TarefaCalendario[]>([]);
+  // Todas as casas da empresa (também as inativas): base do rótulo único das casas homónimas.
+  const [todasPropriedades, setTodasPropriedades] = useState<PropriedadeDTO[]>([]);
+  const rotulosCasas = useMemo(() => rotulosDeCasas(todasPropriedades), [todasPropriedades]);
+  const rotuloCasa = (c: { _id?: string; nome?: string } | null | undefined) => rotuloDaCasa(rotulosCasas, c);
+  // As tarefas já trazem o rótulo único no nome da casa (cartões, filtros, modal e exportação mostram o mesmo).
+  const tarefas = useMemo<TarefaCalendario[]>(
+    () => tarefasBrutas.map((t) => (t.propriedade_id ? { ...t, propriedade_id: { ...t.propriedade_id, nome: rotuloDaCasa(rotulosCasas, t.propriedade_id) } } : t)),
+    [tarefasBrutas, rotulosCasas]
+  );
   const [propriedades, setPropriedades] = useState<PropriedadeDTO[]>([]);
   const [equipa, setEquipa] = useState<UtilizadorDTO[]>([]);
   const [loading, setLoading] = useState(true);
@@ -388,6 +399,7 @@ export default function CalendarioOperacionalPage() {
         adminGet<{ propriedades: PropriedadeDTO[] }>("/api/gestor/propriedades"),
         adminGet<{ utilizadores: UtilizadorDTO[] }>("/api/gestor/equipa"),
       ]);
+      setTodasPropriedades(propRes.propriedades ?? []);
       setPropriedades((propRes.propriedades ?? []).filter((p) => p.ativo));
       setEquipa(
         // Prompt 105 — Só staff pode receber limpezas.
@@ -925,14 +937,14 @@ export default function CalendarioOperacionalPage() {
       );
       if (vaga) {
         // A equipa mudou: volta a pedir a lista (traz a equipa completa e as vagas atualizadas).
-        const avisoVaga = [res.warning, res.aviso_horario].filter(Boolean).join(" | ");
+        const avisoVaga = avisoComAcao(`Atribuída a ${equipa.find((u) => u._id === reatribuindoPara)?.nome ?? "a pessoa escolhida"}.`, res.warning, res.aviso_horario);
         if (avisoVaga) setWarningToast(avisoVaga);
         setTarefaSelecionada(null);
         setReatribuindoPara("");
         await carregarTarefas();
         return;
       }
-      const avisoReatribuir = [res.warning, res.aviso_horario].filter(Boolean).join(" | ");
+      const avisoReatribuir = avisoComAcao(`Reatribuída a ${equipa.find((u) => u._id === reatribuindoPara)?.nome ?? "a pessoa escolhida"}.`, res.warning, res.aviso_horario);
       if (avisoReatribuir) setWarningToast(avisoReatribuir);
 
       // Atualiza já o cartão (data recalculada, nova pessoa) e depois volta a pedir a lista.
@@ -1108,9 +1120,9 @@ export default function CalendarioOperacionalPage() {
           return;
         }
         // 2º clique (conflitoForcar=true) ou warning de distância: mostra toast.
-        setWarningToast([res.warning, res.aviso_horario].filter(Boolean).join(" | "));
+        setWarningToast(avisoComAcao("Limpeza criada.", res.warning, res.aviso_horario));
       } else if (res.aviso_horario) {
-        setWarningToast(res.aviso_horario);
+        setWarningToast(avisoComAcao("Limpeza criada.", res.aviso_horario));
       }
       setConflitoForcar(false);
       setNovaForm({
@@ -1428,7 +1440,7 @@ export default function CalendarioOperacionalPage() {
               <option value="">Todas</option>
               {propriedades.map((p) => (
                 <option key={p._id} value={p._id}>
-                  {p.nome}
+                  {rotuloCasa(p)}
                 </option>
               ))}
             </select>
@@ -2092,7 +2104,7 @@ export default function CalendarioOperacionalPage() {
               >
                 <option value="">— Selecionar —</option>
                 {propriedades.map((p) => (
-                  <option key={p._id} value={p._id}>{p.nome}</option>
+                  <option key={p._id} value={p._id}>{rotuloCasa(p)}</option>
                 ))}
               </select>
             </div>
