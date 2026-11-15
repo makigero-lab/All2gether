@@ -21,6 +21,7 @@ import { pt } from "date-fns/locale";
 
 import { Button } from "@/components/ui/button";
 import { EstadoTarefaBadge } from "@/components/ui/estado-tarefa-badge";
+import { eFechadaPeloSistema } from "@/lib/estados";
 import {
   Card,
   CardContent,
@@ -284,7 +285,9 @@ export default function StaffCalendarioPage() {
                               <div
                                 className={cn(
                                   "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg",
-                                  t.estado === "concluida"
+                                  eFechadaPeloSistema(t)
+                                    ? "bg-status-porat-bg text-status-porat"
+                                    : t.estado === "concluida"
                                     ? "bg-status-conc-bg text-status-conc"
                                     : t.estado === "por_atribuir"
                                     ? "bg-status-porat-bg text-status-porat"
@@ -411,7 +414,7 @@ export default function StaffCalendarioPage() {
                                         </span>
                                       </p>
                                     </div>
-                                    <EstadoTarefaBadge estado={t.estado} />
+                                    <EstadoTarefaBadge estado={t.estado} fechadaPeloSistema={eFechadaPeloSistema(t)} perfil="staff" />
                                   </CardContent>
                                 </Card>
                               </Link>

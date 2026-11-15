@@ -145,6 +145,8 @@ router.get('/reservas/exportar-excel', auth, isGestor, exportarExcel);
 router.post('/tarefas/:id/atraso', auth, isGestor, reportarAtrasoTarefa);
 // Prova da limpeza (fotos só ao abrir) e avarias (ciclo fechado).
 router.get('/tarefas/:id/prova', auth, isGestor, getProvaLimpeza);
+// Limpezas fechadas pelo sistema às 20:00 (por omissão últimos 7 dias).
+router.get('/limpezas/fechadas-automaticamente', auth, isGestor, require('../controllers/fechoAutomaticoController').listarFechadasAutomaticamente);
 router.patch('/tarefas/:id/avarias/:avariaId/resolver', auth, isGestor, resolverAvaria);
 
 // Gestão manual de tarefas.

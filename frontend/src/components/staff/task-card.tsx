@@ -23,6 +23,7 @@ import { pt } from "date-fns/locale";
 import { cn, parsearDataSegura, googleMapsUrl, extrairHoraISO } from "@/lib/utils";
 import { textoEquipa } from "@/lib/equipa";
 import { EstadoTarefaBadge } from "@/components/ui/estado-tarefa-badge";
+import { eFechadaPeloSistema } from "@/lib/estados";
 import { buttonVariants } from "@/components/ui/button";
 import {
   Card,
@@ -79,7 +80,16 @@ function horaInicio(dataISO?: string): string {
  * Maps fica por cima (`relative z-10`), por isso não abre a tarefa. O "botão"
  * "Ver detalhes" é só visual (div): o clique cai no overlay do link.
  */
-export function TaskCard({ tarefa, onAtualizar }: { tarefa: TarefaMock; onAtualizar?: () => void }) {
+/** «Sáb 14/11» (Lisboa) do dia da tarefa. */
+function diaCurtoLisboa(iso: string): string {
+  const d = parsearDataSegura(iso);
+  if (!d) return "";
+  const sem = d.toLocaleDateString("pt-PT", { weekday: "short", timeZone: "Europe/Lisbon" }).replace(".", "");
+  const dm = d.toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit", timeZone: "Europe/Lisbon" });
+  return `${sem.charAt(0).toUpperCase()}${sem.slice(1)} ${dm}`;
+}
+
+export function TaskCard({ tarefa, onAtualizar, mostrarDia = false }: { tarefa: TarefaMock; onAtualizar?: () => void; mostrarDia?: boolean }) {
   const Icon = tipoIcon[tarefa.tipo];
   const porAtribuir = tarefa.estado === "por_atribuir";
   const hora = horaInicio(tarefa.data);
@@ -123,11 +133,12 @@ export function TaskCard({ tarefa, onAtualizar }: { tarefa: TarefaMock; onAtuali
                   prefetch
                   className="after:absolute after:inset-0 after:content-[''] focus-visible:outline-none focus-visible:after:rounded-lg focus-visible:after:ring-2 focus-visible:after:ring-ring"
                 >
-                  {tarefa.propriedade_nome}
+                  {tarefa.rotulo_casa ?? tarefa.propriedade_nome}
                   <span className="sr-only"> — {tipoLabel[tarefa.tipo]}{porAtribuir ? ", aguarda atribuição" : ""}, ver detalhes</span>
                 </Link>
               </CardTitle>
               <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                {mostrarDia && tarefa.data && <span className="font-medium text-foreground">{diaCurtoLisboa(tarefa.data)}</span>}
                 {/* Só a etiqueta do tipo («Limpeza intermédia»), sem «Limpeza» a repetir. */}
                 {tarefa.tipo === "limpeza" && tarefa.tipo_limpeza && tarefa.tipo_limpeza !== "normal"
                   ? <TipoLimpezaBadge tipo={tarefa.tipo_limpeza} />
@@ -135,8 +146,16 @@ export function TaskCard({ tarefa, onAtualizar }: { tarefa: TarefaMock; onAtuali
               </div>
             </div>
           </div>
-          <EstadoTarefaBadge estado={tarefa.estado} className="shrink-0" />
+          {/* O selo «Fechada pelo sistema · Confirmar» é largo: vai para uma linha própria, por baixo do nome. */}
+          {!eFechadaPeloSistema(tarefa) && (
+            <EstadoTarefaBadge estado={tarefa.estado} perfil="staff" className="shrink-0" />
+          )}
         </CardHeader>
+        {eFechadaPeloSistema(tarefa) && (
+          <div className="px-6 pb-3">
+            <EstadoTarefaBadge estado={tarefa.estado} fechadaPeloSistema perfil="staff" className="h-auto whitespace-normal text-left" />
+          </div>
+        )}
 
         <CardContent className="space-y-3">
           <div className="grid grid-cols-2 gap-2 text-sm">

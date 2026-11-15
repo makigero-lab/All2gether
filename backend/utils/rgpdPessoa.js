@@ -44,6 +44,7 @@ const nFotos = (campo) => ({ $cond: [{ $isArray: campo }, { $size: campo }, 0] }
 const PROJECAO_TAREFA = {
   _id: 1, propriedade_id: 1, data: 1, estado: 1, tipo: 1, tipo_limpeza: 1, tempo_limpeza_minutos: 1,
   observacoes_staff: 1, iniciada_em: 1, concluida_em: 1, hora_conclusao: 1, data_conclusao: 1,
+  conclusao_origem: 1, fechada_automaticamente_em: 1, confirmada_depois_em: 1,
   n_fotos_conclusao: nFotos('$fotos_conclusao'),
   n_colegas_na_equipa: { $max: [0, { $subtract: [{ $size: { $ifNull: ['$equipa_atribuida', []] } }, 1] }] },
   avarias: {

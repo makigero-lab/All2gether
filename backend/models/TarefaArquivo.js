@@ -35,6 +35,9 @@ const tarefaArquivoSchema = new mongoose.Schema(
     observacoes_staff: { type: String, default: '' },
     concluida_em: { type: Date, default: null },
     hora_conclusao: { type: Date, default: null },
+    conclusao_origem: { type: String, enum: ['staff', 'gestor', 'automatica', null], default: null },
+    fechada_automaticamente_em: { type: Date, default: null },
+    confirmada_depois_em: { type: Date, default: null },
     avarias: { type: [mongoose.Schema.Types.Mixed], default: [] },
     checklist: { type: [String], default: [] },
     detalhes_reserva: {

@@ -90,3 +90,8 @@ export function corEstadoTarefa(estado: string | null | undefined, fundo = false
   const t = infoEstadoTarefa(estado).token;
   return `hsl(var(--status-${t}${fundo ? "-bg" : ""}))`;
 }
+
+/** Concluída pelo job das 20:00, sem confirmação da equipa (ainda «por confirmar»). */
+export function eFechadaPeloSistema(t: { estado?: string | null; conclusao_origem?: string | null } | null | undefined): boolean {
+  return !!t && t.estado === "concluida" && t.conclusao_origem === "automatica";
+}

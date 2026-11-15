@@ -14,6 +14,7 @@ import {
   Timer,
   FileDown,
   Sparkles,
+  Lock,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -54,6 +55,7 @@ interface PorStaff {
   nome: string;
   total: number;
   concluidas: number;
+  fechadas_sistema?: number;
   carga_minutos: number;
   taxaConclusao: number;
 }
@@ -62,6 +64,7 @@ interface PorDia {
   data: string;
   total: number;
   concluidas: number;
+  fechadas_sistema?: number;
   carga_minutos: number;
 }
 
@@ -82,6 +85,9 @@ interface RelatorioData {
   resumo: {
     totalTarefas: number;
     concluidas: number;
+    /** Fechadas pelo sistema às 20:00 sem confirmação: à parte, não contam como concluídas pela pessoa. */
+    fechadasSistema?: number;
+    confirmadasDepois?: number;
     taxaConclusao: number;
     emAtraso: number;
     taxaAtraso: number;
@@ -256,17 +262,18 @@ export default function RelatoriosPage() {
       const kpisHtml = [
         '<div class="kpi"><div class="label">Total Limpezas</div><div class="value">' + (r.totalTarefas ?? 0) + '</div></div>',
         '<div class="kpi"><div class="label">Concluidas</div><div class="value">' + (r.concluidas ?? 0) + '</div><div class="sub">' + Math.round((r.concluidas / Math.max(1, r.totalTarefas)) * 100) + '%</div></div>',
+        '<div class="kpi"><div class="label">Fechadas pelo sistema</div><div class="value">' + (r.fechadasSistema ?? 0) + '</div></div>',
         '<div class="kpi"><div class="label">Tempo Medio</div><div class="value">' + (Math.round((tempoEstimado / 60) * 10) / 10) + 'h</div></div>',
         '<div class="kpi"><div class="label">Diff Real</div><div class="value">' + (diff === 0 ? '—' : (diff > 0 ? '+' : '') + (Math.round(diff / 60 * 10) / 10) + 'h') + '</div></div>',
       ].join('');
 
       const maxStaff = Math.max(1, ...data.porStaff.map(x => x.total));
       const staffHtml = data.porStaff.length > 0
-        ? '<h2>Produtividade por elemento da equipa</h2><table><thead><tr><th>Equipa</th><th>Total</th><th>Concluidas</th><th>Taxa</th><th>Carga (min)</th><th>Volume</th></tr></thead><tbody>' +
+        ? '<h2>Produtividade por elemento da equipa</h2><table><thead><tr><th>Equipa</th><th>Total</th><th>Concluidas</th><th>Fechadas pelo sistema</th><th>Taxa</th><th>Carga (min)</th><th>Volume</th></tr></thead><tbody>' +
           data.porStaff.map(s => {
             const pct = Math.round(s.taxaConclusao * 100);
             const largura = Math.round((s.total / maxStaff) * 100);
-            return '<tr><td>' + escaparHtml(s.nome) + '</td><td>' + s.total + '</td><td>' + s.concluidas + '</td><td>' + pct + '%</td><td>' + s.carga_minutos + '</td><td><div class="barra-container"><div class="barra" style="width:' + largura + '%"></div></div></td></tr>';
+            return '<tr><td>' + escaparHtml(s.nome) + '</td><td>' + s.total + '</td><td>' + s.concluidas + '</td><td>' + (s.fechadas_sistema ?? 0) + '</td><td>' + pct + '%</td><td>' + s.carga_minutos + '</td><td><div class="barra-container"><div class="barra" style="width:' + largura + '%"></div></div></td></tr>';
           }).join('') + '</tbody></table>'
         : '';
 
@@ -386,6 +393,13 @@ export default function RelatoriosPage() {
         sub: formatarPercent(r.taxaConclusao),
         icon: CheckCircle2,
         cor: CORES.verde,
+      },
+      {
+        label: "Fechadas pelo sistema",
+        value: String(r.fechadasSistema ?? 0),
+        sub: (r.confirmadasDepois ?? 0) > 0 ? `${r.confirmadasDepois} confirmadas depois (nas concluídas)` : "Sem confirmação da equipa",
+        icon: Lock,
+        cor: CORES.amber,
       },
       {
         label: "Em atraso",
@@ -635,7 +649,7 @@ export default function RelatoriosPage() {
                   <BarChart3 className="h-5 w-5 text-brand-text" />
                   Produtividade por funcionário
                 </CardTitle>
-                <CardDescription>Concluídas vs. total de tarefas atribuídas.</CardDescription>
+                <CardDescription>Concluídas pela pessoa vs. total de tarefas atribuídas. As fechadas pelo sistema às 20:00 aparecem à parte.</CardDescription>
               </CardHeader>
               <CardContent>
                 {data.porStaff.length === 0 ? (
@@ -662,6 +676,7 @@ export default function RelatoriosPage() {
                         <Tooltip contentStyle={{ borderRadius: 8, fontSize: 12 }} />
                         <Legend wrapperStyle={{ fontSize: 12 }} formatter={legendaTexto} />
                         <Bar dataKey="concluidas" name="Concluídas" stackId="a" fill={CORES.verde} radius={[0, 0, 0, 0]} />
+                        <Bar dataKey="fechadas_sistema" name="Fechadas pelo sistema" stackId="a" fill={CORES.amber} radius={[0, 0, 0, 0]} />
                         <Bar dataKey="total" name="Total" stackId="a" fill={CORES.dourado} radius={[0, 4, 4, 0]} />
                       </BarChart>
                     </ResponsiveContainer>

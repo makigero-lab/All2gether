@@ -1084,6 +1084,10 @@ exports.atualizarEstadoTarefa = async (req, res) => {
       tarefa.concluida_em = null;
       tarefa.data_conclusao = null;
       tarefa.hora_conclusao = null;
+      // Reaberta: deixa de contar como fechada/confirmada. `fechada_automaticamente_em` mantém-se de
+      // propósito (o job nunca fecha duas vezes a mesma limpeza).
+      tarefa.conclusao_origem = null;
+      tarefa.confirmada_depois_em = null;
     }
     const estadoAntes = tarefa.estado;
     tarefa.estado = estado;
@@ -1092,6 +1096,8 @@ exports.atualizarEstadoTarefa = async (req, res) => {
       tarefa.concluida_em = tarefa.concluida_em || agoraConclusao;
       tarefa.data_conclusao = tarefa.data_conclusao || agoraConclusao; // usado pelo job limpezaFotos
       tarefa.hora_conclusao = tarefa.hora_conclusao || agoraConclusao;
+      // Fecho feito agora pelo gestor (se já estava concluída, mantém a origem, ex.: fecho automático).
+      if (estadoAntes !== 'concluida') tarefa.conclusao_origem = 'gestor';
     }
     // Volta ao pool (ou cancelada): liberta o staff e a equipa.
     if (estado === 'por_atribuir' || estado === 'nao_atribuida' || estado === 'cancelada') {
