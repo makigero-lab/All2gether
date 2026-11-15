@@ -1780,10 +1780,14 @@ describe('Cron Job: Cão de Guarda (Prompt 96)', () => {
 
     // Verifica título + link + corpo (com nome da propriedade).
     for (const call of notificarSpy.mock.calls) {
-      expect(call[1]).toBe('⚠️ Tarefa Incompleta');
+      expect(call[1]).toBe('Falta fechar a limpeza');
       expect(call[3]).toBe('/staff');
-      expect(call[2]).toMatch(/como concluída\. Por favor, atualiza a app!/);
+      // em_curso: avisa do fecho das 20:00; atribuida (não começada): não promete o fecho.
+      expect(call[2]).toMatch(/Ainda não fechaste a limpeza .*antes das 20:00|Ainda não começaste a limpeza/);
     }
+    const corposTodos = notificarSpy.mock.calls.map((c) => c[2]);
+    expect(corposTodos.some((c) => /Ainda não começaste/.test(c) && !/20:00/.test(c))).toBe(true);
+    expect(corposTodos.some((c) => /Ainda não fechaste.*20:00/.test(c))).toBe(true);
     // Pelo menos uma notificação mentiona "Casa CG1".
     const corpos = notificarSpy.mock.calls.map((c) => c[2]);
     expect(corpos.some((c) => c.includes('Casa CG1'))).toBe(true);

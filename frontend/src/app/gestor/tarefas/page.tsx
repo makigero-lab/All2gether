@@ -25,6 +25,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { EstadoTarefaBadge } from "@/components/ui/estado-tarefa-badge";
+import { eFechadaPeloSistema } from "@/lib/estados";
 import { OfertaVagaBadge } from "@/components/gestor/oferta-vaga-badge";
 import {
   Card,
@@ -700,7 +701,7 @@ export default function AdminTarefasPage() {
       (t.estado === "atribuida" || t.estado === "em_curso") && !t.utilizador_id ? "por_atribuir" : t.estado;
     return (
       <div className="flex flex-wrap items-center gap-1">
-        <EstadoTarefaBadge estado={estadoExibido} />
+        <EstadoTarefaBadge estado={estadoExibido} fechadaPeloSistema={eFechadaPeloSistema(t)} />
         <OfertaVagaBadge tarefa={t} curto className="basis-full" />
         {(t.estado === "por_atribuir" || t.estado === "nao_atribuida") && t.motivo_nao_atribuicao && (
           <span title={t.motivo_nao_atribuicao} className="cursor-help">

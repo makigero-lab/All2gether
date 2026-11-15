@@ -29,6 +29,7 @@ const {
 const resp = (status, body) => ({ status, body });
 const ATOR_PARCEIRO = { tipo: 'parceiro' };
 const { estadoDaCasa } = require('./casaAtiva');
+const { fechadaAutomaticamente, confirmadaDepois } = require('./conclusaoAutomatica');
 
 const VERBO_GESTOR = { criou: 'criou', alterou: 'alterou', reabriu: 'alterou', apagou: 'apagou' };
 
@@ -582,9 +583,20 @@ async function listarReservasServico(parceiroId) {
 
     const reservas = await ReservaManual.find({ parceiro_id: parceiroId })
       .populate('propriedade_id', 'nome morada')
-      .populate('tarefa_gerada_id', 'estado data tipo_limpeza tempo_limpeza_minutos hora_conclusao concluida_em')
+      .populate('tarefa_gerada_id', 'estado data tipo_limpeza tempo_limpeza_minutos hora_conclusao concluida_em conclusao_origem confirmada_depois_em')
       .sort({ check_out: -1 })
       .lean();
+    // Fecho automático: o proprietário não vê hora de conclusão (só «fechada pelo sistema»).
+    for (const r of reservas) {
+      const t = r.tarefa_gerada_id;
+      if (t && typeof t === 'object') {
+        t.fechada_automaticamente = fechadaAutomaticamente(t);
+        t.confirmada_depois = confirmadaDepois(t);
+        if (t.fechada_automaticamente || t.confirmada_depois) { t.hora_conclusao = null; t.concluida_em = null; }
+        delete t.conclusao_origem;
+        delete t.confirmada_depois_em;
+      }
+    }
 
     // Reservas das casas dele que vêm de fora (Smoobu): só de leitura. As do iCal e as marcadas pelo
     // gestor são ReservaManual e já estão em `reservas` (aparecem uma só vez).

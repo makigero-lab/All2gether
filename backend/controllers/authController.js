@@ -17,6 +17,7 @@ const Ausencia = require('../models/Ausencia');
 const Propriedade = require('../models/Propriedade');
 const { JWT_SECRET } = require('../middleware/auth');
 const { comMembro } = require('../utils/equipaTarefa');
+const { moradaParaApi } = require('../utils/calendarioExterno/moradaCurta');
 
 // Tempo de expiração do token (pode ser overridden por env).
 const TOKEN_EXPIRACAO = process.env.JWT_EXPIRACAO || '7d';
@@ -290,7 +291,7 @@ exports.minhasTarefas = async (req, res) => {
       data: { $gte: limitePassado },
       estado: { $ne: 'cancelada' },
     }, req.user.id))
-      .populate({ path: 'propriedade_id', select: 'nome morada coordenadas checklist capacidade_hospedes observacoes fornecedor_id' })
+      .populate({ path: 'propriedade_id', select: 'nome morada morada_estruturada coordenadas checklist capacidade_hospedes observacoes fornecedor_id' })
       .sort({ data: 1 })
       // Listagem leve: as fotos (base64) só vão no detalhe/prova.
       .select('-fotos_conclusao -avarias.fotos')
@@ -325,7 +326,14 @@ exports.minhasTarefas = async (req, res) => {
       return { ...t, tempo_viagem_minutos: 0 };
     });
 
-    return res.status(200).json({ tarefas: await juntarNomesEquipa(tarefasComViagem, req.user.id) });
+    // Rua e localidade da casa para distinguir casas com o mesmo nome (a morada já é mostrada à staff).
+    const comMorada = tarefasComViagem.map((t) => {
+      const p = t.propriedade_id;
+      if (!p || typeof p !== 'object') return t;
+      const { morada_estruturada, ...resto } = p;
+      return { ...t, propriedade_id: { ...resto, ...moradaParaApi(p) } };
+    });
+    return res.status(200).json({ tarefas: await juntarNomesEquipa(comMorada, req.user.id) });
   } catch (err) {
     console.error('❌ minhasTarefas:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });

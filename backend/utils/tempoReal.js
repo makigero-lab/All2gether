@@ -21,8 +21,15 @@ function inicioFiavel(t) {
   return null;
 }
 
-/** Minutos reais de uma tarefa concluída, ou null se não conta. */
+/**
+ * Minutos reais de uma tarefa concluída, ou null se não conta. Limpezas fechadas pelo sistema às 20:00
+ * ficam sempre de fora (mesmo com «Comecei» e mesmo se a pessoa as confirmou no dia seguinte: a hora
+ * de conclusão deixa de ser a do trabalho).
+ */
 function duracaoRealMinutos(t) {
+  // Fechada pelo sistema e ainda por confirmar, ou confirmada depois: a hora de conclusão não é a do trabalho.
+  // (Reaberta e concluída de verdade conta: `fechada_automaticamente_em` sozinho já não exclui.)
+  if (t.conclusao_origem === 'automatica' || t.confirmada_depois_em) return null;
   const fim = t.hora_conclusao || t.concluida_em;
   const ini = inicioFiavel(t);
   if (!fim || !ini) return null;

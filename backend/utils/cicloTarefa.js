@@ -14,6 +14,7 @@ const { notificarSino } = require('./notificar');
 const { resolverAvariaDaManutencao } = require('./avarias');
 const H = require('./horario');
 const Notificacao = require('../models/Notificacao');
+const { fechadaAutomaticamente, confirmadaDepois } = require('./conclusaoAutomatica');
 
 const FUSO = 'Europe/Lisbon';
 
@@ -53,6 +54,9 @@ async function nomeCasa(tarefa) {
 async function avisarParceiro(tarefa, evento) {
   try {
     if (!tarefa || tarefa.tipo !== 'limpeza') return false;
+    // Fecho automático (sem confirmação da equipa) nunca vira «concluída» para o proprietário.
+    // Confirmada depois pela equipa: a hora da confirmação não é a do trabalho, também não avisa.
+    if (evento === 'concluida' && (fechadaAutomaticamente(tarefa) || confirmadaDepois(tarefa))) return false;
     const parceiroId = await parceiroDaTarefa(tarefa);
     if (!parceiroId) return false;
     const casa = await nomeCasa(tarefa);
