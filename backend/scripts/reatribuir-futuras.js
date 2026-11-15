@@ -10,7 +10,7 @@
  *
  * Abrange: tipo 'limpeza', estado atribuida/por_atribuir/nao_atribuida, sem início, de
  * --desde (por defeito amanhã) em diante. Fica de fora: em curso, concluídas, canceladas,
- * manutenções e as que o gestor desatribuiu à mão. O dia nunca muda; a hora e a equipa sim.
+ * manutenções, as que o gestor desatribuiu à mão e as que ele fixou à mão (ver utils/origemLimpeza.js). O dia nunca muda; a hora e a equipa sim.
  * Por dia: casas com mais pessoas primeiro, depois pela hora atual.
  *
  * Uso (a URI vem do ambiente, nunca da linha de comandos):
@@ -25,6 +25,7 @@ const mongoose = require('mongoose');
 
 const H = require('../utils/horario');
 const { foraDoHorario } = require('./reagendar-horarios');
+const { ORIGENS, reservasPorTarefa, origemDaLimpeza, fixadaPeloGestor } = require('../utils/origemLimpeza');
 
 const arg = (n) => process.argv.includes(n);
 const val = (n) => { const i = process.argv.indexOf(n); return i > 0 ? process.argv[i + 1] : null; };
@@ -58,13 +59,35 @@ const FILTRO_CAND = (desde) => ({
 });
 
 /** Plano com o motor real, na ligação por defeito do mongoose (a cópia). */
-async function planear(desde) {
+async function planear(desde, info = {}) {
   const Tarefa = require('../models/Tarefa');
   const Propriedade = require('../models/Propriedade');
   const { planearAtribuicao } = require('../utils/atribuicaoAutomatica');
   const { idsEquipa } = require('../utils/equipaTarefa');
 
-  const cands = await Tarefa.find(FILTRO_CAND(desde)).lean();
+  const todas = await Tarefa.find(FILTRO_CAND(desde)).lean();
+  // As que o gestor fixou à mão ficam como estão (e continuam a ocupar a agenda na cópia).
+  const reservas = await reservasPorTarefa(todas);
+  info.porOrigem = Object.fromEntries(ORIGENS.map((o) => [o, { total: 0, fixadas_pelo_gestor: 0, a_preencher_a_hora_fixa: 0, recalculadas: 0, mudam: 0 }]));
+  const origemDe = new Map();
+  const horaFixaDe = new Set();
+  const cands = [];
+  for (const t of todas) {
+    const reserva = reservas.get(String(t._id));
+    const o = origemDaLimpeza(t, reserva);
+    origemDe.set(String(t._id), o);
+    info.porOrigem[o].total++;
+    if (fixadaPeloGestor(t, reserva, H.temHoraReal)) {
+      info.porOrigem[o].fixadas_pelo_gestor++;
+      // Fixada e sem pessoa: procura-se quem caiba à hora que o gestor pôs (a hora nunca muda).
+      if (!t.utilizador_id && !(t.equipa_atribuida && t.equipa_atribuida.length) && H.temHoraReal(t.data)) {
+        info.porOrigem[o].a_preencher_a_hora_fixa++;
+        horaFixaDe.add(String(t._id));
+        cands.push(t);
+      }
+    } else { info.porOrigem[o].recalculadas++; cands.push(t); }
+  }
+  info.origemDe = origemDe;
   const props = new Map((await Propriedade.find({ _id: { $in: [...new Set(cands.map((t) => String(t.propriedade_id)))] } }).lean()).map((p) => [String(p._id), p]));
   const porDia = new Map();
   for (const t of cands) {
@@ -88,7 +111,7 @@ async function planear(desde) {
       const prop = props.get(String(t.propriedade_id));
       const novo = { utilizador_id: null, equipa_atribuida: [], estado: 'por_atribuir', data: t.data, tempo_viagem_minutos: 0, pessoas_em_falta: 0, motivo_nao_atribuicao: 'Propriedade não encontrada' };
       if (prop) {
-        const p = await planearAtribuicao({ empresaId: t.empresa_id, propriedade: prop, dia: new Date(`${dia(t.data)}T00:00:00Z`), tempoLimpeza: t.tempo_limpeza_minutos || prop.tempo_limpeza_minutos || 45 });
+        const p = await planearAtribuicao({ empresaId: t.empresa_id, propriedade: prop, dia: new Date(`${dia(t.data)}T00:00:00Z`), tempoLimpeza: t.tempo_limpeza_minutos || prop.tempo_limpeza_minutos || 45, ...(horaFixaDe.has(String(t._id)) ? { horaFixa: new Date(t.data), tarefaId: t._id } : {}) });
         Object.assign(novo, {
           utilizador_id: p.utilizador_id || null,
           equipa_atribuida: p.equipa_atribuida || [],
@@ -141,7 +164,7 @@ async function main() {
   fs.mkdirSync(saida, { recursive: true });
   const marca = new Date().toISOString().replace(/[:.]/g, '-');
 
-  // 1) Cópia para memória e diagnóstico das horas antes das 09:00 (na cópia).
+  // 1) Cópia para memória e diagnóstico das horas antes das 10:00 (na cópia).
   const { MongoMemoryServer } = require('mongodb-memory-server');
   const mem = await MongoMemoryServer.create();
   const src = await mongoose.createConnection(SRC, { readPreference: 'secondaryPreferred' }).asPromise();
@@ -166,18 +189,19 @@ async function main() {
       criada: t.createdAt, alterada: t.updatedAt, inicio_origem: t.inicio_origem || null, data_ajustada_gestor: !!t.data_ajustada_gestor,
       reserva_smoobu: t.smoobu_reserva_id || t.reserva_id || null,
     }));
-  console.log(`Antes das 09:00 (hoje em diante, não canceladas/concluídas): ${diagnostico.length}`);
+  console.log(`Antes das 10:00 (hoje em diante, não canceladas/concluídas): ${diagnostico.length}`);
 
   const verifAntes = await verificar(desde);
 
   // 2) Plano na cópia.
-  const plano = await planear(desde);
+  const infoPlano = {};
+  const plano = await planear(desde, infoPlano);
   const verifPlano = await verificar(desde);
 
   const linhas = plano.map(({ antes: a, depois: d }) => {
     const eqA = [a.utilizador_id, ...(a.equipa_atribuida || [])].filter(Boolean).map(String).filter((v, i, s) => s.indexOf(v) === i);
     return {
-      id: String(a._id), dia: dia(a.data), casa: casas.get(String(a.propriedade_id)),
+      id: String(a._id), origem: infoPlano.origemDe.get(String(a._id)), dia: dia(a.data), casa: casas.get(String(a.propriedade_id)),
       antes: { estado: a.estado, hora: hh(a.data), pessoas: nomesDe(eqA) },
       depois: { estado: d.estado, hora: hh(d.data), pessoas: nomesDe(d.equipa), faltam: d.pessoas_em_falta, motivo: d.motivo_nao_atribuicao },
       mudou: a.estado !== d.estado || hh(a.data) !== hh(d.data) || eqA.slice().sort().join() !== d.equipa.slice().sort().join(),
@@ -195,8 +219,10 @@ async function main() {
     com_vaga: linhas.filter((l) => l.depois.estado === 'atribuida' && l.depois.faltam > 0).length,
     antes: { fora_do_horario: verifAntes.foraDoHorario.length, sobrepostas: verifAntes.sobrepostas.length },
     plano: { fora_do_horario: verifPlano.foraDoHorario.length, sobrepostas: verifPlano.sobrepostas.length },
-    antes_das_9_hoje_em_diante: diagnostico.length,
+    por_origem: infoPlano.porOrigem,
+    antes_das_10_hoje_em_diante: diagnostico.length,
   };
+  for (const l of linhas) if (l.mudou) infoPlano.porOrigem[l.origem].mudam++;
   fs.writeFileSync(path.join(saida, `plano-${marca}.json`), JSON.stringify({ resumo, diagnostico, linhas, verifAntes, verifPlano }, null, 1));
   console.log('Resumo:', JSON.stringify(resumo, null, 1));
 

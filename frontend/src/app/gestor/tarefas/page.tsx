@@ -54,6 +54,10 @@ import {
 import { PaginationBar } from "@/components/admin/pagination-bar";
 import { DetalheTarefaModal } from "@/components/gestor/detalhe-tarefa-modal";
 import { parsearDataSegura, extrairHoraISO, plural } from "@/lib/utils";
+import { lerUtilizador } from "@/lib/auth";
+import { avisoComAcao } from "@/lib/aviso-horario";
+import { rotulosDeCasas, rotuloDaCasa, tarefaDaCasa } from "@/lib/casas-rotulo";
+import { diasDoFiltro, guardarEscolha, lerEscolhaGuardada, passaFiltroRapido, type DiaRapido } from "@/lib/filtro-dias-rapido";
 import { SeletorDisponiveis, corpoAtribuicao, type InfoDisponiveis } from "@/components/gestor/seletor-disponiveis";
 
 interface TarefaAdmin {
@@ -174,8 +178,13 @@ function formatarDataHora(iso: string): string {
 }
 
 export default function AdminTarefasPage() {
-  const [tarefas, setTarefas] = useState<TarefaAdmin[]>([]);
+  const [tarefasBrutas, setTarefas] = useState<TarefaAdmin[]>([]);
   const [propriedades, setPropriedades] = useState<PropriedadeDTO[]>([]);
+  // Rótulo único das casas (casas homónimas distinguem-se pela morada): as tarefas já trazem-no no nome da casa,
+  // por isso a tabela, os cartões, o detalhe e os diálogos mostram todos o mesmo.
+  const rotulosCasas = rotulosDeCasas(propriedades);
+  const rotuloCasa = (c: { _id?: string; nome?: string } | null | undefined) => rotuloDaCasa(rotulosCasas, c);
+  const tarefas = tarefasBrutas.map((t) => (t.propriedade_id ? { ...t, propriedade_id: { ...t.propriedade_id, nome: rotuloCasa(t.propriedade_id) } } : t));
   const [staff, setStaff] = useState<UtilizadorDTO[]>([]);
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
@@ -193,6 +202,40 @@ export default function AdminTarefasPage() {
   const [filtroStaff, setFiltroStaff] = useState("");
   // FIX (sync parceiros) — Toggle para mostrar só tarefas de reservas de parceiros.
   const [soParceiros, setSoParceiros] = useState(false);
+  // Filtro rápido «Hoje / Amanhã» (multi-seleção; nenhum ligado = sem este filtro).
+  const [diasRapidos, setDiasRapidos] = useState<DiaRapido[]>([]);
+  const [utilizadorFiltroId, setUtilizadorFiltroId] = useState<string | null>(null);
+  useEffect(() => {
+    let vivo = true;
+    lerUtilizador()
+      .then((u) => {
+        if (!vivo) return;
+        const id = u?.id ?? null;
+        setUtilizadorFiltroId(id);
+        setDiasRapidos(lerEscolhaGuardada(id));
+      })
+      .catch(() => {});
+    return () => { vivo = false; };
+  }, []);
+  const alternarDiaRapido = (d: DiaRapido) => {
+    setDiasRapidos((atual) => {
+      const novo = atual.includes(d) ? atual.filter((x) => x !== d) : [...atual, d];
+      guardarEscolha(utilizadorFiltroId, novo);
+      return novo;
+    });
+    setPagina(1);
+  };
+  // «Hoje» e «Amanhã» acompanham a meia-noite de Lisboa com a página aberta: volta a calcular de minuto a minuto
+  // e quando o separador volta a ficar visível.
+  const [, setRelogio] = useState(0);
+  useEffect(() => {
+    const agir = () => setRelogio((n) => n + 1);
+    const id = window.setInterval(agir, 60000);
+    const vis = () => { if (document.visibilityState === "visible") agir(); };
+    document.addEventListener("visibilitychange", vis);
+    return () => { window.clearInterval(id); document.removeEventListener("visibilitychange", vis); };
+  }, []);
+  const diasRapidosISO = diasDoFiltro(diasRapidos);
 
   // v1.58.0 (Prompt 80, ponto 3) — Aba de filtragem por estado.
   // 'todas' | 'por_atribuir' | 'pendentes' | 'concluidas'
@@ -209,6 +252,8 @@ export default function AdminTarefasPage() {
     if (soParceiros && !t.origem_parceiro) {
       return false;
     }
+    // Filtro rápido Hoje / Amanhã (dias de Lisboa).
+    if (!passaFiltroRapido(t.data, diasRapidosISO)) return false;
     // FIX (filtros avançados) — Intervalo de datas.
     if (filtroDataInicio) {
       const dataTarefa = t.data?.slice(0, 10);
@@ -218,11 +263,8 @@ export default function AdminTarefasPage() {
       const dataTarefa = t.data?.slice(0, 10);
       if (!dataTarefa || dataTarefa > filtroDataFim) return false;
     }
-    // FIX (filtros avançados) — Filtro de propriedade (compara por nome).
-    if (filtroPropriedade) {
-      const nomeSelecionado = propriedades.find((p) => p._id === filtroPropriedade)?.nome;
-      if (t.propriedade_id?.nome !== nomeSelecionado) return false;
-    }
+    // Filtro de propriedade: por _id (casas com o mesmo nome não se misturam).
+    if (!tarefaDaCasa(t, filtroPropriedade)) return false;
     // FIX (filtros avançados) — Filtro de staff (compara por nome).
     if (filtroStaff) {
       const nomeStaff = staff.find((s) => s._id === filtroStaff)?.nome;
@@ -426,9 +468,7 @@ export default function AdminTarefasPage() {
       setConflitoForcar(false);
 
       // Warning logístico (distância > 15km) — mostra como toast.
-      const avisoToast = [!temConflitoHorario ? res.warning : null, res.aviso_horario]
-        .filter(Boolean)
-        .join(" | ");
+      const avisoToast = avisoComAcao("Limpeza criada.", !temConflitoHorario ? res.warning : null, res.aviso_horario);
       if (avisoToast) setWarningToast(avisoToast);
 
       setForm({
@@ -461,7 +501,7 @@ export default function AdminTarefasPage() {
         `/api/gestor/tarefas/${atribuindo._id}/atribuir`,
         corpoAtribuicao(atribuirUserId, infoDisp, atribuindo.utilizador_id, atribuindo.equipa_atribuida)
       );
-      const avisoAtribuir = [res.warning, res.aviso_horario].filter(Boolean).join(" | ");
+      const avisoAtribuir = avisoComAcao(`Atribuída a ${staff.find((u) => u._id === atribuirUserId)?.nome ?? "a pessoa escolhida"}.`, res.warning, res.aviso_horario);
       if (avisoAtribuir) setWarningToast(avisoAtribuir);
       setAtribuindo(null);
       setAtribuirUserId("");
@@ -812,7 +852,7 @@ export default function AdminTarefasPage() {
                   >
                     <option value="">Selecionar…</option>
                     {propriedades.filter((p) => p.ativo).map((p) => (
-                      <option key={p._id} value={p._id}>{p.nome}</option>
+                      <option key={p._id} value={p._id}>{rotuloCasa(p)}</option>
                     ))}
                   </select>
                 </div>
@@ -991,6 +1031,28 @@ export default function AdminTarefasPage() {
         </TabsList>
       </Tabs>
 
+      {/* Filtro rápido Hoje / Amanhã: acima dos outros filtros, sempre visível (também no telemóvel), com a contagem. */}
+      <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Filtro rápido por dia">
+        {([["hoje", "Hoje"], ["amanha", "Amanhã"]] as const).map(([id, rotulo]) => (
+          <Button
+            key={id}
+            variant={diasRapidos.includes(id) ? "default" : "outline"}
+            size="sm"
+            className="h-11 min-w-[5.5rem] rounded-full sm:h-9"
+            onClick={() => alternarDiaRapido(id)}
+            aria-pressed={diasRapidos.includes(id)}
+          >
+            {rotulo}
+          </Button>
+        ))}
+        <span
+          className={`ml-auto text-sm tabular-nums ${tarefasFiltradas.length !== tarefas.length ? "font-semibold text-foreground" : "text-muted-foreground dark:text-foreground/80"}`}
+          aria-live="polite"
+        >
+          {tarefasFiltradas.length} de {plural(tarefas.length, "tarefa")}
+        </span>
+      </div>
+
       {/* FIX (filtros avançados) — Barra de filtros: datas, propriedade, staff. */}
       <Card>
         <CardContent className="flex flex-wrap items-end gap-3 p-4">
@@ -1024,7 +1086,7 @@ export default function AdminTarefasPage() {
             >
               <option value="">Todas</option>
               {propriedades.filter((p) => p.ativo).map((p) => (
-                <option key={p._id} value={p._id}>{p.nome}</option>
+                <option key={p._id} value={p._id}>{rotuloCasa(p)}</option>
               ))}
             </select>
           </div>
@@ -1053,7 +1115,7 @@ export default function AdminTarefasPage() {
           >
             🤝 Apenas proprietários
           </Button>
-          {(filtroDataInicio || filtroDataFim || filtroPropriedade || filtroStaff || soParceiros) && (
+          {(filtroDataInicio || filtroDataFim || filtroPropriedade || filtroStaff || soParceiros || diasRapidos.length > 0) && (
             <Button
               variant="ghost"
               size="sm"
@@ -1064,15 +1126,14 @@ export default function AdminTarefasPage() {
                 setFiltroPropriedade("");
                 setFiltroStaff("");
                 setSoParceiros(false);
+                setDiasRapidos([]);
+                guardarEscolha(utilizadorFiltroId, []);
                 setPagina(1);
               }}
             >
               Limpar filtros
             </Button>
           )}
-          <span className="ml-auto text-xs text-muted-foreground">
-            {tarefasFiltradas.length} de {plural(tarefas.length, "tarefa")}
-          </span>
         </CardContent>
       </Card>
 
@@ -1105,7 +1166,7 @@ export default function AdminTarefasPage() {
               {tarefasPagina.map((t) => (
                 <li key={t._id} className="space-y-2 p-3">
                   <div className="min-w-0">
-                    <p className="break-words font-medium">{t.propriedade_id?.nome ?? "—"}</p>
+                    <p className="break-words font-medium">{rotuloCasa(t.propriedade_id)}</p>
                     <p className="text-xs tabular-nums text-muted-foreground">{formatarDataHora(t.data)}</p>
                     <div className="mt-1.5">{estadoTarefa(t)}</div>
                   </div>
@@ -1161,7 +1222,7 @@ export default function AdminTarefasPage() {
                       <td className="px-4 py-3 whitespace-nowrap tabular-nums">{formatarDataHora(t.data)}</td>
                       <td className="min-w-[10rem] max-w-[16rem] px-4 py-3 font-medium">
                         <div className="flex items-center gap-2">
-                          <span className="line-clamp-2 min-w-0 break-words" title={t.propriedade_id?.nome ?? undefined}>{t.propriedade_id?.nome ?? "—"}</span>
+                          <span className="line-clamp-2 min-w-0 break-words" title={rotuloCasa(t.propriedade_id)}>{rotuloCasa(t.propriedade_id)}</span>
                           {/* FIX (sync parceiros) — Badge “🤝 Parceiro” se a tarefa
                               veio de uma reserva de parceiro. */}
                           {t.origem_parceiro && (
@@ -1274,7 +1335,7 @@ export default function AdminTarefasPage() {
           <div>
             <DialogTitle>Atribuir limpeza</DialogTitle>
             <DialogDescription>
-              {atribuindo?.propriedade_id?.nome} — {atribuindo ? formatarData(atribuindo.data) : ""}
+              {atribuindo ? rotuloCasa(atribuindo.propriedade_id) : ""} — {atribuindo ? formatarData(atribuindo.data) : ""}
               {atribuindo && nomesEquipa(atribuindo).length > 1 && (
                 <span className="mt-1 block text-xs">
                   Equipa atual: {nomesEquipa(atribuindo).join(" + ")}. {infoDisp?.modo === "vaga" ? "A pessoa escolhida entra na equipa e preenche a vaga." : "A pessoa escolhida passa a responsável e os outros membros mantêm-se."}
@@ -1411,7 +1472,7 @@ export default function AdminTarefasPage() {
                     .filter((p) => p.ativo)
                     .map((p) => (
                       <option key={p._id} value={p._id}>
-                        {p.nome}
+                        {rotuloCasa(p)}
                       </option>
                     ))}
                 </select>
@@ -1557,7 +1618,7 @@ export default function AdminTarefasPage() {
             </DialogTitle>
             <DialogDescription>
               Tens a certeza que queres cancelar a limpeza de{" "}
-              <strong>{cancelarTarget?.propriedade_id?.nome ?? "Propriedade"}</strong>?
+              <strong>{cancelarTarget ? rotuloCasa(cancelarTarget.propriedade_id) : "Propriedade"}</strong>?
               Esta ação não pode ser desfeita.
             </DialogDescription>
           </div>

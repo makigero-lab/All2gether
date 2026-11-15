@@ -21,7 +21,7 @@ import type { TarefaDia } from "@/components/gestor/vista-dia-equipa";
 
 export const TIPOS_FORA = ["ausencia", "ausencia_pendente", "folga_fixa", "viagem"];
 
-/** Início–fim («09:00–11:00») a partir da hora guardada e da duração. */
+/** Início–fim («10:00–11:00») a partir da hora guardada e da duração. */
 export function intervalo(t: TarefaDia): string {
   if (!temHoraReal(t.data)) return "Sem hora";
   const ini = extrairHoraISO(t.data);

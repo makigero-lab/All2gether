@@ -28,10 +28,10 @@ describe('hora padrão de tarefas sem pessoa (10:00 de Lisboa)', () => {
   });
 
   test('o início automático e o aviso fora do horário usam a hora de Lisboa', () => {
-    // 17:45 locais: já não começa; 18:30 locais acaba depois das 18:00.
+    // 17:45 locais: já não começa; 18:30 locais já começa depois das 17:30.
     expect(H.avisoForaDoHorario(H.utcDeMinutosLocais('2031-07-15', m(17, 45)), 10)).toBe('começa depois das 17:30');
     expect(H.avisoForaDoHorario(H.utcDeMinutosLocais('2031-01-15', m(17, 45)), 10)).toBe('começa depois das 17:30');
-    expect(H.avisoForaDoHorario(H.utcDeMinutosLocais('2031-07-15', m(9)), 60)).toBeNull();
-    expect(H.avisoForaDoHorario(H.utcDeMinutosLocais('2031-01-15', m(9)), 60)).toBeNull();
+    expect(H.avisoForaDoHorario(H.utcDeMinutosLocais('2031-07-15', m(10)), 60)).toBeNull();
+    expect(H.avisoForaDoHorario(H.utcDeMinutosLocais('2031-01-15', m(10)), 60)).toBeNull();
   });
 });

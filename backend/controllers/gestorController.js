@@ -60,6 +60,15 @@ function obterEmpresaId(req, res) {
 }
 
 // Exporta para reutilização noutros controllers (ex: tarefaController).
+const { moradaParaApi } = require('../utils/calendarioExterno/moradaCurta');
+/** Junta à casa da tarefa a morada curta (rua/localidade) para distinguir casas com o mesmo nome; não envia a morada estruturada. */
+function comMoradaCurtaNaCasa(t) {
+  const p = t && t.propriedade_id;
+  if (!p || typeof p !== 'object' || !p.nome) return t;
+  const { morada_estruturada, ...resto } = p;
+  return { ...t, propriedade_id: { ...resto, ...moradaParaApi(p) } };
+}
+
 exports.obterEmpresaId = obterEmpresaId;
 
 /* ------------------------------------------------------------------ */
@@ -585,7 +594,7 @@ exports.getTarefas = async (req, res) => {
     const tarefas = await Tarefa.find(filtro)
       // Prompt 114 — Inclui capacidade_hospedes para destaque no detalhe.
       // Prompt 139 — Inclui coordenadas para cálculo on-the-fly de tempo_viagem.
-      .populate({ path: 'propriedade_id', select: 'nome capacidade_hospedes coordenadas' })
+      .populate({ path: 'propriedade_id', select: 'nome capacidade_hospedes coordenadas morada morada_estruturada' })
       // FIX (fantasmas de inativos) — match: { ativo: true, eliminado_em: null }
       // garante que tarefas atribuídas a staff entretanto desativado NÃO
       // populam o nome do staff — utilizador_id fica null no resultado,
@@ -633,7 +642,7 @@ exports.getTarefas = async (req, res) => {
       return { ...t, tempo_viagem_minutos: 0 };
     });
 
-    return res.status(200).json({ tarefas: tarefasComViagem });
+    return res.status(200).json({ tarefas: tarefasComViagem.map(comMoradaCurtaNaCasa) });
   } catch (err) {
     console.error('❌ getTarefas:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });
@@ -739,7 +748,7 @@ exports.getDadosCalendario = async (req, res) => {
 
     const tarefas = await Tarefa.find(filtro)
       // Prompt 114 — Inclui capacidade_hospedes para destaque no detalhe.
-      .populate({ path: 'propriedade_id', select: 'nome morada coordenadas capacidade_hospedes' })
+      .populate({ path: 'propriedade_id', select: 'nome morada morada_estruturada coordenadas capacidade_hospedes' })
       // FIX (fantasmas de inativos) — match: { ativo: true, eliminado_em: null }
       .populate({ path: 'utilizador_id', select: 'nome', match: { ativo: true, eliminado_em: null } })
       .populate({ path: 'equipa_atribuida', select: 'nome', match: { ativo: true, eliminado_em: null } })
@@ -1003,7 +1012,7 @@ exports.getDadosCalendario = async (req, res) => {
       // Junta tarefas + folgas fixas + ausências (aprovadas + pendentes) e
       // ordena por data. Prompt 139 — usa tarefasComViagem.
       const resultado = [
-        ...tarefasComViagem,
+        ...tarefasComViagem.map(comMoradaCurtaNaCasa),
         ...diasFolga,
         ...eventosAusencias,
         ...eventosAusenciasPendentes,
@@ -1013,7 +1022,7 @@ exports.getDadosCalendario = async (req, res) => {
     }
 
     // Prompt 139 — sem filtro de datas, devolve tarefasComViagem directamente.
-    return res.status(200).json({ tarefas: tarefasComViagem });
+    return res.status(200).json({ tarefas: tarefasComViagem.map(comMoradaCurtaNaCasa) });
   } catch (err) {
     console.error('❌ getDadosCalendario:', err.message);
     return res.status(500).json({ erro: 'Erro interno do servidor.' });

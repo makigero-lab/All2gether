@@ -23,8 +23,9 @@ const { idsEquipa, comMembro, normalizarEquipa } = require('./equipaTarefa');
 
 const MOTIVO_SEM_EQUIPA = 'Sem equipa ativa';
 const MOTIVO_INDISPONIVEL = 'Toda a equipa ausente, de folga ou fora da equipa exclusiva neste dia';
-const MOTIVO_LOTACAO = 'Não cabe no horário de ninguém (09:00-18:00, com almoço e viagens)';
-const MOTIVO_SEM_HORA_COMUM = 'Sem hora comum para a equipa (09:00-18:00, com almoço e viagens)';
+const MOTIVO_LOTACAO = 'Não cabe no horário de ninguém (10:00-18:00, com almoço e viagens)';
+const MOTIVO_HORA_FIXA = 'A pessoa escolhida não cabe à hora que o gestor fixou (a hora não se muda)';
+const MOTIVO_SEM_HORA_COMUM = 'Sem hora comum para a equipa (10:00-18:00, com almoço e viagens)';
 // Limites para não multiplicar chamadas de viagem (pagas): candidatos extra e combinações testadas.
 const MAX_CANDIDATOS_EXTRA = 4;
 const MAX_COMBINACOES = 6;
@@ -98,11 +99,13 @@ async function procurarEquipaComHoraComum({ empresaId, range, propriedade, tempo
  * @param {object} p.propriedade - precisa de _id, coordenadas, staff_necessario
  * @param {Date} p.dia - qualquer instante do dia (normalizado para o dia UTC)
  * @param {number} p.tempoLimpeza
+ * @param {Date} [p.horaFixa] - hora posta à mão pelo gestor: o motor só escolhe a pessoa e só se couber a essa hora
+ * @param {*} [p.tarefaId] - a própria tarefa (fica de fora da agenda ao verificar `horaFixa`)
  * @returns {Promise<{
  *   utilizador_id, equipa_atribuida: Array, data: Date, tempo_viagem_minutos: number,
  *   estado: string, motivo_nao_atribuicao: string|null, faltam: number }>}
  */
-async function planearAtribuicao({ empresaId, propriedade, dia, tempoLimpeza }) {
+async function planearAtribuicao({ empresaId, propriedade, dia, tempoLimpeza, horaFixa = null, tarefaId = null }) {
   const range = obterRangeDia(dia);
   // Casa inativa (ou de proprietário inativo): nunca se atribui ninguém.
   if (await casaInativa(propriedade)) {
@@ -129,23 +132,56 @@ async function planearAtribuicao({ empresaId, propriedade, dia, tempoLimpeza }) 
   try {
     let ids = [];
     let viagemLB = 0;
-    if (staffNecessario > 1) {
-      const r = await determinarEquipaAtribuida(
-        empresaId, range, propriedade.coordenadas, tempo, propriedade._id, staffNecessario
-      );
-      ids = (r?.equipa || []).map((m) => m.utilizadorId);
-    } else {
+    const escolher = async (excl) => {
+      if (staffNecessario > 1) {
+        const r = await determinarEquipaAtribuida(
+          empresaId, range, propriedade.coordenadas, tempo, propriedade._id, staffNecessario, excl, !!horaFixa
+        );
+        return { ids: (r?.equipa || []).map((m) => m.utilizadorId), viagem: 0 };
+      }
       const r = await determinarUtilizadorAtribuido(
-        empresaId, range, propriedade.coordenadas, tempo, propriedade._id
+        empresaId, range, propriedade.coordenadas, tempo, propriedade._id, excl, !!horaFixa
       );
-      if (r?.utilizadorId) ids = [r.utilizadorId];
-      viagemLB = Number(r?.tempoViagem) || 0;
+      return { ids: r?.utilizadorId ? [r.utilizadorId] : [], viagem: Number(r?.tempoViagem) || 0 };
+    };
+    // Com hora fixada pelo gestor, o motor escolhe pela ordem de preferência de sempre (equipa preferida, carga
+    // semanal, mesmo prédio) mas só entre quem CABE a essa hora: quem não cabe é posto de parte e tenta-se a seguinte.
+    let excluidos = null;
+    let naoCouberam = 0;
+    for (let tentativa = 0; tentativa < 25; tentativa++) {
+      const e = await escolher(excluidos);
+      ids = e.ids; viagemLB = e.viagem;
+      if (!horaFixa || ids.length === 0) break;
+      const naoCabem = [];
+      for (const id of ids) {
+        if (!(await cabeNaAgendaNaHora(id, horaFixa, tempo, tarefaId, propriedade.coordenadas, propriedade._id))) naoCabem.push(String(id));
+      }
+      if (naoCabem.length === 0) break;
+      naoCouberam += naoCabem.length;
+      excluidos = new Set([...(excluidos || []), ...naoCabem]);
+      ids = [];
     }
 
+    if (ids.length === 0 && naoCouberam > 0) {
+      plano.estado = 'nao_atribuida';
+      plano.motivo_nao_atribuicao = MOTIVO_HORA_FIXA;
+      plano.data = new Date(horaFixa);
+      return plano;
+    }
     if (ids.length === 0) {
       const d = await diagnosticarFaltaDeStaff(empresaId, range, propriedade._id, null, tempo);
       plano.estado = d.estado;
       plano.motivo_nao_atribuicao = d.motivo;
+      return plano;
+    }
+
+    // Hora fixada pelo gestor: nunca se muda (já só entraram pessoas que cabem a essa hora).
+    if (horaFixa) {
+      plano.utilizador_id = ids[0];
+      plano.equipa_atribuida = ids;
+      plano.data = new Date(horaFixa);
+      plano.estado = 'atribuida';
+      plano.faltam = Math.max(0, staffNecessario - ids.length);
       return plano;
     }
 
@@ -178,6 +214,11 @@ async function planearAtribuicao({ empresaId, propriedade, dia, tempoLimpeza }) 
   return plano;
 }
 
+/** Parâmetros do motor quando o gestor fixou a hora desta limpeza (data_ajustada_gestor + hora real). */
+function horaFixaDaTarefa(t) {
+  return t && t.data_ajustada_gestor && H.temHoraReal(t.data) ? { horaFixa: new Date(t.data), tarefaId: t._id } : {};
+}
+
 /**
  * A pessoa já tem outra limpeza que se sobrepõe a [data, data + duração]?
  * (usa tempo de limpeza + viagem de cada tarefa; ignora canceladas/concluídas
@@ -203,7 +244,7 @@ async function temSobreposicao(utilizadorId, data, duracaoMin, excluirTarefaId =
 }
 
 /**
- * A limpeza, na hora em que está, cumpre o horário desta pessoa (janela 09:00-18:00,
+ * A limpeza, na hora em que está, cumpre o horário desta pessoa (janela 10:00-18:00,
  * sem sobreposição com viagens, almoço possível)? Usa a agenda real; a própria
  * tarefa fica de fora. Sem hora real (meia-noite) devolve true (ainda não agendada).
  * @returns {Promise<boolean>}
@@ -214,7 +255,7 @@ async function cabeNaAgendaNaHora(utilizadorId, data, duracaoMin, excluirTarefaI
   const dur = Number(duracaoMin) || 45;
   const ini = H.minutosLocais(data);
   // Hora já fora da janela (dados antigos): não a «piora»; só recusa sobreposições.
-  if (ini < H.HORARIO.INICIO_DIA || ini >= H.HORARIO.FIM_DIA) {
+  if (ini < H.HORARIO.INICIO_DIA || ini >= H.HORARIO.FIM_DIA || ini + dur > H.HORARIO.FIM_MAXIMO_LIMPEZA) {
     return !(await temSobreposicao(utilizadorId, data, dur, excluirTarefaId));
   }
   const nova = { duracao: dur, coord, propId, nova: true, ini, fim: ini + dur };
@@ -357,6 +398,7 @@ async function atribuirTarefaEmFalta(tarefa, dia) {
     propriedade,
     dia,
     tempoLimpeza: tarefa.tempo_limpeza_minutos || 45,
+    ...horaFixaDaTarefa(tarefa),
   });
   if (plano.estado === 'atribuida') {
     const r = await Tarefa.updateOne(
@@ -517,6 +559,7 @@ module.exports = {
   planearVaga,
   diagnosticarFaltaDeStaff,
   planearAtribuicao,
+  horaFixaDaTarefa,
   MOTIVO_SEM_EQUIPA,
   MOTIVO_INDISPONIVEL,
   MOTIVO_LOTACAO,
