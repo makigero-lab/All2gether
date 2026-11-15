@@ -1782,7 +1782,7 @@ describe('Cron Job: Cão de Guarda (Prompt 96)', () => {
     for (const call of notificarSpy.mock.calls) {
       expect(call[1]).toBe('⚠️ Tarefa Incompleta');
       expect(call[3]).toBe('/staff');
-      expect(call[2]).toMatch(/como concluída\. Por favor, atualiza a app!/);
+      expect(call[2]).toMatch(/Ainda não fechaste a limpeza .*antes das 20:00/);
     }
     // Pelo menos uma notificação mentiona "Casa CG1".
     const corpos = notificarSpy.mock.calls.map((c) => c[2]);

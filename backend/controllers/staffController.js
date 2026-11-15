@@ -18,6 +18,7 @@ const { notificarUtilizador, avisarGestores } = require('../utils/notificar');
 const { preencherVagaTarefa, preencherVagasAposAusencia } = require('../utils/atribuicaoAutomatica');
 const { comMembro, retirarMembroDoc } = require('../utils/equipaTarefa');
 const { aoConcluirTarefa } = require('../utils/cicloTarefa');
+const { fechadaAutomaticamente } = require('../utils/conclusaoAutomatica');
 const { horaPadraoDoDia } = require('../utils/horario');
 
 /* ------------------------------------------------------------------ */
@@ -511,7 +512,9 @@ exports.concluirTarefa = async (req, res) => {
       });
     }
 
-    if (tarefa.estado === 'concluida') {
+    // Fechada pelo sistema às 20:00 sem confirmação: a pessoa ainda pode juntar fotos/notas e confirmar.
+    const confirmaFechoAutomatico = fechadaAutomaticamente(tarefa);
+    if (tarefa.estado === 'concluida' && !confirmaFechoAutomatico) {
       return res.status(400).json({ erro: 'Tarefa já concluída.' });
     }
 
@@ -548,7 +551,10 @@ exports.concluirTarefa = async (req, res) => {
       hora_conclusao: agora,
       data_conclusao: agora, // HF19 — para o cron job de limpeza
       fotos_conclusao: fotosNormalizadas, // HF19 — fotos da conclusão
+      conclusao_origem: 'staff',
     };
+    // Confirmação tardia: a hora gravada é a de agora (hora real da confirmação), nunca a das 20:00.
+    if (confirmaFechoAutomatico) set.confirmada_depois_em = agora;
 
     if (req.body?.observacoes_staff !== undefined) {
       set.observacoes_staff = String(req.body.observacoes_staff || '');
@@ -564,7 +570,14 @@ exports.concluirTarefa = async (req, res) => {
     }
 
     const atualizada = await Tarefa.findOneAndUpdate(
-      comMembro({ _id: id, estado: { $nin: ['concluida', 'cancelada'] } }, utilizadorId),
+      // Só se ainda estiver por fechar, ou fechada pelo sistema sem confirmação (condicional: dois cliques não repetem).
+      comMembro({
+        _id: id,
+        $or: [
+          { estado: { $nin: ['concluida', 'cancelada'] } },
+          { estado: 'concluida', conclusao_origem: 'automatica' },
+        ],
+      }, utilizadorId),
       { $set: set },
       { new: true }
     );
@@ -918,7 +931,7 @@ exports.toggleChecklistItem = async (req, res) => {
       return res.status(404).json({ erro: 'Tarefa não encontrada.' });
     }
 
-    if (tarefa.estado === 'concluida') {
+    if (tarefa.estado === 'concluida' && !fechadaAutomaticamente(tarefa)) {
       return res.status(400).json({ erro: 'Não podes alterar a checklist de uma tarefa concluída.' });
     }
 

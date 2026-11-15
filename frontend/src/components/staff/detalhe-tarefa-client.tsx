@@ -123,7 +123,10 @@ export function DetalheTarefaClient({
   // Prompt 113 — Se a tarefa JÁ estiver concluída (ex.: reabrir o detalhe),
   // bloqueia TODA a interação: checklists, observações, Concluir, Atraso,
   // Avaria. Mostra o estado final sem permitir editar.
-  const jaConcluida = tarefa.estado === "concluida";
+  // Fechada pelo sistema (20:00) sem confirmação NÃO conta como concluída: a pessoa ainda pode juntar
+  // fotos e notas e confirmá-la (fica com a hora real da confirmação).
+  const fechadaPeloSistema = tarefa.estado === "concluida" && tarefa.conclusao_origem === "automatica";
+  const jaConcluida = tarefa.estado === "concluida" && !fechadaPeloSistema;
 
   // Início da limpeza («Comecei» / automático): estado local, atualizado sem recarregar a página
   // (recarregar perderia a checklist e as notas por gravar).
@@ -605,6 +608,13 @@ export function DetalheTarefaClient({
             <Play className="h-4 w-4 shrink-0" aria-hidden="true" />
             Em curso{horaCurta(iniciadaEm) ? ` desde as ${horaCurta(iniciadaEm)}` : ""}
             {inicioOrigem === "automatico" ? " (início automático)" : ""}
+          </p>
+        )}
+
+        {fechadaPeloSistema && !concluida && (
+          <p role="status" className="flex items-start gap-2 rounded-md bg-status-porat-bg px-3 py-2.5 text-sm font-medium text-status-porat">
+            <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+            O sistema fechou esta limpeza às 20:00 sem a tua confirmação. Junta fotos e notas e conclui-a para ficar registada.
           </p>
         )}
 

@@ -162,6 +162,8 @@ export interface TarefaMock {
   observacoes_staff?: string | null;
   iniciada_em?: string | null;
   inicio_origem?: "botao" | "automatico" | null;
+  // Fechada pelo sistema às 20:00 sem confirmação: a pessoa ainda a pode confirmar (fotos/notas).
+  conclusao_origem?: "staff" | "gestor" | "automatica" | null;
   // «Não consegui começar»: último registo do staff.
   nao_consegui_comecar?: { motivo: string; nota?: string; em?: string } | null;
   // Lavandaria: a casa tem lavandaria associada? (só então se mostra «Roupa limpa»).

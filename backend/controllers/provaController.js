@@ -13,6 +13,7 @@ const mongoose = require('mongoose');
 const Tarefa = require('../models/Tarefa');
 const ReservaManual = require('../models/ReservaManual');
 const { obterEmpresaId } = require('./gestorController');
+const { fechadaAutomaticamente, confirmadaDepois, horaConclusaoReal } = require('../utils/conclusaoAutomatica');
 
 /** Itens feitos / total da checklist dinâmica. `total` 0 = a tarefa não tem checklist dinâmica. */
 function contarChecklist(t) {
@@ -27,7 +28,8 @@ function contarChecklist(t) {
   return { feitos, total };
 }
 
-const horaConclusaoDe = (t) => t.hora_conclusao || t.concluida_em || null;
+// Sem hora de conclusão numa limpeza fechada pelo sistema (não há prova de que foi feita às 20:00).
+const horaConclusaoDe = horaConclusaoReal;
 
 exports.contarChecklist = contarChecklist;
 
@@ -39,7 +41,7 @@ exports.getProvaLimpeza = async (req, res) => {
     if (!mongoose.isValidObjectId(id)) return res.status(400).json({ erro: 'ID de tarefa inválido.' });
 
     const t = await Tarefa.findOne({ _id: id, empresa_id: empresaId })
-      .select('estado tipo hora_conclusao concluida_em iniciada_em inicio_origem fotos_conclusao checklist_dinamica observacoes_staff avarias nao_consegui_comecar')
+      .select('estado tipo hora_conclusao concluida_em conclusao_origem fechada_automaticamente_em confirmada_depois_em iniciada_em inicio_origem fotos_conclusao checklist_dinamica observacoes_staff avarias nao_consegui_comecar')
       .lean();
     if (!t) return res.status(404).json({ erro: 'Tarefa não encontrada.' });
 
@@ -48,11 +50,15 @@ exports.getProvaLimpeza = async (req, res) => {
       tarefa_id: String(t._id),
       estado: t.estado,
       hora_conclusao: horaConclusaoDe(t),
+      fechada_automaticamente: fechadaAutomaticamente(t),
+      confirmada_depois: confirmadaDepois(t),
+      fechada_automaticamente_em: t.fechada_automaticamente_em || null,
+      confirmada_depois_em: t.confirmada_depois_em || null,
       iniciada_em: t.iniciada_em || null,
       inicio_origem: t.inicio_origem || null,
       fotos,
       // Concluída sem fotos = já passou a retenção das fotos.
-      fotos_expiradas: t.estado === 'concluida' && fotos.length === 0,
+      fotos_expiradas: t.estado === 'concluida' && fotos.length === 0 && !fechadaAutomaticamente(t),
       checklist: contarChecklist(t),
       observacoes_staff: t.observacoes_staff || '',
       nao_consegui_comecar: t.nao_consegui_comecar || null,
@@ -114,7 +120,7 @@ exports.getLimpezaDoParceiro = async (req, res) => {
     if (!reserva.tarefa_gerada_id) return res.status(404).json({ erro: 'Esta reserva ainda não tem limpeza.' });
 
     const t = await Tarefa.findById(reserva.tarefa_gerada_id)
-      .select('estado data hora_conclusao concluida_em fotos_conclusao tipo_limpeza')
+      .select('estado data hora_conclusao concluida_em conclusao_origem confirmada_depois_em fotos_conclusao tipo_limpeza')
       .lean();
     if (!t) return res.status(404).json({ erro: 'Limpeza não encontrada.' });
 
@@ -126,8 +132,11 @@ exports.getLimpezaDoParceiro = async (req, res) => {
       tipo_limpeza: t.tipo_limpeza || 'normal',
       estado: t.estado,
       hora_conclusao: concluida ? horaConclusaoDe(t) : null,
+      // Fechada pelo sistema, sem confirmação da equipa: o proprietário não vê hora nem «concluída».
+      fechada_automaticamente: fechadaAutomaticamente(t),
+      confirmada_depois: confirmadaDepois(t),
       fotos,
-      fotos_expiradas: concluida && fotos.length === 0,
+      fotos_expiradas: concluida && fotos.length === 0 && !fechadaAutomaticamente(t),
     });
   } catch (err) {
     console.error('❌ getLimpezaDoParceiro:', err.message);

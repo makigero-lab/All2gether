@@ -140,6 +140,7 @@ exports.getRelatorioProdutividade = async (req, res) => {
           $match: {
             ...matchBase,
             estado: 'concluida',
+            fechada_automaticamente_em: null, // fecho automático nunca conta no tempo real
             hora_conclusao: { $ne: null, $type: 'date' },
           },
         },
@@ -309,7 +310,7 @@ exports.getRelatorioTempoReal = async (req, res) => {
       estado: 'concluida',
       data: { $gte: inicio, $lt: fim },
     })
-      .select('propriedade_id tempo_limpeza_minutos tipo_limpeza hora_conclusao concluida_em iniciada_em inicio_origem primeiro_item_checklist_em')
+      .select('propriedade_id tempo_limpeza_minutos tipo_limpeza hora_conclusao concluida_em iniciada_em inicio_origem primeiro_item_checklist_em conclusao_origem fechada_automaticamente_em')
       .lean();
 
     const props = await Propriedade.find({ empresa_id: empresaId }).select('nome tempo_limpeza_minutos').lean();
@@ -318,6 +319,7 @@ exports.getRelatorioTempoReal = async (req, res) => {
 
     const inicios = { botao: 0, automatico: 0, sem_registo: 0 };
     for (const t of concluidas) {
+      if (t.fechada_automaticamente_em) continue; // fechadas pelo sistema: não entram nesta contagem
       if (t.inicio_origem === 'botao') inicios.botao++;
       else if (t.inicio_origem === 'automatico') inicios.automatico++;
       else inicios.sem_registo++;

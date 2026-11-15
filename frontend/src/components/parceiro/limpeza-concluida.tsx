@@ -21,6 +21,8 @@ interface LimpezaDTO {
   data: string;
   estado: string;
   hora_conclusao: string | null;
+  fechada_automaticamente?: boolean;
+  confirmada_depois?: boolean;
   fotos: string[];
   fotos_expiradas: boolean;
 }
@@ -42,11 +44,17 @@ export function LimpezaConcluida({
   hora,
   casa,
   compacto = false,
+  fechadaPeloSistema = false,
+  confirmadaDepois = false,
 }: {
   reservaId: string;
   hora: string | null;
   casa: string;
   compacto?: boolean;
+  /** Fechada pelo sistema às 20:00, sem confirmação da equipa: não há hora de conclusão. */
+  fechadaPeloSistema?: boolean;
+  /** Fechada pelo sistema e confirmada pela equipa mais tarde (a hora da confirmação não é a do trabalho). */
+  confirmadaDepois?: boolean;
 }) {
   const [aberto, setAberto] = useState(false);
   const [dados, setDados] = useState<LimpezaDTO | null>(null);
@@ -73,7 +81,7 @@ export function LimpezaConcluida({
       <span className="inline-flex flex-nowrap items-center gap-1 whitespace-nowrap">
         <span className="inline-flex items-center gap-1 rounded bg-status-conc-bg px-1.5 py-0.5 text-xs font-medium text-status-conc">
           <CheckCircle2 className="h-3 w-3 shrink-0" aria-hidden="true" />
-          {h ? `Concluída às ${h}` : "Concluída"}
+          {fechadaPeloSistema ? "Fechada pelo sistema" : h ? `Concluída às ${h}` : "Concluída"}
         </span>
         <Button
           variant="ghost"
@@ -90,7 +98,7 @@ export function LimpezaConcluida({
       <Dialog open={aberto} onOpenChange={setAberto}>
         <DialogHeader>
           <div>
-            <DialogTitle>Limpeza concluída</DialogTitle>
+            <DialogTitle>{fechadaPeloSistema ? "Limpeza fechada pelo sistema" : "Limpeza concluída"}</DialogTitle>
             <DialogDescription>{casa}</DialogDescription>
           </div>
           <DialogClose onClick={() => setAberto(false)} />
@@ -108,10 +116,20 @@ export function LimpezaConcluida({
           )}
           {dados && (
             <>
-              <p className="text-sm">
-                <strong>Concluída às {horaDe(dados.hora_conclusao) ?? "—"}</strong>
-              </p>
-              {dados.fotos.length > 0 ? (
+              {dados.fechada_automaticamente ? (
+                <p className="rounded-md bg-muted/50 p-3 text-sm">
+                  <strong>Fechada pelo sistema, sem confirmação da equipa.</strong> Não há hora de conclusão nem fotos desta limpeza.
+                </p>
+              ) : dados.confirmada_depois ? (
+                <p className="text-sm">
+                  <strong>Confirmada pela equipa depois do fecho automático.</strong> Não há hora de conclusão.
+                </p>
+              ) : (
+                <p className="text-sm">
+                  <strong>Concluída às {horaDe(dados.hora_conclusao) ?? "—"}</strong>
+                </p>
+              )}
+              {dados.fechada_automaticamente ? null : dados.fotos.length > 0 ? (
                 <ul className="grid grid-cols-2 gap-2">
                   {dados.fotos.map((f, i) => (
                     <li key={i}>

@@ -49,6 +49,7 @@ const { iniciarSincronizacaoCalendarios } = require('./jobs/sincronizacaoCalenda
 const { iniciarLimpezaFotos } = require('./jobs/limpezaFotos');
 const { iniciarGeradorRotinas } = require('./jobs/geradorRotinas');
 const { iniciarInicioLimpeza } = require('./jobs/inicioLimpeza');
+const { iniciarFechoAutomatico } = require('./jobs/fechoAutomatico');
 const { iniciarResumoGestor } = require('./jobs/resumoGestor');
 const { configurarWebPush } = require('./utils/push');
 
@@ -299,10 +300,13 @@ if (require.main === module) {
       // (Europe/Lisbon), envia push a cada staff com trabalho amanhã.
       iniciarAgendaAmanha();
 
-      // Cron job "Cão de Guarda": todos os dias às 18:00
-      // (Europe/Lisbon), envia push por cada tarefa de limpeza de hoje
-      // ainda não concluída (lembra o staff de fechar o dia).
+      // Cron job "Cão de Guarda" (Europe/Lisbon): às 18:00 auto-atribui as tarefas de amanhã sem
+      // ninguém; às 19:00 envia push por cada limpeza de hoje ainda não fechada (lembra o staff).
       iniciarCaoGuarda();
+
+      // Fecho automático às 20:00 (Europe/Lisbon): fecha as limpezas 'em_curso' com pessoa que ninguém
+      // fechou (marcadas como fecho automático). Recupera ao arrancar e de hora a hora (o Render dorme).
+      iniciarFechoAutomatico();
 
       // Cron job "Arquivista": dia 1 de cada trimestre,
       // move tarefas concluídas/canceladas com mais de 3 meses para o arquivo.

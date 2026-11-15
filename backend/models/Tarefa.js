@@ -156,6 +156,14 @@ const tarefaSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    // Quem fechou a limpeza: 'staff' (a pessoa), 'gestor' (à mão) ou 'automatica' (job das 20:00, sem
+    // confirmação da equipa; aí `concluida_em` é a hora do fecho e `hora_conclusao` fica vazia).
+    // Concluídas antigas não têm o campo (= confirmadas por pessoas).
+    conclusao_origem: { type: String, enum: ['staff', 'gestor', 'automatica', null], default: null },
+    // Quando o sistema fechou a limpeza. Mantém-se depois de a pessoa a confirmar (para a lista do gestor).
+    fechada_automaticamente_em: { type: Date, default: null, index: true },
+    // Quando a pessoa confirmou, depois, uma limpeza fechada pelo sistema.
+    confirmada_depois_em: { type: Date, default: null },
     // HF19 — Fotos obrigatórias na conclusão da tarefa.
     // O staff tem de anexar pelo menos 1 foto (máx. 5) para concluir.
     // Strings base64 ou URLs. O cron job limpezaFotos esvazia este array

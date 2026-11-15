@@ -91,11 +91,15 @@ export interface TarefaDetalheGestor {
   alerta?: string | null;
   hora_conclusao?: string | null;
   concluida_em?: string | null;
+  conclusao_origem?: "staff" | "gestor" | "automatica" | null;
 }
 
 /** Prova da limpeza (GET /api/gestor/tarefas/:id/prova): carrega-se só ao abrir o modal. */
 interface ProvaDTO {
   hora_conclusao: string | null;
+  fechada_automaticamente?: boolean;
+  confirmada_depois?: boolean;
+  confirmada_depois_em?: string | null;
   fotos: string[];
   fotos_expiradas: boolean;
   checklist: { feitos: number; total: number };
@@ -213,6 +217,9 @@ export function DetalheTarefaModal({
 
   // Prova da limpeza: fotos, hora de conclusão e checklist, só ao abrir.
   const [prova, setProva] = useState<ProvaDTO | null>(null);
+  // Fecho automático das 20:00: sem hora de conclusão nem prova (ver backend/utils/conclusaoAutomatica.js).
+  const fechadaAuto = prova ? !!prova.fechada_automaticamente : tarefa?.conclusao_origem === "automatica";
+  const confirmadaTarde = !!prova?.confirmada_depois;
   const [provaErro, setProvaErro] = useState<string | null>(null);
   const [provaA, setProvaA] = useState(false);
   const [resolvendo, setResolvendo] = useState<string | null>(null);
@@ -430,11 +437,24 @@ export function DetalheTarefaModal({
                   {provaErro && (
                     <p role="alert" className="text-sm text-destructive">{provaErro}</p>
                   )}
+                  {fechadaAuto ? (
+                    <p className="rounded-md bg-status-porat-bg px-3 py-2 text-sm font-medium text-status-porat">
+                      Fechada pelo sistema às {horaCurta(tarefa.concluida_em)}, sem confirmação da equipa. Não há hora de conclusão nem fotos.
+                    </p>
+                  ) : confirmadaTarde ? (
+                    <p className="text-sm">
+                      <strong>Confirmada pela equipa depois do fecho automático</strong> ({horaCurta(prova?.confirmada_depois_em ?? tarefa.concluida_em)} de outro momento; não é a hora do trabalho).
+                    </p>
+                  ) : null}
                   <p className="text-sm">
-                    Concluída às{" "}
-                    <strong>{horaCurta(prova?.hora_conclusao ?? tarefa.hora_conclusao ?? tarefa.concluida_em)}</strong>
+                    {!fechadaAuto && !confirmadaTarde && (
+                      <>
+                        Concluída às{" "}
+                        <strong>{horaCurta(prova?.hora_conclusao ?? tarefa.hora_conclusao ?? tarefa.concluida_em)}</strong>
+                      </>
+                    )}
                     {prova && prova.checklist.total > 0 && (
-                      <span className="ml-3 inline-flex items-center gap-1 text-muted-foreground">
+                      <span className="inline-flex items-center gap-1 text-muted-foreground">
                         <ListChecks className="h-4 w-4" aria-hidden="true" />
                         Checklist: {prova.checklist.feitos}/{prova.checklist.total} itens feitos
                       </span>

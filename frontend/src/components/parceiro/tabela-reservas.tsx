@@ -92,7 +92,7 @@ interface ReservaDTO {
   horario_preferido?: string | null;
   /** Tipo de limpeza; sem o campo (reservas antigas) = normal. */
   tipo_limpeza?: string | null;
-  tarefa_gerada_id: { estado: string; data: string; hora_conclusao?: string | null; concluida_em?: string | null } | null;
+  tarefa_gerada_id: { estado: string; data: string; hora_conclusao?: string | null; concluida_em?: string | null; fechada_automaticamente?: boolean; confirmada_depois?: boolean } | null;
   createdAt: string;
   /** Vem de um calendário externo (Airbnb, Booking...) ou foi marcada à mão. */
   origem?: "manual" | "ical" | null;
@@ -1714,7 +1714,7 @@ export function TabelaReservas({
                             // por cima do botão do lixo na coluna fixa ao lado).
                             <span className="flex flex-wrap items-center gap-1 whitespace-nowrap">
                               {l.estado === "concluida" && l.reserva ? (
-                                <LimpezaConcluida reservaId={l.reserva._id} hora={l.horaConclusao ?? null} casa={nome} />
+                                <LimpezaConcluida reservaId={l.reserva._id} hora={l.horaConclusao ?? null} casa={nome} fechadaPeloSistema={!!l.reserva.tarefa_gerada_id?.fechada_automaticamente} confirmadaDepois={!!l.reserva.tarefa_gerada_id?.confirmada_depois} />
                               ) : (
                                 <EstadoTarefaBadge estado={estadoParaParceiro(l.estado)} />
                               )}
@@ -1879,7 +1879,7 @@ export function TabelaReservas({
                         ) : l.eliminada ? (
                           <span className="rounded bg-destructive/15 px-1.5 py-0.5 text-xs font-medium text-destructive">A eliminar</span>
                         ) : l.estado === "concluida" && l.reserva ? (
-                          <LimpezaConcluida reservaId={l.reserva._id} hora={l.horaConclusao ?? null} casa={nome} compacto />
+                          <LimpezaConcluida reservaId={l.reserva._id} hora={l.horaConclusao ?? null} casa={nome} compacto fechadaPeloSistema={!!l.reserva.tarefa_gerada_id?.fechada_automaticamente} confirmadaDepois={!!l.reserva.tarefa_gerada_id?.confirmada_depois} />
                         ) : l.estado ? (
                           <EstadoTarefaBadge estado={estadoParaParceiro(l.estado)} />
                         ) : (

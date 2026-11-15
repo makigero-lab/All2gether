@@ -32,6 +32,7 @@ import { Button } from "@/components/ui/button";
 import { adminGet, adminPatch } from "@/lib/api";
 import { EstadoTarefaBadge } from "@/components/ui/estado-tarefa-badge";
 import { OfertaVagaBadge } from "@/components/gestor/oferta-vaga-badge";
+import { FechadasAutomaticamente } from "@/components/gestor/fechadas-automaticamente";
 import { TipoMarca } from "@/components/tipo-limpeza-badge";
 import { PushNotificationSetup } from "@/components/gestor/push-notification-setup";
 import { formatarDataSegura, textoRedistribuicao, type RedistribuicaoDTO, plural } from "@/lib/utils";
@@ -411,6 +412,8 @@ export default function AdminDashboardPage() {
               )}
             </section>
           </div>
+
+          <FechadasAutomaticamente />
         </>
       ) : null}
     </div>

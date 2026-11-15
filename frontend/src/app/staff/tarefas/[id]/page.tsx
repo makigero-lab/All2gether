@@ -139,6 +139,7 @@ export default function DetalheTarefaPage({
     observacoes_staff: tarefa.observacoes_staff ?? null,
     iniciada_em: tarefa.iniciada_em ?? null,
     inicio_origem: tarefa.inicio_origem ?? null,
+    conclusao_origem: tarefa.conclusao_origem ?? null,
     nao_consegui_comecar: tarefa.nao_consegui_comecar ?? null,
     tem_lavandaria: !!tarefa.propriedade_id?.fornecedor_id,
     roupa_entregue: tarefa.roupa_entregue === true,

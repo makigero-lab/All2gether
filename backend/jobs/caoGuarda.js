@@ -5,9 +5,9 @@
  * Prompt 98 (Fase 1.5) — "A Rede de Segurança das 18h" (auto-atribuição de
  *                         emergência das tarefas órfãs de amanhã).
  *
- * Todos os dias às 18:00 (fuso de Portugal/Lisboa), executa DUAS rotinas:
+ * Executa DUAS rotinas, em horas diferentes (fuso de Portugal/Lisboa):
  *
- *   FASE A — Auto-Atribuição de Emergência (Prompt 98, ANTES dos alertas):
+ *   FASE A (18:00) — Auto-Atribuição de Emergência (Prompt 98):
  *     Procura as Tarefas marcadas para o DIA SEGUINTE (amanhã) com estado
  *     'por_atribuir' (sem funcionário) e invoca o load balancer
  *     (determinarUtilizadorAtribuido) para as distribuir inteligentemente.
@@ -16,11 +16,12 @@
  *     correr uma hora depois, os funcionários já recebem a notificação com
  *     as escalas 100% preenchidas.
  *
- *   FASE B — Alertas de Tarefas Incompletas (Prompt 96, os alertas):
+ *   FASE B (19:00) — Lembrete para fechar a tarefa (Prompt 96; antes às 18:00):
  *     Procura as Tarefas de limpeza do DIA ATUAL que estejam atribuídas a
  *     uma funcionária mas ainda não concluídas (estado 'atribuida' ou
  *     'em_curso') e envia uma push a lembrar cada funcionária de fechar a
- *     tarefa na app.
+ *     tarefa na app. Às 20:00 o job fechoAutomatico fecha as que ficarem
+ *     'em_curso' (a mensagem avisa disso).
  *
  * Nota sobre estados: o modelo Tarefa tem os estados
  *   ['por_atribuir','atribuida','em_curso','concluida','cancelada'].
@@ -254,7 +255,7 @@ async function alertasTarefasIncompletas() {
       notificarUtilizador(
         String(u._id),
         '⚠️ Tarefa Incompleta',
-        `Ainda não marcaste a limpeza da ${nomePropriedade} como concluída. Por favor, atualiza a app!`,
+        `Ainda não fechaste a limpeza da ${nomePropriedade}. Fecha-a na app antes das 20:00; depois disso o sistema fecha-a sem confirmação da equipa.`,
         '/staff',
         // Prompt 115 — Alerta de tarefa incompleta é "principal" → cria in-app.
         { criarInApp: true, tipo: 'aviso' }
@@ -296,6 +297,7 @@ async function alertasTarefasIncompletas() {
  * @returns {Promise<{failSafe: {encontradas, atribuidas, orfas}, alertas: {encontradas, notificadas}}>}
  */
 async function executarCaoGuarda() {
+  // Execução COMPLETA (as duas fases seguidas): uso manual e testes. Em produção cada fase tem o seu cron.
   console.log('🐶 [Cão de Guarda] A iniciar às', new Date().toISOString());
 
   try {
@@ -324,24 +326,54 @@ async function executarCaoGuarda() {
   }
 }
 
+/** FASE A agendada (18:00): retoma atribuições presas + auto-atribuição de emergência de amanhã. Nunca lança. */
+async function executarFaseAtribuicao() {
+  console.log('🐶 [Cão de Guarda] Fase A (atribuição de emergência) às', new Date().toISOString());
+  try {
+    await retomarAtribuicoesPresas().catch((e) => console.error('⚠️  retomarAtribuicoesPresas:', e.message));
+    return await autoAtribuicaoEmergencia();
+  } catch (err) {
+    console.error('❌ [Cão de Guarda] Erro na fase A:', err.message);
+    return { encontradas: 0, atribuidas: 0, orfas: 0, erro: err.message };
+  }
+}
+
+/** FASE B agendada (19:00): lembrete para fechar a tarefa. Nunca lança. */
+async function executarFaseLembrete() {
+  console.log('🐶 [Cão de Guarda] Fase B (lembrete de fecho) às', new Date().toISOString());
+  try {
+    return await alertasTarefasIncompletas();
+  } catch (err) {
+    console.error('❌ [Cão de Guarda] Erro na fase B:', err.message);
+    return { encontradas: 0, notificadas: 0, erro: err.message };
+  }
+}
+
 /**
- * Inicia o cron job.
+ * Inicia os cron jobs.
  *
- * Agenda para todos os dias às 18:00, fuso de Portugal/Lisboa
- * (0 18 * * *, timezone 'Europe/Lisbon'). O node-cron suporta a opção
+ * Fase A às 18:00 e fase B às 19:00, todos os dias, fuso de Portugal/Lisboa
+ * (timezone 'Europe/Lisbon'). O node-cron suporta a opção
  * `timezone` nativamente, pelo que o horário é estável mesmo que o
  * servidor esteja em UTC (caso do Render) — acompanha automaticamente
  * as mudanças legais de horário de Verão/Inverno de Portugal.
  */
 function iniciarCaoGuarda() {
   console.log(
-    '⏰ [Cão de Guarda] Cron agendado para 18:00 (Europe/Lisbon) diariamente (0 18 * * *).'
+    '⏰ [Cão de Guarda] Crons (Europe/Lisbon): 18:00 atribuição de emergência (0 18 * * *) e 19:00 lembrete de fecho (0 19 * * *).'
   );
 
   cron.schedule(
     '0 18 * * *',
     async () => {
-      await executarCaoGuarda();
+      await executarFaseAtribuicao();
+    },
+    { timezone: 'Europe/Lisbon' }
+  );
+  cron.schedule(
+    '0 19 * * *',
+    async () => {
+      await executarFaseLembrete();
     },
     { timezone: 'Europe/Lisbon' }
   );
@@ -355,13 +387,15 @@ function iniciarCaoGuarda() {
   if (t1.unref) t1.unref();
 
   // Permite execução manual para teste (exporta as funções).
-  return { retomarAtribuicoesPresas, executarCaoGuarda, autoAtribuicaoEmergencia, alertasTarefasIncompletas };
+  return { retomarAtribuicoesPresas, executarCaoGuarda, executarFaseAtribuicao, executarFaseLembrete,autoAtribuicaoEmergencia, alertasTarefasIncompletas };
 }
 
 module.exports = {
   iniciarCaoGuarda,
   retomarAtribuicoesPresas,
   executarCaoGuarda,
+  executarFaseAtribuicao,
+  executarFaseLembrete,
   autoAtribuicaoEmergencia,
   alertasTarefasIncompletas,
 };
