@@ -70,7 +70,7 @@ async function horaDeAtribuicaoManual({ utilizadorId, data, tempo, propriedade }
   const dia = Horario.diaUTC(data);
   if (Horario.temHoraReal(data)) {
     const a = Horario.avisoForaDoHorario(data, tempo);
-    return { data, aviso: a ? `Fica fora do horário (${a}).` : null, tempoViagem: 0 };
+    return { data, aviso: a ? `Fica fora do horário de trabalho (${a}).` : null, tempoViagem: 0 };
   }
   const r = await calcularInicioTarefaUtilizador(
     utilizadorId, data, propriedade.coordenadas, tempo, null, propriedade._id
@@ -78,7 +78,7 @@ async function horaDeAtribuicaoManual({ utilizadorId, data, tempo, propriedade }
   if (r.cabe) return { data: r.data, aviso: null, tempoViagem: Number(r.tempoViagem) || 0 };
   return {
     data: Horario.utcDeMinutosLocais(dia, Horario.HORARIO.INICIO_DIA),
-    aviso: `Fica fora do horário: ${r.motivo}. Ficou às 10:00; ajusta a hora se for preciso.`,
+    aviso: `Fica fora do horário de trabalho: ${r.motivo}. Ficou às 10:00; ajusta a hora se for preciso.`,
     tempoViagem: 0,
   };
 }
@@ -974,7 +974,7 @@ exports.atribuirTarefa = async (req, res) => {
         const tempoT = tarefa.tempo_limpeza_minutos || 45;
         if (aplicarHoraDoGestor(tarefa, horaPedida.hora)) {
           const fora = Horario.avisoForaDoHorario(tarefa.data, tempoT);
-          if (fora) avisoHorario = `Fica fora do horário (${fora}).`;
+          if (fora) avisoHorario = `Fica fora do horário de trabalho (${fora}).`;
         } else if (!Horario.temHoraReal(tarefa.data)) {
           const r = await calcularInicioTarefaUtilizador(
             idsEquipa(tarefa), tarefa.data, pr && pr.coordenadas, tempoT, tarefa._id, tarefa.propriedade_id
@@ -984,11 +984,11 @@ exports.atribuirTarefa = async (req, res) => {
             tarefa.tempo_viagem_minutos = Number(r.tempoViagem) || 0;
           } else {
             tarefa.data = Horario.utcDeMinutosLocais(Horario.diaUTC(tarefa.data), Horario.HORARIO.INICIO_DIA);
-            avisoHorario = `Fica fora do horário: ${r.motivo}. Ficou às 10:00; ajusta a hora se for preciso.`;
+            avisoHorario = `Fica fora do horário de trabalho: ${r.motivo}. Ficou às 10:00; ajusta a hora se for preciso.`;
           }
         } else {
           const fora = Horario.avisoForaDoHorario(tarefa.data, tempoT);
-          if (fora) avisoHorario = `Fica fora do horário (${fora}).`;
+          if (fora) avisoHorario = `Fica fora do horário de trabalho (${fora}).`;
         }
       } catch (e) { /* mantém */ }
     }
