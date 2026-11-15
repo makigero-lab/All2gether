@@ -34,7 +34,7 @@ import { NotificationBell } from "@/components/notification-bell";
 import { dataPorExtenso, parsearDataSegura } from "@/lib/utils";
 import { mensagemErro } from "@/lib/rascunho-staff";
 import { eFechadaPeloSistema } from "@/lib/estados";
-import { rotulosDeCasas } from "@/lib/casas-rotulo";
+import { rotulosDeCasas, type CasaDaApi } from "@/lib/casas-rotulo";
 
 /**
  * Interface para a tarefa real vinda da API.
@@ -42,7 +42,7 @@ import { rotulosDeCasas } from "@/lib/casas-rotulo";
  */
 interface TarefaReal {
   _id: string;
-  propriedade_id?: { _id?: string; nome: string; morada?: string; fornecedor_id?: string | null } | null;
+  propriedade_id?: { _id?: string; nome: string; morada?: string; morada_curta?: string | null; morada_rua?: string | null; morada_localidade?: string | null; fornecedor_id?: string | null } | null;
   data: string;
   tipo: string;
   estado: string;
@@ -227,6 +227,23 @@ export default function StaffPage() {
   // Prompt 124 — Navegação de dias (1 dia de cada vez).
   // diaSelecionado é um offset em dias a partir de hoje (0 = hoje, -1 = ontem, 1 = amanhã).
   const [offsetDia, setOffsetDia] = useState(0);
+  // O dia aberto fica no URL (?dia=AAAA-MM-DD): ao voltar de uma tarefa (ex.: confirmar uma de «Ontem») regressa ao dia certo.
+  useEffect(() => {
+    const dia = new URLSearchParams(window.location.search).get("dia");
+    if (!dia || !/^\d{4}-\d{2}-\d{2}$/.test(dia)) return;
+    const hojeISO = new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Lisbon" });
+    const dif = Math.round((Date.parse(`${dia}T00:00:00Z`) - Date.parse(`${hojeISO}T00:00:00Z`)) / 86400000);
+    if (Number.isFinite(dif) && Math.abs(dif) <= 60) setOffsetDia(dif);
+  }, []);
+  useEffect(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + offsetDia);
+    const iso = d.toLocaleDateString("sv-SE", { timeZone: "Europe/Lisbon" });
+    const url = new URL(window.location.href);
+    if (offsetDia === 0) url.searchParams.delete("dia");
+    else url.searchParams.set("dia", iso);
+    window.history.replaceState(window.history.state, "", url.pathname + url.search);
+  }, [offsetDia]);
 
   const hoje = mounted
     ? dataPorExtenso(new Date())
@@ -272,8 +289,8 @@ export default function StaffPage() {
   }, [tarefas, mounted]);
   // Rótulo das casas (a rua só nas homónimas).
   const rotulos = useMemo(() => {
-    const vistas = new Map<string, { _id: string; nome: string; morada?: string }>();
-    for (const t of tarefas) if (t.propriedade_id?._id) vistas.set(t.propriedade_id._id, { _id: t.propriedade_id._id, nome: t.propriedade_id.nome, morada: t.propriedade_id.morada });
+    const vistas = new Map<string, CasaDaApi>();
+    for (const t of tarefas) if (t.propriedade_id?._id) vistas.set(t.propriedade_id._id, { ...t.propriedade_id, _id: t.propriedade_id._id });
     return rotulosDeCasas([...vistas.values()]);
   }, [tarefas]);
   const idsPorConfirmar = new Set(porConfirmar.map((t) => t._id));

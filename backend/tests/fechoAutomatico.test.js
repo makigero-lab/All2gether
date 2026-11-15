@@ -379,6 +379,20 @@ describe('Ronda 2: aviso à equipa, reaberta, presas e rótulos', () => {
     expect(ana.taxaConclusao).toBeCloseTo(0.7, 1);
   });
 
+  test('lista da staff devolve a morada curta da casa (para distinguir homónimas) sem a morada estruturada', async () => {
+    const c = await cenario();
+    await Propriedade.updateOne({ _id: c.p._id }, { $set: { morada_estruturada: { rua: 'Rua Augusta', cidade: 'Lisboa' } } });
+    const hoje = new Date();
+    await c.tarefa(new Date(Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth(), hoje.getUTCDate(), 10)), { estado: 'atribuida' });
+    const r = await request(app).get('/api/auth/me/tarefas').set(auth(c.tokAna));
+    expect(r.status).toBe(200);
+    const p = r.body.tarefas[0].propriedade_id;
+    expect(p.morada_curta).toBe('Rua Augusta, Lisboa');
+    expect(p.morada_rua).toBe('Rua Augusta');
+    expect(p.morada_localidade).toBe('Lisboa');
+    expect(p.morada_estruturada).toBeUndefined();
+  });
+
   test('rótulo da casa leva a rua só quando há casas homónimas na mesma empresa', async () => {
     const { rotulosDeCasas } = require('../utils/rotuloCasa');
     const e = await Empresa.create({ nome: 'E' + ++n });
