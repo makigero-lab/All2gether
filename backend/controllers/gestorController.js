@@ -18,7 +18,8 @@ const Tarefa = require('../models/Tarefa');
 const Ausencia = require('../models/Ausencia');
 const Auditoria = require('../models/Auditoria');
 const WebhookLog = require('../models/WebhookLog');
-const { obterCoordenadas } = require('../utils/geocoding');
+const { localizarMorada } = require('../utils/localizacaoPropriedade');
+const { derivarMoradaEstruturada, textoMorada } = require('../utils/morada');
 const { registarAuditoria } = require('../utils/auditoria');
 const { comMembro, filtroMembro, retirarMembroDoc, membrosPopulados, EXPR_MEMBROS } = require('../utils/equipaTarefa');
 const { FILTRO_SEM_PESSOA } = require('../utils/atribuicaoAutomatica');
@@ -348,11 +349,12 @@ exports.criarPropriedade = async (req, res) => {
     // Validações de presença.
     // FIX (morada estruturada) — Aceita morada OU morada_estruturada (pelo menos
     // o campo rua). Retrocompatível com as 46 propriedades legadas que usam `morada`.
-    const temMoradaStr = morada && String(morada).trim();
-    const temMoradaEstruturada = morada_estruturada && morada_estruturada.rua && String(morada_estruturada.rua).trim();
-    if (!nome || (!temMoradaStr && !temMoradaEstruturada)) {
+    // Morada ÚNICA: o texto é a fonte de verdade. Clientes antigos que enviem
+    // só morada_estruturada continuam a ser aceites (concatenada numa string).
+    const moradaUnica = textoMorada(morada, morada_estruturada);
+    if (!nome || !moradaUnica) {
       return res.status(400).json({
-        erro: 'Campos obrigatórios em falta: nome e morada (ou morada_estruturada.rua).',
+        erro: 'Campos obrigatórios em falta: nome e morada.',
       });
     }
 
@@ -409,45 +411,18 @@ exports.criarPropriedade = async (req, res) => {
     // FIX (sync morada) — Sincroniza o campo `morada` (string) com a
     // concatenação da morada estruturada, para que a listagem que usa `morada`
     // como fallback continue a funcionar.
-    let moradaParaGeocode = '';
-    let moradaEstruturadaFinal = null;
-    let moradaFinalStr = ''; // valor final para o campo `morada` (string)
-    if (temMoradaEstruturada) {
-      const me = morada_estruturada;
-      moradaEstruturadaFinal = {
-        rua: String(me.rua || '').trim(),
-        codigo_postal: String(me.codigo_postal || '').trim(),
-        cidade: String(me.cidade || '').trim(),
-      };
-      moradaParaGeocode = [moradaEstruturadaFinal.rua, moradaEstruturadaFinal.codigo_postal, moradaEstruturadaFinal.cidade]
-        .filter((s) => s)
-        .join(', ');
-      // Sincroniza `morada` (string) com a concatenação.
-      moradaFinalStr = moradaParaGeocode;
-    } else {
-      moradaParaGeocode = String(morada).trim();
-      moradaFinalStr = moradaParaGeocode;
-    }
-    const moradaTrim = moradaParaGeocode; // alias para manter compatibilidade com o código abaixo
-    let coordenadas = { lat: null, lng: null };
-    let geocodingFalhou = false;
-    try {
-      const coords = await obterCoordenadas(moradaTrim);
-      if (coords) {
-        coordenadas = coords;
-      } else {
-        geocodingFalhou = true;
-      }
-    } catch (err) {
-      geocodingFalhou = true;
-      console.error('⚠️  Geocoding falhou (propriedade criada sem coordenadas):', err.message);
-    }
+    // Morada única: a estruturada é DERIVADA do texto (para quem a lê).
+    // forcar_morada: o gestor confirmou gravar sem localização no mapa.
+    const loc = await localizarMorada(moradaUnica, { forcar: req.body?.forcar_morada === true });
+    const geocodingFalhou = loc.falhou;
 
     const nova = await Propriedade.create({
       nome: String(nome).trim(),
-      morada: moradaFinalStr, // FIX (sync morada) — sempre sincronizada com morada_estruturada
-      ...(moradaEstruturadaFinal ? { morada_estruturada: moradaEstruturadaFinal } : {}),
-      coordenadas,
+      morada: moradaUnica,
+      morada_estruturada: derivarMoradaEstruturada(moradaUnica),
+      coordenadas: loc.coordenadas,
+      coordenadas_precisao: loc.coordenadas_precisao,
+      morada_localizada: loc.morada_localizada,
       empresa_id: empresaId,
       tempo_limpeza_minutos: tempo,
       origem: 'manual', // HF17 — propriedade manual (não do Smoobu)
@@ -503,7 +478,8 @@ exports.criarPropriedade = async (req, res) => {
 
     const respostaCriar = { propriedade: nova };
     if (geocodingFalhou) {
-      respostaCriar.warning = 'Não foi possível georreferenciar a morada (coordenadas ficam vazias). Tenta simplificar a morada para ativar o cálculo de distâncias.';
+      respostaCriar.geocoding_falhou = true;
+      respostaCriar.warning = 'Não foi possível localizar a morada no mapa (as coordenadas ficam vazias e as distâncias desta casa não contam). Confirma que a morada está completa.';
     }
     return res.status(201).json(respostaCriar);
   } catch (err) {
@@ -1387,52 +1363,26 @@ exports.atualizarPropriedade = async (req, res) => {
     // `morada` como fallback continue a funcionar. Isto resolve o bug onde a
     // tabela mostrava "A definir" quando o utilizador preenchia apenas a
     // morada estruturada (o `morada` ficava vazio/antigo).
+    // Morada ÚNICA: o texto é a fonte de verdade; a estruturada é derivada.
+    // Nunca se mantêm coordenadas antigas: se a morada mudou (ou ainda não
+    // tinha localização) e não for localizada, ficam a null. Confirmar
+    // «morada inválida» (forcar_morada) grava sem bloquear.
     let geocodingFalhou = false;
-    if (morada_estruturada !== undefined) {
-      const me = morada_estruturada || {};
-      const novaRua = String(me.rua || '').trim();
-      const novoCp = String(me.codigo_postal || '').trim();
-      const novaCidade = String(me.cidade || '').trim();
-      propriedade.morada_estruturada = { rua: novaRua, codigo_postal: novoCp, cidade: novaCidade };
-      // Sincroniza `morada` (string) com a concatenação da morada estruturada.
-      if (novaRua) {
-        const moradaConcatenada = [novaRua, novoCp, novaCidade].filter((s) => s).join(', ');
-        propriedade.morada = moradaConcatenada;
-        // Re-faz geocoding com a concatenação.
-        try {
-          const coords = await obterCoordenadas(moradaConcatenada);
-          if (coords) {
-            propriedade.coordenadas = coords;
-          } else {
-            geocodingFalhou = true;
-          }
-        } catch (err) {
-          geocodingFalhou = true;
-          console.error('⚠️  Geocoding falhou na edição (coordenadas mantidas):', err.message);
-        }
-      }
-    }
-    if (morada !== undefined) {
-      const novaMorada = String(morada).trim();
-      if (novaMorada !== propriedade.morada) {
+    if (morada !== undefined || morada_estruturada !== undefined) {
+      const novaMorada = morada !== undefined
+        ? String(morada || '').replace(/\s+/g, ' ').trim()
+        : textoMorada('', morada_estruturada);
+      const mudou = novaMorada !== (propriedade.morada || '');
+      const forcar = req.body?.forcar_morada === true;
+      if (novaMorada || mudou) {
         propriedade.morada = novaMorada;
-        // Só re-faz geocoding se morada_estruturada NÃO foi fornecida (evita duplo geocode).
-        if (morada_estruturada === undefined && novaMorada) {
-          try {
-            const coords = await obterCoordenadas(novaMorada);
-            if (coords) {
-              propriedade.coordenadas = coords;
-            } else {
-              geocodingFalhou = true;
-            }
-          } catch (err) {
-            // Geocoding falhou → mantém coordenadas antigas (não bloqueia).
-            geocodingFalhou = true;
-            console.error(
-              '⚠️  Geocoding falhou na edição (coordenadas mantidas):',
-              err.message
-            );
-          }
+        propriedade.morada_estruturada = derivarMoradaEstruturada(novaMorada);
+        if (forcar || mudou) {
+          const loc = await localizarMorada(novaMorada, { forcar });
+          propriedade.coordenadas = loc.coordenadas;
+          propriedade.coordenadas_precisao = loc.coordenadas_precisao;
+          propriedade.morada_localizada = loc.morada_localizada;
+          geocodingFalhou = loc.falhou;
         }
       }
     }
@@ -1656,7 +1606,7 @@ exports.atualizarPropriedade = async (req, res) => {
       propriedade,
       ...(limpezas ? { limpezas } : {}),
       ...(geocodingFalhou
-        ? { warning: 'Não foi possível georreferenciar a nova morada. Coordenadas antigas mantidas. Tenta simplificar a morada.' }
+        ? { geocoding_falhou: true, warning: 'Não foi possível localizar a morada no mapa (as coordenadas ficam vazias e as distâncias desta casa não contam). Confirma que a morada está completa.' }
         : {}),
     });
   } catch (err) {

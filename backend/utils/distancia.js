@@ -190,7 +190,7 @@ async function calcularTempoViagemReal(origem, destino, dataTarefa) {
       !Array.isArray(body?.rows) ||
       !body.rows[0]?.elements?.[0]
     ) {
-      throw new Error('Google Maps: resposta sem dados válidos');
+      throw new Error(`Google Distance Matrix status=${body?.status}${body?.error_message ? ` (${body.error_message})` : ''}`);
     }
 
     const elemento = body.rows[0].elements[0];

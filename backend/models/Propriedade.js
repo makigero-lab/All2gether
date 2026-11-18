@@ -43,6 +43,10 @@ const propriedadeSchema = new mongoose.Schema(
       lat: { type: Number, default: null },
       lng: { type: Number, default: null },
     },
+    // Precisão da localização ('exata' | 'aproximada') e a morada que o
+    // geocoder encontrou (para o gestor confirmar que o pino está certo).
+    coordenadas_precisao: { type: String, enum: ['exata', 'aproximada', null], default: null },
+    morada_localizada: { type: String, default: null, trim: true },
     empresa_id: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Empresa',
@@ -240,6 +244,8 @@ const propriedadeSchema = new mongoose.Schema(
 // Usado pelo frontend para display e pelo geocoder para obter coordenadas.
 // Prioridade: morada_estruturada.rua > morada (legado) > string vazia.
 propriedadeSchema.virtual('moradaCompleta').get(function () {
+  // A morada única (texto) é a fonte de verdade; a estruturada é só derivada.
+  if (this.morada && String(this.morada).trim()) return String(this.morada).trim();
   const me = this.morada_estruturada;
   if (me && me.rua && String(me.rua).trim()) {
     const partes = [me.rua.trim()];

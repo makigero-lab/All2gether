@@ -19,9 +19,6 @@ export interface EditarPropriedadeForm {
   tipos: Record<string, { tempo: string; checklist: string }>;
   modelo_checklist_id: string;
   observacoes: string;
-  morada_rua: string;
-  morada_codigo_postal: string;
-  morada_cidade: string;
   parceiro_id: string;
   fornecedor_id: string;
   equipa_preferencial: string[];
@@ -139,8 +136,8 @@ export function EditarPropriedadeDialog({
   aberto: boolean;
   nomeAtual: string;
   ativa: boolean;
-  /** Coordenadas guardadas (morada localizada) ou null. */
-  localizada: { lat: number; lng: number } | null;
+  /** Localização guardada (coordenadas, morada encontrada, precisão) ou null. */
+  localizada: { lat: number; lng: number; moradaEncontrada?: string | null; aproximada?: boolean } | null;
   form: EditarPropriedadeForm;
   setForm: (fn: (f: EditarPropriedadeForm) => EditarPropriedadeForm) => void;
   parceiros: Opcao[];
@@ -158,7 +155,6 @@ export function EditarPropriedadeDialog({
   onClose: () => void;
 }) {
   const [separador, setSeparador] = useState("essencial");
-  const [estruturadaAberta, setEstruturadaAberta] = useState(false);
   const [notasAbertas, setNotasAbertas] = useState(false);
   const [editarTipo, setEditarTipo] = useState<string | null>(null);
 
@@ -204,7 +200,7 @@ export function EditarPropriedadeDialog({
                   {localizada && !moradaAviso && (
                     <span className="inline-flex items-center gap-1 text-xs font-medium text-status-conc">
                       <Check className="h-3 w-3" aria-hidden="true" />
-                      Localizada ({localizada.lat.toFixed(4)}, {localizada.lng.toFixed(4)})
+                      Localizada
                     </span>
                   )}
                 </div>
@@ -227,18 +223,21 @@ export function EditarPropriedadeDialog({
                     <span>{moradaAviso}</span>
                   </p>
                 )}
-                <button type="button" className="flex min-h-9 items-center gap-1 text-sm font-medium text-brand-text" aria-expanded={estruturadaAberta} onClick={() => setEstruturadaAberta((v) => !v)}>
-                  <ChevronRight className={cn("h-4 w-4 transition-transform", estruturadaAberta && "rotate-90")} aria-hidden="true" />
-                  Morada estruturada
-                  <span className="hidden font-normal text-muted-foreground sm:inline">· opcional, melhora a localização</span>
-                </button>
-                {estruturadaAberta && (
-                  <div className="grid gap-2 sm:grid-cols-3">
-                    <Input aria-label="Rua, número, andar" placeholder="Rua, número, andar" value={form.morada_rua} onChange={(e) => upd({ morada_rua: e.target.value })} />
-                    <Input aria-label="Código postal" placeholder="Código postal (1200-001)" value={form.morada_codigo_postal} onChange={(e) => upd({ morada_codigo_postal: e.target.value })} />
-                    <Input aria-label="Cidade" placeholder="Cidade" value={form.morada_cidade} onChange={(e) => upd({ morada_cidade: e.target.value })} />
-                    <p className="text-xs text-muted-foreground sm:col-span-3">Se preencheres a rua, esta morada substitui a «Morada» acima para localizar a casa.</p>
-                  </div>
+                {localizada && !moradaAviso && (
+                  <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+                    <span className="min-w-0 break-words">
+                      Localizada como: {localizada.moradaEncontrada || `${localizada.lat.toFixed(4)}, ${localizada.lng.toFixed(4)}`}
+                      {localizada.aproximada && <span className="font-medium text-status-porat"> (aproximada)</span>}
+                    </span>
+                    <a
+                      href={`https://www.google.com/maps/search/?api=1&query=${localizada.lat},${localizada.lng}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex min-h-9 items-center font-medium text-brand-text hover:underline"
+                    >
+                      Ver no mapa
+                    </a>
+                  </p>
                 )}
               </div>
               <div className="grid gap-4 sm:grid-cols-2">

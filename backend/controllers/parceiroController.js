@@ -20,7 +20,8 @@ const { moradaParaApi } = require('../utils/calendarioExterno/moradaCurta');
 const mongoose = require('mongoose');
 const Propriedade = require('../models/Propriedade');
 const Tarefa = require('../models/Tarefa');
-const { obterCoordenadas } = require('../utils/geocoding');
+const { localizarMorada } = require('../utils/localizacaoPropriedade');
+const { derivarMoradaEstruturada } = require('../utils/morada');
 /**
  * POST /api/parceiro/propriedades
  *
@@ -57,18 +58,15 @@ async function criarPropriedade(req, res) {
     }
 
     // Geocoding best-effort (não bloqueia se falhar).
-    let coordenadas = { lat: null, lng: null };
-    try {
-      const result = await obterCoordenadas(String(morada).trim());
-      if (result) coordenadas = result;
-    } catch (e) {
-      console.warn('⚠️  [Parceiro] geocoding falhou (continua sem coordenadas):', e.message);
-    }
+    const loc = await localizarMorada(String(morada).trim());
 
     const novaPropriedade = await Propriedade.create({
       nome: String(nome).trim(),
       morada: String(morada).trim(),
-      coordenadas,
+      morada_estruturada: derivarMoradaEstruturada(String(morada)),
+      coordenadas: loc.coordenadas,
+      coordenadas_precisao: loc.coordenadas_precisao,
+      morada_localizada: loc.morada_localizada,
       empresa_id: empresaId,
       tempo_limpeza_minutos: Number(tempo_limpeza_minutos) || 45,
       capacidade_hospedes: capacidade_hospedes != null ? Number(capacidade_hospedes) : null,
