@@ -18,6 +18,7 @@
  * tentativas que já não cabem. Com { rapido: true } (importação em massa)
  * só se usa o Google + a morada tal como está + abreviaturas expandidas.
  */
+const { logSeguro } = require('./segredos');
 const { derivarMoradaEstruturada, expandirAbreviaturas, semCodigoPostal } = require('./morada');
 
 const PAUSA_NOMINATIM_MS = 1100;
@@ -38,15 +39,15 @@ async function obterCoordenadasGoogleMaps(morada, timeoutMs = TIMEOUT_PEDIDO_MS,
       `?address=${encodeURIComponent(morada)}&language=pt-PT&region=pt&key=${apiKey.trim()}`;
     const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) {
-      console.error(`❌ Google Geocoding HTTP ${res.status} para "${morada}".`);
+      logSeguro.error(`❌ Google Geocoding HTTP ${res.status} para "${morada}".`);
       return null;
     }
     const data = await res.json();
     estado.status = data.status;
     if (data.status !== 'OK' || !Array.isArray(data.results) || data.results.length === 0) {
       const msg = `Google Geocoding status=${data.status}${data.error_message ? ` (${data.error_message})` : ''} para "${morada}".`;
-      if (STATUS_GRAVES.has(data.status)) console.error(`❌ ${msg} A chave GOOGLE_MAPS_API_KEY pode estar inválida ou sem permissões.`);
-      else console.warn(`⚠️  ${msg}`);
+      if (STATUS_GRAVES.has(data.status)) logSeguro.error(`❌ ${msg} A chave GOOGLE_MAPS_API_KEY pode estar inválida ou sem permissões.`);
+      else logSeguro.warn(`⚠️  ${msg}`);
       return null;
     }
     const r = data.results[0];
@@ -56,7 +57,7 @@ async function obterCoordenadasGoogleMaps(morada, timeoutMs = TIMEOUT_PEDIDO_MS,
     const aprox = r.partial_match === true || !(r.geometry && r.geometry.location_type === 'ROOFTOP');
     return { lat, lng, precisao: aprox ? 'aproximada' : 'exata', morada_localizada: r.formatted_address || null };
   } catch (err) {
-    console.error(`❌ Google Geocoding falhou para "${morada}": ${err.message}`);
+    logSeguro.error(`❌ Google Geocoding falhou para "${morada}": ${err.message}`);
     return null;
   }
 }
@@ -70,7 +71,7 @@ async function pesquisarNominatim(params, timeoutMs = TIMEOUT_PEDIDO_MS) {
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok) {
-      console.error('⚠️  Nominatim HTTP', res.status);
+      logSeguro.error('⚠️  Nominatim HTTP', res.status);
       return null;
     }
     const data = await res.json();
@@ -80,7 +81,7 @@ async function pesquisarNominatim(params, timeoutMs = TIMEOUT_PEDIDO_MS) {
     if (Number.isNaN(lat) || Number.isNaN(lng)) return null;
     return { lat, lng, morada_localizada: data[0].display_name || null };
   } catch (err) {
-    console.error('❌ Erro no geocoding (Nominatim):', err.message);
+    logSeguro.error('❌ Erro no geocoding (Nominatim):', err.message);
     return null;
   }
 }
@@ -132,7 +133,7 @@ async function obterCoordenadasNominatim(morada, { esperar, rapido, restante }) 
     const r = await pesquisarNominatim(v.params, tempo);
     if (r) return { ...r, precisao: v.precisao };
   }
-  console.warn(`⚠️  Nominatim: sem resultados para "${morada}" (variantes tentadas dentro do orçamento).`);
+  logSeguro.warn(`⚠️  Nominatim: sem resultados para "${morada}" (variantes tentadas dentro do orçamento).`);
   return null;
 }
 
@@ -196,12 +197,12 @@ async function moradaDoPino(lat, lng, opcoes = {}) {
           return String(data.results[0].formatted_address);
         }
         const msg = `Google reverse geocoding status=${data.status}${data.error_message ? ` (${data.error_message})` : ''}.`;
-        if (STATUS_GRAVES.has(data.status)) console.error(`❌ ${msg}`); else console.warn(`⚠️  ${msg}`);
+        if (STATUS_GRAVES.has(data.status)) logSeguro.error(`❌ ${msg}`); else logSeguro.warn(`⚠️  ${msg}`);
       } else {
-        console.error(`❌ Google reverse geocoding HTTP ${res.status}.`);
+        logSeguro.error(`❌ Google reverse geocoding HTTP ${res.status}.`);
       }
     } catch (err) {
-      console.error(`❌ Google reverse geocoding falhou: ${err.message}`);
+      logSeguro.error(`❌ Google reverse geocoding falhou: ${err.message}`);
     }
   }
   if (restante() < MINIMO_PEDIDO_MS) return null;
@@ -215,7 +216,7 @@ async function moradaDoPino(lat, lng, opcoes = {}) {
     const data = await res.json();
     return data && typeof data.display_name === 'string' && data.display_name ? data.display_name : null;
   } catch (err) {
-    console.error('❌ Erro no reverse geocoding (Nominatim):', err.message);
+    logSeguro.error('❌ Erro no reverse geocoding (Nominatim):', err.message);
     return null;
   }
 }

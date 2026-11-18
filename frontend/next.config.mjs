@@ -12,7 +12,9 @@ const emDev = process.env.NODE_ENV !== "production";
  *
  * Google Maps (sugestões de morada + mapa com pino): SÓ se NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY
  * existir no build. Domínios segundo https://developers.google.com/maps/documentation/javascript/content-security-policy
- * (googleapis.com, gstatic.com, google.com, googleusercontent.com, ggpht.com, fontes do Google).
+ * (maps.googleapis.com, places.googleapis.com, maps.gstatic.com, *.google.com para mosaicos de satélite,
+ * googleusercontent.com, ggpht.com, fontes do Google). script-src só leva maps.googleapis.com e maps.gstatic.com:
+ * a documentação só pede *.google.com nos scripts para domínios antigos/regionais, que não usamos.
  * A documentação inclui 'unsafe-eval' no script-src do exemplo; como não diz se é obrigatório e o
  * projeto já usa script-src com 'unsafe-inline', acrescenta-se só quando a chave existe.
  * Places API (New) fala com places.googleapis.com (coberto por *.googleapis.com em connect-src).
@@ -27,11 +29,11 @@ function politicaCsp() {
   const googleMaps = Boolean(process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY && process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY.trim());
   const diretivas = [
     "default-src 'self'",
-    `script-src 'self' 'unsafe-inline'${emDev || googleMaps ? " 'unsafe-eval'" : ""}${googleMaps ? " https://*.googleapis.com https://*.gstatic.com https://*.google.com" : ""}`,
+    `script-src 'self' 'unsafe-inline'${emDev || googleMaps ? " 'unsafe-eval'" : ""}${googleMaps ? " https://maps.googleapis.com https://maps.gstatic.com" : ""}`,
     `style-src 'self' 'unsafe-inline'${googleMaps ? " https://fonts.googleapis.com" : ""}`,
-    `img-src 'self' data: blob:${googleMaps ? " https://*.googleapis.com https://*.gstatic.com https://*.google.com https://*.googleusercontent.com https://*.ggpht.com" : ""}`,
+    `img-src 'self' data: blob:${googleMaps ? " https://maps.googleapis.com https://maps.gstatic.com https://*.google.com https://*.googleusercontent.com https://*.ggpht.com" : ""}`,
     `font-src 'self' data:${googleMaps ? " https://fonts.gstatic.com" : ""}`,
-    `connect-src 'self'${api ? " " + api : ""}${emDev ? " ws: wss:" : ""}${googleMaps ? " https://*.googleapis.com https://*.google.com https://*.gstatic.com" : ""}`,
+    `connect-src 'self'${api ? " " + api : ""}${emDev ? " ws: wss:" : ""}${googleMaps ? " https://maps.googleapis.com https://places.googleapis.com https://maps.gstatic.com https://*.google.com" : ""}`,
     ...(googleMaps ? ["frame-src https://*.google.com"] : []),
     "worker-src 'self' blob:",
     "manifest-src 'self'",

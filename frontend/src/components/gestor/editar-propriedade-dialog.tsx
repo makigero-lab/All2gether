@@ -194,7 +194,9 @@ export function EditarPropriedadeDialog({
   useEffect(() => { if (!aberto) { setManualAberto(false); setPino(null); setMapaAberto(false); } }, [aberto]);
 
   // Centro do mapa: pino colado/ajustado, depois a sugestão escolhida, depois o que está gravado.
-  const centroMapa = lerCoordenadas(form.coordenadas_manuais) ?? (form.escolha ? { lat: form.escolha.lat, lng: form.escolha.lng } : localizada ? { lat: localizada.lat, lng: localizada.lng } : null);
+  // Posição do pino escolhida/colada e ainda por guardar: substitui o estado «Localizada» antigo.
+  const posicaoPendente = lerCoordenadas(form.coordenadas_manuais);
+  const centroMapa = posicaoPendente ?? (form.escolha ? { lat: form.escolha.lat, lng: form.escolha.lng } : localizada ? { lat: localizada.lat, lng: localizada.lng } : null);
   useEffect(() => { if (erroMorada) setManualAberto(true); }, [erroMorada]);
 
   // O aviso âmbar (morada não localizada) é anunciado e recebe o foco ao aparecer.
@@ -266,7 +268,7 @@ export function EditarPropriedadeDialog({
               <div className="space-y-1.5">
                 <div className="flex flex-wrap items-center gap-2">
                   <label htmlFor="edit-morada" className="text-xs font-medium text-muted-foreground">Morada</label>
-                  {localizada && !moradaAviso && !moradaMudou && (
+                  {localizada && !moradaAviso && !moradaMudou && !posicaoPendente && (
                     <span className="inline-flex items-center gap-1 text-xs font-medium text-status-conc">
                       <Check className="h-3 w-3" aria-hidden="true" />
                       Localizada
@@ -301,7 +303,22 @@ export function EditarPropriedadeDialog({
                     <span>{erroMorada}</span>
                   </p>
                 )}
-                {localizada && !moradaAviso && !moradaMudou && (
+                {posicaoPendente && (
+                  <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm text-muted-foreground" role="status">
+                    <span className="min-w-0 break-words">
+                      Nova posição do pino: {posicaoPendente.lat.toFixed(5)}, {posicaoPendente.lng.toFixed(5)} <span className="font-medium text-status-porat">(por guardar)</span>
+                    </span>
+                    <a
+                      href={`https://www.google.com/maps/search/?api=1&query=${posicaoPendente.lat},${posicaoPendente.lng}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex min-h-11 items-center font-medium text-brand-text hover:underline sm:min-h-9"
+                    >
+                      Ver no mapa
+                    </a>
+                  </p>
+                )}
+                {localizada && !moradaAviso && !moradaMudou && !posicaoPendente && (
                   <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm text-muted-foreground">
                     <span className="min-w-0 break-words">
                       {localizada.manual
