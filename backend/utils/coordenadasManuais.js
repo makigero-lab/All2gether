@@ -118,4 +118,28 @@ async function interpretarCoordenadasManuais(texto, opcoes = {}) {
   return { lat: coords.lat, lng: coords.lng };
 }
 
-module.exports = { interpretarCoordenadasManuais, extrairCoordenadas, resolverLinkGoogle, dentroDePortugal, CoordenadasInvalidas, HOSTS_GOOGLE };
+const TIPOS_EXATOS = new Set(['street_address', 'premise', 'subpremise']);
+
+/**
+ * Valida a «localização escolhida» enviada pelo ecrã depois de o gestor escolher
+ * uma sugestão do Google ao escrever a morada: { lat, lng, origem: 'google_places', tipos?: string[] }.
+ * Devolve a precisão: 'exata' só se o tipo do lugar for street_address/premise/subpremise.
+ * @returns {{ ok: true, valor: { lat: number, lng: number, precisao: 'exata'|'aproximada' } } | { ok: false, erro: string }}
+ */
+function validarLocalizacaoEscolhida(v) {
+  const invalida = (erro) => ({ ok: false, erro });
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return invalida('A localização escolhida é inválida.');
+  if (v.origem !== 'google_places') return invalida('A origem da localização escolhida é inválida.');
+  if (typeof v.lat !== 'number' || typeof v.lng !== 'number') return invalida('A localização escolhida tem de ter latitude e longitude numéricas.');
+  if (!dentroDePortugal({ lat: v.lat, lng: v.lng })) return invalida('A localização escolhida fica fora de Portugal.');
+  let tipos = [];
+  if (v.tipos !== undefined) {
+    if (!Array.isArray(v.tipos) || v.tipos.length > 30 || v.tipos.some((t) => typeof t !== 'string' || t.length > 60)) {
+      return invalida('Os tipos do lugar escolhido são inválidos.');
+    }
+    tipos = v.tipos;
+  }
+  return { ok: true, valor: { lat: v.lat, lng: v.lng, precisao: tipos.some((t) => TIPOS_EXATOS.has(t)) ? 'exata' : 'aproximada' } };
+}
+
+module.exports = { validarLocalizacaoEscolhida, interpretarCoordenadasManuais, extrairCoordenadas, resolverLinkGoogle, dentroDePortugal, CoordenadasInvalidas, HOSTS_GOOGLE };

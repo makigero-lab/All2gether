@@ -8,6 +8,10 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogClose, DialogContent, DialogFooter, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
+import { MoradaComSugestoes } from "@/components/gestor/morada-com-sugestoes";
+import { MapaPino } from "@/components/gestor/mapa-pino";
+import { googleMapsDisponivel } from "@/lib/google-maps";
+import { formatarCoordenadas, lerCoordenadas, type EscolhaMorada } from "@/lib/sugestoes-morada";
 
 /** Valores do formulário «Editar propriedade» (tudo em texto, como nos inputs). */
 export interface EditarPropriedadeForm {
@@ -21,6 +25,8 @@ export interface EditarPropriedadeForm {
   observacoes: string;
   /** Coordenadas ou link do Google Maps colados pelo gestor (localização à mão). */
   coordenadas_manuais: string;
+  /** Sugestão do Google escolhida ao escrever a morada (null = nenhuma / descartada). */
+  escolha: EscolhaMorada | null;
   parceiro_id: string;
   fornecedor_id: string;
   equipa_preferencial: string[];
@@ -177,14 +183,18 @@ export function EditarPropriedadeDialog({
   const [manualAberto, setManualAberto] = useState(false);
   // Morada sugerida para o pino colado («Usar esta morada»).
   const [pino, setPino] = useState<{ texto: string; a: boolean; morada: string | null; erro?: string } | null>(null);
-  const verPino = async () => {
-    const texto = form.coordenadas_manuais.trim();
+  const [mapaAberto, setMapaAberto] = useState(false);
+  const verPino = async (textoDado?: string) => {
+    const texto = (textoDado ?? form.coordenadas_manuais).trim();
     if (!texto || pino?.texto === texto) return;
     setPino({ texto, a: true, morada: null });
     const r = await onVerPino(texto);
     setPino({ texto, a: false, morada: r.morada, erro: r.erro });
   };
-  useEffect(() => { if (!aberto) { setManualAberto(false); setPino(null); } }, [aberto]);
+  useEffect(() => { if (!aberto) { setManualAberto(false); setPino(null); setMapaAberto(false); } }, [aberto]);
+
+  // Centro do mapa: pino colado/ajustado, depois a sugestão escolhida, depois o que está gravado.
+  const centroMapa = lerCoordenadas(form.coordenadas_manuais) ?? (form.escolha ? { lat: form.escolha.lat, lng: form.escolha.lng } : localizada ? { lat: localizada.lat, lng: localizada.lng } : null);
   useEffect(() => { if (erroMorada) setManualAberto(true); }, [erroMorada]);
 
   // O aviso âmbar (morada não localizada) é anunciado e recebe o foco ao aparecer.
@@ -265,14 +275,17 @@ export function EditarPropriedadeDialog({
                 </div>
                 <div className="relative">
                   <MapPin className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" aria-hidden="true" />
-                  <CampoAuto
+                  <MoradaComSugestoes
                     id="edit-morada"
+                    Campo={CampoAuto}
+                    bloquearEnter
                     className="pl-9"
                     value={form.morada}
-                    onChange={(e) => {
-                      upd({ morada: e.target.value });
+                    onChange={(texto) => {
+                      upd({ morada: texto });
                       onMoradaMudou();
                     }}
+                    onEscolher={(escolha) => upd({ escolha })}
                     required
                   />
                 </div>
@@ -306,6 +319,38 @@ export function EditarPropriedadeDialog({
                     </a>
                   </p>
                 )}
+                {/* Ajustar o pino no mapa (só com chave de browser do Google). */}
+                {googleMapsDisponivel() && centroMapa && !mapaAberto && (
+                  <button
+                    type="button"
+                    onClick={() => setMapaAberto(true)}
+                    className="inline-flex min-h-11 items-center text-sm font-medium text-brand-text hover:underline sm:min-h-9"
+                  >
+                    Ajustar o pino
+                  </button>
+                )}
+                {googleMapsDisponivel() && !centroMapa && !mapaAberto && (
+                  <button
+                    type="button"
+                    onClick={() => setMapaAberto(true)}
+                    className="inline-flex min-h-11 items-center text-sm font-medium text-brand-text hover:underline sm:min-h-9"
+                  >
+                    Marcar no mapa
+                  </button>
+                )}
+                {mapaAberto && (
+                  <MapaPino
+                    centro={centroMapa}
+                    onCancelar={() => setMapaAberto(false)}
+                    onUsar={(lat, lng) => {
+                      const texto = formatarCoordenadas(lat, lng);
+                      upd({ coordenadas_manuais: texto });
+                      setManualAberto(true);
+                      setMapaAberto(false);
+                      void verPino(texto);
+                    }}
+                  />
+                )}
                 {/* Sem localização ou só aproximada: tentar de novo ou indicar à mão. */}
                 {(!localizada || localizada.aproximada || moradaAviso) && (
                   <div className="space-y-2">
@@ -338,7 +383,7 @@ export function EditarPropriedadeDialog({
                           id="edit-coordenadas-manuais"
                           value={form.coordenadas_manuais}
                           onChange={(e) => upd({ coordenadas_manuais: e.target.value })}
-                          onBlur={verPino}
+                          onBlur={() => void verPino()}
                           placeholder="38.7536, -9.2302"
                           autoComplete="off"
                         />

@@ -21,7 +21,7 @@ const WebhookLog = require('../models/WebhookLog');
 const { localizarMorada, gravarLocalizacaoEscolhida } = require('../utils/localizacaoPropriedade');
 const { derivarMoradaEstruturada, textoMorada, validarMorada } = require('../utils/morada');
 
-const { interpretarCoordenadasManuais, CoordenadasInvalidas } = require('../utils/coordenadasManuais');
+const { interpretarCoordenadasManuais, validarLocalizacaoEscolhida, CoordenadasInvalidas } = require('../utils/coordenadasManuais');
 
 const VINTE_QUATRO_HORAS_MS = 24 * 60 * 60 * 1000;
 const { registarAuditoria } = require('../utils/auditoria');
@@ -422,7 +422,21 @@ exports.criarPropriedade = async (req, res) => {
     // como fallback continue a funcionar.
     // Morada única: a estruturada é DERIVADA do texto (para quem a lê).
     // forcar_morada: o gestor confirmou gravar sem localização no mapa.
-    const loc = await localizarMorada(moradaValida.valor, { forcar: req.body?.forcar_morada === true });
+    // Sugestão do Google escolhida ao escrever: coordenadas certas, sem geocodificar.
+    let escolhida = null;
+    if (req.body?.localizacao_escolhida !== undefined && req.body?.localizacao_escolhida !== null) {
+      const ve = validarLocalizacaoEscolhida(req.body.localizacao_escolhida);
+      if (!ve.ok) return res.status(400).json({ erro: ve.erro, codigo: 'LOCALIZACAO_INVALIDA' });
+      escolhida = ve.valor;
+    }
+    const loc = escolhida
+      ? {
+          coordenadas: { lat: escolhida.lat, lng: escolhida.lng },
+          coordenadas_precisao: escolhida.precisao,
+          morada_localizada: moradaValida.valor,
+          falhou: false,
+        }
+      : await localizarMorada(moradaValida.valor, { forcar: req.body?.forcar_morada === true });
     const geocodingFalhou = loc.falhou;
 
     const nova = await Propriedade.create({
@@ -1397,6 +1411,13 @@ exports.atualizarPropriedade = async (req, res) => {
         throw e;
       }
     }
+    // Sugestão do Google escolhida ao escrever a morada (a localização manual, se vier, manda).
+    let escolhida = null;
+    if (req.body?.localizacao_escolhida !== undefined && req.body?.localizacao_escolhida !== null) {
+      const ve = validarLocalizacaoEscolhida(req.body.localizacao_escolhida);
+      if (!ve.ok) return res.status(400).json({ erro: ve.erro, codigo: 'LOCALIZACAO_INVALIDA' });
+      escolhida = ve.valor;
+    }
     const localizarDeNovo = req.body?.localizar_de_novo === true;
     if (morada !== undefined) {
       const v = validarMorada(morada);
@@ -1418,13 +1439,13 @@ exports.atualizarPropriedade = async (req, res) => {
       const semCoords = propriedade.coordenadas?.lat == null || propriedade.coordenadas?.lng == null;
       const tentadoEm = propriedade.geocoding_tentado_em ? new Date(propriedade.geocoding_tentado_em).getTime() : 0;
       const repetir = semCoords && novaMorada !== 'A definir' && Date.now() - tentadoEm > VINTE_QUATRO_HORAS_MS;
-      if (!manual) {
+      if (!manual && !escolhida) {
         propriedade.morada = novaMorada;
         propriedade.morada_estruturada = derivarMoradaEstruturada(novaMorada);
       }
       // «Tentar localizar de novo» ignora a janela de 24 h; a localização à mão
       // pedida neste mesmo envio dispensa o geocoding.
-      if (!manual && (forcar || mudou || repetir || localizarDeNovo)) {
+      if (!manual && !escolhida && (forcar || mudou || repetir || localizarDeNovo)) {
         const tinhaLocalizacao = !semCoords;
         const loc = await localizarMorada(novaMorada, { forcar });
         propriedade.geocoding_tentado_em = new Date();
@@ -1437,6 +1458,15 @@ exports.atualizarPropriedade = async (req, res) => {
           geocodingFalhou = loc.falhou;
         }
       }
+    }
+    if (escolhida && !manual && novaMorada !== undefined) {
+      gravarLocalizacaoEscolhida(propriedade, {
+        coordenadas: escolhida,
+        precisao: escolhida.precisao,
+        moradaLocalizada: novaMorada,
+        morada: novaMorada,
+      });
+      geocodingFalhou = false;
     }
     if (manual) {
       // Coordenadas do pino mandam; o texto (se também veio, p. ex. «Usar esta

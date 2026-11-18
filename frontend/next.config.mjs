@@ -9,6 +9,13 @@ const emDev = process.env.NODE_ENV !== "production";
  * data:/blob:. O Next precisa de scripts/estilos inline (sem nonces), por isso 'unsafe-inline';
  * 'unsafe-eval' só em desenvolvimento (React refresh). O Service Worker (push) é do mesmo
  * origin ('self'); blob: nos workers por causa de bibliotecas de gráficos/Excel.
+ *
+ * Google Maps (sugestões de morada + mapa com pino): SÓ se NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY
+ * existir no build. Domínios segundo https://developers.google.com/maps/documentation/javascript/content-security-policy
+ * (googleapis.com, gstatic.com, google.com, googleusercontent.com, ggpht.com, fontes do Google).
+ * A documentação inclui 'unsafe-eval' no script-src do exemplo; como não diz se é obrigatório e o
+ * projeto já usa script-src com 'unsafe-inline', acrescenta-se só quando a chave existe.
+ * Places API (New) fala com places.googleapis.com (coberto por *.googleapis.com em connect-src).
  */
 function politicaCsp() {
   let api = "";
@@ -17,13 +24,15 @@ function politicaCsp() {
   } catch {
     /* URL inválido: ignora */
   }
+  const googleMaps = Boolean(process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY && process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY.trim());
   const diretivas = [
     "default-src 'self'",
-    `script-src 'self' 'unsafe-inline'${emDev ? " 'unsafe-eval'" : ""}`,
-    "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob:",
-    "font-src 'self' data:",
-    `connect-src 'self'${api ? " " + api : ""}${emDev ? " ws: wss:" : ""}`,
+    `script-src 'self' 'unsafe-inline'${emDev || googleMaps ? " 'unsafe-eval'" : ""}${googleMaps ? " https://*.googleapis.com https://*.gstatic.com https://*.google.com" : ""}`,
+    `style-src 'self' 'unsafe-inline'${googleMaps ? " https://fonts.googleapis.com" : ""}`,
+    `img-src 'self' data: blob:${googleMaps ? " https://*.googleapis.com https://*.gstatic.com https://*.google.com https://*.googleusercontent.com https://*.ggpht.com" : ""}`,
+    `font-src 'self' data:${googleMaps ? " https://fonts.gstatic.com" : ""}`,
+    `connect-src 'self'${api ? " " + api : ""}${emDev ? " ws: wss:" : ""}${googleMaps ? " https://*.googleapis.com https://*.google.com https://*.gstatic.com" : ""}`,
+    ...(googleMaps ? ["frame-src https://*.google.com"] : []),
     "worker-src 'self' blob:",
     "manifest-src 'self'",
     "media-src 'self' blob: data:",
@@ -80,6 +89,11 @@ const withPWA = withPWAInit({
   extendDefaultRuntimeCaching: true,
   workboxOptions: {
     runtimeCaching: [
+      {
+        // Google Maps / Places: sempre à rede (nada de moradas ou posições em cache do Service Worker).
+        urlPattern: ({ url }) => url.hostname === "maps.googleapis.com" || url.hostname === "places.googleapis.com",
+        handler: "NetworkOnly",
+      },
       {
         // Qualquer /api/ (proxies do Next e API) vai sempre à rede.
         urlPattern: ({ url }) => url.pathname.startsWith("/api/"),

@@ -76,3 +76,51 @@ Recuperar, por ordem de preferência:
 | `cifrar-chave-smoobu.js` | Cifra chave e segredo do Smoobu e preenche o HMAC. Aborta se algo já cifrado não decifra; escrita condicional. | Passo 6; também repara o HMAC. |
 | `rodarChaveIcal.js` | Volta a cifrar links e credenciais Smoobu com a chave atual; avisa das chaves antigas ainda em uso. | Rotação. |
 | `decifrar-chave-smoobu.js` | Reversão: chave e segredo em claro. | Antes de um rollback do código. |
+
+## Google Maps: duas chaves, APIs, quotas e orçamento
+
+Há **duas chaves diferentes** (nunca a mesma): uma no servidor e uma no browser. Se a chave de browser não estiver
+configurada, as sugestões de morada e o mapa com pino **ficam escondidos** e o resto da aplicação funciona como antes.
+
+| | Chave do servidor | Chave de browser |
+|---|---|---|
+| Variável | `GOOGLE_MAPS_API_KEY` (Render) | `NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY` (Vercel; pública por natureza, vai no JavaScript) |
+| Usada por | `utils/geocoding.js` (geocodificar e «morada neste pino») e `utils/distancia.js` | Sugestões ao escrever a morada e mapa com pino arrastável |
+| APIs ativas | Geocoding API, Distance Matrix API | Maps JavaScript API, Places API (New) |
+| Restrição | Por **IP**/sem restrição de referrer (o Render não tem IP fixo no plano grátis: restringir só por API) | **HTTP referrer** `https://app.all2gether.pt/*` e restringir às duas APIs acima |
+
+Notas:
+
+- A chave de browser lê-se no **build** (variável `NEXT_PUBLIC_*`): depois de a criar ou mudar na Vercel é preciso um
+  novo deploy. A CSP (`frontend/next.config.mjs`) só abre os domínios do Google quando a variável existe.
+- O script do Google só é carregado quando é preciso (ao focar o campo Morada ou ao abrir o mapa), nunca no arranque.
+- O pedido a Places (New) pede só `location`, `formattedAddress` e `addressComponents` (SKU Essentials) e usa um
+  session token por pesquisa. **Nunca pedir `displayName` nem outros campos Pro** sem rever o custo.
+- O mapa usa `mapId: "DEMO_MAP_ID"` (AdvancedMarker sem configurar nada na consola). Para estilos próprios seria preciso criar um mapId.
+- A lista de sugestões mostra «Sugestões do Google». Se um dia as sugestões forem mostradas sem mapa com o logótipo
+  em falta, rever os requisitos de atribuição do Google.
+- Se a chave for recusada (referrer errado, API por ativar, sem faturação) o campo Morada continua a funcionar como
+  campo normal (sem sugestões) e o mapa mostra «Não foi possível carregar o mapa». No servidor, o `status` do Google
+  (REQUEST_DENIED, OVER_QUERY_LIMIT...) fica no log do Render.
+
+### Quotas diárias e orçamento (limites que ficam definidos na consola do Google Cloud)
+
+| API | Limite diário a definir |
+|---|---|
+| Geocoding API | 300 pedidos/dia |
+| Places API (New) | 300 pedidos/dia |
+| Distance Matrix API | 300 pedidos/dia |
+| Maps JavaScript API | 100 carregamentos/dia |
+
+Orçamento mensal do projeto: **1 €**, com alertas de orçamento a 50 %, 90 % e 100 % para o email do titular. Com as
+quotas diárias acima o consumo máximo fica abaixo dos créditos gratuitos mensais do Google Maps Platform; se um limite for
+atingido, as funcionalidades degradam de forma segura: geocoding passa para o Nominatim, distâncias para Haversine, e o
+campo Morada fica sem sugestões. A pré-visualização «morada neste pino» tem ainda um limite próprio de 30 pedidos por minuto por utilizador.
+
+### Configurar (resumo)
+
+1. Google Cloud: criar o projeto com faturação; ativar Geocoding, Distance Matrix, Maps JavaScript e Places API (New).
+2. Criar as duas chaves com as restrições da tabela; definir as quotas diárias e o orçamento de 1 €.
+3. Render: `GOOGLE_MAPS_API_KEY` = chave do servidor. Vercel: `NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY` = chave de browser; novo deploy.
+4. Verificar: no editar de uma casa, escrever 3 letras da morada (aparecem sugestões); escolher uma; «Ajustar o pino» abre o mapa em satélite.
+5. Se algo falhar, ver a consola do browser (erros de CSP/`RefererNotAllowedMapError`) e o log do Render.
