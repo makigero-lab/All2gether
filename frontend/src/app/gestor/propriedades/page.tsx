@@ -41,6 +41,8 @@ import {
 } from "@/lib/api";
 import { lerUtilizador, type Role } from "@/lib/auth";
 import { googleMapsUrl, plural } from "@/lib/utils";
+import { correspondePesquisa } from "@/lib/pesquisa";
+import { CaixaPesquisa } from "@/components/gestor/caixa-pesquisa";
 
 /** Tipos de limpeza configuráveis por casa (normal usa os valores base da casa). */
 const TIPOS_CONFIG = [
@@ -199,11 +201,13 @@ export default function PropriedadesPage() {
       return;
     }
 
-    // Prompt 126 — Confirmação de morada inválida (GPS não encontrado).
-    // Se moradaWarning está ativo e o utilizador ainda não confirmou, pede
-    // um 2º clique (set moradaConfirmada=true) sem submeter novamente.
-    if (moradaWarning && !moradaConfirmada) {
-      setMoradaConfirmada(true);
+    // A propriedade já ficou gravada (sem localização) no 1.º envio: confirmar
+    // a morada inválida só fecha o formulário (nunca cria uma 2.ª propriedade).
+    if (moradaWarning) {
+      setMoradaWarning(null);
+      setForm({ nome: "", smoobu_id: "", morada: "", tempo_limpeza_minutos: "45", checklist: "" });
+      setMostrarForm(false);
+      setFeedbackOk("Morada guardada sem localização no mapa; as distâncias desta casa não contam.");
       return;
     }
 
@@ -223,22 +227,19 @@ export default function PropriedadesPage() {
             .split("\n")
             .map((s) => s.trim())
             .filter((s) => s.length > 0),
-          forcar_morada: moradaConfirmada || undefined,
         }
       );
       // Prompt 117 — Aviso de geocoding INLINE (não toast global).
       // Prompt 126 — Se voltar a haver warning, mantém o form aberto para o
       // utilizador confirmar (reset moradaConfirmada para exigir novo clique).
       if (res.warning) {
-        setMoradaWarning("Morada guardada, mas não encontrada no GPS. Simplifica-a (ex: remova R/C, Esq).");
-        setMoradaConfirmada(false);
+        setMoradaWarning("Não encontrámos esta morada no mapa. Se for mesmo esta, confirma abaixo: fica guardada sem localização e as distâncias desta casa não contam.");
         // Atualiza a tabela (a propriedade foi criada) mas não fecha o form.
         await carregar();
         return;
       }
       // Sem warning — limpa o formulário e fecha.
       setMoradaWarning(null);
-      setMoradaConfirmada(false);
       setForm({ nome: "", smoobu_id: "", morada: "", tempo_limpeza_minutos: "45", checklist: "" });
       setMostrarForm(false);
       await carregar();
@@ -292,11 +293,8 @@ export default function PropriedadesPage() {
   const [moradaWarning, setMoradaWarning] = useState<string | null>(null);
   // Aviso inline do modal de edição (morada editada não georreferenciada).
   const [editMoradaWarning, setEditMoradaWarning] = useState<string | null>(null);
-  // Prompt 126 — Confirmação explícita de morada inválida (GPS não encontrado).
-  // Depois do 1º submit com warning, o botão muda para "Confirmar Morada Inválida"
-  // e é necessário um 2º clique para confirmar.
-  const [moradaConfirmada, setMoradaConfirmada] = useState(false);
-  const [editMoradaConfirmada, setEditMoradaConfirmada] = useState(false);
+  // Pesquisa (nome, morada, proprietário) por cima da lista.
+  const [pesquisa, setPesquisa] = useState("");
 
   // FIX (relocação do botão Smoobu) — Estado `sincronizando`/`sincronizacaoOk`
   // removido. A funcionalidade de importação do Smoobu foi migrada para a
@@ -320,9 +318,6 @@ export default function PropriedadesPage() {
     dias_fixos_limpeza: [] as number[],
     // FIX (parceiro associado + morada estruturada) — novos campos.
     observacoes: "",
-    morada_rua: "",
-    morada_codigo_postal: "",
-    morada_cidade: "",
     // FIX (parceiro associado relacional) — ID do parceiro B2B associado.
     parceiro_id: "",
     // FIX (restrição lavandaria) — Fornecedor (lavandaria) atribuído.
@@ -339,7 +334,7 @@ export default function PropriedadesPage() {
     e.preventDefault();
     setManualErro(null);
 
-    if (!manualForm.nome.trim() || (!manualForm.morada.trim() && !manualForm.morada_rua.trim())) {
+    if (!manualForm.nome.trim() || !manualForm.morada.trim()) {
       setManualErro("Nome e Morada são obrigatórios.");
       return;
     }
@@ -354,21 +349,12 @@ export default function PropriedadesPage() {
     try {
       // HF18 — Payload simplificado. O backend define origem: 'manual'.
       // Não enviamos smoobu_id (a propriedade não vem do Smoobu).
-      await adminPost<{ propriedade: PropriedadeDTO; warning?: string }>(
+      const resCriar = await adminPost<{ propriedade: PropriedadeDTO; warning?: string }>(
         "/api/gestor/propriedades",
         {
           nome: manualForm.nome.trim(),
-          // FIX (morada estruturada) — Se rua foi preenchida, envia morada_estruturada.
-          // Senão, envia morada (string única) para retrocompatibilidade.
-          ...(manualForm.morada_rua.trim()
-            ? {
-                morada_estruturada: {
-                  rua: manualForm.morada_rua.trim(),
-                  codigo_postal: manualForm.morada_codigo_postal.trim(),
-                  cidade: manualForm.morada_cidade.trim(),
-                },
-              }
-            : { morada: manualForm.morada.trim() }),
+          // Morada ÚNICA (a estrutura é derivada no servidor).
+          morada: manualForm.morada.trim(),
           tempo_limpeza_minutos: tempo,
           staff_necessario: Math.max(1, Math.min(10, Number(manualForm.staff_necessario) || 1)),
           tipologia: manualForm.tipologia === "" ? null : Number(manualForm.tipologia),
@@ -391,8 +377,10 @@ export default function PropriedadesPage() {
         }
       );
       // Limpa o formulário e fecha o modal.
-      setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1", tipologia: "", cliente_particular: false, dias_fixos_limpeza: [], observacoes: "", morada_rua: "", morada_codigo_postal: "", morada_cidade: "", parceiro_id: "", fornecedor_id: "", capacidade_hospedes: "" });
+      setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1", tipologia: "", cliente_particular: false, dias_fixos_limpeza: [], observacoes: "", parceiro_id: "", fornecedor_id: "", capacidade_hospedes: "" });
       setManualOpen(false);
+      // Propriedade criada, mas a morada não foi localizada: avisa (não bloqueia).
+      if (resCriar.warning) setFeedbackOk("Morada guardada sem localização no mapa; as distâncias desta casa não contam.");
       await carregar();
     } catch (e) {
       setManualErro(e instanceof Error ? e.message : "Erro ao criar propriedade.");
@@ -413,9 +401,6 @@ export default function PropriedadesPage() {
     modelo_checklist_id: "",
     // FIX (parceiro associado + morada estruturada) — novos campos.
     observacoes: "",
-    morada_rua: "",
-    morada_codigo_postal: "",
-    morada_cidade: "",
     // FIX (parceiro associado relacional) — ID do parceiro B2B associado.
     parceiro_id: "",
     // FIX (restrição lavandaria) — Fornecedor (lavandaria) atribuído.
@@ -524,7 +509,7 @@ export default function PropriedadesPage() {
     setEditForm({
       nome: p.nome,
       smoobu_id: p.smoobu_id ?? "",
-      morada: p.morada ?? "",
+      morada: p.morada || p.moradaCompleta || "",
       tempo_limpeza_minutos: String(p.tempo_limpeza_minutos ?? 45),
       checklist: (p.checklist ?? []).join("\n"),
       tipos: configTiposDe(p),
@@ -541,9 +526,6 @@ export default function PropriedadesPage() {
       modelo_checklist_id: p.modelo_checklist_id ?? "",
       // FIX (parceiro associado + morada estruturada) — novos campos.
       observacoes: p.observacoes ?? "",
-      morada_rua: p.morada_estruturada?.rua ?? "",
-      morada_codigo_postal: p.morada_estruturada?.codigo_postal ?? "",
-      morada_cidade: p.morada_estruturada?.cidade ?? "",
       // FIX (parceiro associado relacional) — Extrai o ID do parceiro
       // (pode ser string ou objeto populado { _id, nome, ... }).
       parceiro_id:
@@ -563,7 +545,6 @@ export default function PropriedadesPage() {
     setEditErro(null);
     // Prompt 126 — Reset dos avisos de morada ao abrir o modal.
     setEditMoradaWarning(null);
-    setEditMoradaConfirmada(false);
     // Prompt 134 — Carrega os modelos de checklist para o select.
     carregarModelosChecklist();
   }
@@ -621,7 +602,7 @@ export default function PropriedadesPage() {
     if (!editando) return;
     setEditErro(null);
 
-    if (!editForm.nome.trim() || (!editForm.morada.trim() && !editForm.morada_rua.trim())) {
+    if (!editForm.nome.trim() || !editForm.morada.trim()) {
       setEditErro("Nome e Morada são obrigatórios.");
       return;
     }
@@ -640,11 +621,9 @@ export default function PropriedadesPage() {
       }
     }
 
-    // Prompt 126 — Confirmação de morada inválida no modal de edição.
-    if (editMoradaWarning && !editMoradaConfirmada) {
-      setEditMoradaConfirmada(true);
-      return;
-    }
+    // «Confirmar morada inválida»: o gestor viu o aviso (a morada já ficou gravada
+    // sem localização) e confirma com UM clique; o servidor não volta a bloquear.
+    const forcarMorada = editMoradaWarning !== null;
 
     setEditSubmitting(true);
     try {
@@ -655,17 +634,8 @@ export default function PropriedadesPage() {
         `/api/gestor/propriedades/${editando._id}`,
         {
           nome: editForm.nome.trim(),
-          // FIX (morada estruturada) — Se rua foi preenchida, envia morada_estruturada.
-          // Senão, envia morada (string única) para retrocompatibilidade.
-          ...(editForm.morada_rua.trim()
-            ? {
-                morada_estruturada: {
-                  rua: editForm.morada_rua.trim(),
-                  codigo_postal: editForm.morada_codigo_postal.trim(),
-                  cidade: editForm.morada_cidade.trim(),
-                },
-              }
-            : { morada: editForm.morada.trim() }),
+          // Morada ÚNICA (a estrutura é derivada no servidor).
+          morada: editForm.morada.trim(),
           tempo_limpeza_minutos: tempo,
           checklist: editForm.checklist
             .split("\n")
@@ -717,14 +687,13 @@ export default function PropriedadesPage() {
             ? { capacidade_hospedes: Number(editForm.capacidade_hospedes) }
             : { capacidade_hospedes: null }),
           dias_fixos_limpeza: editForm.dias_fixos_limpeza,
-          forcar_morada: editMoradaConfirmada || undefined,
+          forcar_morada: forcarMorada || undefined,
         }
       );
       // Prompt 117 — Aviso de geocoding INLINE no modal de edição.
       // Prompt 126 — Se voltar a haver warning, mantém o modal aberto.
       if (res.warning) {
-        setEditMoradaWarning("Morada guardada, mas não encontrada no GPS. Simplifica-a (ex: remova R/C, Esq).");
-        setEditMoradaConfirmada(false);
+        setEditMoradaWarning("Não encontrámos esta morada no mapa. Se for mesmo esta, confirma abaixo: fica guardada sem localização e as distâncias desta casa não contam.");
         // Atualiza a linha na tabela mas não fecha o modal.
         setPropriedades((prev) =>
           prev.map((x) => (x._id === editando._id ? res.propriedade : x))
@@ -732,7 +701,6 @@ export default function PropriedadesPage() {
         return;
       }
       setEditMoradaWarning(null);
-      setEditMoradaConfirmada(false);
       // Atualiza a linha na tabela.
       setPropriedades((prev) =>
         prev.map((x) => (x._id === editando._id ? res.propriedade : x))
@@ -740,7 +708,9 @@ export default function PropriedadesPage() {
       setEditando(null);
       // Limpezas por começar que seguiram o novo tempo / nº de pessoas.
       const l = res.limpezas;
-      if (l?.em_segundo_plano) {
+      if (forcarMorada) {
+        setFeedbackOk("Morada guardada sem localização no mapa; as distâncias desta casa não contam.");
+      } else if (l?.em_segundo_plano) {
         setFeedbackOk("Propriedade guardada. As limpezas por começar estão a ser atualizadas.");
       } else if (l && l.atualizadas > 0) {
         setFeedbackOk(
@@ -754,6 +724,19 @@ export default function PropriedadesPage() {
       setEditSubmitting(false);
     }
   }
+
+  // Filtros: estado + pesquisa (nome, morada, proprietário).
+  const porEstado = propriedades.filter((p) =>
+    filtroEstado === "todos" ? true : filtroEstado === "ativos" ? p.ativo : !p.ativo
+  );
+  const visiveis = porEstado.filter((p) =>
+    correspondePesquisa(pesquisa, [
+      p.nome,
+      p.morada,
+      p.moradaCompleta,
+      p.parceiro_id && typeof p.parceiro_id === "object" ? p.parceiro_id.nome : "",
+    ])
+  );
 
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
@@ -836,7 +819,7 @@ export default function PropriedadesPage() {
             onClick={() => {
               setManualOpen(true);
               setManualErro(null);
-              setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1", tipologia: "", cliente_particular: false, dias_fixos_limpeza: [], observacoes: "", morada_rua: "", morada_codigo_postal: "", morada_cidade: "", parceiro_id: "", fornecedor_id: "", capacidade_hospedes: "" });
+              setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1", tipologia: "", cliente_particular: false, dias_fixos_limpeza: [], observacoes: "", parceiro_id: "", fornecedor_id: "", capacidade_hospedes: "" });
             }}
           >
             <Plus className="h-4 w-4" />
@@ -940,8 +923,6 @@ export default function PropriedadesPage() {
                     onChange={(e) => {
                       setForm((f) => ({ ...f, morada: e.target.value }));
                       setMoradaWarning(null);
-                      // Prompt 126 — Reset da confirmação quando a morada muda.
-                      setMoradaConfirmada(false);
                     }}
                     placeholder="Ex.: Rua das Flores 12, Lisboa"
                     required
@@ -1029,7 +1010,6 @@ export default function PropriedadesPage() {
                     setMostrarForm(false);
                     setFormErro(null);
                     setMoradaWarning(null);
-                    setMoradaConfirmada(false);
                     setForm({ nome: "", smoobu_id: "", morada: "", tempo_limpeza_minutos: "45", checklist: "" });
                   }}
                   disabled={submitting}
@@ -1077,6 +1057,23 @@ export default function PropriedadesPage() {
         </Card>
       )}
 
+      {/* Pesquisa (junta-se ao filtro de estado) */}
+      {!loading && porEstado.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3">
+          <CaixaPesquisa
+            valor={pesquisa}
+            onChange={setPesquisa}
+            rotulo="Pesquisar propriedades"
+            placeholder="Pesquisar por nome, morada ou proprietário"
+          />
+          {pesquisa.trim() && (
+            <span className="text-sm text-muted-foreground" role="status">
+              {visiveis.length} de {porEstado.length}
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Tabela de propriedades */}
       <Card>
         <CardContent className="p-0">
@@ -1085,9 +1082,7 @@ export default function PropriedadesPage() {
               <Loader2 className="h-5 w-5 animate-spin" />
               A carregar propriedades…
             </div>
-          ) : propriedades.filter((p) =>
-            filtroEstado === "todos" ? true : filtroEstado === "ativos" ? p.ativo : !p.ativo
-          ).length === 0 ? (
+          ) : porEstado.length === 0 ? (
             <div className="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">
               <Building2 className="h-10 w-10 opacity-40" />
               <p className="text-sm">{filtroEstado === "ativos" ? "Sem propriedades ativas." : "Ainda não há propriedades."}</p>
@@ -1096,6 +1091,12 @@ export default function PropriedadesPage() {
                   ? "Muda o filtro para “Todos” para ver propriedades inativas, ou adiciona uma nova."
                   : "Clica em “Adicionar” para adicionar a primeira."}
               </p>
+            </div>
+          ) : visiveis.length === 0 ? (
+            <div className="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">
+              <Building2 className="h-10 w-10 opacity-40" />
+              <p className="text-sm">Nenhum resultado para «{pesquisa.trim()}»</p>
+              <Button variant="outline" size="sm" onClick={() => setPesquisa("")}>Limpar pesquisa</Button>
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -1110,10 +1111,7 @@ export default function PropriedadesPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {propriedades
-                    .filter((p) =>
-                      filtroEstado === "todos" ? true : filtroEstado === "ativos" ? p.ativo : !p.ativo
-                    )
+                  {visiveis
                     .map((p) => (
                     <tr key={p._id} className={`hover:bg-muted/30 ${!p.ativo ? "opacity-60" : ""}`}>
                       <td className="px-4 py-3">
@@ -1154,8 +1152,7 @@ export default function PropriedadesPage() {
                               morada string válida. Antes verificava apenas
                               p.morada === "A definir", o que mostrava o badge
                               mesmo quando a morada estruturada estava preenchida. */}
-                          {(!p.morada_estruturada?.rua &&
-                            (!p.morada || p.morada === "A definir" || p.morada === "")) && (
+                          {(!p.morada || p.morada === "A definir") && (
                             <Badge className="bg-amber-500/15 text-amber-700 border-amber-500/30 hover:bg-amber-500/20">
                               ⚠️ Morada por definir
                             </Badge>
@@ -1176,29 +1173,11 @@ export default function PropriedadesPage() {
                             FIX (google maps integration) — Botão "Abrir no Google
                             Maps" que usa coordenadas (se existirem) ou a morada. */}
                         {(() => {
-                          const me = p.morada_estruturada;
-                          // FIX (morada estruturada) — Prioridade de display:
-                          // 1. morada_estruturada concatenada (Rua, CP, Cidade)
-                          // 2. moradaCompleta (virtual do backend — já concatenada)
-                          // 3. morada (string legada)
-                          // 4. null se vazia ou "A definir"
-                          let moradaDisplay = '';
-                          if (me?.rua) {
-                            moradaDisplay = [me.rua, me.codigo_postal, me.cidade].filter(Boolean).join(", ");
-                          } else if (p.moradaCompleta) {
-                            moradaDisplay = p.moradaCompleta;
-                          } else {
-                            moradaDisplay = p.morada || '';
-                          }
+                          // Morada única (texto). A navegação usa SEMPRE o texto:
+                          // o Google Maps resolve a morada copiada do próprio Google.
+                          const moradaDisplay = p.morada || p.moradaCompleta || '';
                           if (!moradaDisplay || moradaDisplay === "A definir") return null;
-                          // FIX (google maps integration) — Usa coordenadas se
-                          // existirem (mais preciso), senão usa a morada string.
-                          const coords = p.coordenadas;
-                          const gmapsUrl = googleMapsUrl(
-                            coords?.lat != null && coords?.lng != null
-                              ? { lat: coords.lat, lng: coords.lng }
-                              : moradaDisplay
-                          );
+                          const gmapsUrl = googleMapsUrl(moradaDisplay);
                           return (
                             <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1.5">
                               <span>{moradaDisplay}</span>
@@ -1336,48 +1315,12 @@ export default function PropriedadesPage() {
                 onChange={(e) =>
                   setManualForm((f) => ({ ...f, morada: e.target.value }))
                 }
-                placeholder="Ex.: Rua das Flores 12, Lisboa"
+                placeholder="Cola aqui a morada do Google Maps"
                 required
               />
               <p className="text-xs text-muted-foreground">
-                As coordenadas são calculadas automaticamente via Nominatim
-                (best-effort). Se a morada não for encontrada, a propriedade é
-                criada na mesma (sem coordenadas).
-              </p>
-            </div>
-            {/* FIX (morada estruturada) — Campos estruturados opcionais.
-                Se preencheres a Rua, o backend usa os 3 campos para geocoding
-                e ignora a "Morada" (string única) acima. */}
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">
-                Morada Estruturada (opcional — substitui &quot;Morada&quot; se preenchida)
-              </label>
-              <div className="grid gap-2 sm:grid-cols-3">
-                <Input
-                  placeholder="Rua, número, andar"
-                  value={manualForm.morada_rua}
-                  onChange={(e) =>
-                    setManualForm((f) => ({ ...f, morada_rua: e.target.value }))
-                  }
-                />
-                <Input
-                  placeholder="Código Postal (ex: 1200-001)"
-                  value={manualForm.morada_codigo_postal}
-                  onChange={(e) =>
-                    setManualForm((f) => ({ ...f, morada_codigo_postal: e.target.value }))
-                  }
-                />
-                <Input
-                  placeholder="Cidade (ex: Lisboa)"
-                  value={manualForm.morada_cidade}
-                  onChange={(e) =>
-                    setManualForm((f) => ({ ...f, morada_cidade: e.target.value }))
-                  }
-                />
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Preferencial em relação à &quot;Morada&quot; única. Usado para geocoding
-                mais preciso e para mostrar a morada de forma estruturada.
+                Basta uma morada (rua, número, código postal e localidade). Se não
+                for encontrada no mapa, a propriedade é criada na mesma e avisamos.
               </p>
             </div>
             {/* FIX (parceiro associado) — Observações (notas internas). */}
@@ -1633,7 +1576,12 @@ export default function PropriedadesPage() {
         ativa={editando?.ativo !== false}
         localizada={
           editando?.coordenadas && editando.coordenadas.lat != null && editando.coordenadas.lng != null
-            ? { lat: editando.coordenadas.lat, lng: editando.coordenadas.lng }
+            ? {
+                lat: editando.coordenadas.lat,
+                lng: editando.coordenadas.lng,
+                moradaEncontrada: editando.morada_localizada ?? null,
+                aproximada: editando.coordenadas_precisao === "aproximada",
+              }
             : null
         }
         form={editForm}
@@ -1648,7 +1596,6 @@ export default function PropriedadesPage() {
         moradaAviso={editMoradaWarning}
         onMoradaMudou={() => {
           setEditMoradaWarning(null);
-          setEditMoradaConfirmada(false);
         }}
         erro={editErro}
         a={editSubmitting}
@@ -1656,7 +1603,6 @@ export default function PropriedadesPage() {
         onClose={() => {
           setEditando(null);
           setEditMoradaWarning(null);
-          setEditMoradaConfirmada(false);
         }}
       />
 

@@ -1,149 +1,135 @@
 /**
  * Geocoding — All2gether
  *
- * Converte moradas em coordenadas (lat, lng).
+ * Converte uma morada (texto único) em coordenadas. Devolve
+ *   { lat, lng, precisao: 'exata' | 'aproximada', morada_localizada }
+ * ou null se não localizou.
  *
- * FIX (google maps integration) — Agora usa Google Maps Geocoding API se a
- * env var GOOGLE_MAPS_API_KEY estiver definida. Fallback silencioso para
- * Nominatim (OpenStreetMap) se:
- *   - GOOGLE_MAPS_API_KEY não estiver definida
- *   - A chamada à API do Google falhar (rede, quota, key inválida)
- *   - A resposta não contiver dados válidos
- *
- * Vantagens do Google Maps sobre Nominatim:
- *   - Maior precisão em moradas portuguesas (rua, número, código postal)
- *   - Sem rate limit de 1 req/segundo (Nominatim limita a 1/s)
- *   - Better coverage de códigos postais e locais
- *   - Place ID (para futuras integrações com Places API)
- *
- * Limitações do Nominatim (fallback):
- *   - Máximo 1 pedido por segundo (rate limit).
- *   - User-Agent obrigatório (identifica a aplicação).
- *   - Uso para fins não comerciais (ver política de uso do Nominatim).
+ * 1. Google Maps Geocoding (se GOOGLE_MAPS_API_KEY existir). O `status` é
+ *    registado de forma visível (REQUEST_DENIED, OVER_QUERY_LIMIT...).
+ * 2. Nominatim (countrycodes=pt), por ordem, até uma variante dar:
+ *      (1) morada tal como está; (2) abreviaturas expandidas;
+ *      (3) sem código postal; (4) pesquisa estruturada;
+ *      (5) só código postal + cidade (ÚLTIMO recurso, 'aproximada').
+ *    Respeita 1 pedido/s entre tentativas.
  */
+const { derivarMoradaEstruturada, expandirAbreviaturas, semCodigoPostal } = require('./morada');
 
-/**
- * Tenta obter coordenadas via Google Maps Geocoding API.
- *
- * @param {string} morada - Morada completa
- * @returns {Promise<{ lat: number, lng: number } | null>}
- */
+const PAUSA_NOMINATIM_MS = 1100;
+const UA = 'All2gether/1.0 (all2gether.app)';
+const STATUS_GRAVES = new Set(['REQUEST_DENIED', 'OVER_QUERY_LIMIT', 'OVER_DAILY_LIMIT', 'INVALID_REQUEST', 'UNKNOWN_ERROR']);
+
+const esperarPadrao = (ms) => new Promise((r) => setTimeout(r, ms));
+
 async function obterCoordenadasGoogleMaps(morada) {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!apiKey || !apiKey.trim()) return null;
-
   try {
     const url =
       `https://maps.googleapis.com/maps/api/geocode/json` +
-      `?address=${encodeURIComponent(morada)}` +
-      `&language=pt-PT` +
-      `&region=pt` +
-      `&key=${apiKey.trim()}`;
-
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout(5000), // 5s timeout
-    });
-
+      `?address=${encodeURIComponent(morada)}&language=pt-PT&region=pt&key=${apiKey.trim()}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
     if (!res.ok) {
-      console.warn(`⚠️  Google Maps Geocoding HTTP ${res.status} para "${morada}".`);
+      console.error(`❌ Google Geocoding HTTP ${res.status} para "${morada}".`);
       return null;
     }
-
     const data = await res.json();
-
-    // Google devolve status: 'OK', 'ZERO_RESULTS', 'OVER_QUERY_LIMIT', etc.
     if (data.status !== 'OK' || !Array.isArray(data.results) || data.results.length === 0) {
-      console.warn(`⚠️  Google Maps Geocoding: status=${data.status} para "${morada}".`);
+      const msg = `Google Geocoding status=${data.status}${data.error_message ? ` (${data.error_message})` : ''} para "${morada}".`;
+      if (STATUS_GRAVES.has(data.status)) console.error(`❌ ${msg} A chave GOOGLE_MAPS_API_KEY pode estar inválida ou sem permissões.`);
+      else console.warn(`⚠️  ${msg}`);
       return null;
     }
-
-    const resultado = data.results[0];
-    const { lat, lng } = resultado.geometry.location;
-    if (typeof lat !== 'number' || typeof lng !== 'number') {
-      console.warn(`⚠️  Google Maps Geocoding: coordenadas inválidas para "${morada}".`);
-      return null;
-    }
-
-    return { lat, lng };
+    const r = data.results[0];
+    const { lat, lng } = (r.geometry && r.geometry.location) || {};
+    if (typeof lat !== 'number' || typeof lng !== 'number') return null;
+    const aprox = r.partial_match === true || (r.geometry && r.geometry.location_type === 'APPROXIMATE');
+    return { lat, lng, precisao: aprox ? 'aproximada' : 'exata', morada_localizada: r.formatted_address || null };
   } catch (err) {
-    console.warn(`⚠️  Google Maps Geocoding falhou para "${morada}": ${err.message}`);
+    console.error(`❌ Google Geocoding falhou para "${morada}": ${err.message}`);
     return null;
   }
 }
 
-/**
- * Fallback: obter coordenadas via Nominatim (OpenStreetMap).
- *
- * @param {string} morada - Morada completa
- * @returns {Promise<{ lat: number, lng: number } | null>}
- */
-async function obterCoordenadasNominatim(morada) {
+/** Uma pesquisa ao Nominatim; params é um objeto de query. */
+async function pesquisarNominatim(params) {
+  const qs = new URLSearchParams({ format: 'json', limit: '1', countrycodes: 'pt', ...params });
   try {
-    const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(
-      morada
-    )}`;
-
-    const res = await fetch(url, {
-      headers: {
-        'User-Agent': 'All2gether/1.0 (all2gether.app)',
-      },
-      signal: AbortSignal.timeout(5000), // 5s timeout
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?${qs.toString()}`, {
+      headers: { 'User-Agent': UA },
+      signal: AbortSignal.timeout(5000),
     });
-
     if (!res.ok) {
       console.error('⚠️  Nominatim HTTP', res.status);
       return null;
     }
-
     const data = await res.json();
-
-    if (!Array.isArray(data) || data.length === 0) {
-      console.warn(`⚠️  Nominatim: sem resultados para "${morada}".`);
-      return null;
-    }
-
-    const resultado = data[0];
-    return {
-      lat: parseFloat(resultado.lat),
-      lng: parseFloat(resultado.lon),
-    };
+    if (!Array.isArray(data) || data.length === 0) return null;
+    const lat = parseFloat(data[0].lat);
+    const lng = parseFloat(data[0].lon);
+    if (Number.isNaN(lat) || Number.isNaN(lng)) return null;
+    return { lat, lng, morada_localizada: data[0].display_name || null };
   } catch (err) {
     console.error('❌ Erro no geocoding (Nominatim):', err.message);
     return null;
   }
 }
 
-/**
- * Converte uma morada em coordenadas { lat, lng }.
- *
- * FIX (google maps integration) — Prioridade:
- *   1. Google Maps Geocoding API (se GOOGLE_MAPS_API_KEY definida)
- *   2. Nominatim (fallback)
- *
- * @param {string} morada - Morada completa (ex.: "Rua das Flores 12, Lisboa")
- * @returns {Promise<{ lat: number, lng: number } | null>} - Coordenadas ou null se não encontrado.
- */
-async function obterCoordenadas(morada) {
-  if (!morada || !String(morada).trim()) return null;
+/** Variantes de pesquisa, por ordem de preferência (sem repetidas). */
+function variantesNominatim(morada) {
+  const original = String(morada).replace(/\s+/g, ' ').trim();
+  const expandida = expandirAbreviaturas(original);
+  const e = derivarMoradaEstruturada(expandida);
+  const lista = [
+    { params: { q: original }, precisao: 'exata' },
+    { params: { q: expandida }, precisao: 'exata' },
+    { params: { q: semCodigoPostal(expandida) }, precisao: 'exata' },
+  ];
+  if (e.rua) {
+    lista.push({
+      params: { street: e.rua, ...(e.cidade ? { city: e.cidade } : {}), ...(e.codigo_postal ? { postalcode: e.codigo_postal } : {}) },
+      precisao: 'exata',
+    });
+  }
+  if (e.codigo_postal) {
+    lista.push({ params: { q: [e.codigo_postal, e.cidade].filter(Boolean).join(' ') }, precisao: 'aproximada' });
+  }
+  const vistos = new Set();
+  return lista.filter((v) => {
+    const chave = JSON.stringify(v.params);
+    if (!Object.values(v.params).every((x) => String(x || '').trim()) || vistos.has(chave)) return false;
+    vistos.add(chave);
+    return true;
+  });
+}
 
-  // 1. Tenta Google Maps primeiro (se API key configurada).
-  const coordsGoogle = await obterCoordenadasGoogleMaps(morada);
-  if (coordsGoogle) return coordsGoogle;
-
-  // 2. Fallback para Nominatim.
-  return obterCoordenadasNominatim(morada);
+async function obterCoordenadasNominatim(morada, esperar = esperarPadrao) {
+  let primeira = true;
+  for (const v of variantesNominatim(morada)) {
+    if (!primeira) await esperar(PAUSA_NOMINATIM_MS);
+    primeira = false;
+    const r = await pesquisarNominatim(v.params);
+    if (r) return { ...r, precisao: v.precisao };
+  }
+  console.warn(`⚠️  Nominatim: sem resultados para "${morada}" (todas as variantes).`);
+  return null;
 }
 
 /**
- * FIX (google maps integration) — Verifica se o Google Maps está configurado.
- * Usado pelo frontend (via API) para saber se pode mostrar botões "Abrir no
- * Google Maps" e links de navegação.
- *
- * @returns {boolean}
+ * @param {string} morada
+ * @param {{ esperar?: (ms:number)=>Promise<void> }} [opcoes] relógio injetável (testes)
+ * @returns {Promise<{lat:number,lng:number,precisao:'exata'|'aproximada',morada_localizada:string|null}|null>}
  */
+async function obterCoordenadas(morada, opcoes = {}) {
+  if (!morada || !String(morada).trim()) return null;
+  const g = await obterCoordenadasGoogleMaps(morada);
+  if (g) return g;
+  return obterCoordenadasNominatim(morada, opcoes.esperar);
+}
+
 function googleMapsAtivo() {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   return !!(apiKey && apiKey.trim());
 }
 
-module.exports = { obterCoordenadas, googleMapsAtivo };
+module.exports = { obterCoordenadas, googleMapsAtivo, variantesNominatim };

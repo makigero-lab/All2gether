@@ -32,6 +32,8 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { MudarEstadoProprietarioDialog } from "@/components/gestor/mudar-estado-proprietario";
+import { CaixaPesquisa } from "@/components/gestor/caixa-pesquisa";
+import { correspondePesquisa } from "@/lib/pesquisa";
 import {
   adminGet,
   adminPost,
@@ -92,6 +94,7 @@ export default function ParceirosPage() {
   // Filtro de estado (como na Equipa): por defeito só os ativos.
   const [filtroEstado, setFiltroEstado] = useState<FiltroEstado>("ativos");
   const [aviso, setAviso] = useState<string | null>(null);
+  const [pesquisa, setPesquisa] = useState("");
 
   // Confirmação de desativar/reativar (diálogo partilhado com a Equipa).
   const [mudarEstado, setMudarEstado] = useState<UtilizadorDTO | null>(null);
@@ -193,11 +196,12 @@ export default function ParceirosPage() {
     }
   }
 
-  const visiveis = parceiros.filter((p) => {
+  const porEstado = parceiros.filter((p) => {
     if (filtroEstado === "ativos") return p.ativo;
     if (filtroEstado === "inativos") return !p.ativo;
     return true;
   });
+  const visiveis = porEstado.filter((p) => correspondePesquisa(pesquisa, [p.nome, p.email, p.telefone, p.nif, p.observacoes]));
 
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
@@ -238,6 +242,17 @@ export default function ParceirosPage() {
           <option value="inativos">Estado: Inativos</option>
           <option value="todos">Estado: Todos</option>
         </select>
+        <CaixaPesquisa
+          valor={pesquisa}
+          onChange={setPesquisa}
+          rotulo="Pesquisar proprietários"
+          placeholder="Pesquisar por nome, email, telefone ou NIF"
+        />
+        {pesquisa.trim() && (
+          <span className="text-sm text-muted-foreground" role="status">
+            {visiveis.length} de {porEstado.length}
+          </span>
+        )}
       </div>
 
       {aviso && (
@@ -272,6 +287,12 @@ export default function ParceirosPage() {
               <Handshake className="h-10 w-10 opacity-40" />
               <p className="text-sm">Ainda não há proprietários.</p>
               <p className="text-xs">Clica em &quot;Novo Proprietário&quot; para adicionar o primeiro.</p>
+            </div>
+          ) : visiveis.length === 0 && pesquisa.trim() ? (
+            <div className="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">
+              <Handshake className="h-10 w-10 opacity-40" />
+              <p className="text-sm">Nenhum resultado para «{pesquisa.trim()}»</p>
+              <Button variant="outline" size="sm" onClick={() => setPesquisa("")}>Limpar pesquisa</Button>
             </div>
           ) : visiveis.length === 0 ? (
             <div className="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">

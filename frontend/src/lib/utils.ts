@@ -191,8 +191,12 @@ export function calcularHoraFimISO(iso: string | null | undefined, minutos: numb
  * Google Maps (app web ou mobile).
  *
  * Aceita:
- *   - Coordenadas { lat, lng } → usa o formato `?query=lat,lng` (mais preciso).
  *   - String de morada → usa o formato `?query=morada` (URL-encoded).
+ *     USAR SEMPRE ESTA para navegação (staff, «Abrir no Google Maps»): o Google
+ *     resolve a morada copiada do próprio Google; as coordenadas do geocoder
+ *     podem estar desatualizadas ou aproximadas e enviar alguém ao sítio errado.
+ *   - Coordenadas { lat, lng } → `?query=lat,lng`; só para «Ver no mapa»
+ *     (o gestor confirma o pino guardado), nunca para navegar.
  *
  * Usa o endpoint universal `https://www.google.com/maps/search/?api=1&query=...`
  * que funciona em browser, iOS e Android (abre a app nativa se instalada).
