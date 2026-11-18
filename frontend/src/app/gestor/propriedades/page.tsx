@@ -41,6 +41,8 @@ import { lerUtilizador, type Role } from "@/lib/auth";
 import { googleMapsUrl, plural } from "@/lib/utils";
 import { correspondePesquisa } from "@/lib/pesquisa";
 import { CaixaPesquisa } from "@/components/gestor/caixa-pesquisa";
+import { MoradaComSugestoes } from "@/components/gestor/morada-com-sugestoes";
+import type { EscolhaMorada } from "@/lib/sugestoes-morada";
 
 /** Tipos de limpeza configuráveis por casa (normal usa os valores base da casa). */
 const TIPOS_CONFIG = [
@@ -214,6 +216,8 @@ export default function PropriedadesPage() {
     // FIX (lotação máxima) — Capacidade máxima de hóspedes (lotação da casa).
     // Usada como fallback quando o Smoobu não envia o número de hóspedes.
     capacidade_hospedes: "",
+    // Sugestão do Google escolhida ao escrever a morada.
+    escolha: null as EscolhaMorada | null,
   });
   const [manualSubmitting, setManualSubmitting] = useState(false);
   const [manualErro, setManualErro] = useState<string | null>(null);
@@ -244,6 +248,9 @@ export default function PropriedadesPage() {
           nome: manualForm.nome.trim(),
           // Morada ÚNICA (a estrutura é derivada no servidor).
           morada: manualForm.morada.trim(),
+          ...(manualForm.escolha
+            ? { localizacao_escolhida: { lat: manualForm.escolha.lat, lng: manualForm.escolha.lng, tipos: manualForm.escolha.tipos, origem: "google_places" } }
+            : {}),
           tempo_limpeza_minutos: tempo,
           staff_necessario: Math.max(1, Math.min(10, Number(manualForm.staff_necessario) || 1)),
           tipologia: manualForm.tipologia === "" ? null : Number(manualForm.tipologia),
@@ -266,7 +273,7 @@ export default function PropriedadesPage() {
         }
       );
       // Limpa o formulário e fecha o modal.
-      setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1", tipologia: "", cliente_particular: false, dias_fixos_limpeza: [], observacoes: "", parceiro_id: "", fornecedor_id: "", capacidade_hospedes: "" });
+      setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1", tipologia: "", cliente_particular: false, dias_fixos_limpeza: [], observacoes: "", parceiro_id: "", fornecedor_id: "", capacidade_hospedes: "", escolha: null });
       setManualOpen(false);
       // Propriedade criada, mas a morada não foi localizada: avisa (não bloqueia).
       if (resCriar.warning) setFeedbackOk("Morada guardada sem localização no mapa; as distâncias desta casa não contam.");
@@ -290,6 +297,8 @@ export default function PropriedadesPage() {
     modelo_checklist_id: "",
     // Coordenadas ou link do Google Maps colados pelo gestor (localização à mão).
     coordenadas_manuais: "",
+    // Sugestão do Google escolhida ao escrever a morada.
+    escolha: null as EscolhaMorada | null,
     // FIX (parceiro associado + morada estruturada) — novos campos.
     observacoes: "",
     // FIX (parceiro associado relacional) — ID do parceiro B2B associado.
@@ -419,6 +428,7 @@ export default function PropriedadesPage() {
       modelo_checklist_id: p.modelo_checklist_id ?? "",
       // FIX (parceiro associado + morada estruturada) — novos campos.
       coordenadas_manuais: "",
+      escolha: null,
       observacoes: p.observacoes ?? "",
       // FIX (parceiro associado relacional) — Extrai o ID do parceiro
       // (pode ser string ou objeto populado { _id, nome, ... }).
@@ -599,6 +609,9 @@ export default function PropriedadesPage() {
           dias_fixos_limpeza: editForm.dias_fixos_limpeza,
           forcar_morada: forcarMorada || undefined,
           localizar_de_novo: opcoes?.localizarDeNovo || undefined,
+          ...(editForm.escolha
+            ? { localizacao_escolhida: { lat: editForm.escolha.lat, lng: editForm.escolha.lng, tipos: editForm.escolha.tipos, origem: "google_places" } }
+            : {}),
           ...(editForm.coordenadas_manuais.trim() ? { coordenadas_manuais: editForm.coordenadas_manuais.trim() } : {}),
         }
       );
@@ -657,7 +670,7 @@ export default function PropriedadesPage() {
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Erro ao editar propriedade.";
       const codigoErro = (e as { codigo?: string }).codigo;
-      if (codigoErro === "MORADA_INVALIDA" || codigoErro === "COORDENADAS_INVALIDAS") setEditErroMorada(msg);
+      if (codigoErro === "MORADA_INVALIDA" || codigoErro === "COORDENADAS_INVALIDAS" || codigoErro === "LOCALIZACAO_INVALIDA") setEditErroMorada(msg);
       else setEditErro(msg);
     } finally {
       setEditSubmitting(false);
@@ -760,7 +773,7 @@ export default function PropriedadesPage() {
             onClick={() => {
               setManualOpen(true);
               setManualErro(null);
-              setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1", tipologia: "", cliente_particular: false, dias_fixos_limpeza: [], observacoes: "", parceiro_id: "", fornecedor_id: "", capacidade_hospedes: "" });
+              setManualForm({ nome: "", morada: "", tempo_limpeza_minutos: "45", staff_necessario: "1", tipologia: "", cliente_particular: false, dias_fixos_limpeza: [], observacoes: "", parceiro_id: "", fornecedor_id: "", capacidade_hospedes: "", escolha: null });
             }}
           >
             <Plus className="h-4 w-4" />
@@ -1080,12 +1093,12 @@ export default function PropriedadesPage() {
               <label htmlFor="manual-morada" className="text-sm font-medium">
                 Morada <span className="text-destructive">*</span>
               </label>
-              <Input
+              <MoradaComSugestoes
                 id="manual-morada"
+                Campo={Input}
                 value={manualForm.morada}
-                onChange={(e) =>
-                  setManualForm((f) => ({ ...f, morada: e.target.value }))
-                }
+                onChange={(texto) => setManualForm((f) => ({ ...f, morada: texto }))}
+                onEscolher={(escolha) => setManualForm((f) => ({ ...f, escolha }))}
                 placeholder="Cola aqui a morada do Google Maps"
                 required
               />
@@ -1366,7 +1379,7 @@ export default function PropriedadesPage() {
         onModeloChange={handleModeloChecklistChange}
         tiposConfig={TIPOS_CONFIG}
         moradaAviso={editMoradaWarning}
-        moradaMudou={editando !== null && editForm.morada.trim() !== (editando.morada || editando.moradaCompleta || "").trim()}
+        moradaMudou={editando !== null && !editForm.escolha && editForm.morada.trim() !== (editando.morada || editando.moradaCompleta || "").trim()}
         onMoradaMudou={() => {
           setEditMoradaWarning(null);
           setEditErroMorada(null);
