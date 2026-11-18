@@ -128,6 +128,7 @@ export function EditarPropriedadeDialog({
   tiposConfig,
   moradaAviso,
   moradaMudou,
+  erroMorada,
   onMoradaMudou,
   erro,
   a,
@@ -152,6 +153,8 @@ export function EditarPropriedadeDialog({
   /** A morada foi alterada: ao guardar o servidor vai localizá-la no mapa (pode demorar uns segundos). */
   moradaMudou: boolean;
   onMoradaMudou: () => void;
+  /** Erro do servidor sobre a morada (mostrado junto ao campo). */
+  erroMorada: string | null;
   erro: string | null;
   a: boolean;
   onSubmit: (e: React.FormEvent) => void;
@@ -160,6 +163,27 @@ export function EditarPropriedadeDialog({
   const [separador, setSeparador] = useState("essencial");
   const [notasAbertas, setNotasAbertas] = useState(false);
   const [editarTipo, setEditarTipo] = useState<string | null>(null);
+  const erroRef = useRef<HTMLParagraphElement>(null);
+  const erroMoradaRef = useRef<HTMLParagraphElement>(null);
+
+  // Erros fora de vista (ecrã pequeno): levar o alerta à vista e dar-lhe o foco.
+  useEffect(() => {
+    if (!aberto || !erroMorada) return;
+    setSeparador("essencial");
+    const t = setTimeout(() => {
+      erroMoradaRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+      erroMoradaRef.current?.focus();
+    }, 0);
+    return () => clearTimeout(t);
+  }, [aberto, erroMorada]);
+  useEffect(() => {
+    if (!aberto || !erro) return;
+    const t = setTimeout(() => {
+      erroRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+      erroRef.current?.focus();
+    }, 0);
+    return () => clearTimeout(t);
+  }, [aberto, erro]);
 
   const linhasTipo = [{ id: "normal", rotulo: "Normal" }, ...tiposConfig];
   const upd = (patch: Partial<EditarPropriedadeForm>) => setForm((f) => ({ ...f, ...patch }));
@@ -200,7 +224,7 @@ export function EditarPropriedadeDialog({
               <div className="space-y-1.5">
                 <div className="flex flex-wrap items-center gap-2">
                   <label htmlFor="edit-morada" className="text-xs font-medium text-muted-foreground">Morada</label>
-                  {localizada && !moradaAviso && (
+                  {localizada && !moradaAviso && !moradaMudou && (
                     <span className="inline-flex items-center gap-1 text-xs font-medium text-status-conc">
                       <Check className="h-3 w-3" aria-hidden="true" />
                       Localizada
@@ -226,7 +250,13 @@ export function EditarPropriedadeDialog({
                     <span>{moradaAviso}</span>
                   </p>
                 )}
-                {localizada && !moradaAviso && (
+                {erroMorada && (
+                  <p ref={erroMoradaRef} tabIndex={-1} role="alert" className="flex items-start gap-1.5 text-xs text-destructive outline-none">
+                    <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    <span>{erroMorada}</span>
+                  </p>
+                )}
+                {localizada && !moradaAviso && !moradaMudou && (
                   <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
                     <span className="min-w-0 break-words">
                       Localizada como: {localizada.moradaEncontrada || `${localizada.lat.toFixed(4)}, ${localizada.lng.toFixed(4)}`}
@@ -494,7 +524,7 @@ export function EditarPropriedadeDialog({
                 <p className="text-xs text-muted-foreground">Em branco, o tipo herda o tempo base e a checklist da casa. O tipo não muda preços.</p>
               </div>
             </TabsContent>
-            {erro && <p role="alert" className="mt-3 text-sm text-destructive">{erro}</p>}
+            {erro && <p ref={erroRef} tabIndex={-1} role="alert" className="mt-3 text-sm text-destructive outline-none">{erro}</p>}
           </DialogContent>
         </Tabs>
 

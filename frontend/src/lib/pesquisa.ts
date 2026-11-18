@@ -44,7 +44,10 @@ function paraComparar(valor: unknown): string {
 
 /** true se a pesquisa estiver vazia ou todas as palavras existirem nos campos. */
 export function correspondePesquisa(pesquisa: string, campos: unknown[]): boolean {
-  const palavras = paraComparar(pesquisa).split(" ").filter(Boolean);
+  // Na pesquisa só se expande o que tem ponto («av.»): «av» a meio de «Avelar» continua a servir.
+  // Nos campos das casas expande-se sempre («Av. dos…» encontra «avenida»).
+  const consulta = String(pesquisa ?? "").includes(".") ? paraComparar(pesquisa) : normalizarTexto(pesquisa);
+  const palavras = consulta.split(" ").filter(Boolean);
   if (palavras.length === 0) return true;
   const palheiro = campos.map(paraComparar).join(" | ");
   return palavras.every((p) => palheiro.includes(p));

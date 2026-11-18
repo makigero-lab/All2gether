@@ -354,7 +354,7 @@ exports.criarPropriedade = async (req, res) => {
     // Morada ÚNICA: o texto é a fonte de verdade. Clientes antigos que enviem
     // só morada_estruturada continuam a ser aceites (concatenada numa string).
     if (morada !== undefined && morada !== null && typeof morada !== 'string') {
-      return res.status(400).json({ erro: 'A morada tem de ser um texto.' });
+      return res.status(400).json({ erro: 'A morada tem de ser um texto.', codigo: 'MORADA_INVALIDA' });
     }
     const moradaUnica = textoMorada(morada, morada_estruturada);
     if (!nome || !moradaUnica) {
@@ -363,7 +363,7 @@ exports.criarPropriedade = async (req, res) => {
       });
     }
     const moradaValida = validarMorada(moradaUnica);
-    if (!moradaValida.ok) return res.status(400).json({ erro: moradaValida.erro });
+    if (!moradaValida.ok) return res.status(400).json({ erro: moradaValida.erro, codigo: 'MORADA_INVALIDA' });
 
     // F0 — Validação de unicidade do smoobu_id removida.
 
@@ -1383,13 +1383,13 @@ exports.atualizarPropriedade = async (req, res) => {
     let novaMorada;
     if (morada !== undefined) {
       const v = validarMorada(morada);
-      if (!v.ok) return res.status(400).json({ erro: v.erro });
+      if (!v.ok) return res.status(400).json({ erro: v.erro, codigo: 'MORADA_INVALIDA' });
       novaMorada = v.valor;
     } else if (morada_estruturada !== undefined) {
       const t = textoMorada('', morada_estruturada);
       if (t) {
         const v = validarMorada(t);
-        if (!v.ok) return res.status(400).json({ erro: v.erro });
+        if (!v.ok) return res.status(400).json({ erro: v.erro, codigo: 'MORADA_INVALIDA' });
         novaMorada = v.valor;
       }
     }

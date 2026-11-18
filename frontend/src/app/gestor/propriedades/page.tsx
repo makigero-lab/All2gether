@@ -303,6 +303,8 @@ export default function PropriedadesPage() {
   });
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editErro, setEditErro] = useState<string | null>(null);
+  // Erro do servidor sobre a morada (mostrado junto ao campo Morada).
+  const [editErroMorada, setEditErroMorada] = useState<string | null>(null);
 
   // Prompt 134 — Lista de Modelos de Checklist da empresa (para o select no
   // modal de edição). Carregada quando o modal abre.
@@ -424,6 +426,7 @@ export default function PropriedadesPage() {
       dias_fixos_limpeza: Array.isArray(p.dias_fixos_limpeza) ? [...p.dias_fixos_limpeza] : [],
     });
     setEditErro(null);
+    setEditErroMorada(null);
     // Prompt 126 — Reset dos avisos de morada ao abrir o modal.
     setEditMoradaWarning(null);
     // Prompt 134 — Carrega os modelos de checklist para o select.
@@ -482,6 +485,7 @@ export default function PropriedadesPage() {
     e.preventDefault();
     if (!editando) return;
     setEditErro(null);
+    setEditErroMorada(null);
 
     if (!editForm.nome.trim() || !editForm.morada.trim()) {
       setEditErro("Nome e Morada são obrigatórios.");
@@ -600,7 +604,9 @@ export default function PropriedadesPage() {
         );
       }
     } catch (e) {
-      setEditErro(e instanceof Error ? e.message : "Erro ao editar propriedade.");
+      const msg = e instanceof Error ? e.message : "Erro ao editar propriedade.";
+      if ((e as { codigo?: string }).codigo === "MORADA_INVALIDA") setEditErroMorada(msg);
+      else setEditErro(msg);
     } finally {
       setEditSubmitting(false);
     }
@@ -1284,7 +1290,9 @@ export default function PropriedadesPage() {
         moradaMudou={editando !== null && editForm.morada.trim() !== (editando.morada || editando.moradaCompleta || "").trim()}
         onMoradaMudou={() => {
           setEditMoradaWarning(null);
+          setEditErroMorada(null);
         }}
+        erroMorada={editErroMorada}
         erro={editErro}
         a={editSubmitting}
         onSubmit={handleEditar}

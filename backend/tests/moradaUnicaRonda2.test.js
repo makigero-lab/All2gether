@@ -23,6 +23,11 @@ describe('derivação (A6)', () => {
   test('cidade é só a 1.ª parte depois do código postal', () => {
     expect(derivarMoradaEstruturada('Av. A 4, 2700-418 Amadora, Portugal')).toEqual({ rua: 'Av. A 4', codigo_postal: '2700-418', cidade: 'Amadora' });
   });
+  test('«Portugal» / «PT» no fim nunca é a cidade', () => {
+    expect(derivarMoradaEstruturada('Rua X 5, Lisboa, Portugal')).toEqual({ rua: 'Rua X 5', codigo_postal: '', cidade: 'Lisboa' });
+    expect(derivarMoradaEstruturada('Av. A 4, 2700-418, PT')).toEqual({ rua: 'Av. A 4', codigo_postal: '2700-418', cidade: '' });
+    expect(derivarMoradaEstruturada('Rua X 5, Portugal').cidade).toBe('');
+  });
   test('sem CP, andar/fração não é cidade', () => {
     for (const fim of ['R/C Esq', '3º Dto', 'Lote 4', 'Bloco B', 'Fração A', 'Edifício Sol']) {
       expect(derivarMoradaEstruturada(`Rua X 5, ${fim}`).cidade).toBe('');
@@ -87,6 +92,8 @@ describe('API', () => {
       expect((await put(m)).status).toBe(400);
     }
     expect((await post(',,,')).body.erro).toMatch(/morada/i);
+    expect((await post(',,,')).body.codigo).toBe('MORADA_INVALIDA');
+    expect((await put(',,,')).body.codigo).toBe('MORADA_INVALIDA');
     expect(obterCoordenadas).not.toHaveBeenCalled();
   });
 

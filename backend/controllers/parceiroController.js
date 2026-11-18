@@ -57,7 +57,7 @@ async function criarPropriedade(req, res) {
       return res.status(400).json({ erro: 'morada é obrigatória.' });
     }
     const moradaValida = validarMorada(morada);
-    if (!moradaValida.ok) return res.status(400).json({ erro: moradaValida.erro });
+    if (!moradaValida.ok) return res.status(400).json({ erro: moradaValida.erro, codigo: 'MORADA_INVALIDA' });
 
     // Geocoding best-effort (não bloqueia se falhar).
     const loc = await localizarMorada(moradaValida.valor);
