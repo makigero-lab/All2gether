@@ -11,8 +11,6 @@ import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
-  CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import {
   Dialog,
@@ -85,26 +83,6 @@ export default function PropriedadesPage() {
   // gestor procurar explicitamente).
   const [filtroEstado, setFiltroEstado] = useState<"todos" | "ativos" | "inativos">("ativos");
 
-  // Estado do formulário de criação
-  const [mostrarForm, setMostrarForm] = useState(false);
-  const [form, setForm] = useState({
-    nome: "",
-    smoobu_id: "",
-    morada: "",
-    tempo_limpeza_minutos: "45",
-    checklist: "",
-  });
-  const [submitting, setSubmitting] = useState(false);
-  const [formErro, setFormErro] = useState<string | null>(null);
-
-  // Lista de apartamentos do Smoobu (para o dropdown no formulário de criação).
-  // Carregada via GET /api/gestor/smoobu/propriedades quando o formulário abre.
-  const [propriedadesSmoobu, setPropriedadesSmoobu] = useState<
-    { id: string | number; name: string }[]
-  >([]);
-  const [smoobuLoading, setSmoobuLoading] = useState(false);
-  const [smoobuErro, setSmoobuErro] = useState<string | null>(null);
-
   // FIX (hard-delete para admin) — Role do utilizador atual (para mostrar o
   // botão "Eliminar Definitivamente" apenas para admin).
   const [userRole, setUserRole] = useState<Role | null>(null);
@@ -156,100 +134,6 @@ export default function PropriedadesPage() {
     carregar();
   }, [carregar]);
 
-  /** Carrega a lista de apartamentos do Smoobu (para o dropdown). */
-  const carregarSmoobu = useCallback(async () => {
-    // Só carrega se ainda não foi carregado (evita pedidos repetidos).
-    if (propriedadesSmoobu.length > 0) return;
-    setSmoobuLoading(true);
-    setSmoobuErro(null);
-    try {
-      const data = await adminGet<{ propriedadesSmoobu: { id: string | number; name: string }[] }>(
-        "/api/gestor/smoobu/propriedades"
-      );
-      setPropriedadesSmoobu(data.propriedadesSmoobu ?? []);
-    } catch (e) {
-      setSmoobuErro(
-        e instanceof Error
-          ? `Não foi possível carregar os apartamentos do Smoobu: ${e.message}`
-          : "Erro ao carregar apartamentos do Smoobu."
-      );
-    } finally {
-      setSmoobuLoading(false);
-    }
-  }, [propriedadesSmoobu.length]);
-
-  // Quando o formulário abre, carrega a lista do Smoobu (se ainda não foi).
-  useEffect(() => {
-    if (mostrarForm) {
-      carregarSmoobu();
-    }
-  }, [mostrarForm, carregarSmoobu]);
-
-  /** Submete o formulário de nova propriedade. */
-  async function handleSubmeter(e: React.FormEvent) {
-    e.preventDefault();
-    setFormErro(null);
-
-    if (!form.nome.trim() || !form.smoobu_id.trim() || !form.morada.trim()) {
-      setFormErro("Nome, Smoobu ID e Morada são obrigatórios.");
-      return;
-    }
-
-    const tempo = Number(form.tempo_limpeza_minutos);
-    if (Number.isNaN(tempo) || tempo < 0) {
-      setFormErro("Tempo de Limpeza deve ser um número maior ou igual a 0.");
-      return;
-    }
-
-    // A propriedade já ficou gravada (sem localização) no 1.º envio: confirmar
-    // a morada inválida só fecha o formulário (nunca cria uma 2.ª propriedade).
-    if (moradaWarning) {
-      setMoradaWarning(null);
-      setForm({ nome: "", smoobu_id: "", morada: "", tempo_limpeza_minutos: "45", checklist: "" });
-      setMostrarForm(false);
-      setFeedbackOk("Morada guardada sem localização no mapa; as distâncias desta casa não contam.");
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      // Prompt 114 — Captura warning de geocoding (morada não georreferenciada).
-      // Prompt 126 — Envia flag forcar_morada para o backend saber que o
-      // utilizador confirmou a morada inválida (futura extensão).
-      const res = await adminPost<{ propriedade: PropriedadeDTO; warning?: string }>(
-        "/api/gestor/propriedades",
-        {
-          nome: form.nome.trim(),
-          smoobu_id: form.smoobu_id.trim(),
-          morada: form.morada.trim(),
-          tempo_limpeza_minutos: tempo,
-          checklist: form.checklist
-            .split("\n")
-            .map((s) => s.trim())
-            .filter((s) => s.length > 0),
-        }
-      );
-      // Prompt 117 — Aviso de geocoding INLINE (não toast global).
-      // Prompt 126 — Se voltar a haver warning, mantém o form aberto para o
-      // utilizador confirmar (reset moradaConfirmada para exigir novo clique).
-      if (res.warning) {
-        setMoradaWarning("Não encontrámos esta morada no mapa. Se for mesmo esta, confirma abaixo: fica guardada sem localização e as distâncias desta casa não contam.");
-        // Atualiza a tabela (a propriedade foi criada) mas não fecha o form.
-        await carregar();
-        return;
-      }
-      // Sem warning — limpa o formulário e fecha.
-      setMoradaWarning(null);
-      setForm({ nome: "", smoobu_id: "", morada: "", tempo_limpeza_minutos: "45", checklist: "" });
-      setMostrarForm(false);
-      await carregar();
-    } catch (e) {
-      setFormErro(e instanceof Error ? e.message : "Erro ao criar propriedade.");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
   /** Alterna ativo/inativo com otimismo. */
   async function handleToggleAtivo(p: PropriedadeDTO) {
     const novoEstado = !p.ativo;
@@ -288,9 +172,6 @@ export default function PropriedadesPage() {
   // página /gestor/configuracoes/integracoes.
   // Estado genérico de feedback de sucesso (toggle de estado, checklist padrão).
   const [feedbackOk, setFeedbackOk] = useState<string | null>(null);
-  // Prompt 117 — Aviso de geocoding INLINE (junto ao campo morada, não toast global).
-  // String preenchida quando o Nominatim/Google falha ao georreferenciar a morada.
-  const [moradaWarning, setMoradaWarning] = useState<string | null>(null);
   // Aviso inline do modal de edição (morada editada não georreferenciada).
   const [editMoradaWarning, setEditMoradaWarning] = useState<string | null>(null);
   // Pesquisa (nome, morada, proprietário) por cima da lista.
@@ -828,200 +709,6 @@ export default function PropriedadesPage() {
         </div>
       </div>
 
-      {/* Formulário inline de criação */}
-      {mostrarForm && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Building2 className="h-5 w-5 text-brand-text" />
-              Nova propriedade
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmeter} className="space-y-4">
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                <div className="space-y-1.5">
-                  <label htmlFor="nome" className="text-sm font-medium">
-                    Nome
-                  </label>
-                  <Input
-                    id="nome"
-                    value={form.nome}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, nome: e.target.value }))
-                    }
-                    placeholder="Ex.: Apartamento Maré Alta"
-                    required
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label htmlFor="smoobu_id" className="text-sm font-medium">
-                    Apartamento do Smoobu
-                  </label>
-                  {smoobuLoading ? (
-                    <div className="flex h-9 items-center gap-2 rounded-md border border-input px-3 text-xs text-muted-foreground">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      A carregar do Smoobu…
-                    </div>
-                  ) : smoobuErro ? (
-                    <>
-                      <Input
-                        id="smoobu_id"
-                        value={form.smoobu_id}
-                        onChange={(e) =>
-                          setForm((f) => ({ ...f, smoobu_id: e.target.value }))
-                        }
-                        placeholder="Ex.: 67890 (fallback manual)"
-                        required
-                      />
-                      <p className="text-xs text-amber-600 dark:text-amber-500">
-                        {smoobuErro} Podes inserir o ID manualmente.
-                      </p>
-                    </>
-                  ) : (
-                    <select
-                      id="smoobu_id"
-                      value={form.smoobu_id}
-                      onChange={(e) => {
-                        const idEscolhido = e.target.value;
-                        // Encontra o apartamento escolhido para preencher o nome.
-                        const apto = propriedadesSmoobu.find(
-                          (p) => String(p.id) === idEscolhido
-                        );
-                        setForm((f) => ({
-                          ...f,
-                          smoobu_id: idEscolhido,
-                          // Preenche o nome automaticamente se o utilizador ainda
-                          // não o tiver editado (poupa tempo). Se já escreveu algo
-                          // custom, respeita — mas o comportamento padrão é usar o
-                          // nome do Smoobu.
-                          nome: apto?.name ?? f.nome,
-                        }));
-                      }}
-                      required
-                      className="flex h-11 md:h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    >
-                      <option value="">Seleciona um apartamento…</option>
-                      {propriedadesSmoobu.map((p) => (
-                        <option key={p.id} value={String(p.id)}>
-                          {p.name} (ID: {p.id})
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                  <p className="text-xs text-muted-foreground">
-                    Lista carregada do Smoobu. Ao escolher, o nome é preenchido automaticamente.
-                  </p>
-                </div>
-                <div className="space-y-1.5 sm:col-span-2">
-                  <label htmlFor="morada" className="text-sm font-medium">
-                    Morada completa
-                  </label>
-                  <Input
-                    id="morada"
-                    value={form.morada}
-                    onChange={(e) => {
-                      setForm((f) => ({ ...f, morada: e.target.value }));
-                      setMoradaWarning(null);
-                    }}
-                    placeholder="Ex.: Rua das Flores 12, Lisboa"
-                    required
-                  />
-                  {/* Prompt 117 — Aviso de geocoding INLINE (não toast global) */}
-                  {moradaWarning && (
-                    <p className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-300">
-                      <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                      <span>{moradaWarning}</span>
-                    </p>
-                  )}
-                </div>
-                <div className="space-y-1.5">
-                  <label
-                    htmlFor="tempo_limpeza_minutos"
-                    className="text-sm font-medium"
-                  >
-                    Tempo de Limpeza (min)
-                  </label>
-                  <Input
-                    id="tempo_limpeza_minutos"
-                    type="number"
-                    min={0}
-                    value={form.tempo_limpeza_minutos}
-                    onChange={(e) =>
-                      setForm((f) => ({
-                        ...f,
-                        tempo_limpeza_minutos: e.target.value,
-                      }))
-                    }
-                    placeholder="45"
-                  />
-                </div>
-              </div>
-
-              {/* Checklist de Limpeza */}
-              <div className="space-y-1.5">
-                <label htmlFor="checklist" className="text-sm font-medium">
-                  Checklist de Limpeza (um item por linha)
-                </label>
-                <textarea
-                  id="checklist"
-                  value={form.checklist}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, checklist: e.target.value }))
-                  }
-                  rows={4}
-                  placeholder={"Verificar toalhas\nEsvaziar lixo\nTrocar roupa de cama"}
-                  className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                />
-                <p className="text-xs text-muted-foreground">
-                  O staff verá estes itens ao concluir a tarefa de limpeza desta propriedade.
-                </p>
-              </div>
-
-              {formErro && (
-                <p className="flex items-center gap-2 text-sm text-destructive">
-                  <AlertCircle className="h-4 w-4" />
-                  {formErro}
-                </p>
-              )}
-
-              <div className="flex items-center gap-2">
-                <Button
-                  type="submit"
-                  disabled={submitting}
-                  variant={moradaWarning ? "outline" : "default"}
-                  className={moradaWarning ? "border-amber-500/50 text-amber-700 hover:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/50 dark:hover:bg-amber-500/10" : ""}
-                >
-                  {submitting ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      A guardar…
-                    </>
-                  ) : moradaWarning ? (
-                    "Confirmar Morada Inválida"
-                  ) : (
-                    "Guardar Propriedade"
-                  )}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setMostrarForm(false);
-                    setFormErro(null);
-                    setMoradaWarning(null);
-                    setForm({ nome: "", smoobu_id: "", morada: "", tempo_limpeza_minutos: "45", checklist: "" });
-                  }}
-                  disabled={submitting}
-                >
-                  Cancelar
-                </Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
-      )}
-
       {/* Erro de carregamento */}
       {erro && !loading && (
         <Card className="border-destructive/50">
@@ -1058,13 +745,13 @@ export default function PropriedadesPage() {
       )}
 
       {/* Pesquisa (junta-se ao filtro de estado) */}
-      {!loading && porEstado.length > 0 && (
+      {!loading && propriedades.length > 0 && (
         <div className="flex flex-wrap items-center gap-3">
           <CaixaPesquisa
             valor={pesquisa}
             onChange={setPesquisa}
             rotulo="Pesquisar propriedades"
-            placeholder="Pesquisar por nome, morada ou proprietário"
+            placeholder="Nome, morada ou proprietário"
           />
           {pesquisa.trim() && (
             <span className="text-sm text-muted-foreground" role="status">
@@ -1594,6 +1281,7 @@ export default function PropriedadesPage() {
         onModeloChange={handleModeloChecklistChange}
         tiposConfig={TIPOS_CONFIG}
         moradaAviso={editMoradaWarning}
+        moradaMudou={editando !== null && editForm.morada.trim() !== (editando.morada || editando.moradaCompleta || "").trim()}
         onMoradaMudou={() => {
           setEditMoradaWarning(null);
         }}

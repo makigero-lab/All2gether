@@ -246,7 +246,7 @@ export default function ParceirosPage() {
           valor={pesquisa}
           onChange={setPesquisa}
           rotulo="Pesquisar proprietários"
-          placeholder="Pesquisar por nome, email, telefone ou NIF"
+          placeholder="Nome, email, telefone, NIF"
         />
         {pesquisa.trim() && (
           <span className="text-sm text-muted-foreground" role="status">

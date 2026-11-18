@@ -127,6 +127,7 @@ export function EditarPropriedadeDialog({
   onModeloChange,
   tiposConfig,
   moradaAviso,
+  moradaMudou,
   onMoradaMudou,
   erro,
   a,
@@ -148,6 +149,8 @@ export function EditarPropriedadeDialog({
   onModeloChange: (id: string) => void;
   tiposConfig: readonly { id: string; rotulo: string }[];
   moradaAviso: string | null;
+  /** A morada foi alterada: ao guardar o servidor vai localizá-la no mapa (pode demorar uns segundos). */
+  moradaMudou: boolean;
   onMoradaMudou: () => void;
   erro: string | null;
   a: boolean;
@@ -504,7 +507,7 @@ export function EditarPropriedadeDialog({
             variant={moradaAviso ? "outline" : "default"}
             className={moradaAviso ? "border-status-porat/50 text-status-porat hover:bg-status-porat-bg" : ""}
           >
-            {a ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />A guardar…</>) : moradaAviso ? "Confirmar morada inválida" : "Guardar alterações"}
+            {a ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />{moradaMudou ? "A localizar a morada…" : "A guardar…"}</>) : moradaAviso ? "Confirmar morada inválida" : "Guardar alterações"}
           </Button>
         </DialogFooter>
       </form>

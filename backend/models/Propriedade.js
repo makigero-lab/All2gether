@@ -47,6 +47,9 @@ const propriedadeSchema = new mongoose.Schema(
     // geocoder encontrou (para o gestor confirmar que o pino está certo).
     coordenadas_precisao: { type: String, enum: ['exata', 'aproximada', null], default: null },
     morada_localizada: { type: String, default: null, trim: true },
+    // Quando se tentou localizar a morada pela última vez (evita repetir uma
+    // tentativa falhada em cada gravação: só volta a tentar passadas 24 h).
+    geocoding_tentado_em: { type: Date, default: null },
     empresa_id: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Empresa',
