@@ -21,7 +21,7 @@ const mongoose = require('mongoose');
 const Propriedade = require('../models/Propriedade');
 const Tarefa = require('../models/Tarefa');
 const { localizarMorada } = require('../utils/localizacaoPropriedade');
-const { derivarMoradaEstruturada } = require('../utils/morada');
+const { derivarMoradaEstruturada, validarMorada } = require('../utils/morada');
 /**
  * POST /api/parceiro/propriedades
  *
@@ -53,17 +53,20 @@ async function criarPropriedade(req, res) {
     if (!nome || !String(nome).trim()) {
       return res.status(400).json({ erro: 'nome é obrigatório.' });
     }
-    if (!morada || !String(morada).trim()) {
+    if (morada === undefined || morada === null || (typeof morada === 'string' && !morada.trim())) {
       return res.status(400).json({ erro: 'morada é obrigatória.' });
     }
+    const moradaValida = validarMorada(morada);
+    if (!moradaValida.ok) return res.status(400).json({ erro: moradaValida.erro });
 
     // Geocoding best-effort (não bloqueia se falhar).
-    const loc = await localizarMorada(String(morada).trim());
+    const loc = await localizarMorada(moradaValida.valor);
 
     const novaPropriedade = await Propriedade.create({
       nome: String(nome).trim(),
-      morada: String(morada).trim(),
-      morada_estruturada: derivarMoradaEstruturada(String(morada)),
+      morada: moradaValida.valor,
+      morada_estruturada: derivarMoradaEstruturada(moradaValida.valor),
+      geocoding_tentado_em: new Date(),
       coordenadas: loc.coordenadas,
       coordenadas_precisao: loc.coordenadas_precisao,
       morada_localizada: loc.morada_localizada,

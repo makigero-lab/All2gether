@@ -2046,7 +2046,8 @@ async function importarPropriedades(req, res) {
           ) {
             existente.morada = moradaTexto;
             try {
-              const coords = await obterCoordenadas(moradaTexto);
+              // Importação em massa: modo rápido (não pode estourar o timeout do pedido).
+              const coords = await obterCoordenadas(moradaTexto, { rapido: true });
               if (coords) existente.coordenadas = coords;
             } catch (e) {
               console.warn(
@@ -2075,7 +2076,7 @@ async function importarPropriedades(req, res) {
         let coords = { lat: null, lng: null };
         if (moradaTexto !== 'A definir') {
           try {
-            const result = await obterCoordenadas(moradaTexto);
+            const result = await obterCoordenadas(moradaTexto, { rapido: true });
             if (result) coords = result;
           } catch (e) {
             console.warn(

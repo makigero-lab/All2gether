@@ -19,7 +19,9 @@ const Ausencia = require('../models/Ausencia');
 const Auditoria = require('../models/Auditoria');
 const WebhookLog = require('../models/WebhookLog');
 const { localizarMorada } = require('../utils/localizacaoPropriedade');
-const { derivarMoradaEstruturada, textoMorada } = require('../utils/morada');
+const { derivarMoradaEstruturada, textoMorada, validarMorada } = require('../utils/morada');
+
+const VINTE_QUATRO_HORAS_MS = 24 * 60 * 60 * 1000;
 const { registarAuditoria } = require('../utils/auditoria');
 const { comMembro, filtroMembro, retirarMembroDoc, membrosPopulados, EXPR_MEMBROS } = require('../utils/equipaTarefa');
 const { FILTRO_SEM_PESSOA } = require('../utils/atribuicaoAutomatica');
@@ -351,12 +353,17 @@ exports.criarPropriedade = async (req, res) => {
     // o campo rua). Retrocompatível com as 46 propriedades legadas que usam `morada`.
     // Morada ÚNICA: o texto é a fonte de verdade. Clientes antigos que enviem
     // só morada_estruturada continuam a ser aceites (concatenada numa string).
+    if (morada !== undefined && morada !== null && typeof morada !== 'string') {
+      return res.status(400).json({ erro: 'A morada tem de ser um texto.' });
+    }
     const moradaUnica = textoMorada(morada, morada_estruturada);
     if (!nome || !moradaUnica) {
       return res.status(400).json({
         erro: 'Campos obrigatórios em falta: nome e morada.',
       });
     }
+    const moradaValida = validarMorada(moradaUnica);
+    if (!moradaValida.ok) return res.status(400).json({ erro: moradaValida.erro });
 
     // F0 — Validação de unicidade do smoobu_id removida.
 
@@ -413,13 +420,14 @@ exports.criarPropriedade = async (req, res) => {
     // como fallback continue a funcionar.
     // Morada única: a estruturada é DERIVADA do texto (para quem a lê).
     // forcar_morada: o gestor confirmou gravar sem localização no mapa.
-    const loc = await localizarMorada(moradaUnica, { forcar: req.body?.forcar_morada === true });
+    const loc = await localizarMorada(moradaValida.valor, { forcar: req.body?.forcar_morada === true });
     const geocodingFalhou = loc.falhou;
 
     const nova = await Propriedade.create({
       nome: String(nome).trim(),
-      morada: moradaUnica,
-      morada_estruturada: derivarMoradaEstruturada(moradaUnica),
+      morada: moradaValida.valor,
+      morada_estruturada: derivarMoradaEstruturada(moradaValida.valor),
+      geocoding_tentado_em: new Date(),
       coordenadas: loc.coordenadas,
       coordenadas_precisao: loc.coordenadas_precisao,
       morada_localizada: loc.morada_localizada,
@@ -1367,23 +1375,39 @@ exports.atualizarPropriedade = async (req, res) => {
     // Nunca se mantêm coordenadas antigas: se a morada mudou (ou ainda não
     // tinha localização) e não for localizada, ficam a null. Confirmar
     // «morada inválida» (forcar_morada) grava sem bloquear.
+    // Só se mexe na morada se vier uma válida: `morada` (texto) ou, em clientes
+    // antigos, uma morada_estruturada com conteúdo (vazia = ignorada, como antes).
+    // Com a morada igual e sem coordenadas, só se volta a tentar passadas 24 h
+    // da última tentativa (geocoding_tentado_em) ou se o gestor confirmar.
     let geocodingFalhou = false;
-    if (morada !== undefined || morada_estruturada !== undefined) {
-      const novaMorada = morada !== undefined
-        ? String(morada || '').replace(/\s+/g, ' ').trim()
-        : textoMorada('', morada_estruturada);
+    let novaMorada;
+    if (morada !== undefined) {
+      const v = validarMorada(morada);
+      if (!v.ok) return res.status(400).json({ erro: v.erro });
+      novaMorada = v.valor;
+    } else if (morada_estruturada !== undefined) {
+      const t = textoMorada('', morada_estruturada);
+      if (t) {
+        const v = validarMorada(t);
+        if (!v.ok) return res.status(400).json({ erro: v.erro });
+        novaMorada = v.valor;
+      }
+    }
+    if (novaMorada !== undefined) {
       const mudou = novaMorada !== (propriedade.morada || '');
       const forcar = req.body?.forcar_morada === true;
-      if (novaMorada || mudou) {
-        propriedade.morada = novaMorada;
-        propriedade.morada_estruturada = derivarMoradaEstruturada(novaMorada);
-        if (forcar || mudou) {
-          const loc = await localizarMorada(novaMorada, { forcar });
-          propriedade.coordenadas = loc.coordenadas;
-          propriedade.coordenadas_precisao = loc.coordenadas_precisao;
-          propriedade.morada_localizada = loc.morada_localizada;
-          geocodingFalhou = loc.falhou;
-        }
+      const semCoords = propriedade.coordenadas?.lat == null || propriedade.coordenadas?.lng == null;
+      const tentadoEm = propriedade.geocoding_tentado_em ? new Date(propriedade.geocoding_tentado_em).getTime() : 0;
+      const repetir = semCoords && novaMorada !== 'A definir' && Date.now() - tentadoEm > VINTE_QUATRO_HORAS_MS;
+      propriedade.morada = novaMorada;
+      propriedade.morada_estruturada = derivarMoradaEstruturada(novaMorada);
+      if (forcar || mudou || repetir) {
+        const loc = await localizarMorada(novaMorada, { forcar });
+        propriedade.coordenadas = loc.coordenadas;
+        propriedade.coordenadas_precisao = loc.coordenadas_precisao;
+        propriedade.morada_localizada = loc.morada_localizada;
+        propriedade.geocoding_tentado_em = new Date();
+        geocodingFalhou = loc.falhou;
       }
     }
 

@@ -12,23 +12,31 @@
  *      (3) sem código postal; (4) pesquisa estruturada;
  *      (5) só código postal + cidade (ÚLTIMO recurso, 'aproximada').
  *    Respeita 1 pedido/s entre tentativas.
+ *
+ * Orçamento: cada morada tem um tempo total máximo (por defeito 8 s); os
+ * timeouts por pedido encurtam quando o orçamento aperta e não se começam
+ * tentativas que já não cabem. Com { rapido: true } (importação em massa)
+ * só se usa o Google + a morada tal como está + abreviaturas expandidas.
  */
 const { derivarMoradaEstruturada, expandirAbreviaturas, semCodigoPostal } = require('./morada');
 
 const PAUSA_NOMINATIM_MS = 1100;
+const ORCAMENTO_MS = 8000;
+const TIMEOUT_PEDIDO_MS = 5000;
+const MINIMO_PEDIDO_MS = 800;
 const UA = 'All2gether/1.0 (all2gether.app)';
 const STATUS_GRAVES = new Set(['REQUEST_DENIED', 'OVER_QUERY_LIMIT', 'OVER_DAILY_LIMIT', 'INVALID_REQUEST', 'UNKNOWN_ERROR']);
 
 const esperarPadrao = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function obterCoordenadasGoogleMaps(morada) {
+async function obterCoordenadasGoogleMaps(morada, timeoutMs = TIMEOUT_PEDIDO_MS) {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!apiKey || !apiKey.trim()) return null;
   try {
     const url =
       `https://maps.googleapis.com/maps/api/geocode/json` +
       `?address=${encodeURIComponent(morada)}&language=pt-PT&region=pt&key=${apiKey.trim()}`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+    const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) {
       console.error(`❌ Google Geocoding HTTP ${res.status} para "${morada}".`);
       return null;
@@ -52,12 +60,12 @@ async function obterCoordenadasGoogleMaps(morada) {
 }
 
 /** Uma pesquisa ao Nominatim; params é um objeto de query. */
-async function pesquisarNominatim(params) {
+async function pesquisarNominatim(params, timeoutMs = TIMEOUT_PEDIDO_MS) {
   const qs = new URLSearchParams({ format: 'json', limit: '1', countrycodes: 'pt', ...params });
   try {
     const res = await fetch(`https://nominatim.openstreetmap.org/search?${qs.toString()}`, {
       headers: { 'User-Agent': UA },
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok) {
       console.error('⚠️  Nominatim HTTP', res.status);
@@ -75,24 +83,29 @@ async function pesquisarNominatim(params) {
   }
 }
 
-/** Variantes de pesquisa, por ordem de preferência (sem repetidas). */
-function variantesNominatim(morada) {
+/**
+ * Variantes de pesquisa, por ordem de preferência (sem repetidas).
+ * rapido: só (1) tal como está e (2) abreviaturas expandidas.
+ */
+function variantesNominatim(morada, { rapido = false } = {}) {
   const original = String(morada).replace(/\s+/g, ' ').trim();
   const expandida = expandirAbreviaturas(original);
   const e = derivarMoradaEstruturada(expandida);
   const lista = [
     { params: { q: original }, precisao: 'exata' },
     { params: { q: expandida }, precisao: 'exata' },
-    { params: { q: semCodigoPostal(expandida) }, precisao: 'exata' },
   ];
-  if (e.rua) {
-    lista.push({
-      params: { street: e.rua, ...(e.cidade ? { city: e.cidade } : {}), ...(e.codigo_postal ? { postalcode: e.codigo_postal } : {}) },
-      precisao: 'exata',
-    });
-  }
-  if (e.codigo_postal) {
-    lista.push({ params: { q: [e.codigo_postal, e.cidade].filter(Boolean).join(' ') }, precisao: 'aproximada' });
+  if (!rapido) {
+    lista.push({ params: { q: semCodigoPostal(expandida) }, precisao: 'exata' });
+    if (e.rua) {
+      lista.push({
+        params: { street: e.rua, ...(e.cidade ? { city: e.cidade } : {}), ...(e.codigo_postal ? { postalcode: e.codigo_postal } : {}) },
+        precisao: 'exata',
+      });
+    }
+    if (e.codigo_postal) {
+      lista.push({ params: { q: [e.codigo_postal, e.cidade].filter(Boolean).join(' ') }, precisao: 'aproximada' });
+    }
   }
   const vistos = new Set();
   return lista.filter((v) => {
@@ -103,28 +116,47 @@ function variantesNominatim(morada) {
   });
 }
 
-async function obterCoordenadasNominatim(morada, esperar = esperarPadrao) {
+async function obterCoordenadasNominatim(morada, { esperar, rapido, restante }) {
   let primeira = true;
-  for (const v of variantesNominatim(morada)) {
-    if (!primeira) await esperar(PAUSA_NOMINATIM_MS);
+  for (const v of variantesNominatim(morada, { rapido })) {
+    if (!primeira) {
+      // Já não cabe pausa + um pedido útil no orçamento: desiste.
+      if (restante() < PAUSA_NOMINATIM_MS + MINIMO_PEDIDO_MS) break;
+      await esperar(PAUSA_NOMINATIM_MS);
+    }
     primeira = false;
-    const r = await pesquisarNominatim(v.params);
+    const tempo = Math.min(TIMEOUT_PEDIDO_MS, restante());
+    if (tempo < MINIMO_PEDIDO_MS) break;
+    const r = await pesquisarNominatim(v.params, tempo);
     if (r) return { ...r, precisao: v.precisao };
   }
-  console.warn(`⚠️  Nominatim: sem resultados para "${morada}" (todas as variantes).`);
+  console.warn(`⚠️  Nominatim: sem resultados para "${morada}" (variantes tentadas dentro do orçamento).`);
   return null;
 }
 
 /**
  * @param {string} morada
- * @param {{ esperar?: (ms:number)=>Promise<void> }} [opcoes] relógio injetável (testes)
+ * @param {object} [opcoes]
+ * @param {boolean} [opcoes.rapido] importação em massa: Google + 2 variantes
+ * @param {number} [opcoes.orcamentoMs] tempo total máximo por morada (def. 8000)
+ * @param {(ms:number)=>Promise<void>} [opcoes.esperar] pausa injetável (testes)
+ * @param {()=>number} [opcoes.agora] relógio injetável (testes)
  * @returns {Promise<{lat:number,lng:number,precisao:'exata'|'aproximada',morada_localizada:string|null}|null>}
  */
 async function obterCoordenadas(morada, opcoes = {}) {
   if (!morada || !String(morada).trim()) return null;
-  const g = await obterCoordenadasGoogleMaps(morada);
+  const agora = opcoes.agora || Date.now;
+  const fim = agora() + (opcoes.orcamentoMs || ORCAMENTO_MS);
+  const restante = () => fim - agora();
+
+  const g = await obterCoordenadasGoogleMaps(morada, Math.min(TIMEOUT_PEDIDO_MS, restante()));
   if (g) return g;
-  return obterCoordenadasNominatim(morada, opcoes.esperar);
+  if (restante() < MINIMO_PEDIDO_MS) return null;
+  return obterCoordenadasNominatim(morada, {
+    esperar: opcoes.esperar || esperarPadrao,
+    rapido: opcoes.rapido === true,
+    restante,
+  });
 }
 
 function googleMapsAtivo() {

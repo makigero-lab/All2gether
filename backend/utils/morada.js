@@ -25,7 +25,8 @@ function derivarMoradaEstruturada(morada) {
   const m = RE_CP.exec(texto);
   if (m) {
     const antes = limpar(texto.slice(0, m.index));
-    const depois = limpar(texto.slice(m.index + m[0].length));
+    // Cidade: só a 1.ª parte depois do CP (até à vírgula): «2700-418 Amadora, Portugal».
+    const depois = limpar(limpar(texto.slice(m.index + m[0].length)).split(',')[0]);
     if (depois) return { rua: antes, codigo_postal: m[0], cidade: depois };
     // «Rua X, Amadora, 2700-418»: a cidade é a última parte antes do CP.
     const partes = antes.split(',').map((x) => x.trim()).filter(Boolean);
@@ -36,11 +37,32 @@ function derivarMoradaEstruturada(morada) {
     return { rua: antes, codigo_postal: m[0], cidade: '' };
   }
   const partes = texto.split(',').map((x) => x.trim()).filter(Boolean);
-  if (partes.length > 1) {
+  // Sem CP, a última parte só é cidade se não parecer andar/fração («R/C Esq», «3º», «Lote 4»).
+  if (partes.length > 1 && !pareceAndar(partes[partes.length - 1])) {
     const cidade = partes.pop();
     return { rua: partes.join(', '), codigo_postal: '', cidade };
   }
   return { rua: limpar(texto), codigo_postal: '', cidade: '' };
+}
+
+const RE_ANDAR = /(^|[\s/])(r\/c|rc|res-do-chao|esq|esquerdo|dto|dir|direito|bloco|bl|lote|fra[cç][aã]o|edif[ií]cio|ed|andar|cave|loja)\b|\d\s*[ºo°ª](?![a-zà-ú])|^\d+\s*(esq|dto|dir)?\.?$/i;
+/** «R/C Esq», «3º Dto», «Bloco B», «Lote 4», «Fração A», «Edifício X». */
+function pareceAndar(segmento) {
+  return RE_ANDAR.test(String(segmento || '').trim());
+}
+
+const MAX_MORADA = 300;
+/**
+ * Valida a morada recebida na API: string, trim, até 300 caracteres,
+ * com pelo menos uma letra ou número (rejeita «,,,»).
+ * @returns {{ ok: true, valor: string } | { ok: false, erro: string }}
+ */
+function validarMorada(valor) {
+  if (typeof valor !== 'string') return { ok: false, erro: 'A morada tem de ser um texto.' };
+  const v = valor.replace(/\s+/g, ' ').trim();
+  if (!/[\p{L}\p{N}]/u.test(v)) return { ok: false, erro: 'Indica uma morada válida (rua, número, código postal e localidade).' };
+  if (v.length > MAX_MORADA) return { ok: false, erro: `A morada é demasiado longa (máximo ${MAX_MORADA} caracteres).` };
+  return { ok: true, valor: v };
 }
 
 /**
@@ -89,4 +111,4 @@ function semCodigoPostal(morada) {
     .trim();
 }
 
-module.exports = { textoMorada, derivarMoradaEstruturada, expandirAbreviaturas, semCodigoPostal };
+module.exports = { validarMorada, pareceAndar, MAX_MORADA, textoMorada, derivarMoradaEstruturada, expandirAbreviaturas, semCodigoPostal };

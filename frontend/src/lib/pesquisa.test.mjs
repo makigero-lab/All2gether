@@ -35,6 +35,20 @@ test("todas as palavras têm de existir, em qualquer ordem e em qualquer campo",
   assert.equal(correspondePesquisa("silva porto", ["Casa A", "Av. X, Amadora", "Maria Silva"]), false);
 });
 
+test("abreviaturas expandidas dos dois lados", () => {
+  assert.equal(correspondePesquisa("avenida combatentes", ["Av. dos Combatentes da Grande Guerra 42, Amadora"]), true);
+  assert.equal(correspondePesquisa("av. combatentes", ["Avenida dos Combatentes 42"]), true);
+  assert.equal(correspondePesquisa("rua augusta", ["R. Augusta 3"]), true);
+  assert.equal(correspondePesquisa("travessa", ["Tv. do Ouro 1"]), true);
+  assert.equal(correspondePesquisa("av", ["Av. X 1"]), true);
+  assert.equal(correspondePesquisa("praca", ["Pça. da República 2"]), true);
+  assert.equal(correspondePesquisa("avenida", ["Rua das Flores 1"]), false);
+});
+
+test("expandirAbreviaturas", () => {
+  assert.equal(exp.expandirAbreviaturas("Avª da Liberdade 5, R. B 2"), "Avenida da Liberdade 5, Rua B 2");
+});
+
 test("ignora campos vazios, nulos e não-texto", () => {
   assert.equal(correspondePesquisa("912", [null, undefined, "", 912345678]), true);
   assert.equal(correspondePesquisa("abc", [null, undefined]), false);
