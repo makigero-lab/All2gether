@@ -29,7 +29,7 @@ const STATUS_GRAVES = new Set(['REQUEST_DENIED', 'OVER_QUERY_LIMIT', 'OVER_DAILY
 
 const esperarPadrao = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function obterCoordenadasGoogleMaps(morada, timeoutMs = TIMEOUT_PEDIDO_MS) {
+async function obterCoordenadasGoogleMaps(morada, timeoutMs = TIMEOUT_PEDIDO_MS, estado = {}) {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!apiKey || !apiKey.trim()) return null;
   try {
@@ -42,6 +42,7 @@ async function obterCoordenadasGoogleMaps(morada, timeoutMs = TIMEOUT_PEDIDO_MS)
       return null;
     }
     const data = await res.json();
+    estado.status = data.status;
     if (data.status !== 'OK' || !Array.isArray(data.results) || data.results.length === 0) {
       const msg = `Google Geocoding status=${data.status}${data.error_message ? ` (${data.error_message})` : ''} para "${morada}".`;
       if (STATUS_GRAVES.has(data.status)) console.error(`❌ ${msg} A chave GOOGLE_MAPS_API_KEY pode estar inválida ou sem permissões.`);
@@ -51,7 +52,8 @@ async function obterCoordenadasGoogleMaps(morada, timeoutMs = TIMEOUT_PEDIDO_MS)
     const r = data.results[0];
     const { lat, lng } = (r.geometry && r.geometry.location) || {};
     if (typeof lat !== 'number' || typeof lng !== 'number') return null;
-    const aprox = r.partial_match === true || (r.geometry && r.geometry.location_type === 'APPROXIMATE');
+    // ROOFTOP = exata; partial_match, APPROXIMATE, GEOMETRIC_CENTER, RANGE_INTERPOLATED = aproximada.
+    const aprox = r.partial_match === true || !(r.geometry && r.geometry.location_type === 'ROOFTOP');
     return { lat, lng, precisao: aprox ? 'aproximada' : 'exata', morada_localizada: r.formatted_address || null };
   } catch (err) {
     console.error(`❌ Google Geocoding falhou para "${morada}": ${err.message}`);
@@ -149,8 +151,21 @@ async function obterCoordenadas(morada, opcoes = {}) {
   const fim = agora() + (opcoes.orcamentoMs || ORCAMENTO_MS);
   const restante = () => fim - agora();
 
-  const g = await obterCoordenadasGoogleMaps(morada, Math.min(TIMEOUT_PEDIDO_MS, restante()));
+  const estadoGoogle = {};
+  const g = await obterCoordenadasGoogleMaps(morada, Math.min(TIMEOUT_PEDIDO_MS, restante()), estadoGoogle);
   if (g) return g;
+
+  // Google não conhece a morada exata (ZERO_RESULTS): tenta só «<CP> <cidade>, Portugal» (aproximada).
+  if (estadoGoogle.status === 'ZERO_RESULTS' && restante() >= MINIMO_PEDIDO_MS) {
+    const e = derivarMoradaEstruturada(expandirAbreviaturas(String(morada)));
+    if (e.codigo_postal) {
+      const ga = await obterCoordenadasGoogleMaps(
+        `${[e.codigo_postal, e.cidade].filter(Boolean).join(' ')}, Portugal`,
+        Math.min(TIMEOUT_PEDIDO_MS, restante())
+      );
+      if (ga) return { ...ga, precisao: 'aproximada' };
+    }
+  }
   if (restante() < MINIMO_PEDIDO_MS) return null;
   return obterCoordenadasNominatim(morada, {
     esperar: opcoes.esperar || esperarPadrao,
@@ -159,9 +174,55 @@ async function obterCoordenadas(morada, opcoes = {}) {
   });
 }
 
+/**
+ * Reverse geocoding: a morada «neste pino». Google (latlng, pt-PT) e, se falhar,
+ * Nominatim /reverse. Respeita um orçamento total (def. 4 s). Devolve a morada
+ * (texto) ou null; nunca lança.
+ */
+async function moradaDoPino(lat, lng, opcoes = {}) {
+  if (typeof lat !== 'number' || typeof lng !== 'number') return null;
+  const agora = opcoes.agora || Date.now;
+  const fim = agora() + (opcoes.orcamentoMs || 4000);
+  const restante = () => fim - agora();
+
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+  if (apiKey && apiKey.trim() && restante() >= MINIMO_PEDIDO_MS) {
+    try {
+      const url = `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&language=pt-PT&key=${apiKey.trim()}`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(Math.min(3000, restante())) });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.status === 'OK' && Array.isArray(data.results) && data.results[0] && data.results[0].formatted_address) {
+          return String(data.results[0].formatted_address);
+        }
+        const msg = `Google reverse geocoding status=${data.status}${data.error_message ? ` (${data.error_message})` : ''}.`;
+        if (STATUS_GRAVES.has(data.status)) console.error(`❌ ${msg}`); else console.warn(`⚠️  ${msg}`);
+      } else {
+        console.error(`❌ Google reverse geocoding HTTP ${res.status}.`);
+      }
+    } catch (err) {
+      console.error(`❌ Google reverse geocoding falhou: ${err.message}`);
+    }
+  }
+  if (restante() < MINIMO_PEDIDO_MS) return null;
+  try {
+    const qs = new URLSearchParams({ format: 'json', lat: String(lat), lon: String(lng), zoom: '18', 'accept-language': 'pt-PT' });
+    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?${qs.toString()}`, {
+      headers: { 'User-Agent': UA },
+      signal: AbortSignal.timeout(Math.min(3000, restante())),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data && typeof data.display_name === 'string' && data.display_name ? data.display_name : null;
+  } catch (err) {
+    console.error('❌ Erro no reverse geocoding (Nominatim):', err.message);
+    return null;
+  }
+}
+
 function googleMapsAtivo() {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   return !!(apiKey && apiKey.trim());
 }
 
-module.exports = { obterCoordenadas, googleMapsAtivo, variantesNominatim };
+module.exports = { obterCoordenadas, moradaDoPino, googleMapsAtivo, variantesNominatim };

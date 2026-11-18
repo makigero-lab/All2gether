@@ -275,7 +275,7 @@ export interface PropriedadeDTO {
   // Pode não estar presente se o backend não enviar virtuals (mas toJSON está configurado).
   moradaCompleta?: string;
   // Precisão da localização e morada que o geocoder encontrou.
-  coordenadas_precisao?: "exata" | "aproximada" | null;
+  coordenadas_precisao?: "exata" | "aproximada" | "manual" | null;
   morada_localizada?: string | null;
   createdAt?: string;
   updatedAt?: string;

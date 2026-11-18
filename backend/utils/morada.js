@@ -18,7 +18,8 @@ const RE_CP = /\b\d{4}-\d{3}\b/;
 function derivarMoradaEstruturada(morada) {
   const vazio = { rua: '', codigo_postal: '', cidade: '' };
   if (typeof morada !== 'string') return vazio;
-  const texto = morada.replace(/\s+/g, ' ').trim();
+  // «Portugal» / «PT» no fim é o país, nunca a cidade.
+  const texto = morada.replace(/\s+/g, ' ').trim().replace(/[,\s]+(portugal|pt)\s*$/i, '');
   if (!texto) return vazio;
 
   const limpar = (s) => String(s || '').replace(/^[\s,;-]+|[\s,;-]+$/g, '').trim();

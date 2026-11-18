@@ -45,6 +45,14 @@ test("abreviaturas expandidas dos dois lados", () => {
   assert.equal(correspondePesquisa("avenida", ["Rua das Flores 1"]), false);
 });
 
+test("«av» sem ponto encontra «Avelar»; «av.» encontra Av. e Avenida", () => {
+  assert.equal(correspondePesquisa("av", ["Rua Avelar 3"]), true);
+  assert.equal(correspondePesquisa("av.", ["Av. dos Combatentes 42"]), true);
+  assert.equal(correspondePesquisa("av. dos", ["Avenida dos Combatentes 42"]), true);
+  assert.equal(correspondePesquisa("avenida", ["Av. dos Combatentes 42"]), true);
+  assert.equal(correspondePesquisa("av.", ["Rua Avelar 3"]), false);
+});
+
 test("expandirAbreviaturas", () => {
   assert.equal(exp.expandirAbreviaturas("Avª da Liberdade 5, R. B 2"), "Avenida da Liberdade 5, Rua B 2");
 });
