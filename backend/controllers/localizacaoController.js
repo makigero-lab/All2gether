@@ -5,6 +5,26 @@
  */
 const { interpretarCoordenadasManuais, CoordenadasInvalidas } = require('../utils/coordenadasManuais');
 const { moradaDoPino } = require('../utils/geocoding');
+const rateLimit = require('express-rate-limit');
+const { chaveGlobal } = require('../utils/limiteGlobal');
+
+/**
+ * Limite próprio da pré-visualização (gasta quota do Google): 30 por minuto por
+ * utilizador (JWT verificado; sem JWT válido, por IP — mesmo padrão do limite global).
+ * Em NODE_ENV=test está desligado, salvo `forcar` (testes do próprio limite).
+ */
+function criarLimitePrevisualizacao({ forcar = false, max = 30 } = {}) {
+  const desligado = process.env.NODE_ENV === 'test' && !forcar;
+  return rateLimit({
+    windowMs: 60 * 1000,
+    limit: desligado ? Infinity : max,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { erro: 'Demasiadas verificações seguidas. Tenta novamente daqui a um minuto.' },
+    keyGenerator: (req) => `prev:${chaveGlobal(req)}`,
+    validate: { keyGeneratorIpFallback: false },
+  });
+}
 
 async function previsualizarLocalizacaoManual(req, res) {
   try {
@@ -18,4 +38,4 @@ async function previsualizarLocalizacaoManual(req, res) {
   }
 }
 
-module.exports = { previsualizarLocalizacaoManual };
+module.exports = { previsualizarLocalizacaoManual, criarLimitePrevisualizacao };

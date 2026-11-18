@@ -1293,6 +1293,7 @@ exports.atualizarPropriedade = async (req, res) => {
       capacidade_hospedes === undefined &&
       req.body?.dias_fixos_limpeza === undefined &&
       req.body?.coordenadas_manuais === undefined &&
+      req.body?.localizar_de_novo !== true &&
       fornecedor_id === undefined
     ) {
       return res.status(400).json({
@@ -1409,6 +1410,8 @@ exports.atualizarPropriedade = async (req, res) => {
         novaMorada = v.valor;
       }
     }
+    // «Tentar localizar de novo» sozinho (sem morada no corpo): usa a morada gravada.
+    if (novaMorada === undefined && localizarDeNovo && propriedade.morada) novaMorada = propriedade.morada;
     if (novaMorada !== undefined) {
       const mudou = novaMorada !== (propriedade.morada || '');
       const forcar = req.body?.forcar_morada === true;

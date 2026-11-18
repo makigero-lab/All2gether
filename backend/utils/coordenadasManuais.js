@@ -35,6 +35,9 @@ class CoordenadasInvalidas extends Error {
 
 const NUM = '(-?\\d{1,3}(?:\\.\\d+)?)';
 const RE_SIMPLES = new RegExp(`^\\s*${NUM}\\s*[,;]?\\s+${NUM}\\s*$|^\\s*${NUM}\\s*[,;]\\s*${NUM}\\s*$`);
+// Vírgula decimal portuguesa: «38,7536, -9,2302», «38,7536 -9,2302», «38,7536; -9,2302».
+const NUM_VIRGULA = '(-?\\d{1,3},\\d+)';
+const RE_VIRGULA = new RegExp(`^\\s*${NUM_VIRGULA}\\s*(?:;|,|\\s)\\s*${NUM_VIRGULA}\\s*$`);
 const RE_PINO = new RegExp(`!3d${NUM}!4d${NUM}`);
 const RE_QUERY = new RegExp(`[?&](?:q|query|ll|center|destination)=${NUM}(?:,|%2C)\\s*${NUM}`, 'i');
 const RE_ARROBA = new RegExp(`@${NUM},${NUM}`);
@@ -49,6 +52,8 @@ function extrairCoordenadas(texto) {
     const [a, b] = simples[1] !== undefined ? [simples[1], simples[2]] : [simples[3], simples[4]];
     return { lat: parseFloat(a), lng: parseFloat(b) };
   }
+  const virgula = RE_VIRGULA.exec(t);
+  if (virgula) return { lat: parseFloat(virgula[1].replace(',', '.')), lng: parseFloat(virgula[2].replace(',', '.')) };
   try { t = decodeURIComponent(t); } catch (_) { /* mantém o texto */ }
   for (const re of [RE_PINO, RE_QUERY, RE_ARROBA]) {
     const m = re.exec(t);
@@ -64,7 +69,9 @@ function dentroDePortugal({ lat, lng }) {
 function urlGoogleValido(texto) {
   let u;
   try { u = new URL(texto); } catch (_) { return null; }
-  if (u.protocol !== 'https:' || !HOSTS_GOOGLE.has(u.hostname.toLowerCase())) return null;
+  // Só HTTPS, sem porta explícita nem credenciais, e só hosts Google conhecidos.
+  if (u.protocol !== 'https:' || u.port !== '' || u.username || u.password) return null;
+  if (!HOSTS_GOOGLE.has(u.hostname.toLowerCase())) return null;
   return u;
 }
 
@@ -104,7 +111,7 @@ async function interpretarCoordenadasManuais(texto, opcoes = {}) {
       throw new CoordenadasInvalidas('Não foi possível abrir o link. Cola antes as coordenadas (ex.: 38.7536, -9.2302).');
     }
   }
-  if (!coords) throw new CoordenadasInvalidas('Não encontrei coordenadas. Usa o formato 38.7536, -9.2302 ou um link do Google Maps.');
+  if (!coords) throw new CoordenadasInvalidas('Não encontrei coordenadas. Usa o formato 38.7536, -9.2302 (com ponto decimal) ou um link do Google Maps.');
   if (!dentroDePortugal(coords)) {
     throw new CoordenadasInvalidas('Estas coordenadas ficam fora de Portugal (latitude 32 a 42,5; longitude -31,5 a -6). Confirma a ordem: primeiro a latitude, depois a longitude.');
   }

@@ -28,6 +28,9 @@ describe('coordenadas indicadas à mão: formatos', () => {
   const casos = [
     ['38.7536, -9.2302', 38.7536, -9.2302],
     ['38.7536,-9.2302', 38.7536, -9.2302],
+    ['38,7536, -9,2302', 38.7536, -9.2302],
+    ['38,7536 -9,2302', 38.7536, -9.2302],
+    ['38,7536; -9,2302', 38.7536, -9.2302],
     ['38.7536 -9.2302', 38.7536, -9.2302],
     ['https://www.google.com/maps/place/X/@38.7536,-9.2302,17z', 38.7536, -9.2302],
     ['https://www.google.com/maps?q=38.7536,-9.2302', 38.7536, -9.2302],
@@ -229,5 +232,46 @@ describe('morada neste pino (reverse geocoding)', () => {
     expect(bd.morada_estruturada.cidade).toBe('Amadora');
     expect(bd.coordenadas).toEqual({ lat: 38.7536, lng: -9.2302 });
     expect(bd.coordenadas_precisao).toBe('manual');
+  });
+});
+
+describe('ronda 6', () => {
+  test('F4: hosts Google só sem porta explícita nem credenciais', async () => {
+    const fetchFn = jest.fn();
+    for (const u of ['https://maps.app.goo.gl:8443/abc', 'https://user:pw@maps.app.goo.gl/abc', 'https://www.google.com:444/maps']) {
+      expect(await resolverLinkGoogle(u, { fetchFn })).toBeNull();
+      await expect(interpretarCoordenadasManuais(u)).rejects.toThrow(/links do Google Maps/);
+    }
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  test('F5: texto ambíguo com vírgulas pede ponto decimal', async () => {
+    await expect(interpretarCoordenadasManuais('38,7536,-9,2302,5')).rejects.toThrow(/ponto decimal/);
+  });
+
+  test('F2: PUT só com localizar_de_novo usa a morada gravada', async () => {
+    const c = await cenario(app, { extra: 0, sn: 1 });
+    await Propriedade.updateOne({ _id: c.p._id }, { morada: MORADA, coordenadas: { lat: null, lng: null }, geocoding_tentado_em: new Date() });
+    obterCoordenadas.mockResolvedValue({ lat: 38.7, lng: -9.2, precisao: 'exata', morada_localizada: 'Amadora' });
+    const r = await request(app).put(`/api/gestor/propriedades/${c.p._id}`).set(auth(c.token)).send({ localizar_de_novo: true });
+    expect(r.status).toBe(200);
+    expect(obterCoordenadas).toHaveBeenCalledWith(MORADA);
+    expect((await Propriedade.findById(c.p._id).lean()).coordenadas.lat).toBe(38.7);
+  });
+
+  test('F6: limite próprio da pré-visualização (por utilizador)', async () => {
+    const express = require('express');
+    const jwt = require('jsonwebtoken');
+    const { criarLimitePrevisualizacao } = require('../controllers/localizacaoController');
+    const mini = express();
+    mini.post('/p', criarLimitePrevisualizacao({ forcar: true, max: 2 }), (req, res) => res.json({ ok: true }));
+    const token = (id) => jwt.sign({ id, role: 'gestor' }, require('../middleware/auth').JWT_SECRET, { expiresIn: '1h' });
+    const A = new mongoose.Types.ObjectId().toString();
+    const B = new mongoose.Types.ObjectId().toString();
+    const chamar = (t) => request(mini).post('/p').set('Authorization', `Bearer ${t}`);
+    expect((await chamar(token(A))).status).toBe(200);
+    expect((await chamar(token(A))).status).toBe(200);
+    expect((await chamar(token(A))).status).toBe(429);
+    expect((await chamar(token(B))).status).toBe(200);
   });
 });

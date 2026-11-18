@@ -532,7 +532,8 @@ export default function PropriedadesPage() {
 
     // «Confirmar morada inválida»: o gestor viu o aviso (a morada já ficou gravada
     // sem localização) e confirma com UM clique; o servidor não volta a bloquear.
-    const forcarMorada = editMoradaWarning !== null && opcoes?.localizarDeNovo !== true;
+    // Com localização à mão colada, o aviso deixa de se aplicar: não se força nada.
+    const forcarMorada = editMoradaWarning !== null && opcoes?.localizarDeNovo !== true && !editForm.coordenadas_manuais.trim();
 
     setEditSubmitting(true);
     try {

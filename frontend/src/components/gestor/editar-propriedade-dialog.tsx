@@ -635,8 +635,8 @@ export function EditarPropriedadeDialog({
           <Button
             type="submit"
             disabled={a}
-            variant={moradaAviso ? "outline" : "default"}
-            className={moradaAviso ? "border-status-porat/50 text-status-porat hover:bg-status-porat-bg" : ""}
+            variant={moradaAviso && !form.coordenadas_manuais.trim() ? "outline" : "default"}
+            className={moradaAviso && !form.coordenadas_manuais.trim() ? "border-status-porat/50 text-status-porat hover:bg-status-porat-bg" : ""}
           >
             {a ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />{moradaMudou ? "A localizar a morada…" : "A guardar…"}</>) : moradaAviso && !form.coordenadas_manuais.trim() ? "Guardar sem localização" : "Guardar alterações"}
           </Button>
