@@ -104,9 +104,77 @@ function chaveCache(origem, destino) {
   return `${origem.lat.toFixed(5)},${origem.lng.toFixed(5)}→${destino.lat.toFixed(5)},${destino.lng.toFixed(5)}`;
 }
 
+const TIMEOUT_GOOGLE_MS = 5000; // não bloqueia o LB
+
+/**
+ * Routes API — computeRouteMatrix (Essentials: DRIVE + TRAFFIC_UNAWARE).
+ * Devolve a duração em SEGUNDOS. Lança Error (nunca com a chave na mensagem);
+ * `servicoDesativado=true` se o Google disser que a Routes API não está ativa neste projeto.
+ */
+async function segundosViaRoutes(origem, destino, apiKey) {
+  const res = await fetch('https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-Api-Key': apiKey,
+      'X-Goog-FieldMask': 'originIndex,destinationIndex,duration,distanceMeters,status,condition',
+    },
+    body: JSON.stringify({
+      origins: [{ waypoint: { location: { latLng: { latitude: origem.lat, longitude: origem.lng } } } }],
+      destinations: [{ waypoint: { location: { latLng: { latitude: destino.lat, longitude: destino.lng } } } }],
+      travelMode: 'DRIVE',
+      routingPreference: 'TRAFFIC_UNAWARE',
+      languageCode: 'pt-PT',
+      regionCode: 'PT',
+    }),
+    signal: AbortSignal.timeout(TIMEOUT_GOOGLE_MS),
+  });
+
+  if (!res.ok) {
+    let corpo = null;
+    try { corpo = await res.json(); } catch (_) { /* sem JSON */ }
+    const erro = (corpo && (Array.isArray(corpo) ? corpo[0] : corpo).error) || {};
+    const motivo = (Array.isArray(erro.details) && erro.details.map((d) => d && d.reason).find(Boolean)) || erro.status || '';
+    const e = new Error(`Google Routes API HTTP ${res.status}${motivo ? ` ${motivo}` : ''}${erro.message ? ` (${String(erro.message).slice(0, 160)})` : ''}`);
+    e.servicoDesativado = res.status === 403 && (motivo === 'SERVICE_DISABLED' || /has not been used|is disabled/i.test(erro.message || ''));
+    throw e;
+  }
+
+  const corpo = await res.json();
+  const elementos = Array.isArray(corpo) ? corpo : [];
+  const el = elementos.find((x) => x && (x.originIndex ?? 0) === 0 && (x.destinationIndex ?? 0) === 0);
+  if (!el) throw new Error('Google Routes API: resposta sem elementos');
+  if (el.condition !== undefined && el.condition !== 'ROUTE_EXISTS') throw new Error(`Google Routes API: condition=${el.condition}`);
+  if (el.status && el.status.code) throw new Error(`Google Routes API: elemento status=${el.status.code}${el.status.message ? ` (${String(el.status.message).slice(0, 120)})` : ''}`);
+  // duration vem como string em segundos («123s»); 0s é válido (mesmo local).
+  const m = /^(\d+(?:\.\d+)?)s$/.exec(String(el.duration ?? ''));
+  if (!m) throw new Error('Google Routes API: duração inválida');
+  return parseFloat(m[1]);
+}
+
+/** Distance Matrix legada (2.ª tentativa, só em projetos onde a Routes API não está ativa). Devolve SEGUNDOS. */
+async function segundosViaDistanceMatrixLegada(origem, destino, apiKey) {
+  const url =
+    `https://maps.googleapis.com/maps/api/distancematrix/json` +
+    `?origins=${origem.lat},${origem.lng}` +
+    `&destinations=${destino.lat},${destino.lng}` +
+    `&mode=driving&units=metric&key=${apiKey}`;
+  const res = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_GOOGLE_MS) });
+  if (!res.ok) throw new Error(`Google Distance Matrix HTTP ${res.status}`);
+  const body = await res.json();
+  if (body?.status !== 'OK' || !Array.isArray(body?.rows) || !body.rows[0]?.elements?.[0]) {
+    throw new Error(`Google Distance Matrix status=${body?.status}${body?.error_message ? ` (${body.error_message})` : ''}`);
+  }
+  const elemento = body.rows[0].elements[0];
+  if (elemento.status !== 'OK' || typeof elemento.duration?.value !== 'number') {
+    throw new Error(`Google Distance Matrix: elemento status=${elemento.status}`);
+  }
+  return elemento.duration.value;
+}
+
 /**
  * HF16 — Tenta obter o tempo de condução real via Google Maps Distance
- * Matrix API. Fallback silencioso para Haversine se:
+ * Matrix API (hoje Routes API; Distance Matrix legada só se a Routes estiver desativada). Fallback silencioso para Haversine se:
  *   - GOOGLE_MAPS_API_KEY não estiver definida
  *   - A chamada à API falhar (rede, timeout, 4xx/5xx)
  *   - A resposta não contiver dados válidos
@@ -164,46 +232,20 @@ async function calcularTempoViagemReal(origem, destino, dataTarefa) {
     return { ...cached.resultado };
   }
 
-  // Tenta Google Maps Distance Matrix API.
+  // Tenta o Google Maps: Routes API (computeRouteMatrix) primeiro; a Distance
+  // Matrix legada só como 2.ª tentativa se a Routes estiver desativada (projetos antigos).
   try {
-    const url =
-      `https://maps.googleapis.com/maps/api/distancematrix/json` +
-      `?origins=${origem.lat},${origem.lng}` +
-      `&destinations=${destino.lat},${destino.lng}` +
-      `&mode=driving` +
-      `&units=metric` +
-      `&key=${apiKey.trim()}`;
-
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout(5000), // 5s timeout — não bloqueia o LB
-    });
-
-    if (!res.ok) {
-      throw new Error(`Google Maps API devolveu ${res.status}`);
+    let segundos;
+    try {
+      segundos = await segundosViaRoutes(origem, destino, apiKey.trim());
+    } catch (err) {
+      if (!err.servicoDesativado) throw err;
+      console.warn('⚠️  [Distâncias] Routes API desativada neste projeto Google: a tentar a Distance Matrix legada.');
+      segundos = await segundosViaDistanceMatrixLegada(origem, destino, apiKey.trim());
     }
 
-    const body = await res.json();
-
-    // Valida a resposta: status OK + elemento com duration.
-    if (
-      body?.status !== 'OK' ||
-      !Array.isArray(body?.rows) ||
-      !body.rows[0]?.elements?.[0]
-    ) {
-      throw new Error(`Google Distance Matrix status=${body?.status}${body?.error_message ? ` (${body.error_message})` : ''}`);
-    }
-
-    const elemento = body.rows[0].elements[0];
-    // duration.value === 0 é válido (origem e destino no mesmo local).
-    if (elemento.status !== 'OK' || typeof elemento.duration?.value !== 'number') {
-      throw new Error(`Google Maps: elemento status=${elemento.status}`);
-    }
-
-    // duration.value vem em SEGUNDOS — converter para minutos.
-    const minutos = Math.round(elemento.duration.value / 60);
-
-    // Cap de 60 min (1h) — consistente com o cap do Haversine.
-    const minutosCapped = Math.min(minutos, 60);
+    // Segundos → minutos, com cap de 60 min (1h), consistente com o cap do Haversine.
+    const minutosCapped = Math.min(Math.round(segundos / 60), 60);
 
     const resultado = {
       minutos: minutosCapped,
@@ -219,7 +261,7 @@ async function calcularTempoViagemReal(origem, destino, dataTarefa) {
     // Fallback silencioso — não loga como erro (pode ser comum se a API key
     // for inválida ou o quota excedido). Loga como warning apenas.
     console.warn(
-      `⚠️  [HF16] Google Maps Distance Matrix falhou (${err.message}) — fallback para Haversine.`
+      `⚠️  [Distâncias] Google Maps falhou (${err.message}) — fallback para Haversine.`
     );
 
     const resultado = {

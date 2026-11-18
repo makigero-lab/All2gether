@@ -47,13 +47,13 @@ describe('Google Maps — origem e destino no mesmo local', () => {
     if (chaveAntiga === undefined) delete process.env.GOOGLE_MAPS_API_KEY; else process.env.GOOGLE_MAPS_API_KEY = chaveAntiga;
   });
 
-  it('duration.value = 0 é aceite como 0 minutos (e não como falha)', async () => {
+  it('duration "0s" é aceite como 0 minutos (e não como falha)', async () => {
     process.env.GOOGLE_MAPS_API_KEY = 'chave-de-teste';
     const { calcularTempoViagemReal, limparCacheDistancias } = require('../utils/distancia');
     limparCacheDistancias();
     jest.spyOn(global, 'fetch').mockResolvedValue({
       ok: true,
-      json: async () => ({ status: 'OK', rows: [{ elements: [{ status: 'OK', duration: { value: 0 }, distance: { value: 0 } }] }] }),
+      json: async () => [{ originIndex: 0, destinationIndex: 0, status: {}, condition: 'ROUTE_EXISTS', distanceMeters: 0, duration: '0s' }],
     });
     const aviso = jest.spyOn(console, 'warn').mockImplementation(() => {});
     const r = await calcularTempoViagemReal({ lat: 38.7, lng: -9.1 }, { lat: 38.7, lng: -9.1 });

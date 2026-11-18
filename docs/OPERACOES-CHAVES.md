@@ -85,9 +85,9 @@ configurada, as sugestões de morada e o mapa com pino **ficam escondidos** e o 
 | | Chave do servidor | Chave de browser |
 |---|---|---|
 | Variável | `GOOGLE_MAPS_API_KEY` (Render) | `NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY` (Vercel; pública por natureza, vai no JavaScript) |
-| Usada por | `utils/geocoding.js` (geocodificar e «morada neste pino») e `utils/distancia.js` | Sugestões ao escrever a morada e mapa com pino arrastável |
-| APIs ativas | Geocoding API, Distance Matrix API | Maps JavaScript API, Places API (New) |
-| Restrição | Por **IP**/sem restrição de referrer (o Render não tem IP fixo no plano grátis: restringir só por API) | **HTTP referrer** `https://app.all2gether.pt/*` e restringir às duas APIs acima |
+| Usada por | `utils/geocoding.js` (geocodificar e «morada neste pino») e `utils/distancia.js` (tempos de viagem via **Routes API**, `computeRouteMatrix`, DRIVE + TRAFFIC_UNAWARE; a Distance Matrix legada só é tentada se a Routes devolver 403 SERVICE_DISABLED, em projetos antigos) | Sugestões ao escrever a morada e mapa com pino arrastável |
+| APIs ativas | Geocoding API, Routes API, Places API (New). Projetos Google novos já não permitem ativar a Distance Matrix legada | Maps JavaScript API, Places API (New) |
+| Restrição | Sem restrição de referrer nem de IP (o Render não tem IP fixo no plano grátis): restringir **só por API** a Geocoding API + Routes API + Places API (New) | **HTTP referrer** `https://app.all2gether.pt/*` e restringir às duas APIs acima |
 
 Notas:
 
@@ -109,7 +109,7 @@ Notas:
 |---|---|
 | Geocoding API | 300 pedidos/dia |
 | Places API (New) | 300 pedidos/dia |
-| Distance Matrix API | 300 pedidos/dia |
+| Routes API (matriz de rotas) | 300 pedidos/dia |
 | Maps JavaScript API | 100 carregamentos/dia |
 
 Orçamento mensal do projeto: **1 €**, com alertas de orçamento a 50 %, 90 % e 100 % para o email do titular. Com as
@@ -119,7 +119,7 @@ campo Morada fica sem sugestões. A pré-visualização «morada neste pino» te
 
 ### Configurar (resumo)
 
-1. Google Cloud: criar o projeto com faturação; ativar Geocoding, Distance Matrix, Maps JavaScript e Places API (New).
+1. Google Cloud: criar o projeto com faturação; ativar Geocoding, Routes, Maps JavaScript e Places API (New).
 2. Criar as duas chaves com as restrições da tabela; definir as quotas diárias e o orçamento de 1 €.
 3. Render: `GOOGLE_MAPS_API_KEY` = chave do servidor. Vercel: `NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY` = chave de browser; novo deploy.
 4. Verificar: no editar de uma casa, escrever 3 letras da morada (aparecem sugestões); escolher uma; «Ajustar o pino» abre o mapa em satélite.
