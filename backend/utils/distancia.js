@@ -14,6 +14,8 @@
  *   funciona SEMPRE, mesmo sem Google Maps configurado.
  */
 
+const { logSeguro } = require('./segredos');
+
 // Cache em memória de chamadas à API (evita chamadas repetidas para o
 // mesmo par de coordenadas no mesmo ciclo de atribuição).
 // TTL: 5 minutos (300s) — as distâncias de condução não mudam num dia.
@@ -240,7 +242,7 @@ async function calcularTempoViagemReal(origem, destino, dataTarefa) {
       segundos = await segundosViaRoutes(origem, destino, apiKey.trim());
     } catch (err) {
       if (!err.servicoDesativado) throw err;
-      console.warn('⚠️  [Distâncias] Routes API desativada neste projeto Google: a tentar a Distance Matrix legada.');
+      logSeguro.warn('⚠️  [Distâncias] Routes API desativada neste projeto Google: a tentar a Distance Matrix legada.');
       segundos = await segundosViaDistanceMatrixLegada(origem, destino, apiKey.trim());
     }
 
@@ -260,7 +262,7 @@ async function calcularTempoViagemReal(origem, destino, dataTarefa) {
   } catch (err) {
     // Fallback silencioso — não loga como erro (pode ser comum se a API key
     // for inválida ou o quota excedido). Loga como warning apenas.
-    console.warn(
+    logSeguro.warn(
       `⚠️  [Distâncias] Google Maps falhou (${err.message}) — fallback para Haversine.`
     );
 

@@ -73,8 +73,14 @@ test("CSP: só abre os domínios do Google com a chave definida", async () => {
     const sem = await csp(undefined);
     assert.ok(!sem.includes("googleapis"));
     const com = await csp("chave");
-    assert.ok(com.includes("https://*.googleapis.com") && com.includes("https://*.gstatic.com") && com.includes("googleusercontent.com"));
-    assert.ok(/connect-src[^;]*googleapis/.test(com));
+    const diretiva = (nome) => com.split("; ").find((d) => d.startsWith(nome + " ")) ?? "";
+    // script-src: só os dois hosts de scripts, sem wildcards
+    const scripts = diretiva("script-src");
+    assert.ok(scripts.includes("https://maps.googleapis.com") && scripts.includes("https://maps.gstatic.com"));
+    assert.ok(!scripts.includes("*"), scripts);
+    assert.ok(/connect-src[^;]*maps.googleapis.com/.test(com) && /connect-src[^;]*places.googleapis.com/.test(com));
+    assert.ok(diretiva("img-src").includes("googleusercontent.com"));
+    assert.ok(!com.includes("https://*.googleapis.com"));
   } finally {
     if (anterior === undefined) delete process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY;
     else process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY = anterior;
