@@ -165,6 +165,18 @@ export function EditarPropriedadeDialog({
   const [editarTipo, setEditarTipo] = useState<string | null>(null);
   const erroRef = useRef<HTMLParagraphElement>(null);
   const erroMoradaRef = useRef<HTMLParagraphElement>(null);
+  const avisoMoradaRef = useRef<HTMLParagraphElement>(null);
+
+  // O aviso âmbar (morada não localizada) é anunciado e recebe o foco ao aparecer.
+  useEffect(() => {
+    if (!aberto || !moradaAviso) return;
+    setSeparador("essencial");
+    const t = setTimeout(() => {
+      avisoMoradaRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+      avisoMoradaRef.current?.focus();
+    }, 0);
+    return () => clearTimeout(t);
+  }, [aberto, moradaAviso]);
 
   // Erros fora de vista (ecrã pequeno): levar o alerta à vista e dar-lhe o foco.
   useEffect(() => {
@@ -245,28 +257,28 @@ export function EditarPropriedadeDialog({
                   />
                 </div>
                 {moradaAviso && (
-                  <p className="flex items-start gap-1.5 text-xs text-status-porat">
-                    <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <p ref={avisoMoradaRef} tabIndex={-1} role="alert" className="flex items-start gap-1.5 text-sm text-status-porat outline-none">
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
                     <span>{moradaAviso}</span>
                   </p>
                 )}
                 {erroMorada && (
-                  <p ref={erroMoradaRef} tabIndex={-1} role="alert" className="flex items-start gap-1.5 text-xs text-destructive outline-none">
-                    <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <p ref={erroMoradaRef} tabIndex={-1} role="alert" className="flex items-start gap-1.5 text-sm text-destructive outline-none">
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
                     <span>{erroMorada}</span>
                   </p>
                 )}
                 {localizada && !moradaAviso && !moradaMudou && (
-                  <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+                  <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm text-muted-foreground">
                     <span className="min-w-0 break-words">
                       Localizada como: {localizada.moradaEncontrada || `${localizada.lat.toFixed(4)}, ${localizada.lng.toFixed(4)}`}
-                      {localizada.aproximada && <span className="font-medium text-status-porat"> (aproximada)</span>}
+                      {localizada.aproximada && <span className="font-medium text-status-porat"> (aproximada: só encontrámos a rua ou o código postal; confirma em Ver no mapa)</span>}
                     </span>
                     <a
                       href={`https://www.google.com/maps/search/?api=1&query=${localizada.lat},${localizada.lng}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex min-h-9 items-center font-medium text-brand-text hover:underline"
+                      className="inline-flex min-h-11 items-center font-medium text-brand-text hover:underline sm:min-h-9"
                     >
                       Ver no mapa
                     </a>
@@ -529,7 +541,7 @@ export function EditarPropriedadeDialog({
         </Tabs>
 
         <DialogFooter>
-          <span className="mr-auto hidden text-xs text-muted-foreground sm:inline">Alterações guardadas só ao carregar em Guardar</span>
+          {!moradaAviso && <span className="mr-auto hidden text-xs text-muted-foreground sm:inline">Alterações guardadas só ao carregar em Guardar</span>}
           <Button type="button" variant="outline" onClick={onClose} disabled={a}>Cancelar</Button>
           <Button
             type="submit"
@@ -537,7 +549,7 @@ export function EditarPropriedadeDialog({
             variant={moradaAviso ? "outline" : "default"}
             className={moradaAviso ? "border-status-porat/50 text-status-porat hover:bg-status-porat-bg" : ""}
           >
-            {a ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />{moradaMudou ? "A localizar a morada…" : "A guardar…"}</>) : moradaAviso ? "Confirmar morada inválida" : "Guardar alterações"}
+            {a ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />{moradaMudou ? "A localizar a morada…" : "A guardar…"}</>) : moradaAviso ? "Guardar sem localização" : "Guardar alterações"}
           </Button>
         </DialogFooter>
       </form>

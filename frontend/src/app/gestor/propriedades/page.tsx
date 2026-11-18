@@ -578,7 +578,7 @@ export default function PropriedadesPage() {
       // Prompt 117 — Aviso de geocoding INLINE no modal de edição.
       // Prompt 126 — Se voltar a haver warning, mantém o modal aberto.
       if (res.warning) {
-        setEditMoradaWarning("Não encontrámos esta morada no mapa. Se for mesmo esta, confirma abaixo: fica guardada sem localização e as distâncias desta casa não contam.");
+        setEditMoradaWarning("Guardámos a casa, mas não encontrámos esta morada no mapa. Corrige-a ou mantém-na assim: as distâncias desta casa não contam. Experimenta copiar a morada do Google Maps ou juntar o código postal.");
         // Atualiza a linha na tabela mas não fecha o modal.
         setPropriedades((prev) =>
           prev.map((x) => (x._id === editando._id ? res.propriedade : x))
@@ -593,15 +593,20 @@ export default function PropriedadesPage() {
       setEditando(null);
       // Limpezas por começar que seguiram o novo tempo / nº de pessoas.
       const l = res.limpezas;
+      const moradaAlterada = editForm.morada.trim() !== (editando.morada || editando.moradaCompleta || "").trim();
+      const localizadaAgora = res.propriedade?.coordenadas?.lat != null && res.propriedade?.coordenadas?.lng != null;
+      const prefixoMorada = moradaAlterada && localizadaAgora ? "Morada guardada e localizada no mapa. " : "";
       if (forcarMorada) {
         setFeedbackOk("Morada guardada sem localização no mapa; as distâncias desta casa não contam.");
       } else if (l?.em_segundo_plano) {
-        setFeedbackOk("Propriedade guardada. As limpezas por começar estão a ser atualizadas.");
+        setFeedbackOk(prefixoMorada + "Propriedade guardada. As limpezas por começar estão a ser atualizadas.");
       } else if (l && l.atualizadas > 0) {
         setFeedbackOk(
-          `Propriedade guardada. ${l.atualizadas} ${l.atualizadas === 1 ? "limpeza por começar foi atualizada" : "limpezas por começar foram atualizadas"}` +
+          prefixoMorada + `Propriedade guardada. ${l.atualizadas} ${l.atualizadas === 1 ? "limpeza por começar foi atualizada" : "limpezas por começar foram atualizadas"}` +
             (l.sem_equipa > 0 ? `; ${l.sem_equipa} ${l.sem_equipa === 1 ? "ficou" : "ficaram"} sem equipa (vê o calendário).` : ".")
         );
+      } else if (prefixoMorada) {
+        setFeedbackOk(prefixoMorada.trim());
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Erro ao editar propriedade.";
@@ -854,9 +859,10 @@ export default function PropriedadesPage() {
                           {(p.coordenadas?.lat == null || p.coordenadas?.lng == null) && (
                             <Badge
                               className="bg-amber-500/15 text-amber-700 border-amber-500/30 hover:bg-amber-500/20"
-                              title="Sem coordenadas: a viagem até esta casa é estimada em 30 min. Edita a morada para a localizar."
+                              title="Esta casa não conta nas distâncias. Edita a morada para a localizar."
                             >
                               Sem localização
+                              <span className="sr-only">: esta casa não conta nas distâncias. Edita a morada para a localizar.</span>
                             </Badge>
                           )}
                         </div>
@@ -879,10 +885,11 @@ export default function PropriedadesPage() {
                                   href={gmapsUrl}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-0.5 text-brand-text hover:underline"
-                                  title="Abrir no Google Maps"
+                                  className="-my-2 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-brand-text hover:bg-muted sm:h-9 sm:w-9"
+                                  title="Abrir morada no Google Maps"
+                                  aria-label="Abrir morada no Google Maps"
                                 >
-                                  <Navigation className="h-3 w-3" />
+                                  <Navigation className="h-4 w-4" aria-hidden="true" />
                                 </a>
                               )}
                             </div>
