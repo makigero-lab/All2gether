@@ -75,6 +75,8 @@ router.get('/dashboard', auth, isGestor, getDashboard);
 router.get('/propriedades', auth, isGestor, getPropriedades);
 router.post('/propriedades', auth, isGestor, criarPropriedade);
 router.put('/propriedades/:id', auth, isGestor, atualizarPropriedade);
+// Pré-visualização da localização indicada à mão (devolve a morada sugerida do pino).
+router.post('/propriedades/localizacao-manual/previsualizar', auth, isGestor, require('../controllers/localizacaoController').previsualizarLocalizacaoManual);
 router.patch('/propriedades/:id/estado', auth, isGestor, alternarEstadoPropriedade);
 // FIX (hard-delete para admin) — DELETE com ?hard=true para hard-delete (só admin).
 router.delete('/propriedades/:id', auth, isGestor, eliminarPropriedade);

@@ -171,7 +171,15 @@ export default function PropriedadesPage() {
   // removido. A funcionalidade de importação do Smoobu foi migrada para a
   // página /gestor/configuracoes/integracoes.
   // Estado genérico de feedback de sucesso (toggle de estado, checklist padrão).
-  const [feedbackOk, setFeedbackOk] = useState<string | null>(null);
+  const [feedbackOk, setFeedbackOkBase] = useState<string | null>(null);
+  // Link opcional do banner («Ver no mapa»); qualquer outro feedback limpa-o.
+  const [feedbackLink, setFeedbackLink] = useState<{ url: string; rotulo: string } | null>(null);
+  const setFeedbackOk = (m: string | null) => {
+    setFeedbackLink(null);
+    setFeedbackOkBase(m);
+  };
+  // Filtro «só sem localização» (junto à pesquisa).
+  const [soSemLocalizacao, setSoSemLocalizacao] = useState(false);
   // Aviso inline do modal de edição (morada editada não georreferenciada).
   const [editMoradaWarning, setEditMoradaWarning] = useState<string | null>(null);
   // Pesquisa (nome, morada, proprietário) por cima da lista.
@@ -280,6 +288,8 @@ export default function PropriedadesPage() {
     tipos: CONFIG_TIPOS_VAZIA,
     funcionario_preferencial_id: "",
     modelo_checklist_id: "",
+    // Coordenadas ou link do Google Maps colados pelo gestor (localização à mão).
+    coordenadas_manuais: "",
     // FIX (parceiro associado + morada estruturada) — novos campos.
     observacoes: "",
     // FIX (parceiro associado relacional) — ID do parceiro B2B associado.
@@ -408,6 +418,7 @@ export default function PropriedadesPage() {
       // Prompt 134 — Modelo de Checklist associado (string vazia = Nenhum).
       modelo_checklist_id: p.modelo_checklist_id ?? "",
       // FIX (parceiro associado + morada estruturada) — novos campos.
+      coordenadas_manuais: "",
       observacoes: p.observacoes ?? "",
       // FIX (parceiro associado relacional) — Extrai o ID do parceiro
       // (pode ser string ou objeto populado { _id, nome, ... }).
@@ -480,8 +491,21 @@ export default function PropriedadesPage() {
     }
   }
 
+  /** Pede ao servidor a morada que existe no pino colado (reverse geocoding). Não grava nada. */
+  async function verMoradaDoPino(texto: string): Promise<{ morada: string | null; erro?: string }> {
+    try {
+      const r = await adminPost<{ morada_sugerida: string | null }>(
+        "/api/gestor/propriedades/localizacao-manual/previsualizar",
+        { coordenadas_manuais: texto }
+      );
+      return { morada: r.morada_sugerida ?? null };
+    } catch (e) {
+      return { morada: null, erro: e instanceof Error ? e.message : "Não foi possível verificar a localização." };
+    }
+  }
+
   /** Submete a edição da propriedade. */
-  async function handleEditar(e: React.FormEvent) {
+  async function handleEditar(e: React.FormEvent, opcoes?: { localizarDeNovo?: boolean }) {
     e.preventDefault();
     if (!editando) return;
     setEditErro(null);
@@ -508,7 +532,7 @@ export default function PropriedadesPage() {
 
     // «Confirmar morada inválida»: o gestor viu o aviso (a morada já ficou gravada
     // sem localização) e confirma com UM clique; o servidor não volta a bloquear.
-    const forcarMorada = editMoradaWarning !== null;
+    const forcarMorada = editMoradaWarning !== null && opcoes?.localizarDeNovo !== true;
 
     setEditSubmitting(true);
     try {
@@ -573,6 +597,8 @@ export default function PropriedadesPage() {
             : { capacidade_hospedes: null }),
           dias_fixos_limpeza: editForm.dias_fixos_limpeza,
           forcar_morada: forcarMorada || undefined,
+          localizar_de_novo: opcoes?.localizarDeNovo || undefined,
+          ...(editForm.coordenadas_manuais.trim() ? { coordenadas_manuais: editForm.coordenadas_manuais.trim() } : {}),
         }
       );
       // Prompt 117 — Aviso de geocoding INLINE no modal de edição.
@@ -583,6 +609,8 @@ export default function PropriedadesPage() {
         setPropriedades((prev) =>
           prev.map((x) => (x._id === editando._id ? res.propriedade : x))
         );
+        // O modal passa a refletir o que ficou gravado (sem localização).
+        setEditando(res.propriedade);
         return;
       }
       setEditMoradaWarning(null);
@@ -594,8 +622,24 @@ export default function PropriedadesPage() {
       // Limpezas por começar que seguiram o novo tempo / nº de pessoas.
       const l = res.limpezas;
       const moradaAlterada = editForm.morada.trim() !== (editando.morada || editando.moradaCompleta || "").trim();
-      const localizadaAgora = res.propriedade?.coordenadas?.lat != null && res.propriedade?.coordenadas?.lng != null;
-      const prefixoMorada = moradaAlterada && localizadaAgora ? "Morada guardada e localizada no mapa. " : "";
+      const cg = res.propriedade?.coordenadas;
+      const localizadaAgora = cg?.lat != null && cg?.lng != null;
+      const mudouLocalizacao = moradaAlterada || !!editForm.coordenadas_manuais.trim() || opcoes?.localizarDeNovo === true;
+      const precisaoGravada = res.propriedade?.coordenadas_precisao;
+      let prefixoMorada = "";
+      let linkMapa: { url: string; rotulo: string } | null = null;
+      if (mudouLocalizacao && localizadaAgora) {
+        const texto = precisaoGravada === "manual"
+          ? "Localização indicada à mão guardada"
+          : precisaoGravada === "aproximada"
+            ? "Morada guardada com localização aproximada"
+            : "Morada guardada e localizada no mapa";
+        prefixoMorada = texto + ". ";
+        linkMapa = {
+          url: `https://www.google.com/maps/search/?api=1&query=${cg!.lat},${cg!.lng}`,
+          rotulo: precisaoGravada === "aproximada" ? "Ver no mapa para confirmar" : "Ver no mapa",
+        };
+      }
       if (forcarMorada) {
         setFeedbackOk("Morada guardada sem localização no mapa; as distâncias desta casa não contam.");
       } else if (l?.em_segundo_plano) {
@@ -608,9 +652,11 @@ export default function PropriedadesPage() {
       } else if (prefixoMorada) {
         setFeedbackOk(prefixoMorada.trim());
       }
+      if (linkMapa && !forcarMorada) setFeedbackLink(linkMapa);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Erro ao editar propriedade.";
-      if ((e as { codigo?: string }).codigo === "MORADA_INVALIDA") setEditErroMorada(msg);
+      const codigoErro = (e as { codigo?: string }).codigo;
+      if (codigoErro === "MORADA_INVALIDA" || codigoErro === "COORDENADAS_INVALIDAS") setEditErroMorada(msg);
       else setEditErro(msg);
     } finally {
       setEditSubmitting(false);
@@ -621,7 +667,9 @@ export default function PropriedadesPage() {
   const porEstado = propriedades.filter((p) =>
     filtroEstado === "todos" ? true : filtroEstado === "ativos" ? p.ativo : !p.ativo
   );
-  const visiveis = porEstado.filter((p) =>
+  const semLocalizacao = (p: PropriedadeDTO) => p.coordenadas?.lat == null || p.coordenadas?.lng == null;
+  const totalSemLocalizacao = porEstado.filter(semLocalizacao).length;
+  const visiveis = porEstado.filter((p) => !soSemLocalizacao || semLocalizacao(p)).filter((p) =>
     correspondePesquisa(pesquisa, [
       p.nome,
       p.morada,
@@ -742,7 +790,17 @@ export default function PropriedadesPage() {
         <Card className="border-emerald-500/50">
           <CardContent className="flex items-center gap-3 p-4 text-sm text-emerald-600 dark:text-emerald-400">
             <CheckCircle2 className="h-5 w-5 shrink-0" />
-            <span>{feedbackOk}</span>
+            <span>
+              {feedbackOk}
+              {feedbackLink && (
+                <>
+                  {" · "}
+                  <a href={feedbackLink.url} target="_blank" rel="noopener noreferrer" className="font-medium underline">
+                    {feedbackLink.rotulo}
+                  </a>
+                </>
+              )}
+            </span>
             <Button
               variant="outline"
               size="sm"
@@ -764,7 +822,17 @@ export default function PropriedadesPage() {
             rotulo="Pesquisar propriedades"
             placeholder="Nome, morada ou proprietário"
           />
-          {pesquisa.trim() && (
+          {(totalSemLocalizacao > 0 || soSemLocalizacao) && (
+            <button
+              type="button"
+              aria-pressed={soSemLocalizacao}
+              onClick={() => setSoSemLocalizacao((v) => !v)}
+              className={`inline-flex min-h-11 items-center rounded-md border px-3 text-sm font-medium sm:min-h-9 ${soSemLocalizacao ? "border-amber-500/60 bg-amber-500/15 text-amber-700 dark:text-amber-400" : "border-input text-muted-foreground hover:bg-muted"}`}
+            >
+              {totalSemLocalizacao} sem localização
+            </button>
+          )}
+          {(pesquisa.trim() || soSemLocalizacao) && (
             <span className="text-sm text-muted-foreground" role="status">
               {visiveis.length} de {porEstado.length}
             </span>
@@ -793,8 +861,10 @@ export default function PropriedadesPage() {
           ) : visiveis.length === 0 ? (
             <div className="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">
               <Building2 className="h-10 w-10 opacity-40" />
-              <p className="text-sm">Nenhum resultado para «{pesquisa.trim()}»</p>
-              <Button variant="outline" size="sm" onClick={() => setPesquisa("")}>Limpar pesquisa</Button>
+              <p className="text-sm">{pesquisa.trim() ? `Nenhum resultado para «${pesquisa.trim()}»` : "Nenhuma casa sem localização."}</p>
+              <Button variant="outline" size="sm" onClick={() => { setPesquisa(""); setSoSemLocalizacao(false); }}>
+                {pesquisa.trim() ? "Limpar pesquisa" : "Mostrar todas"}
+              </Button>
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -1281,6 +1351,7 @@ export default function PropriedadesPage() {
                 lng: editando.coordenadas.lng,
                 moradaEncontrada: editando.morada_localizada ?? null,
                 aproximada: editando.coordenadas_precisao === "aproximada",
+                manual: editando.coordenadas_precisao === "manual",
               }
             : null
         }
@@ -1300,6 +1371,8 @@ export default function PropriedadesPage() {
           setEditErroMorada(null);
         }}
         erroMorada={editErroMorada}
+        onVerPino={verMoradaDoPino}
+        onLocalizarDeNovo={() => handleEditar({ preventDefault() {} } as React.FormEvent, { localizarDeNovo: true })}
         erro={editErro}
         a={editSubmitting}
         onSubmit={handleEditar}

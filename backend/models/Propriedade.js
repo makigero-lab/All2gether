@@ -45,7 +45,7 @@ const propriedadeSchema = new mongoose.Schema(
     },
     // Precisão da localização ('exata' | 'aproximada') e a morada que o
     // geocoder encontrou (para o gestor confirmar que o pino está certo).
-    coordenadas_precisao: { type: String, enum: ['exata', 'aproximada', null], default: null },
+    coordenadas_precisao: { type: String, enum: ['exata', 'aproximada', 'manual', null], default: null },
     morada_localizada: { type: String, default: null, trim: true },
     // Quando se tentou localizar a morada pela última vez (evita repetir uma
     // tentativa falhada em cada gravação: só volta a tentar passadas 24 h).

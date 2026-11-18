@@ -18,8 +18,10 @@ const Tarefa = require('../models/Tarefa');
 const Ausencia = require('../models/Ausencia');
 const Auditoria = require('../models/Auditoria');
 const WebhookLog = require('../models/WebhookLog');
-const { localizarMorada } = require('../utils/localizacaoPropriedade');
+const { localizarMorada, gravarLocalizacaoEscolhida } = require('../utils/localizacaoPropriedade');
 const { derivarMoradaEstruturada, textoMorada, validarMorada } = require('../utils/morada');
+
+const { interpretarCoordenadasManuais, CoordenadasInvalidas } = require('../utils/coordenadasManuais');
 
 const VINTE_QUATRO_HORAS_MS = 24 * 60 * 60 * 1000;
 const { registarAuditoria } = require('../utils/auditoria');
@@ -1290,6 +1292,7 @@ exports.atualizarPropriedade = async (req, res) => {
       req.body?.checklists_por_tipo === undefined &&
       capacidade_hospedes === undefined &&
       req.body?.dias_fixos_limpeza === undefined &&
+      req.body?.coordenadas_manuais === undefined &&
       fornecedor_id === undefined
     ) {
       return res.status(400).json({
@@ -1381,6 +1384,19 @@ exports.atualizarPropriedade = async (req, res) => {
     // da última tentativa (geocoding_tentado_em) ou se o gestor confirmar.
     let geocodingFalhou = false;
     let novaMorada;
+    // Localização indicada à mão (coordenadas ou link do Google Maps colado):
+    // validada antes de gravar seja o que for; não toca no texto da morada.
+    let manual = null;
+    const textoManual = req.body?.coordenadas_manuais;
+    if (textoManual !== undefined && textoManual !== null && textoManual !== '') {
+      try {
+        manual = await interpretarCoordenadasManuais(textoManual);
+      } catch (e) {
+        if (e instanceof CoordenadasInvalidas) return res.status(400).json({ erro: e.message, codigo: e.codigo });
+        throw e;
+      }
+    }
+    const localizarDeNovo = req.body?.localizar_de_novo === true;
     if (morada !== undefined) {
       const v = validarMorada(morada);
       if (!v.ok) return res.status(400).json({ erro: v.erro, codigo: 'MORADA_INVALIDA' });
@@ -1399,16 +1415,36 @@ exports.atualizarPropriedade = async (req, res) => {
       const semCoords = propriedade.coordenadas?.lat == null || propriedade.coordenadas?.lng == null;
       const tentadoEm = propriedade.geocoding_tentado_em ? new Date(propriedade.geocoding_tentado_em).getTime() : 0;
       const repetir = semCoords && novaMorada !== 'A definir' && Date.now() - tentadoEm > VINTE_QUATRO_HORAS_MS;
-      propriedade.morada = novaMorada;
-      propriedade.morada_estruturada = derivarMoradaEstruturada(novaMorada);
-      if (forcar || mudou || repetir) {
-        const loc = await localizarMorada(novaMorada, { forcar });
-        propriedade.coordenadas = loc.coordenadas;
-        propriedade.coordenadas_precisao = loc.coordenadas_precisao;
-        propriedade.morada_localizada = loc.morada_localizada;
-        propriedade.geocoding_tentado_em = new Date();
-        geocodingFalhou = loc.falhou;
+      if (!manual) {
+        propriedade.morada = novaMorada;
+        propriedade.morada_estruturada = derivarMoradaEstruturada(novaMorada);
       }
+      // «Tentar localizar de novo» ignora a janela de 24 h; a localização à mão
+      // pedida neste mesmo envio dispensa o geocoding.
+      if (!manual && (forcar || mudou || repetir || localizarDeNovo)) {
+        const tinhaLocalizacao = !semCoords;
+        const loc = await localizarMorada(novaMorada, { forcar });
+        propriedade.geocoding_tentado_em = new Date();
+        if (localizarDeNovo && !mudou && !forcar && loc.falhou && tinhaLocalizacao) {
+          // Nova tentativa falhou mas a morada é a mesma: mantém a localização que já tinha.
+        } else {
+          propriedade.coordenadas = loc.coordenadas;
+          propriedade.coordenadas_precisao = loc.coordenadas_precisao;
+          propriedade.morada_localizada = loc.morada_localizada;
+          geocodingFalhou = loc.falhou;
+        }
+      }
+    }
+    if (manual) {
+      // Coordenadas do pino mandam; o texto (se também veio, p. ex. «Usar esta
+      // morada») grava-se sem voltar a geocodificar.
+      gravarLocalizacaoEscolhida(propriedade, {
+        coordenadas: manual,
+        precisao: 'manual',
+        moradaLocalizada: 'Indicada à mão',
+        morada: novaMorada,
+      });
+      geocodingFalhou = false;
     }
 
     // FIX (parceiro associado) — Observações livres (notas internas do gestor).

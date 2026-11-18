@@ -19,6 +19,8 @@ export interface EditarPropriedadeForm {
   tipos: Record<string, { tempo: string; checklist: string }>;
   modelo_checklist_id: string;
   observacoes: string;
+  /** Coordenadas ou link do Google Maps colados pelo gestor (localização à mão). */
+  coordenadas_manuais: string;
   parceiro_id: string;
   fornecedor_id: string;
   equipa_preferencial: string[];
@@ -129,6 +131,8 @@ export function EditarPropriedadeDialog({
   moradaAviso,
   moradaMudou,
   erroMorada,
+  onLocalizarDeNovo,
+  onVerPino,
   onMoradaMudou,
   erro,
   a,
@@ -139,7 +143,7 @@ export function EditarPropriedadeDialog({
   nomeAtual: string;
   ativa: boolean;
   /** Localização guardada (coordenadas, morada encontrada, precisão) ou null. */
-  localizada: { lat: number; lng: number; moradaEncontrada?: string | null; aproximada?: boolean } | null;
+  localizada: { lat: number; lng: number; moradaEncontrada?: string | null; aproximada?: boolean; manual?: boolean } | null;
   form: EditarPropriedadeForm;
   setForm: (fn: (f: EditarPropriedadeForm) => EditarPropriedadeForm) => void;
   parceiros: Opcao[];
@@ -155,6 +159,10 @@ export function EditarPropriedadeDialog({
   onMoradaMudou: () => void;
   /** Erro do servidor sobre a morada (mostrado junto ao campo). */
   erroMorada: string | null;
+  /** «Tentar localizar de novo»: grava e força nova tentativa (ignora a janela de 24 h). */
+  onLocalizarDeNovo: () => void;
+  /** Morada que existe no pino colado (reverse geocoding no servidor). */
+  onVerPino: (texto: string) => Promise<{ morada: string | null; erro?: string }>;
   erro: string | null;
   a: boolean;
   onSubmit: (e: React.FormEvent) => void;
@@ -166,6 +174,18 @@ export function EditarPropriedadeDialog({
   const erroRef = useRef<HTMLParagraphElement>(null);
   const erroMoradaRef = useRef<HTMLParagraphElement>(null);
   const avisoMoradaRef = useRef<HTMLParagraphElement>(null);
+  const [manualAberto, setManualAberto] = useState(false);
+  // Morada sugerida para o pino colado («Usar esta morada»).
+  const [pino, setPino] = useState<{ texto: string; a: boolean; morada: string | null; erro?: string } | null>(null);
+  const verPino = async () => {
+    const texto = form.coordenadas_manuais.trim();
+    if (!texto || pino?.texto === texto) return;
+    setPino({ texto, a: true, morada: null });
+    const r = await onVerPino(texto);
+    setPino({ texto, a: false, morada: r.morada, erro: r.erro });
+  };
+  useEffect(() => { if (!aberto) { setManualAberto(false); setPino(null); } }, [aberto]);
+  useEffect(() => { if (erroMorada) setManualAberto(true); }, [erroMorada]);
 
   // O aviso âmbar (morada não localizada) é anunciado e recebe o foco ao aparecer.
   useEffect(() => {
@@ -271,7 +291,9 @@ export function EditarPropriedadeDialog({
                 {localizada && !moradaAviso && !moradaMudou && (
                   <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm text-muted-foreground">
                     <span className="min-w-0 break-words">
-                      Localizada como: {localizada.moradaEncontrada || `${localizada.lat.toFixed(4)}, ${localizada.lng.toFixed(4)}`}
+                      {localizada.manual
+                        ? "Localização indicada à mão"
+                        : <>Localizada como: {localizada.moradaEncontrada || `${localizada.lat.toFixed(4)}, ${localizada.lng.toFixed(4)}`}</>}
                       {localizada.aproximada && <span className="font-medium text-status-porat"> (aproximada: só encontrámos a rua ou o código postal; confirma em Ver no mapa)</span>}
                     </span>
                     <a
@@ -283,6 +305,73 @@ export function EditarPropriedadeDialog({
                       Ver no mapa
                     </a>
                   </p>
+                )}
+                {/* Sem localização ou só aproximada: tentar de novo ou indicar à mão. */}
+                {(!localizada || localizada.aproximada || moradaAviso) && (
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap gap-x-4 gap-y-1">
+                      {(!localizada || moradaAviso) && !moradaMudou && (
+                        <button
+                          type="button"
+                          onClick={onLocalizarDeNovo}
+                          disabled={a}
+                          className="inline-flex min-h-11 items-center text-sm font-medium text-brand-text hover:underline disabled:opacity-50 sm:min-h-9"
+                        >
+                          Tentar localizar de novo
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        aria-expanded={manualAberto || !!form.coordenadas_manuais}
+                        onClick={() => setManualAberto((v) => !v)}
+                        className="inline-flex min-h-11 items-center text-sm font-medium text-brand-text hover:underline sm:min-h-9"
+                      >
+                        Indicar a localização à mão
+                      </button>
+                    </div>
+                    {(manualAberto || !!form.coordenadas_manuais) && (
+                      <div className="space-y-1.5">
+                        <label htmlFor="edit-coordenadas-manuais" className="text-sm font-medium">
+                          Cola as coordenadas ou o link do Google Maps
+                        </label>
+                        <Input
+                          id="edit-coordenadas-manuais"
+                          value={form.coordenadas_manuais}
+                          onChange={(e) => upd({ coordenadas_manuais: e.target.value })}
+                          onBlur={verPino}
+                          placeholder="38.7536, -9.2302"
+                          autoComplete="off"
+                        />
+                        {pino && pino.texto === form.coordenadas_manuais.trim() && (
+                          <p className="text-sm" role="status">
+                            {pino.a ? (
+                              <span className="text-muted-foreground">A procurar a morada neste pino…</span>
+                            ) : pino.erro ? (
+                              <span className="text-destructive">{pino.erro}</span>
+                            ) : pino.morada ? (
+                              <span className="flex flex-wrap items-center gap-x-2">
+                                <span className="min-w-0 break-words text-muted-foreground">Morada neste pino: {pino.morada}</span>
+                                {pino.morada !== form.morada.trim() && (
+                                  <button
+                                    type="button"
+                                    onClick={() => { upd({ morada: pino.morada ?? "" }); onMoradaMudou(); }}
+                                    className="inline-flex min-h-11 items-center font-medium text-brand-text hover:underline sm:min-h-9"
+                                  >
+                                    Usar esta morada
+                                  </button>
+                                )}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground">Não encontrámos uma morada para este pino; mantemos o teu texto.</span>
+                            )}
+                          </p>
+                        )}
+                        <p className="text-sm text-muted-foreground">
+                          No Google Maps, carrega no pino com o botão direito e clica nas coordenadas para as copiar. Fica guardado ao carregar em Guardar.
+                        </p>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
@@ -549,7 +638,7 @@ export function EditarPropriedadeDialog({
             variant={moradaAviso ? "outline" : "default"}
             className={moradaAviso ? "border-status-porat/50 text-status-porat hover:bg-status-porat-bg" : ""}
           >
-            {a ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />{moradaMudou ? "A localizar a morada…" : "A guardar…"}</>) : moradaAviso ? "Guardar sem localização" : "Guardar alterações"}
+            {a ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />{moradaMudou ? "A localizar a morada…" : "A guardar…"}</>) : moradaAviso && !form.coordenadas_manuais.trim() ? "Guardar sem localização" : "Guardar alterações"}
           </Button>
         </DialogFooter>
       </form>

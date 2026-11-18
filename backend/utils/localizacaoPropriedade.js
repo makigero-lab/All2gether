@@ -6,6 +6,7 @@
  * e o load balancer já tratam coordenadas null; a staff navega pelo texto).
  */
 const { obterCoordenadas } = require('./geocoding');
+const { derivarMoradaEstruturada } = require('./morada');
 
 const SEM_LOCALIZACAO = Object.freeze({
   coordenadas: { lat: null, lng: null },
@@ -38,4 +39,25 @@ async function localizarMorada(morada, opcoes = {}) {
   return { ...SEM_LOCALIZACAO, coordenadas: { lat: null, lng: null }, falhou: true };
 }
 
-module.exports = { localizarMorada };
+/**
+ * Grava «coordenadas + texto da morada escolhido» SEM geocodificar. Reutilizável
+ * por qualquer origem que já tenha as coordenadas certas: pino indicado à mão,
+ * e, no futuro, uma sugestão escolhida ao escrever (Places Autocomplete).
+ *
+ * @param {object} propriedade documento Mongoose (é alterado, não guardado)
+ * @param {{ coordenadas: {lat:number,lng:number}, precisao: 'exata'|'aproximada'|'manual',
+ *           moradaLocalizada?: string|null, morada?: string }} escolha
+ *        morada só é passada quando o texto muda (a estruturada é re-derivada).
+ */
+function gravarLocalizacaoEscolhida(propriedade, escolha) {
+  if (typeof escolha.morada === 'string' && escolha.morada.trim()) {
+    propriedade.morada = escolha.morada.trim();
+    propriedade.morada_estruturada = derivarMoradaEstruturada(propriedade.morada);
+  }
+  propriedade.coordenadas = { lat: escolha.coordenadas.lat, lng: escolha.coordenadas.lng };
+  propriedade.coordenadas_precisao = escolha.precisao;
+  propriedade.morada_localizada = escolha.moradaLocalizada || null;
+  propriedade.geocoding_tentado_em = new Date();
+}
+
+module.exports = { localizarMorada, gravarLocalizacaoEscolhida };
