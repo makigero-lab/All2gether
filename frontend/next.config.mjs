@@ -17,7 +17,9 @@ const emDev = process.env.NODE_ENV !== "production";
  * a documentação só pede *.google.com nos scripts para domínios antigos/regionais, que não usamos.
  * A documentação inclui 'unsafe-eval' no script-src do exemplo; como não diz se é obrigatório e o
  * projeto já usa script-src com 'unsafe-inline', acrescenta-se só quando a chave existe.
- * Places API (New) fala com places.googleapis.com (coberto por *.googleapis.com em connect-src).
+ * Places API (New) fala com places.googleapis.com (listado explicitamente em connect-src, sem wildcards).
+ * connect-src leva também fonts.googleapis.com e fonts.gstatic.com: o Service Worker (regras predefinidas
+ * do next-pwa para Google Fonts) faz fetch() a esses hosts, e o fetch é regido pelo connect-src.
  */
 function politicaCsp() {
   let api = "";
@@ -33,7 +35,7 @@ function politicaCsp() {
     `style-src 'self' 'unsafe-inline'${googleMaps ? " https://fonts.googleapis.com" : ""}`,
     `img-src 'self' data: blob:${googleMaps ? " https://maps.googleapis.com https://maps.gstatic.com https://*.google.com https://*.googleusercontent.com https://*.ggpht.com" : ""}`,
     `font-src 'self' data:${googleMaps ? " https://fonts.gstatic.com" : ""}`,
-    `connect-src 'self'${api ? " " + api : ""}${emDev ? " ws: wss:" : ""}${googleMaps ? " https://maps.googleapis.com https://places.googleapis.com https://maps.gstatic.com https://*.google.com" : ""}`,
+    `connect-src 'self'${api ? " " + api : ""}${emDev ? " ws: wss:" : ""}${googleMaps ? " https://maps.googleapis.com https://places.googleapis.com https://maps.gstatic.com https://*.google.com https://fonts.googleapis.com https://fonts.gstatic.com" : ""}`,
     ...(googleMaps ? ["frame-src https://*.google.com"] : []),
     "worker-src 'self' blob:",
     "manifest-src 'self'",

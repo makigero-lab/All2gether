@@ -53,20 +53,22 @@ export function MapaPino({
           setPosicao({ lat, lng });
           setMexeu(true);
         };
-        const aoLargar = pino.addListener("dragend", () => {
+        const aoLargar = () => {
           const p = pino.position as google.maps.LatLng | google.maps.LatLngLiteral | null | undefined;
           if (!p) return;
           const lat = typeof (p as google.maps.LatLng).lat === "function" ? (p as google.maps.LatLng).lat() : (p as google.maps.LatLngLiteral).lat;
           const lng = typeof (p as google.maps.LatLng).lng === "function" ? (p as google.maps.LatLng).lng() : (p as google.maps.LatLngLiteral).lng;
           mover(lat, lng);
-        });
+        };
+        // «gmp-dragend» é um evento DOM do elemento (os addListener estão obsoletos nos AdvancedMarker).
+        pino.addEventListener("gmp-dragend", aoLargar);
         // Tocar no mapa também põe lá o pino (mais fácil no telemóvel).
         const aoClicar = mapa.addListener("click", (e: google.maps.MapMouseEvent) => {
           if (!e.latLng) return;
           pino.position = e.latLng;
           mover(e.latLng.lat(), e.latLng.lng());
         });
-        limpeza.push(() => { aoLargar.remove(); aoClicar.remove(); pino.map = null; });
+        limpeza.push(() => { pino.removeEventListener("gmp-dragend", aoLargar); aoClicar.remove(); pino.map = null; });
         setEstado("pronto");
       } catch {
         if (!cancelado) setEstado("erro");
