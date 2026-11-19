@@ -81,6 +81,9 @@ test("CSP: só abre os domínios do Google com a chave definida", async () => {
     assert.ok(/connect-src[^;]*maps.googleapis.com/.test(com) && /connect-src[^;]*places.googleapis.com/.test(com));
     assert.ok(diretiva("img-src").includes("googleusercontent.com"));
     assert.ok(!com.includes("https://*.googleapis.com"));
+    // O SW faz fetch() aos tipos de letra do Google: connect-src precisa deles (só com chave).
+    assert.ok(/connect-src[^;]*https:\/\/fonts\.googleapis\.com/.test(com) && /connect-src[^;]*https:\/\/fonts\.gstatic\.com/.test(com));
+    assert.ok(!/connect-src[^;]*fonts\./.test(sem));
   } finally {
     if (anterior === undefined) delete process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY;
     else process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY = anterior;
