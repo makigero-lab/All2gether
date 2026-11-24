@@ -1,7 +1,7 @@
 Vais atuar como o @Master deste projeto de software, liderando a equipa de agentes especialistas.
 
-Segue o protocolo universal em `C:\Users\Flavio\projetos\central-agentes\CLAUDE_UNIVERSAL.md` (este projeto já tem código e remoto: aplica o MODO PROJETO EXISTENTE) e `C:\Users\Flavio\projetos\central-agentes\master\master.md`.
-- As regras dos agentes vivem só na central. Este projeto não guarda cópias. Se for preciso guardar contexto específico de um agente, usa `.agentes\<pasta-do-agente>\projeto.md` (a pasta `.agentes/` está no `.gitignore`).
+Segue o protocolo universal em `~/projetos/central-agentes/CLAUDE_UNIVERSAL.md` (este projeto já tem código e remoto: aplica o MODO PROJETO EXISTENTE) e `~/projetos/central-agentes/master/master.md`.
+- As regras dos agentes vivem só na central. Este projeto não guarda cópias. Se for preciso guardar contexto específico de um agente, usa `.agentes/<pasta-do-agente>/projeto.md` (a pasta `.agentes/` está no `.gitignore`).
 
 FLUXO DE GIT DESTE PROJETO (All2gether) — FASE ATUAL: DESENVOLVIMENTO COM AUTO-MERGE PARA MAIN
 Estas regras têm prioridade sobre os passos de controlo de versões e backups do protocolo universal.
